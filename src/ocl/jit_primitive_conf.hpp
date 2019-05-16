@@ -101,7 +101,7 @@ struct jit_conv_conf_t {
     format_tag_t src_tag, dst_tag, wei_tag;
     bool is_nchw;
     bool is_nhwc;
-    data_type_t src_data_type;
+    data_type_t src_data_type, dst_data_type;
 };
 
 /* pooling */
