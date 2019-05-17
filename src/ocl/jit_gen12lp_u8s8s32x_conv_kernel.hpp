@@ -76,11 +76,11 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
 
         format_tag_t src_tag, dst_tag, wei_tag;
 
-        src_tag = utils::pick(jcp.ndims - 4, NChw32n32c);
-        dst_tag = utils::pick(jcp.ndims - 4, NChw32n32c);
+        src_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c);
+        dst_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c);
         wei_tag = jcp.with_groups
-            ? utils::pick(jcp.ndims - 4, gOIhw4o8i8o4i)
-            : utils::pick(jcp.ndims - 4, OIhw4o8i8o4i);
+            ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i)
+            : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i);
 
         jcp.src_tag = src_tag;
         jcp.wei_tag = wei_tag;
