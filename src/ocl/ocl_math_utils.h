@@ -51,7 +51,6 @@ inline int mmad_4(uchar4 input, char4 weight, int acc) {
     return acc;
 }
 
-
 inline int mmad8(uint8 A_scalars, int8 B_vectors, int acc) {
     acc = IMAD(as_uchar4(A_scalars[0]), as_char4(B_vectors[0]), acc);
     acc = IMAD(as_uchar4(A_scalars[1]), as_char4(B_vectors[1]), acc);
