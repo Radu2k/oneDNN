@@ -195,8 +195,10 @@ namespace format_tag {
     const format_tag_t aBCde8b16c2b = mkldnn_aBCde8b16c2b;
     const format_tag_t ABcde8b8a = mkldnn_ABcde8b8a;
     const format_tag_t aBCde8b8c = mkldnn_aBCde8b8c;
+    const format_tag_t ABc4a8b8a4b = mkldnn_ABc4a8b8a4b;
     const format_tag_t ABcd4a8b8a4b = mkldnn_ABcd4a8b8a4b;
     const format_tag_t ABcd2a8b8a2b = mkldnn_ABcd2a8b8a2b;
+    const format_tag_t aBCd4b8c8b4c = mkldnn_aBCd4b8c8b4c;
     const format_tag_t aBCde4b8c8b4c = mkldnn_aBCde4b8c8b4c;
     const format_tag_t aBCde2b8c8b2c = mkldnn_aBCde2b8c8b2c;
     const format_tag_t aBCde8c16b2c = mkldnn_aBCde8c16b2c;
@@ -234,6 +236,7 @@ namespace format_tag {
     const format_tag_t Acdeb8a = mkldnn_Acdeb8a;
     const format_tag_t BAc16a16b = mkldnn_BAc16a16b;
     const format_tag_t BAcd16a16b = mkldnn_BAcd16a16b;
+    const format_tag_t ABc32a32b = mkldnn_ABc32a32b;
     const format_tag_t ABcd32a32b = mkldnn_ABcd32a32b;
     const format_tag_t BAcde16b16a = mkldnn_BAcde16b16a;
     const format_tag_t aBdec32b   = mkldnn_aBdec32b;
@@ -289,6 +292,7 @@ namespace format_tag {
     const format_tag_t NCw16n16c = mkldnn_NCw16n16c;
     const format_tag_t NChw16n16c = mkldnn_NChw16n16c;
     const format_tag_t NCdhw16n16c = mkldnn_NCdhw16n16c;
+    const format_tag_t NCw32n32c = mkldnn_NCw32n32c;
     const format_tag_t NChw32n32c  = mkldnn_NChw32n32c;
     const format_tag_t IOdhw16i16o = mkldnn_IOdhw16i16o;
     const format_tag_t IOhw16i16o  = mkldnn_IOhw16i16o;
@@ -369,8 +373,10 @@ namespace format_tag {
     const format_tag_t gOIhw8i16o2i = mkldnn_gOIhw8i16o2i;
     const format_tag_t gOIhw8i8o = mkldnn_gOIhw8i8o;
     const format_tag_t gOIhw8o16i2o = mkldnn_gOIhw8o16i2o;
+    const format_tag_t OIw4o8i8o4i = mkldnn_OIw4o8i8o4i;
     const format_tag_t OIhw4o8i8o4i = mkldnn_OIhw4o8i8o4i;
     const format_tag_t OIhw2o8i8o2i = mkldnn_OIhw2o8i8o2i;
+    const format_tag_t gOIw4o8i8o4i = mkldnn_gOIw4o8i8o4i;
     const format_tag_t gOIhw4o8i8o4i = mkldnn_gOIhw4o8i8o4i;
     const format_tag_t gOIhw2o8i8o2i = mkldnn_gOIhw2o8i8o2i;
     const format_tag_t gOIhw8o8i = mkldnn_gOIhw8o8i;

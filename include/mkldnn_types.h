@@ -209,6 +209,7 @@ typedef enum {
 
     mkldnn_Abc16a,
     mkldnn_ABc16a16b,
+    mkldnn_ABc32a32b,
     /// 3D tensor blocked by 2nd dimension with block size 16
     mkldnn_aBc16b,
     mkldnn_ABc16b16a,
@@ -273,8 +274,10 @@ typedef enum {
     mkldnn_aBCde8b16c2b,
     mkldnn_ABcde8b8a,
     mkldnn_aBCde8b8c,
+    mkldnn_ABc4a8b8a4b,
     mkldnn_ABcd4a8b8a4b,
     mkldnn_ABcd2a8b8a2b,
+    mkldnn_aBCd4b8c8b4c,
     mkldnn_aBCde4b8c8b4c,
     mkldnn_aBCde2b8c8b2c,
     mkldnn_aBCde8c16b2c,
@@ -448,6 +451,7 @@ typedef enum {
     mkldnn_NCw16n16c = mkldnn_ABc16a16b,
     mkldnn_NCdhw16n16c = mkldnn_ABcde16a16b,
     mkldnn_NChw16n16c = mkldnn_ABcd16a16b,
+    mkldnn_NCw32n32c = mkldnn_ABc32a32b,
     mkldnn_NChw32n32c = mkldnn_ABcd32a32b,
 
     // weights, 3D
@@ -539,8 +543,10 @@ typedef enum {
     mkldnn_gOIhw8o16i2o = mkldnn_aBCde8b16c2b,
     mkldnn_gOIhw8o8i = mkldnn_aBCde8b8c,
 
+    mkldnn_OIw4o8i8o4i = mkldnn_ABc4a8b8a4b,
     mkldnn_OIhw4o8i8o4i = mkldnn_ABcd4a8b8a4b,
     mkldnn_OIhw2o8i8o2i = mkldnn_ABcd2a8b8a2b,
+    mkldnn_gOIw4o8i8o4i = mkldnn_aBCd4b8c8b4c,
     mkldnn_gOIhw4o8i8o4i = mkldnn_aBCde4b8c8b4c,
     mkldnn_gOIhw2o8i8o2i = mkldnn_aBCde2b8c8b2c,
 
