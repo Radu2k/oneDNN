@@ -15,3 +15,16 @@
 --dir=FWD_B --batch=conv_gpu
 --mb=16
 --dir=FWD_B --batch=conv_gpu
+
+# i8
+--reset --cfg=u8s8u8s32
+--mb=2
+--dir=FWD_B --batch=conv_gpu --batch=conv_dilated --batch=conv_dilated_3d
+--mb=16
+--dir=FWD_B --batch=conv_gpu --batch=conv_dilated --batch=conv_dilated_3d
+
+--reset --cfg=u8s8s8s32
+--mb=2
+--dir=FWD_B --batch=conv_gpu --batch=conv_dilated --batch=conv_dilated_3d
+--mb=16
+--dir=FWD_B --batch=conv_gpu --batch=conv_dilated --batch=conv_dilated_3d

@@ -92,8 +92,8 @@
 #    define FLOAT_T float
 #    define FLOAT8_T float8
 #    define TO_DATA_T(v) (char)(v)
-#    define CONVERT_DATA_T convert_char
-#    define CONVERT_DATA8_T convert_char8
+#    define CONVERT_DATA_T convert_char_sat
+#    define CONVERT_DATA8_T convert_char8_sat
 #    define ROUND rint
 
 #    define BLOCK_READ intel_sub_group_block_read_uc
@@ -122,8 +122,8 @@
 #    define FLOAT_T float
 #    define FLOAT8_T float8
 #    define TO_DATA_T(v) (uchar)(v)
-#    define CONVERT_DATA_T convert_uchar
-#    define CONVERT_DATA8_T convert_uchar8
+#    define CONVERT_DATA_T convert_uchar_sat
+#    define CONVERT_DATA8_T convert_uchar8_sat
 #    define ROUND rint
 
 #    define BLOCK_READ intel_sub_group_block_read_uc
@@ -174,7 +174,22 @@
 #    define AS_VECT_UINT_T as_uint8
 #endif
 
-#if NDIMS == 4
+#if NDIMS == 3
+#    define SRC_OFF(x0, x1, d, d1, x2)                                 \
+        (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0          \
+                + ((x1) % SRC_B1) * SRC_SB1 + ((x1) / SRC_B1) * SRC_S1 \
+                + ((x2) % SRC_B2) * SRC_SB2 + ((x2) / SRC_B2) * SRC_S2)
+
+#    define WHT_OFF(x0, x1, d, d1, x2)                                 \
+        (((x0) % WHT_B0) * WHT_SB0 + ((x0) / WHT_B0) * WHT_S0          \
+                + ((x1) % WHT_B1) * WHT_SB1 + ((x1) / WHT_B1) * WHT_S1 \
+                + ((x2) % WHT_B2) * WHT_SB2 + ((x2) / WHT_B2) * WHT_S2)
+
+#    define DST_OFF(x0, x1, d, d1, x2)                                 \
+        (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0          \
+                + ((x1) % DST_B1) * DST_SB1 + ((x1) / DST_B1) * DST_S1 \
+                + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2)
+#elif NDIMS == 4
 #    define SRC_OFF(x0, x1, d, x2, x3)                                 \
         (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0          \
                 + ((x1) % SRC_B1) * SRC_SB1 + ((x1) / SRC_B1) * SRC_S1 \
