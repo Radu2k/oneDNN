@@ -1,0 +1,13 @@
+--attr=oscale=none:1;post_ops='sum:2'        g2ic16ih1iw36oc32oh1ow35kh1kw2n
+--attr=oscale=none:1;post_ops='relu:3'       g2ic16ih1iw36oc32oh1ow35kh1kw2n
+--attr=oscale=none:1;post_ops='sum:1;relu:1' g2ic16ih1iw36oc32oh1ow35kh1kw2n
+--attr=oscale=none:1;post_ops='sum:2;relu:3' g2ic16ih1iw36oc32oh1ow35kh1kw2n
+--attr=oscale=none:1;post_ops='relu:3;sum:2' g2ic16ih1iw36oc32oh1ow35kh1kw2n
+--attr=oscale=none:1;post_ops='relu:1;sum:1' g2ic16ih1iw36oc32oh1ow35kh1kw2n
+
+--attr=oscale=none:1;post_ops='sum:2'         ic16ih1iw36oc32oh1ow35kh1kw2n
+--attr=oscale=none:1;post_ops='relu:3'        ic16ih1iw36oc32oh1ow35kh1kw2n
+--attr=oscale=none:1;post_ops='sum:1;relu:1'  ic16ih1iw36oc32oh1ow35kh1kw2n
+--attr=oscale=none:1;post_ops='sum:2;relu:3'  ic16ih1iw36oc32oh1ow35kh1kw2n
+--attr=oscale=none:1;post_ops='relu:3;sum:2'  ic16ih1iw36oc32oh1ow35kh1kw2n
+--attr=oscale=none:1;post_ops='relu:1;sum:1'  ic16ih1iw36oc32oh1ow35kh1kw2n
