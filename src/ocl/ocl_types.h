@@ -102,6 +102,7 @@
 #    define BLOCK_READ8 intel_sub_group_block_read_uc8
 #    define BLOCK_WRITE8 intel_sub_group_block_write_uc8
 #    define AS_DATA_T as_char
+#    define AS_DATA4_T as_char4
 #    define AS_DATA8_T as_char8
 
 #    define AS_UINT_T as_uchar
@@ -133,6 +134,7 @@
 #    define BLOCK_READ8 intel_sub_group_block_read_uc8
 #    define BLOCK_WRITE8 intel_sub_group_block_write_uc8
 #    define AS_DATA_T as_uchar
+#    define AS_DATA4_T as_uchar4
 #    define AS_DATA8_T as_uchar8
 
 #    define AS_UINT_T as_uchar

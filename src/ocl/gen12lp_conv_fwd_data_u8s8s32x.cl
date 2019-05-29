@@ -14,14 +14,14 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "ocl/ocl_types.h"
 #include "ocl/ocl_math_utils.h"
+#include "ocl/ocl_types.h"
 
 #undef MB_FULL_BLOCK
 
 #define BLOCK_READ_SRC(data, idx) \
     data = intel_sub_group_block_read8((__global uint *)&src[idx]);
-    
+
 #define BLOCK_READ_WHT(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
 
@@ -101,7 +101,7 @@ conv_fwd_kernel(const __global uchar *src, const __global char *wei,
                 continue;
             }
             for (int kh = 0; kh < KH; kh++) {
-                if (kh * (1 + DH) + ih < 0 || kh * (1 + DH) + ih >= IH){
+                if (kh * (1 + DH) + ih < 0 || kh * (1 + DH) + ih >= IH) {
                     src += IC_BLOCK * MB_BLOCK * IW * (1 + DH);
                     wei += IC_BLOCK * OC_BLOCK * KW;
                     continue;
@@ -156,57 +156,96 @@ conv_fwd_kernel(const __global uchar *src, const __global char *wei,
 #define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = fma((float)DST, sum_scale, BIA);            \
     TMP = fma((float)ACC, SCALE, TMP);                \
-    RES = convert_uchar_sat(TMP);
+    if (TMP < 0)                                      \
+        TMP *= relu_negative_slope;                   \
+    RES = CONVERT_DATA_T(TMP);
 #else // WITH_SUM_RELU
+#if WITH_RELU && WITH_SUM
+#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
+    TMP = fma((float)ACC, SCALE, BIA);                \
+    if (TMP < 0)                                      \
+        TMP *= relu_negative_slope;                   \
+    TMP = fma((float)DST, sum_scale, TMP);            \
+    RES = CONVERT_DATA_T(TMP);
+#else // WITH_RELU && WITH_SUM
 #if WITH_RELU
 #define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = fma((float)ACC, SCALE, BIA);                \
+    if (TMP < 0)                                      \
+        TMP *= relu_negative_slope;                   \
     RES = CONVERT_DATA_T(TMP);
-#else // WITH_RELU
+#endif // WITH_RELU
+#if WITH_SUM
+#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
+    TMP = fma((float)DST, sum_scale, BIA);            \
+    TMP = fma((float)ACC, SCALE, TMP);                \
+    RES = CONVERT_DATA_T(TMP);
+#endif
+#if WITH_RELU == 0 && WITH_SUM == 0
 #define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = fma((float)ACC, SCALE, BIA);                \
     RES = CONVERT_DATA_T(TMP);
-#endif // WITH_RELU 
+#endif
+#endif // WITH_RELU && WITH_SUM
 #endif // WITH_SUM_RELU
 #else // WITH_BIAS
 #if WITH_SUM_RELU
 #define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE)     \
     TMP = fma((float)ACC, SCALE, (float)DST * sum_scale); \
+    if (TMP < 0)                                          \
+        TMP *= relu_negative_slope;                       \
     RES = CONVERT_DATA_T(TMP);
 #else // WITH_SUM_RELU
+#if WITH_RELU && WITH_SUM
+#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
+    TMP = (float)ACC, SCALE;                          \
+    if (TMP < 0)                                      \
+        TMP *= relu_negative_slope;                   \
+    TMP = fma((float)DST, sum_scale, TMP);            \
+    RES = CONVERT_DATA_T(TMP);
+#else // WITH_RELU && WITH_SUM
 #if WITH_RELU
 #define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = (float)ACC * SCALE;                         \
+    if (TMP < 0)                                      \
+        TMP *= relu_negative_slope;                   \
     RES = CONVERT_DATA_T(TMP);
-#else // WITH_RELU
+#endif // WITH_RELU
+#if WITH_SUM
+#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE)     \
+    TMP = fma((float)ACC, SCALE, (float)DST * sum_scale); \
+    RES = CONVERT_DATA_T(TMP);
+#endif // WITH_SUM
+#if WITH_RELU == 0 && WITH_SUM == 0
 #define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = (float)ACC * SCALE;                         \
     RES = CONVERT_DATA_T(TMP);
-#endif // WITH_RELU
+#endif
+#endif // WITH_RELU && WITH_SUM
 #endif // WITH_SUM_RELU
 #endif // WITH_BIAS
 
 #if WITH_SUM_RELU || WITH_SUM
 #define PACK(idx)                                             \
-    D00 = as_uchar4(D0[idx]);                                 \
+    D00 = AS_DATA4_T(D0[idx]);                                \
     BIAS_SUM_RELU(S00[0], T00, C00[idx], b0, D00[0], scales); \
     BIAS_SUM_RELU(S00[1], T01, C01[idx], b1, D00[1], scales); \
     BIAS_SUM_RELU(S00[2], T02, C02[idx], b2, D00[2], scales); \
     BIAS_SUM_RELU(S00[3], T03, C03[idx], b3, D00[3], scales); \
     T0[idx] = as_uint(S00);                                   \
-    D01 = as_uchar4(D1[idx]);                                 \
+    D01 = AS_DATA4_T(D1[idx]);                                \
     BIAS_SUM_RELU(S01[0], T10, C10[idx], b0, D01[0], scales); \
     BIAS_SUM_RELU(S01[1], T11, C11[idx], b1, D01[1], scales); \
     BIAS_SUM_RELU(S01[2], T12, C12[idx], b2, D01[2], scales); \
     BIAS_SUM_RELU(S01[3], T13, C13[idx], b3, D01[3], scales); \
     T1[idx] = as_uint(S01);                                   \
-    D02 = as_uchar4(D2[idx]);                                 \
+    D02 = AS_DATA4_T(D2[idx]);                                \
     BIAS_SUM_RELU(S02[0], T20, C20[idx], b0, D02[0], scales); \
     BIAS_SUM_RELU(S02[1], T21, C21[idx], b1, D02[1], scales); \
     BIAS_SUM_RELU(S02[2], T22, C22[idx], b2, D02[2], scales); \
     BIAS_SUM_RELU(S02[3], T23, C23[idx], b3, D02[3], scales); \
     T2[idx] = as_uint(S02);                                   \
-    D03 = as_uchar4(D3[idx]);                                 \
+    D03 = AS_DATA4_T(D3[idx]);                                \
     BIAS_SUM_RELU(S03[0], T30, C30[idx], b0, D03[0], scales); \
     BIAS_SUM_RELU(S03[1], T31, C31[idx], b1, D03[1], scales); \
     BIAS_SUM_RELU(S03[2], T32, C32[idx], b2, D03[2], scales); \

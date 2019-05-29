@@ -62,21 +62,22 @@ struct ref_convolution_fwd_t : public primitive_t {
             with_sum = p.find(primitive_kind::sum) != -1;
             const int sum_idx = p.find(primitive_kind::sum);
             sum_scale = (sum_idx != -1) ? p.entry_[sum_idx].sum.scale : 1.0;
-            with_sum_relu = false;
-            if (p.len_ == 2) {
-                with_sum_relu = p.entry_[sum_idx].is_sum(sum_scale == 1.0)
-                        && p.entry_[1].is_relu();
-            }
+
             const int eltwise_ind = p.find(primitive_kind::eltwise);
             bool with_eltwise = eltwise_ind != -1;
             with_relu = false;
             negative_slope = .0f;
             if (with_eltwise) {
                 auto eltwise = p.entry_[eltwise_ind].eltwise;
-                with_relu = eltwise.alg == alg_kind::eltwise_relu;
+                with_relu = eltwise.alg == alg_kind::eltwise_relu
+                        && eltwise.alpha != 1.0f;
                 if (with_relu)
                     negative_slope = eltwise.alpha;
             }
+
+            with_sum_relu = (p.len_ == 2) 
+                && with_relu && with_sum 
+                && sum_idx == 0 && eltwise_ind == 1;
 
             gws[0] = OH() * OW() * OD();
             gws[1] = OC() / G();

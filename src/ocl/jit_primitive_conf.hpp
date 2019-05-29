@@ -286,19 +286,18 @@ inline void set_default_conf(jit_conv_conf_t &jcp, const convolution_desc_t &cd,
 
     const int eltwise_ind = p.find(primitive_kind::eltwise);
     jcp.with_eltwise = eltwise_ind != -1;
-    if (jcp.with_eltwise)
-        jcp.eltwise = p.entry_[eltwise_ind].eltwise;
-    jcp.with_relu
-            = (jcp.with_eltwise && jcp.eltwise.alg == alg_kind::eltwise_relu);
-    if (jcp.with_relu)
-        jcp.negative_slope = jcp.eltwise.alpha;
 
-    if (p.len_ == 2) {
-        jcp.with_sum_relu = p.entry_[sum_idx].is_sum(jcp.sum_scale == 1.0)
-                && p.entry_[1].is_relu();
-    } else {
-        jcp.with_sum_relu = 0;
+    if (jcp.with_eltwise) {
+        jcp.eltwise = p.entry_[eltwise_ind].eltwise;
+        jcp.with_relu = jcp.eltwise.alg == alg_kind::eltwise_relu
+                && jcp.eltwise.alpha != 1.0f;
+        if (jcp.with_relu)
+            jcp.negative_slope = jcp.eltwise.alpha;
     }
+
+    jcp.with_sum_relu = (p.len_ == 2)
+        && jcp.with_relu && jcp.with_sum
+        && sum_idx == 0 && eltwise_ind == 1;
 
     jcp.scale_idx_mult = attr.output_scales_.mask_ == (1 << 1);
 }
