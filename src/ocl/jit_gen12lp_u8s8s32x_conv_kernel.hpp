@@ -45,6 +45,9 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
 
         status_t status = status::success;
 
+        if (jcp.mb < 8)
+            return status::unimplemented;
+
         if (jcp.with_groups && jcp.ngroups > 1 
             && (jcp.oc % 32 != 0 || jcp.ic % 32 != 0))
             return status::unimplemented;
@@ -65,7 +68,7 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
         jcp.lws_d[2] = 1;
 
         jcp.gws_d[0] = utils::rnd_up(jcp.nchunk * 8, jcp.lws_d[0]);
-        jcp.gws_d[1] = jcp.oh * utils::rnd_up(jcp.ow, jcp.lws_d[1]);
+        jcp.gws_d[1] = jcp.od * jcp.oh * utils::rnd_up(jcp.ow, jcp.lws_d[1]);
         jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block);
 
         if (divide_mbblock)
@@ -76,11 +79,11 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
 
         format_tag_t src_tag, dst_tag, wei_tag;
 
-        src_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c);
-        dst_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c);
+        src_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+        dst_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
         wei_tag = jcp.with_groups
-            ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i)
-            : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i);
+            ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i, gOIdhw4o8i8o4i)
+            : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i, OIdhw4o8i8o4i);
 
         jcp.src_tag = src_tag;
         jcp.wei_tag = wei_tag;

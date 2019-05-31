@@ -49,8 +49,12 @@ conv_fwd_kernel(const __global uchar *src, const __global char *wei,
     const int g = (group_oc + oc) / OC_NCHUNK;
     const int group_ic = IC_NCHUNK * g;
 
-    const int goh = group_sp / OW_PADDED;
-    const int gow = group_sp % OW_PADDED;
+    const int god = group_sp / (OW_PADDED * OH);
+    const int gohw = group_sp % (OW_PADDED * OH);
+    const int goh = gohw / OW_PADDED;
+    const int gow = gohw % OW_PADDED;
+
+    const int gid = god * SD;
     const int gih = goh * SH;
     const int giw = gow * SW;
 
@@ -59,26 +63,27 @@ conv_fwd_kernel(const __global uchar *src, const __global char *wei,
     const int local_ih = local_oh * SH;
     const int local_iw = local_ow * SW;
 
+    const int od = god;
     const int ow = gow + local_ow;
     const int oh = goh + local_oh;
+    const int id = gid - PD;
     const int iw = giw + local_iw - PW;
     const int ih = gih + local_ih - PH;
 
     if (ow >= OW)
         return;
 
-    dst += OC_BLOCK * OH * OW * MB_BLOCK * (group_oc + oc);
-    dst += OC_BLOCK * OH * OW * OC_NCHUNK * G * MB_BLOCK * group_mb;
+    dst += OC_BLOCK * OD * OH * OW * MB_BLOCK * (group_oc + oc);
+    dst += OC_BLOCK * OD * OH * OW * OC_NCHUNK * G * MB_BLOCK * group_mb;
     dst += OC_BLOCK * MB_BLOCK / 2 * mb;
-    dst += OC_BLOCK * MB_BLOCK * (OW * oh + ow);
+    dst += OC_BLOCK * MB_BLOCK * (OW * OH * od + OW * oh + ow);
 
-    src += IC_BLOCK * IH * IW * MB_BLOCK * group_ic;
-    src += IC_BLOCK * IH * IW * IC_NCHUNK * G * MB_BLOCK * group_mb;
+    src += IC_BLOCK * ID * IH * IW * MB_BLOCK * group_ic;
+    src += IC_BLOCK * ID * IH * IW * IC_NCHUNK * G * MB_BLOCK * group_mb;
     src += IC_BLOCK * MB_BLOCK / 2 * mb;
-    src += IC_BLOCK * MB_BLOCK * iw;
-    src += IC_BLOCK * MB_BLOCK * IW * ih;
+    src += IC_BLOCK * MB_BLOCK * (IW * IH * id + IW * ih + iw);
 
-    wei += IC_BLOCK * KH * KW * OC_BLOCK * (group_oc + oc) * IC_NCHUNK;
+    wei += IC_BLOCK * KD * KH * KW * OC_BLOCK * (group_oc + oc) * IC_NCHUNK;
 
     int8 C00 = 0, C01 = 0, C02 = 0, C03 = 0;
     int8 C10 = 0, C11 = 0, C12 = 0, C13 = 0;
@@ -89,54 +94,62 @@ conv_fwd_kernel(const __global uchar *src, const __global char *wei,
     for (int ic_chunk = 0; ic_chunk < IC_NCHUNK; ic_chunk++) {
         uint8 S0, S1, S2, S3;
         int8 W0, W1, W2, W3;
-        for (int kh = 0; kh < KH; kh++) {
-            if (kh * (1 + DH) + ih < 0 || kh * (1 + DH) + ih >= IH){
-                src += IC_BLOCK * MB_BLOCK * IW * (1 + DH);
-                wei += IC_BLOCK * OC_BLOCK * KW;
+        for (int kd = 0; kd < KD; kd++) {
+            if (kd * (1 + DD) + id < 0 || kd * (1 + DD) + id >= ID) {
+                src += IC_BLOCK * MB_BLOCK * IH * IW * (1 + DD);
+                wei += IC_BLOCK * OC_BLOCK * KH * KW;
                 continue;
             }
-            __attribute__((opencl_unroll_hint))
-            for (int kw = 0; kw < KW; kw++) {
-                if (kw * (1 + DW) + iw >= 0 && kw * (1 + DW) + iw < IW) {
-                    BLOCK_READ_SRC(S0, 0);
-#if MB > 8
-                    BLOCK_READ_SRC(S1, 8 * IC_BLOCK);
-#ifdef MB_FULL_BLOCK
-                    BLOCK_READ_SRC(S2, 16 * IC_BLOCK);
-                    BLOCK_READ_SRC(S3, 24 * IC_BLOCK);
-#endif // MB_FULL_BLOCK
-#endif // MB > 8
-                    BLOCK_READ_WHT(W0, 0);
-                    BLOCK_READ_WHT(W1, 8 * IC_BLOCK);
-                    BLOCK_READ_WHT(W2, 16 * IC_BLOCK);
-                    BLOCK_READ_WHT(W3, 24 * IC_BLOCK);
-                    C00 = mmad8x8(S0, W0, C00);
-                    C01 = mmad8x8(S0, W1, C01);
-                    C02 = mmad8x8(S0, W2, C02);
-                    C03 = mmad8x8(S0, W3, C03);
-#if MB > 8
-                    C10 = mmad8x8(S1, W0, C10);
-                    C11 = mmad8x8(S1, W1, C11);
-                    C12 = mmad8x8(S1, W2, C12);
-                    C13 = mmad8x8(S1, W3, C13);
-#ifdef MB_FULL_BLOCK
-                    C20 = mmad8x8(S2, W0, C20);
-                    C21 = mmad8x8(S2, W1, C21);
-                    C22 = mmad8x8(S2, W2, C22);
-                    C23 = mmad8x8(S2, W3, C23);
-                    C30 = mmad8x8(S3, W0, C30);
-                    C31 = mmad8x8(S3, W1, C31);
-                    C32 = mmad8x8(S3, W2, C32);
-                    C33 = mmad8x8(S3, W3, C33);
-#endif // MB_FULL_BLOCK
-#endif // MB > 8
+            for (int kh = 0; kh < KH; kh++) {
+                if (kh * (1 + DH) + ih < 0 || kh * (1 + DH) + ih >= IH){
+                    src += IC_BLOCK * MB_BLOCK * IW * (1 + DH);
+                    wei += IC_BLOCK * OC_BLOCK * KW;
+                    continue;
                 }
-                src += IC_BLOCK * MB_BLOCK * (1 + DW);
-                wei += IC_BLOCK * OC_BLOCK;
+                __attribute__((opencl_unroll_hint))
+                for (int kw = 0; kw < KW; kw++) {
+                    if (kw * (1 + DW) + iw >= 0 && kw * (1 + DW) + iw < IW) {
+                        BLOCK_READ_SRC(S0, 0);
+#if MB > 8
+                        BLOCK_READ_SRC(S1, 8 * IC_BLOCK);
+#ifdef MB_FULL_BLOCK
+                        BLOCK_READ_SRC(S2, 16 * IC_BLOCK);
+                        BLOCK_READ_SRC(S3, 24 * IC_BLOCK);
+#endif // MB_FULL_BLOCK
+#endif // MB > 8
+                        BLOCK_READ_WHT(W0, 0);
+                        BLOCK_READ_WHT(W1, 8 * IC_BLOCK);
+                        BLOCK_READ_WHT(W2, 16 * IC_BLOCK);
+                        BLOCK_READ_WHT(W3, 24 * IC_BLOCK);
+                        C00 = mmad8x8(S0, W0, C00);
+                        C01 = mmad8x8(S0, W1, C01);
+                        C02 = mmad8x8(S0, W2, C02);
+                        C03 = mmad8x8(S0, W3, C03);
+#if MB > 8
+                        C10 = mmad8x8(S1, W0, C10);
+                        C11 = mmad8x8(S1, W1, C11);
+                        C12 = mmad8x8(S1, W2, C12);
+                        C13 = mmad8x8(S1, W3, C13);
+#ifdef MB_FULL_BLOCK
+                        C20 = mmad8x8(S2, W0, C20);
+                        C21 = mmad8x8(S2, W1, C21);
+                        C22 = mmad8x8(S2, W2, C22);
+                        C23 = mmad8x8(S2, W3, C23);
+                        C30 = mmad8x8(S3, W0, C30);
+                        C31 = mmad8x8(S3, W1, C31);
+                        C32 = mmad8x8(S3, W2, C32);
+                        C33 = mmad8x8(S3, W3, C33);
+#endif // MB_FULL_BLOCK
+#endif // MB > 8
+                    }
+                    src += IC_BLOCK * MB_BLOCK * (1 + DW);
+                    wei += IC_BLOCK * OC_BLOCK;
+                }
+                src += IC_BLOCK * MB_BLOCK * (IW * (1 + DH) - KW * (1 + DW));
             }
-            src += IC_BLOCK * MB_BLOCK * (IW * (1 + DH) - KW * (1 + DW));
+            src += IC_BLOCK * MB_BLOCK * (IH * (1 + DD) - KH * (1 + DH)) * IW;
         }
-        src += IC_BLOCK * (IH - KH * (1 + DH)) * IW * MB_BLOCK;
+        src += IC_BLOCK * MB_BLOCK * (ID - KD * (1 + DD)) * IH * IW;
     }
 #if WITH_BIAS
 #if WITH_SUM_RELU

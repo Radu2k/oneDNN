@@ -211,6 +211,7 @@ status_t memory_desc_wrapper::compute_blocking(memory_desc_t &memory_desc,
     C(aBCde4c16b4c, {0, 1, 2, 3, 4}, {4, 16, 4}, {2, 1, 2});
     C(Abcde8a, {0, 1, 2, 3, 4}, {8}, {0});
     C(ABcde8a8b, {0, 1, 2, 3, 4}, {8, 8}, {0, 1});
+    C(ABcde32a32b, {0, 1, 2, 3, 4}, {32, 32}, {0, 1});
     C(aBcde8b, {0, 1, 2, 3, 4}, {8}, {1});
     C(ABcde8b16a2b, {0, 1, 2, 3, 4}, {8, 16, 2}, {1, 0, 1});
     C(aBCde8b16c2b, {0, 1, 2, 3, 4}, {8, 16, 2}, {1, 2, 1});
@@ -245,6 +246,8 @@ status_t memory_desc_wrapper::compute_blocking(memory_desc_t &memory_desc,
     C(BAcde16b16a, {1, 0, 2, 3, 4}, {16, 16}, {1, 0});
     C(ABc4a8b8a4b, {0, 1, 2}, { 4, 8, 8, 4 }, { 0, 1, 0, 1 });
     C(ABcd4a8b8a4b, {0, 1, 2, 3}, {4, 8, 8, 4}, {0, 1, 0, 1});
+    C(ABcde4a8b8a4b, {0, 1, 2, 3, 4}, {4, 8, 8, 4}, {0, 1, 0, 1});
+    C(aBCdef4b8c8b4c, {0, 1, 2, 3, 4, 5}, {4, 8, 8, 4}, {1, 2, 1, 2});
     C(ABcd2a8b8a2b, {0, 1, 2, 3}, {2, 8, 8, 2}, {0, 1, 0, 1});
     C(aBCd4b8c8b4c, { 0, 1, 2, 3 }, { 4, 8, 8, 4 }, { 1, 2, 1, 2 });
     C(aBCde4b8c8b4c, {0, 1, 2, 3, 4}, {4, 8, 8, 4}, {1, 2, 1, 2});

@@ -273,9 +273,11 @@ typedef enum {
     mkldnn_ABcde8b16a2b,
     mkldnn_aBCde8b16c2b,
     mkldnn_ABcde8b8a,
+    mkldnn_ABcde32a32b,
     mkldnn_aBCde8b8c,
     mkldnn_ABc4a8b8a4b,
     mkldnn_ABcd4a8b8a4b,
+    mkldnn_ABcde4a8b8a4b,
     mkldnn_ABcd2a8b8a2b,
     mkldnn_aBCd4b8c8b4c,
     mkldnn_aBCde4b8c8b4c,
@@ -291,6 +293,7 @@ typedef enum {
     mkldnn_aBCdef4c4b,
     mkldnn_aBCdef8b8c,
     mkldnn_aBCdef8c16b2c,
+    mkldnn_aBCdef4b8c8b4c,
     mkldnn_aBCdef8c8b,
     mkldnn_aBdc16b,
     mkldnn_aBdc4b,
@@ -453,6 +456,7 @@ typedef enum {
     mkldnn_NChw16n16c = mkldnn_ABcd16a16b,
     mkldnn_NCw32n32c = mkldnn_ABc32a32b,
     mkldnn_NChw32n32c = mkldnn_ABcd32a32b,
+    mkldnn_NCdhw32n32c = mkldnn_ABcde32a32b,
 
     // weights, 3D
     mkldnn_IOw16o16i = mkldnn_BAc16a16b,
@@ -502,6 +506,7 @@ typedef enum {
     mkldnn_OIdhw8i8o = mkldnn_ABcde8b8a,
     mkldnn_OIdhw8o8i = mkldnn_ABcde8a8b,
     mkldnn_IOdhw16i16o = mkldnn_BAcde16b16a,
+    mkldnn_OIdhw4o8i8o4i = mkldnn_ABcde4a8b8a4b,
 
     // weights w/ groups, 3D
     mkldnn_Goiw16g = mkldnn_Abcd16a,
@@ -548,6 +553,7 @@ typedef enum {
     mkldnn_OIhw2o8i8o2i = mkldnn_ABcd2a8b8a2b,
     mkldnn_gOIw4o8i8o4i = mkldnn_aBCd4b8c8b4c,
     mkldnn_gOIhw4o8i8o4i = mkldnn_aBCde4b8c8b4c,
+    mkldnn_gOIdhw4o8i8o4i = mkldnn_aBCdef4b8c8b4c,
     mkldnn_gOIhw2o8i8o2i = mkldnn_aBCde2b8c8b2c,
 
     // weights w/ groups, 6D
