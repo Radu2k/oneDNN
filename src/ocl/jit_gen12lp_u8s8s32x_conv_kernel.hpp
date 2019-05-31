@@ -32,14 +32,9 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
     ~jit_gen12lp_u8s8s32x_conv_fwd_kernel() {};
 
     static status_t init_conf(jit_conv_conf_t &jcp,
-            const convolution_desc_t &cd, const memory_desc_t &src_md,
-            const memory_desc_t &weights_md, const memory_desc_t &dst_md,
-            const memory_desc_t &bias_md, const primitive_attr_t &attr) {
-
-        const memory_desc_wrapper src_mdw(&src_md);
-        const memory_desc_wrapper weights_mdw(&weights_md);
-        const memory_desc_wrapper dst_mdw(&dst_md);
-        const memory_desc_wrapper bias_mdw(&bias_md);
+        const convolution_desc_t &cd, const memory_desc_t &src_md,
+        const memory_desc_t &weights_md, const memory_desc_t &dst_md,
+        const memory_desc_t &bias_md, const primitive_attr_t &attr) {
 
         set_default_conf(jcp, cd, src_md, weights_md, dst_md, attr);
 
@@ -48,13 +43,14 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
         if (jcp.mb < 8)
             return status::unimplemented;
 
-        if (jcp.with_groups && jcp.ngroups > 1 
+        if (!jcp.is_depthwise
+            && jcp.with_groups && jcp.ngroups > 1
             && (jcp.oc % 32 != 0 || jcp.ic % 32 != 0))
             return status::unimplemented;
 
-        jcp.dst_data_type = dst_mdw.data_type();
 
-        jcp.sub_group_size = 8;
+
+        jcp.sub_group_size = (jcp.is_depthwise) ? 16 : 8;
         jcp.mb_block = 32;
         jcp.oc_block = 32;
         jcp.ic_block = 32;
@@ -62,18 +58,26 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
         int oc_group = nstl::min(jcp.nchunk, 2);
 
         bool divide_mbblock = true;
+        if (jcp.is_depthwise) {
+            jcp.lws_d[0] = 16;
+            jcp.lws_d[1] = 1;
+            jcp.lws_d[2] = 1;
 
-        jcp.lws_d[0] = 8 * oc_group;
-        jcp.lws_d[1] = 8;
-        jcp.lws_d[2] = 1;
+            jcp.gws_d[0] = utils::div_up(jcp.ngroups, 32) * jcp.lws_d[0];
+            jcp.gws_d[1] = jcp.od * jcp.oh * jcp.ow;
+            jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block / 4);
+        }
+        else {
+            jcp.lws_d[0] = 8 * oc_group;
+            jcp.lws_d[1] = 8;
+            jcp.lws_d[2] = 1;
 
-        jcp.gws_d[0] = utils::rnd_up(jcp.nchunk * 8, jcp.lws_d[0]);
-        jcp.gws_d[1] = jcp.od * jcp.oh * utils::rnd_up(jcp.ow, jcp.lws_d[1]);
-        jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block);
-
-        if (divide_mbblock)
-            jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block / 2);
-
+            jcp.gws_d[0] = utils::rnd_up(jcp.nchunk * 8, jcp.lws_d[0]);
+            jcp.gws_d[1] = jcp.od * jcp.oh * utils::rnd_up(jcp.ow, jcp.lws_d[1]);
+            jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block);
+            if (divide_mbblock)
+                jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block / 2);
+        }
 
         jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
 
@@ -81,9 +85,13 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
 
         src_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
         dst_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+        if (jcp.is_depthwise) {
+            wei_tag = utils::pick(jcp.ndims - 3, Goiw32g, Goihw32g, Goidhw32g);
+        } else {
         wei_tag = jcp.with_groups
             ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i, gOIdhw4o8i8o4i)
             : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i, OIdhw4o8i8o4i);
+        }
 
         jcp.src_tag = src_tag;
         jcp.wei_tag = wei_tag;
@@ -134,6 +142,7 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
         jit.define_int("WITH_RELU", jcp.with_relu);
         jit.define_int("WITH_SUM", jcp.with_sum);
         jit.define_int("WITH_SUM_RELU", jcp.with_sum_relu);
+        jit.define_int("SUM_SCALE", jcp.sum_scale == 1.0);
 
         jit.define_int("SUB_GROUP_SIZE", jcp.sub_group_size);
         jit.define_int("LWS_0", jcp.lws_d[0]);
@@ -141,6 +150,10 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
         jit.define_int("LWS_2", jcp.lws_d[2]);
 
         jit.set_data_type(jcp.dst_data_type);
+
+        if (jcp.is_depthwise) {
+            jit.add_option("-Dcl_intel_subgroups_char");
+        }
 
         return status::success;
     }

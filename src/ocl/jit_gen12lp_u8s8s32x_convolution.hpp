@@ -25,6 +25,7 @@
 #include "ocl/ocl_utils.hpp"
 
 extern const char *gen12lp_conv_fwd_data_u8s8s32x_kernel;
+extern const char *gen12lp_conv_dw_fwd_data_u8s8s32x_kernel;
 
 namespace mkldnn {
 namespace impl {
@@ -70,7 +71,13 @@ struct jit_gen12lp_u8s8s32x_convolution_fwd_t : public primitive_t {
 
 
     status_t init() override {
-        auto jit = ocl_jit_t(gen12lp_conv_fwd_data_u8s8s32x_kernel);
+        const char *ocl_kernel_str = nullptr;
+        if (pd()->jcp_.is_depthwise)
+            ocl_kernel_str = gen12lp_conv_dw_fwd_data_u8s8s32x_kernel;
+        else
+            ocl_kernel_str = gen12lp_conv_fwd_data_u8s8s32x_kernel;
+
+        auto jit = ocl_jit_t(ocl_kernel_str);
         auto status = jit_gen12lp_u8s8s32x_conv_fwd_kernel::init_const_def(
             jit, pd()->jcp_);
         if (status != status::success)
@@ -80,7 +87,11 @@ struct jit_gen12lp_u8s8s32x_convolution_fwd_t : public primitive_t {
         if (status != status::success)
             return status;
 
-        kernel_ = jit.get_kernel("conv_fwd_kernel");
+        if (pd()->jcp_.is_depthwise)
+            kernel_ = jit.get_kernel("conv_dw_fwd_kernel");
+        else
+            kernel_ = jit.get_kernel("conv_fwd_kernel");
+        
         if (!kernel_)
             return status::runtime_error;
 
