@@ -186,6 +186,7 @@ status_t memory_desc_wrapper::compute_blocking(memory_desc_t &memory_desc,
     C(ABc8b16a2b, {0, 1, 2}, {8, 16, 2}, {1, 0, 1});
     C(ABc8b8a, {0, 1, 2}, {8, 8}, {1, 0});
     C(Abcd16a, {0, 1, 2, 3}, {16}, {0});
+    C(Abcd32a, {0, 1, 2, 3}, {32}, {0});
     C(ABcd16a16b, {0, 1, 2, 3}, {16, 16}, {0, 1});
     C(aBcd16b, {0, 1, 2, 3}, {16}, {1});
     C(ABcd16b16a, {0, 1, 2, 3}, {16, 16}, {1, 0});
@@ -204,6 +205,7 @@ status_t memory_desc_wrapper::compute_blocking(memory_desc_t &memory_desc,
     C(aBCd8c16b2c, {0, 1, 2, 3}, {8, 16, 2}, {2, 1, 2});
     C(aBCd8c8b, {0, 1, 2, 3}, {8, 8}, {2, 1});
     C(Abcde16a, {0, 1, 2, 3, 4}, {16}, {0});
+    C(Abcde32a, {0, 1, 2, 3, 4}, {32}, {0});
     C(ABcde16a16b, {0, 1, 2, 3, 4}, {16, 16}, {0, 1});
     C(aBcde16b, {0, 1, 2, 3, 4}, {16}, {1});
     C(ABcde16b16a, {0, 1, 2, 3, 4}, {16, 16}, {1, 0});
@@ -261,6 +263,7 @@ status_t memory_desc_wrapper::compute_blocking(memory_desc_t &memory_desc,
     C(aBdec32b, {0, 1, 3, 4, 2}, {32}, {1});
     C(aCBdef16c16b, {0, 2, 1, 3, 4, 5}, {16, 16}, {2, 1});
     C(Abcdef16a, {0, 1, 2, 3, 4, 5}, {16}, {0});
+    C(Abcdef32a, {0, 1, 2, 3, 4, 5}, {32}, {0});
     C(aCBd16c16b, {0, 2, 1, 3}, {16, 16}, {2, 1});
     C(aCBde16c16b, {0, 2, 1, 3, 4}, {16, 16}, {2, 1});
     C(Acdb32a, {0, 2, 3, 1}, {32}, {0});

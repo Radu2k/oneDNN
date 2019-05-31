@@ -158,6 +158,7 @@ namespace format_tag {
     const format_tag_t ABc8b16a2b = mkldnn_ABc8b16a2b;
     const format_tag_t ABc8b8a = mkldnn_ABc8b8a;
     const format_tag_t Abcd16a = mkldnn_Abcd16a;
+    const format_tag_t Abcd32a = mkldnn_Abcd32a;
     const format_tag_t ABcd16a16b = mkldnn_ABcd16a16b;
     const format_tag_t aBcd16b = mkldnn_aBcd16b;
     const format_tag_t ABcd16b16a = mkldnn_ABcd16b16a;
@@ -181,6 +182,7 @@ namespace format_tag {
     const format_tag_t aBCd8c16b2c = mkldnn_aBCd8c16b2c;
     const format_tag_t aBCd8c8b = mkldnn_aBCd8c8b;
     const format_tag_t Abcde16a = mkldnn_Abcde16a;
+    const format_tag_t Abcde32a = mkldnn_Abcde32a;
     const format_tag_t ABcde16a16b = mkldnn_ABcde16a16b;
     const format_tag_t aBcde16b = mkldnn_aBcde16b;
     const format_tag_t ABcde16b16a = mkldnn_ABcde16b16a;
@@ -254,6 +256,7 @@ namespace format_tag {
     const format_tag_t BAcde16b16a = mkldnn_BAcde16b16a;
     const format_tag_t aBdec32b   = mkldnn_aBdec32b;
     const format_tag_t Abcdef16a  = mkldnn_Abcdef16a;
+    const format_tag_t Abcdef32a = mkldnn_Abcdef32a;
     const format_tag_t Acdb32a    = mkldnn_Acdb32a;
     const format_tag_t BAc16b16a = mkldnn_BAc16b16a;
     const format_tag_t BAcd16b16a = mkldnn_BAcd16b16a;
@@ -416,6 +419,9 @@ namespace format_tag {
     const format_tag_t gIOdhw8o16i2o = mkldnn_gIOdhw8o16i2o;
     const format_tag_t gOIdhw8i8o = mkldnn_gOIdhw8i8o;
     const format_tag_t gOIdhw8o8i = mkldnn_gOIdhw8o8i;
+    const format_tag_t Goiw32g = mkldnn_Goiw32g;
+    const format_tag_t Goihw32g = mkldnn_Goihw32g;
+    const format_tag_t Goidhw32g = mkldnn_Goidhw32g;
 }
 
 using memory_extra_flags_t = mkldnn_memory_extra_flags_t;

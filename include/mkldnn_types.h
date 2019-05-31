@@ -228,6 +228,7 @@ typedef enum {
     mkldnn_BAc8a16b2a,
     mkldnn_ABc8b8a,
     mkldnn_Abcd16a,
+    mkldnn_Abcd32a,
     mkldnn_ABcd16a16b,
     mkldnn_ABcd32a32b,
     /// 4D tensor blocked by 2nd dimension with block size 16
@@ -257,6 +258,7 @@ typedef enum {
     mkldnn_aCBd8b16c2b,
     mkldnn_aBCd8c8b,
     mkldnn_Abcde16a,
+    mkldnn_Abcde32a,
     mkldnn_ABcde16a16b,
     mkldnn_BAcde8a16b2a,
     /// 5D tensor blocked by 2nd dimension with block size 16
@@ -317,6 +319,7 @@ typedef enum {
     mkldnn_aBdefc4b,
     mkldnn_aBdefc8b,
     mkldnn_Abcdef16a,
+    mkldnn_Abcdef32a,
     mkldnn_Acb16a,
     mkldnn_Acb4a,
     mkldnn_Acb8a,
@@ -540,6 +543,7 @@ typedef enum {
     mkldnn_gOwi16o = mkldnn_aBdc16b,
     mkldnn_gOwi4o = mkldnn_aBdc4b,
     mkldnn_gOwi8o = mkldnn_aBdc8b,
+    mkldnn_Goiw32g = mkldnn_Abcd32a,
 
     // weights w/ groups, 4D
     mkldnn_gIOhw16i16o = mkldnn_aCBde16c16b,
@@ -563,6 +567,7 @@ typedef enum {
     mkldnn_gOIhw8o16i2o = mkldnn_aBCde8b16c2b,
     mkldnn_gIOhw8o16i2o = mkldnn_aCBde8b16c2b,
     mkldnn_gOIhw8o8i = mkldnn_aBCde8b8c,
+    mkldnn_Goihw32g = mkldnn_Abcde32a,
 
     mkldnn_OIw4o8i8o4i = mkldnn_ABc4a8b8a4b,
     mkldnn_OIhw4o8i8o4i = mkldnn_ABcd4a8b8a4b,
@@ -588,6 +593,7 @@ typedef enum {
     mkldnn_gIOdhw8o16i2o = mkldnn_aCBdef8b16c2b,
     mkldnn_gOIdhw8o8i = mkldnn_aBCdef8b8c,
     mkldnn_Goidhw16g = mkldnn_Abcdef16a,
+    mkldnn_Goidhw32g = mkldnn_Abcdef32a,
 } mkldnn_format_tag_t;
 
 /// Kinds of propagation.

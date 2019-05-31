@@ -94,6 +94,7 @@ const char *mkldnn_fmt_tag2str(mkldnn_format_tag_t v) {
     if (v == mkldnn_BAc8a16b2a) return "BAc8a16b2a";
     if (v == mkldnn_ABc8b8a) return "ABc8b8a";
     if (v == mkldnn_Abcd16a) return "Abcd16a";
+    if (v == mkldnn_Abcd32a) return "Abcd32a";
     if (v == mkldnn_ABcd16a16b) return "ABcd16a16b";
     if (v == mkldnn_ABc32a32b) return "ABc32a32b";
     if (v == mkldnn_ABcd32a32b) return "ABcd32a32b";
@@ -121,6 +122,7 @@ const char *mkldnn_fmt_tag2str(mkldnn_format_tag_t v) {
     if (v == mkldnn_aCBd8b16c2b) return "aCBd8b16c2b";
     if (v == mkldnn_aBCd8c8b) return "aBCd8c8b";
     if (v == mkldnn_Abcde16a) return "Abcde16a";
+    if (v == mkldnn_Abcde32a) return "Abcde32a";
     if (v == mkldnn_ABcde16a16b) return "ABcde16a16b";
     if (v == mkldnn_BAcde8a16b2a) return "BAcde8a16b2a";
     if (v == mkldnn_aBcde16b) return "aBcde16b";
@@ -175,6 +177,7 @@ const char *mkldnn_fmt_tag2str(mkldnn_format_tag_t v) {
     if (v == mkldnn_aBdefc4b) return "aBdefc4b";
     if (v == mkldnn_aBdefc8b) return "aBdefc8b";
     if (v == mkldnn_Abcdef16a) return "Abcdef16a";
+    if (v == mkldnn_Abcdef32a) return "Abcdef32a";
     if (v == mkldnn_Acb16a) return "Acb16a";
     if (v == mkldnn_Acb4a) return "Acb4a";
     if (v == mkldnn_Acb8a) return "Acb8a";
@@ -347,6 +350,9 @@ const char *mkldnn_fmt_tag2str(mkldnn_format_tag_t v) {
     if (v == mkldnn_gIOdhw8o16i2o) return "gIOdhw8o16i2o";
     if (v == mkldnn_gOIdhw8o8i) return "gOIdhw8o8i";
     if (v == mkldnn_Goidhw16g) return "Goidhw16g";
+    if (v == mkldnn_Goiw32g) return "Goiw32g";
+    if (v == mkldnn_Goihw32g) return "Goihw32g";
+    if (v == mkldnn_Goidhw32g) return "Goidhw32g";
     assert(!"unknown fmt_tag");
     return "unknown fmt_tag";
 }

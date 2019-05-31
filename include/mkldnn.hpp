@@ -1075,6 +1075,7 @@ struct memory: public handle<mkldnn_memory_t> {
         ABc8b16a2b = mkldnn_ABc8b16a2b,
         ABc8b8a = mkldnn_ABc8b8a,
         Abcd16a = mkldnn_Abcd16a,
+        Abcd32a = mkldnn_Abcd32a,
         ABcd16a16b = mkldnn_ABcd16a16b,
         aBcd16b = mkldnn_aBcd16b,
         ABcd16b16a = mkldnn_ABcd16b16a,
@@ -1098,6 +1099,7 @@ struct memory: public handle<mkldnn_memory_t> {
         aBCd8c16b2c = mkldnn_aBCd8c16b2c,
         aBCd8c8b = mkldnn_aBCd8c8b,
         Abcde16a = mkldnn_Abcde16a,
+        Abcde32a = mkldnn_Abcde32a,
         ABcde16a16b = mkldnn_ABcde16a16b,
         aBcde16b = mkldnn_aBcde16b,
         ABcde16b16a = mkldnn_ABcde16b16a,
@@ -1162,6 +1164,7 @@ struct memory: public handle<mkldnn_memory_t> {
         BAcde16b16 = mkldnn_BAcde16b16a,
         aBdec32b   = mkldnn_aBdec32b,
         Abcdef16a  = mkldnn_Abcdef16a,
+        Abcdef32a = mkldnn_Abcdef32a,
         Acdb32a    = mkldnn_Acdb32a,
         format_tag_last = mkldnn_format_tag_last,
 
