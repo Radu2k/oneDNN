@@ -198,7 +198,7 @@ conv_fwd_kernel(const __global uchar *src, const __global char *wei,
 #else // WITH_SUM_RELU
 #if WITH_RELU && WITH_SUM
 #define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
-    TMP = (float)ACC, SCALE;                          \
+    TMP = (float)ACC * SCALE;                         \
     if (TMP < 0)                                      \
         TMP *= relu_negative_slope;                   \
     TMP = fma((float)DST, sum_scale, TMP);            \

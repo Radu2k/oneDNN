@@ -38,6 +38,8 @@ status_t ref_convolution_fwd_t<src_type, wei_type, dst_type, acc_type>::execute_
     kernel_.set_arg(3, dst);
     kernel_.set_arg(4, pd()->negative_slope);
     kernel_.set_arg(5, pd()->sum_scale);
+    float scales = pd()->attr()->output_scales_.scales_[0];
+    kernel_.set_arg(6, scales);
 
     auto nd_range = cl_nd_range_t(pd()->gws, pd()->lws);
     auto &executor
