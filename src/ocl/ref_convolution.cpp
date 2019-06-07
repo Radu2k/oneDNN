@@ -47,10 +47,34 @@ status_t ref_convolution_fwd_t<src_type, wei_type, dst_type, acc_type>::execute_
     return status;
 }
 
+template <data_type_t diff_dst_type>
+status_t ref_convolution_bwd_data_t<diff_dst_type>
+::execute_forward(const exec_ctx_t &ctx) const {
+    auto &diff_dst = CTX_IN_STORAGE(MKLDNN_ARG_DIFF_DST);
+    auto &weights = CTX_IN_STORAGE(MKLDNN_ARG_WEIGHTS);
+    auto &bias = CTX_IN_STORAGE(MKLDNN_ARG_BIAS);
+    auto &diff_src = CTX_OUT_STORAGE(MKLDNN_ARG_DIFF_SRC);
+
+    /* set kernel args */
+    kernel_.set_arg(0, diff_src);
+    kernel_.set_arg(1, weights);
+    kernel_.set_arg(2, bias);
+    kernel_.set_arg(3, diff_dst);
+
+    auto nd_range = cl_nd_range_t(pd()->gws, pd()->lws);
+    auto &executor
+            = *(utils::downcast<cl_stream_t *>(ctx.stream())->cl_executor());
+    status_t status = executor.parallel_for(nd_range, kernel_);
+
+    return status;
+}
+
 using namespace data_type;
 
 template struct ref_convolution_fwd_t<u8, s8, u8, s32>;
 template struct ref_convolution_fwd_t<u8, s8, s8, s32>;
+template struct ref_convolution_bwd_data_t<u8>;
+template struct ref_convolution_bwd_data_t<s8>;
 
 }
 }

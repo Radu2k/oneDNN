@@ -110,6 +110,8 @@ static const pd_create_f ocl_impl_list[] = {
     INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<s8>),
     INSTANCE(ref_convolution_fwd_t<u8, s8, u8, s32>),
     INSTANCE(ref_convolution_fwd_t<u8, s8, s8, s32>),
+    INSTANCE(ref_convolution_bwd_data_t<u8>),
+    INSTANCE(ref_convolution_bwd_data_t<s8>),
     /*bnorm*/
     INSTANCE(ref_batch_normalization_fwd_t<f16>),
     INSTANCE(ref_batch_normalization_fwd_t<f32>),
