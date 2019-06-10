@@ -20,27 +20,38 @@
 #include "mkldnn_common.hpp"
 
 struct dnn_mem_t {
-    dnn_mem_t(): active_(false) {}
+    dnn_mem_t() {}
 
-    dnn_mem_t(const mkldnn_memory_desc_t &md, mkldnn_engine_t engine)
-        : active_(initialize(md, engine) == OK) {}
-
-    dnn_mem_t(int ndims, const mkldnn_dims_t dims, mkldnn_data_type_t dt,
-            mkldnn_format_tag_t tag, mkldnn_engine_t engine)
-        : active_(initialize(ndims, dims, dt, tag, engine) == OK) {}
+    dnn_mem_t(const mkldnn_memory_desc_t &md, mkldnn_engine_t engine) {
+        active_ = (initialize(md, engine) == OK);
+    }
 
     dnn_mem_t(int ndims, const mkldnn_dims_t dims, mkldnn_data_type_t dt,
-            const mkldnn_dims_t strides, mkldnn_engine_t engine)
-        : active_(initialize(ndims, dims, dt, strides, engine) == OK) {}
+            mkldnn_format_tag_t tag, mkldnn_engine_t engine) {
+        active_ = (initialize(ndims, dims, dt, tag, engine) == OK);
+    }
+
+    dnn_mem_t(int ndims, const mkldnn_dims_t dims, mkldnn_data_type_t dt,
+            mkldnn_format_tag_t tag, const mkldnn_memory_extra_desc_t &extra,
+            mkldnn_engine_t engine) {
+        active_ = (initialize(ndims, dims, dt, tag, extra, engine) == OK);
+    }
+
+    dnn_mem_t(int ndims, const mkldnn_dims_t dims, mkldnn_data_type_t dt,
+            const mkldnn_dims_t strides, mkldnn_engine_t engine) {
+        active_ = (initialize(ndims, dims, dt, strides, engine) == OK);
+    }
 
     dnn_mem_t(const mkldnn_memory_desc_t &md, mkldnn_data_type_t dt,
             mkldnn_format_tag_t tag = mkldnn_format_tag_undef,
-            mkldnn_engine_t engine = engine_ref)
-        : active_(initialize(md, dt, tag, engine) == OK) {}
+            mkldnn_engine_t engine = engine_ref) {
+        active_ = (initialize(md, dt, tag, engine) == OK);
+    }
 
     dnn_mem_t(const mkldnn_memory_desc_t &md, mkldnn_data_type_t dt,
-            mkldnn_engine_t engine = engine_ref)
-        : active_(initialize(md, dt, mkldnn_format_tag_undef, engine) == OK) {}
+            mkldnn_engine_t engine = engine_ref) {
+        active_ = (initialize(md, dt, mkldnn_format_tag_undef, engine) == OK);
+    }
 
     dnn_mem_t(const dnn_mem_t &rhs, mkldnn_data_type_t dt,
             mkldnn_format_tag_t tag = mkldnn_format_tag_undef,
@@ -119,11 +130,14 @@ struct dnn_mem_t {
         void *data = (void *)*this;
         float elem = 0.0;
         switch (dt()) {
-            case mkldnn_s8: elem = static_cast<int8_t *>(data)[idx]; break;
-            case mkldnn_u8: elem = static_cast<uint8_t *>(data)[idx]; break;
-            case mkldnn_s32: elem = static_cast<int32_t *>(data)[idx]; break;
-            case mkldnn_f32: elem = static_cast<float *>(data)[idx]; break;
-            default: assert(!"bad data type");
+        case mkldnn_s8: elem = static_cast<int8_t *>(data)[idx]; break;
+        case mkldnn_u8: elem = static_cast<uint8_t *>(data)[idx]; break;
+        case mkldnn_s32: elem = static_cast<int32_t *>(data)[idx]; break;
+        case mkldnn_f32: elem = static_cast<float *>(data)[idx]; break;
+        case mkldnn_bf16:
+            elem = static_cast<mkldnn::impl::bfloat16_t *>(data)[idx];
+            break;
+        default: assert(!"bad data type");
         }
         return elem;
     }
@@ -135,6 +149,9 @@ struct dnn_mem_t {
             case mkldnn_u8: ((uint8_t *)data)[idx] = value; break;
             case mkldnn_s32: ((int32_t *)data)[idx] = value; break;
             case mkldnn_f32: ((float *)data)[idx] = value; break;
+            case mkldnn_bf16:
+                ((mkldnn::impl::bfloat16_t *)data)[idx] = value;
+                break;
             default: assert(!"bad data type");
         }
     }
@@ -177,19 +194,21 @@ struct dnn_mem_t {
 
     /* fields */
 
-    mkldnn_memory_desc_t md_;
-    mkldnn_memory_t m_;
+    mkldnn_memory_desc_t md_{};
+    mkldnn_memory_t m_{};
 
 private:
-    void *data_;
-    bool is_data_owner_, active_;
+    void *data_ = NULL;
+    bool is_data_owner_ = false;
+    bool active_ = false;
 
-    mkldnn_engine_kind_t engine_kind_;
-    mkldnn_backend_kind_t backend_kind_;
-    mkldnn_engine_t engine_;
+    mkldnn_engine_kind_t engine_kind_ = mkldnn_any_engine;
+    mkldnn_engine_t engine_ = NULL;
 
-    bool is_mapped_;
-    void *mapped_ptr_;
+    bool is_cpu_native_ = false;
+
+    bool is_mapped_ = false;
+    void *mapped_ptr_ = NULL;
 
     int initialize(const mkldnn_memory_desc_t &md, mkldnn_data_type_t dt,
             mkldnn_format_tag_t tag, mkldnn_engine_t engine) {
@@ -202,9 +221,10 @@ private:
         }
         engine_ = engine;
         DNN_SAFE_V(mkldnn_engine_get_kind(engine_, &engine_kind_));
-        DNN_SAFE_V(mkldnn_engine_get_backend_kind(engine_, &backend_kind_));
+        is_cpu_native_ = (engine_kind_ == mkldnn_cpu)
+                && (MKLDNN_CPU_BACKEND == MKLDNN_BACKEND_NATIVE);
 
-        if (backend_kind_ == mkldnn_backend_native) {
+        if (is_cpu_native_) {
             // Allocate memory for native backend directly
             is_data_owner_ = true;
             const size_t alignment = 1024 * 1024 * 16;
@@ -235,6 +255,16 @@ private:
             mkldnn_format_tag_t tag, mkldnn_engine_t engine) {
         mkldnn_memory_desc_t xmd;
         DNN_SAFE(mkldnn_memory_desc_init_by_tag(&xmd, ndims, dims, dt, tag), CRIT);
+        SAFE(initialize(xmd, engine), CRIT);
+        return OK;
+    }
+
+    int initialize(int ndims, const mkldnn_dims_t dims, mkldnn_data_type_t dt,
+            mkldnn_format_tag_t tag, const mkldnn_memory_extra_desc_t &extra,
+            mkldnn_engine_t engine) {
+        mkldnn_memory_desc_t xmd;
+        DNN_SAFE(mkldnn_memory_desc_init_by_tag(&xmd, ndims, dims, dt, tag), CRIT);
+        xmd.extra = extra;
         SAFE(initialize(xmd, engine), CRIT);
         return OK;
     }

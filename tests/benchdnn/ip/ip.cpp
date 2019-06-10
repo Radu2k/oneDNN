@@ -137,7 +137,7 @@ inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
         float fp0 = ((float *)mem_fp)[i];
 
         float fp = fp0;
-        if (p->cfg[kind].dt != mkldnn_f32)
+        if (p->cfg[kind].dt != mkldnn_f32 && p->cfg[kind].dt != mkldnn_bf16)
             fp = mxcsr_round(fp0);
 
         float diff = fabsf(fp - dt);
@@ -198,7 +198,7 @@ int fill_data(data_kind_t kind, const prb_t *p, dnn_mem_t &mem_dt,
         std::minstd_rand msr;
         std::uniform_int_distribution<> gen(
                 c.f_min, c.f_max);
-        msr.discard(idx_start);
+        msr.discard(kind + idx_start);
         for (size_t idx = idx_start; idx < idx_end; ++idx) {
             auto val = (float)gen(msr) * c.f_scale;
             mem_00.set_elem(idx, val);

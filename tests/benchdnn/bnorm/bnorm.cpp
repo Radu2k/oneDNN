@@ -20,6 +20,8 @@
 #include <float.h>
 #include <math.h>
 
+#include <sstream>
+
 #include "mkldnn.h"
 
 #include "src/common/mkldnn_thread.hpp"
@@ -76,7 +78,7 @@ static int prepare_fwd_no_stats(const prb_t *p, dnn_mem_t &src, dnn_mem_t &mean,
      * ALG_0: mean is set to 0
      * ALG_1: mean is set to 2^p, where p \in {-2, -1, ..., 4}
      * ALG_AUTO: choose between ALG_0 and ALG_1 automatically */
-    const int64_t exact_bits = 24;
+    const int64_t exact_bits = digits_dt(p->dt);
     const int64_t L = p->mb * p->id * p->ih * p->iw;
     const int64_t logL = (int64_t)ceilf(log2f(L));
 
@@ -84,14 +86,16 @@ static int prepare_fwd_no_stats(const prb_t *p, dnn_mem_t &src, dnn_mem_t &mean,
     assert(L <= (1LL <<logL));
 
     const int64_t min_flex_bits = 3;
-    const int64_t want_flex_bits = 6;
+    const int64_t want_flex_bits = MIN2(6, exact_bits / 2);
 
     check_alg_t alg = p->check_alg;
     if (alg == ALG_AUTO) /* choose appropriate checking algorithm */
         alg = (exact_bits - logL) / 2 - 1 >= min_flex_bits ? ALG_1 : ALG_0;
 
     const int64_t flex_bits = alg == ALG_0
-        ? want_flex_bits : ((exact_bits - logL) / 2 - 1);
+            ? want_flex_bits /* BFloat16 has only 7 bits of mantissa */
+            : MIN2(p->dt == mkldnn_bf16 ? 7 : exact_bits,
+                      (exact_bits - logL) / 2 - 1);
 
     if (flex_bits < min_flex_bits)
         return FAIL;
@@ -294,11 +298,16 @@ static int prepare_bwd(const prb_t *p, dnn_mem_t &src, dnn_mem_t &d_dst,
             if (p->flags & FUSE_BN_RELU)
                 ((float *)mask)[l0] = ((float *)mask)[l1] = 1;
 
-            float f1 = ((target_db - db) + (target_dg - dg)) /2;
-            float f0 = ((target_db - db) - (target_dg - dg)) /2;
+            float f1 = ((target_db - db) + (target_dg - dg)) / 2;
+            float f0 = ((target_db - db) - (target_dg - dg)) / 2;
 
             ((float *)d_dst)[l1] = f1 + m;
             ((float *)d_dst)[l0] = f0 + m;
+
+            if (p->dt == mkldnn_bf16) { // truncate to bf16
+                ((uint16_t *)(&((float *)d_dst)[l1]))[0] = 0;
+                ((uint16_t *)(&((float *)d_dst)[l0]))[0] = 0;
+            }
         }
 
         if (p->flags & USE_SCALESHIFT) {
@@ -316,9 +325,12 @@ static int prepare_bwd(const prb_t *p, dnn_mem_t &src, dnn_mem_t &d_dst,
 static int compare(const prb_t *p, data_kind_t kind, const dnn_mem_t &fp_mem,
         const dnn_mem_t &dt_mem, res_t *r, const dnn_mem_t *ss = nullptr) {
     const char *skind = data_kind2str(kind);
-    const float eps = p->dir & FLAG_FWD
-        ? (kind == DATA ? 5e-7 : 0)
-        : (kind == DATA ? 2e-7 : 0);
+
+    const int f32_mant_digits = 24;
+    const float eps_coeff = (1 << (f32_mant_digits - digits_dt(p->dt)));
+    const float eps = eps_coeff
+            * (p->dir & FLAG_FWD ? (kind == DATA ? 5e-7 : 0)
+                                 : (kind == DATA ? 2e-7 : 0));
 
     /* With all the stability tricks bwd_d is still pretty unstable.
      * So let's rely on relative error in L1, L2, and L_inf norms.
@@ -378,24 +390,21 @@ static int compare(const prb_t *p, data_kind_t kind, const dnn_mem_t &fp_mem,
             || (!ok && (r->errors < 10 || verbose >= 10))
             || (verbose >= 50 && i < 30);
         if (dump) {
-            const int ind_str_len = 64;
-            char ind_str[ind_str_len] = {'\0'};
+            std::stringstream ss;
             if (kind == DATA) {
                 int64_t mb, c, d, h, w;
                 inv_data_off(p, i, mb, c, d, h, w);
-                snprintf(ind_str, ind_str_len, "" IFMT "," IFMT ",", mb, c);
-                snprintf(ind_str, ind_str_len, "" IFMT "," IFMT "," IFMT "",
-                        d, h, w);
+                ss << mb << "," << c << "," << d << "," << h << "," << w;
             } else if (kind == SS) {
-                snprintf(ind_str, ind_str_len, "" IFMT "," IFMT "",
-                        i / p->ic, i % p->ic);
+                ss << i / p->ic << "," << i % p->ic;
             } else {
-                snprintf(ind_str, ind_str_len, "" IFMT "", i);
+                ss << i;
             }
 
+            std::string ind_str = ss.str();
             print(0, "[%lu][%s%s][%s] fp:%8g dt:%8g diff:%8g rdiff:%8g\n",
                     (unsigned long)i, p->dir & FLAG_BWD ? "D_" : "", skind,
-                    ind_str, fp, dt, diff, rel_diff);
+                    ind_str.c_str(), fp, dt, diff, rel_diff);
         }
     }
     }
@@ -439,6 +448,7 @@ int check_fwd_ws(const dnn_mem_t &data_dt, const dnn_mem_t &ws_dt, res_t *r) {
     /* so far we know ws is just bit-mask of whether value was negative or
      * positive */
     const int64_t nelems = data_dt.nelems(true);
+    const uint8_t *ws = (const uint8_t *)ws_dt;
 
     /* some internal knowledge: flags in ws are either stored as bytes (e.g.
      * for the ref implementation) or as bits (e.g. for the jitted one); in
@@ -449,12 +459,11 @@ int check_fwd_ws(const dnn_mem_t &data_dt, const dnn_mem_t &ws_dt, res_t *r) {
     /* more internal knowledge: data_dt and ws_dt are expected to have exactly
      * the same data layout, and data_dt padded regions are expected to be
      * zero, and the respective ws_dt elements should be set accordingly */
-    const float *d = (const float *)data_dt;
-    const uint8_t *ws = (const uint8_t *)ws_dt;
     for (int64_t i = 0; i < nelems; i += 8) {
         for (int64_t j = 0; j < MIN2(8, nelems - i); ++j) {
-            const bool want = *d > 0;
-            const bool bit_set = ws_type == ws_byte ? *ws : !!(*ws & (1<<j));
+            const float data = data_dt.get_elem(i + j);
+            const bool want = data > 0.f;
+            const bool bit_set = ws_type == ws_byte ? *ws : !!(*ws & (1 << j));
 
             const bool ok = bit_set == want;
             r->errors += !ok;
@@ -464,10 +473,9 @@ int check_fwd_ws(const dnn_mem_t &data_dt, const dnn_mem_t &ws_dt, res_t *r) {
                 || (verbose >= 50 && i < 30);
             if (dump) {
                 print(0, "[%lu] ws exp:%d got:%d (data:%g:%a)\n",
-                        (unsigned long)(i + j), want, bit_set, *d, *d);
+                        (unsigned long)(i + j), want, bit_set, data, data);
             }
 
-            ++d;
             // XXX: GPU implementation uses int32_t for workspace
             if (engine_tgt_kind == mkldnn_gpu) {
                 ws += sizeof(int32_t);
@@ -509,16 +517,20 @@ static int init_pd(const prb_t *p, mkldnn_batch_normalization_desc_t &bd,
                     &data_d, &data_d, p->eps, flags), WARN);
     }
 
-    auto mkldnn_attr = create_mkldnn_attr(p->attr, 1, NULL);
-
     mkldnn_primitive_desc_t hint_fwd_pd = NULL;
     if (p->dir & FLAG_BWD) {
         mkldnn_batch_normalization_desc_t bd_fwd;
         DNN_SAFE(mkldnn_batch_normalization_forward_desc_init(&bd_fwd,
-                    mkldnn_forward_training, &data_d, p->eps, flags), WARN);
-        DNN_SAFE(mkldnn_primitive_desc_create(&hint_fwd_pd, &bd_fwd, NULL,
-                    engine_tgt, NULL), WARN);
+                         mkldnn_forward_training, &data_d, p->eps, flags),
+                WARN);
+        mkldnn_status_t init_fwd_status = mkldnn_primitive_desc_create(
+                &hint_fwd_pd, &bd_fwd, NULL, engine_tgt, NULL);
+        if (init_fwd_status == mkldnn_unimplemented)
+            return r->state = UNIMPLEMENTED, OK;
+        else
+            SAFE(init_fwd_status, WARN);
     }
+    auto mkldnn_attr = create_mkldnn_attr(p->attr, 1, NULL);
     mkldnn_status_t init_status = mkldnn_primitive_desc_create(
             &bpd, &bd, mkldnn_attr, engine_tgt, hint_fwd_pd);
 

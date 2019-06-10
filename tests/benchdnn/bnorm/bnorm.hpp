@@ -21,6 +21,8 @@
 #include <limits.h>
 #include <assert.h>
 
+#include <iostream>
+
 #include "common.hpp"
 #include "dnn_types.hpp"
 #include "mkldnn_common.hpp"
@@ -47,7 +49,7 @@ struct desc_t {
     const char *name;
 };
 int str2desc(desc_t *desc, const char *str);
-void desc2str(const desc_t *d, char *buffer, bool canonical = false);
+std::ostream &operator<<(std::ostream &s, const desc_t &d);
 
 struct prb_t: public desc_t {
     prb_t(const desc_t &desc, int64_t mb, dir_t dir, mkldnn_data_type_t dt,
@@ -66,57 +68,34 @@ struct prb_t: public desc_t {
     flags_t flags;
     attr_t attr;
 };
-void prb2str(const prb_t *p, char *buffer, bool canonical = false);
+std::ostream &operator<<(std::ostream &s, const prb_t &p);
 
 struct perf_report_t: public base_perf_report_t {
-    perf_report_t(const char *perf_template) :
-        base_perf_report_t(perf_template) {}
-
-    virtual ~perf_report_t() {}
+    using base_perf_report_t::base_perf_report_t;
 
     void report(const prb_t *p, const res_t *r, const char *prb_str) {
         p_ = p;
         base_report(r, prb_str);
     }
 
-    virtual void dump_attributes(char *buf) const override {
-        if (!p_->attr.is_def())
-            attr2str(&p_->attr, buf);
+    virtual void dump_desc_csv(std::ostream &s) const override {
+        s << p_->mb << ',' << p_->ic << ',';
+        if (p_->id > 1) s << p_->id << ',';
+        s << p_->ih << ',' << p_->iw << ',' << p_->eps;
     }
 
-    virtual void dump_data_type(char *buf) const override {
-        dprint(buf, dt2str(p_->dt));
+    virtual void dump_flags(std::ostream &s) const override {
+        s << flags2str(p_->flags);
     }
 
-    virtual void dump_descriptor_csv(char *buf) const override {
-        if (p_->id > 1)
-            snprintf(buf, max_dump_len,
-                    "" IFMT "," IFMT "," IFMT "," IFMT "," IFMT ",%g",
-                    p_->mb, p_->ic, p_->id, p_->ih, p_->iw, p_->eps);
-        else
-            snprintf(buf, max_dump_len,
-                    "" IFMT "," IFMT "," IFMT "," IFMT ",%g",
-                    p_->mb, p_->ic, p_->ih, p_->iw, p_->eps);
-    }
-
-    virtual void dump_descriptor_name(char *buf) const override {
-        dprint(buf, p_->name);
-    }
-
-    virtual void dump_direction(char *buf) const override {
-        dprint(buf, dir2str(p_->dir));
-    }
-
-    virtual void dump_flags(char *buf) const override {
-        dprint(buf, flags2str(p_->flags));
-    }
-
-    virtual void dump_tag(char *buf) const override {
-        dprint(buf, tag2str(p_->tag));
-    }
+    virtual const attr_t *attr() const override { return &p_->attr; }
+    virtual const char *name() const override { return p_->name; }
+    virtual const dir_t *dir() const override { return &p_->dir; }
+    virtual const mkldnn_data_type_t *dt() const override { return &p_->dt; }
+    virtual const mkldnn_format_tag_t *tag() const override { return &p_->tag; }
 
 private:
-    const prb_t *p_;
+    const prb_t *p_ = NULL;
 };
 
 /* some extra control parameters which shouldn't be placed in prb_t */
@@ -155,7 +134,7 @@ void compute_ref_bwd(const prb_t *p, const dnn_mem_t &src,
         dnn_mem_t &d_ss);
 
 int doit(const prb_t *p, res_t *res);
-int bench(int argc, char **argv, bool main_bench = true);
+int bench(int argc, char **argv);
 
 }
 

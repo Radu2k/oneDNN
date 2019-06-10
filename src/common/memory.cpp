@@ -30,6 +30,12 @@ using namespace mkldnn::impl::utils;
 using namespace mkldnn::impl::status;
 using namespace mkldnn::impl::data_type;
 
+namespace mkldnn {
+namespace impl {
+memory_desc_t glob_zero_md = memory_desc_t();
+}
+}
+
 namespace {
 bool memory_desc_sanity_check(int ndims,const dims_t dims,
         data_type_t data_type, format_kind_t format_kind) {
@@ -38,7 +44,7 @@ bool memory_desc_sanity_check(int ndims,const dims_t dims,
     bool ok = true
         && dims != nullptr
         && 0 < ndims && ndims <= MKLDNN_MAX_NDIMS
-        && one_of(data_type, f16, f32, s32, s8, u8)
+        && one_of(data_type, f16, bf16, f32, s32, s8, u8)
         && format_kind != format_kind::undef;
     if (!ok) return false;
     for (int d = 0; d < ndims; ++d)

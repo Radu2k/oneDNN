@@ -35,6 +35,8 @@ mkldnn_data_type_t str2dt(const char *str) {
     CASE(s8);
     CASE(u8);
     CASE(s32);
+    CASE(f16);
+    CASE(bf16);
     CASE(f32);
 #undef CASE
     assert(!"unknown data type");
@@ -55,23 +57,27 @@ mkldnn_format_tag_t str2tag(const char *str) {
     CASE(nc);
     CASE(ncw);
     CASE(nwc);
+    CASE(nCw4c);
     CASE(nCw8c);
     CASE(nCw16c);
     CASE(nchw);
     CASE(nhwc);
     CASE(chwn);
+    CASE(nChw4c);
     CASE(nChw8c);
     CASE(nChw16c);
     CASE(NChw16n16c);
     CASE(ab);
     CASE(abc);
     CASE(acb);
+    CASE(aBc4b);
     CASE(aBc8b);
     CASE(aBc16b);
     CASE(abcd);
     CASE(acdb);
     CASE(bcda);
     CASE(cdba);
+    CASE(aBcd4b);
     CASE(aBcd8b);
     CASE(aBcd16b);
     CASE(ABcd16a16b);
@@ -81,6 +87,7 @@ mkldnn_format_tag_t str2tag(const char *str) {
     CASE(acdeb);
     CASE(cdeba);
     CASE(decab);
+    CASE(aBcde4b);
     CASE(aBcde8b);
     CASE(aBcde16b);
     CASE(aBCde4b4c);
@@ -99,6 +106,8 @@ mkldnn_format_tag_t str2tag(const char *str) {
     CASE(Oiw16o);
     CASE(Owi16o);
     CASE(OIw8i16o2i);
+    CASE(OIw8o16i2o);
+    CASE(IOw8o16i2o);
     CASE(OIw4i16o4i);
     CASE(oihw);
     CASE(ihwo);
@@ -111,6 +120,7 @@ mkldnn_format_tag_t str2tag(const char *str) {
     CASE(OIdhw8i16o2i);
     CASE(OIhw4i16o4i);
     CASE(OIhw8o16i2o);
+    CASE(IOhw8o16i2o);
     CASE(OIhw8o8i);
     CASE(OIhw16o16i);
     CASE(IOhw16o16i);
@@ -137,6 +147,7 @@ mkldnn_format_tag_t str2tag(const char *str) {
     CASE(gOIhw2i8o4i);
     CASE(gOIhw4i16o4i);
     CASE(gOIhw8o16i2o);
+    CASE(gIOhw8o16i2o);
     CASE(gOIhw8o8i);
     CASE(gOIhw16o16i);
     CASE(gIOhw16o16i);
@@ -149,6 +160,7 @@ mkldnn_format_tag_t str2tag(const char *str) {
     CASE(ndhwc);
     CASE(oidhw);
     CASE(goidhw);
+    CASE(nCdhw4c);
     CASE(nCdhw8c);
     CASE(nCdhw16c);
     CASE(OIdhw16i16o);
@@ -161,7 +173,7 @@ mkldnn_format_tag_t str2tag(const char *str) {
     CASE(gOdhwi16o);
     CASE(ntc);
     CASE(tnc);
-    CASE(ldsnc);
+    CASE(ldnc);
     CASE(ldigo);
     CASE(ldgoi);
     CASE(ldgo);

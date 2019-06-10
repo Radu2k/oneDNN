@@ -74,6 +74,7 @@ namespace alg_kind {
     const alg_kind_t eltwise_bounded_relu = mkldnn_eltwise_bounded_relu;
     const alg_kind_t eltwise_soft_relu = mkldnn_eltwise_soft_relu;
     const alg_kind_t eltwise_logistic = mkldnn_eltwise_logistic;
+    const alg_kind_t eltwise_exp = mkldnn_eltwise_exp;
     const alg_kind_t pooling_max = mkldnn_pooling_max;
     const alg_kind_t pooling_avg = mkldnn_pooling_avg;
     const alg_kind_t pooling_avg_include_padding = mkldnn_pooling_avg_include_padding;
@@ -90,6 +91,7 @@ using data_type_t = mkldnn_data_type_t;
 namespace data_type {
     const data_type_t undef = mkldnn_data_type_undef;
     const data_type_t f16 = mkldnn_f16;
+    const data_type_t bf16 = mkldnn_bf16;
     const data_type_t f32 = mkldnn_f32;
     const data_type_t s32 = mkldnn_s32;
     const data_type_t s8 = mkldnn_s8;
@@ -150,6 +152,7 @@ namespace format_tag {
     const format_tag_t ABc4b16a4b = mkldnn_ABc4b16a4b;
     const format_tag_t ABc4b4a = mkldnn_ABc4b4a;
     const format_tag_t ABc8a16b2a = mkldnn_ABc8a16b2a;
+    const format_tag_t BAc8a16b2a = mkldnn_BAc8a16b2a;
     const format_tag_t ABc8a8b = mkldnn_ABc8a8b;
     const format_tag_t aBc8b = mkldnn_aBc8b;
     const format_tag_t ABc8b16a2b = mkldnn_ABc8b16a2b;
@@ -167,10 +170,12 @@ namespace format_tag {
     const format_tag_t aBCd4c16b4c = mkldnn_aBCd4c16b4c;
     const format_tag_t aBCd4c4b = mkldnn_aBCd4c4b;
     const format_tag_t ABcd8a16b2a = mkldnn_ABcd8a16b2a;
+    const format_tag_t BAcd8a16b2a = mkldnn_BAcd8a16b2a;
     const format_tag_t ABcd8a8b = mkldnn_ABcd8a8b;
     const format_tag_t aBcd8b = mkldnn_aBcd8b;
     const format_tag_t ABcd8b16a2b = mkldnn_ABcd8b16a2b;
     const format_tag_t aBCd8b16c2b = mkldnn_aBCd8b16c2b;
+    const format_tag_t aCBd8b16c2b = mkldnn_aCBd8b16c2b;
     const format_tag_t ABcd8b8a = mkldnn_ABcd8b8a;
     const format_tag_t aBCd8b8c = mkldnn_aBCd8b8c;
     const format_tag_t aBCd8c16b2c = mkldnn_aBCd8c16b2c;
@@ -192,7 +197,10 @@ namespace format_tag {
     const format_tag_t ABcde8a8b = mkldnn_ABcde8a8b;
     const format_tag_t aBcde8b = mkldnn_aBcde8b;
     const format_tag_t ABcde8b16a2b = mkldnn_ABcde8b16a2b;
+    const format_tag_t ABcde8a16b2a = mkldnn_ABcde8a16b2a;
+    const format_tag_t BAcde8a16b2a = mkldnn_BAcde8a16b2a;
     const format_tag_t aBCde8b16c2b = mkldnn_aBCde8b16c2b;
+    const format_tag_t aCBde8b16c2b = mkldnn_aCBde8b16c2b;
     const format_tag_t ABcde8b8a = mkldnn_ABcde8b8a;
     const format_tag_t aBCde8b8c = mkldnn_aBCde8b8c;
     const format_tag_t ABc4a8b8a4b = mkldnn_ABc4a8b8a4b;
@@ -212,6 +220,8 @@ namespace format_tag {
     const format_tag_t aBCdef4c4b = mkldnn_aBCdef4c4b;
     const format_tag_t aBCdef8b8c = mkldnn_aBCdef8b8c;
     const format_tag_t aBCdef8c16b2c = mkldnn_aBCdef8c16b2c;
+    const format_tag_t aBCdef8b16c2b = mkldnn_aBCdef8b16c2b;
+    const format_tag_t aCBdef8b16c2b = mkldnn_aCBdef8b16c2b;
     const format_tag_t aBCdef8c8b = mkldnn_aBCdef8c8b;
     const format_tag_t aBdc16b = mkldnn_aBdc16b;
     const format_tag_t aBdc4b = mkldnn_aBdc4b;
@@ -279,7 +289,7 @@ namespace format_tag {
     const format_tag_t goidhw = mkldnn_goidhw;
     const format_tag_t tnc = mkldnn_tnc;
     const format_tag_t ntc = mkldnn_ntc;
-    const format_tag_t ldsnc = mkldnn_ldsnc;
+    const format_tag_t ldnc = mkldnn_ldnc;
     const format_tag_t ldigo = mkldnn_ldigo;
     const format_tag_t ldgoi = mkldnn_ldgoi;
     const format_tag_t ldgo = mkldnn_ldgo;
@@ -316,6 +326,7 @@ namespace format_tag {
     const format_tag_t OIw8i16o2i = mkldnn_OIw8i16o2i;
     const format_tag_t OIw8i8o = mkldnn_OIw8i8o;
     const format_tag_t OIw8o16i2o = mkldnn_OIw8o16i2o;
+    const format_tag_t IOw8o16i2o = mkldnn_IOw8o16i2o;
     const format_tag_t OIw8o8i = mkldnn_OIw8o8i;
     const format_tag_t Owi16o = mkldnn_Owi16o;
     const format_tag_t Owi4o = mkldnn_Owi4o;
@@ -333,6 +344,7 @@ namespace format_tag {
     const format_tag_t OIhw8i16o2i = mkldnn_OIhw8i16o2i;
     const format_tag_t OIhw8i8o = mkldnn_OIhw8i8o;
     const format_tag_t OIhw8o16i2o = mkldnn_OIhw8o16i2o;
+    const format_tag_t IOhw8o16i2o = mkldnn_IOhw8o16i2o;
     const format_tag_t OIhw8o8i = mkldnn_OIhw8o8i;
     const format_tag_t Odhwi16o = mkldnn_Odhwi16o;
     const format_tag_t Odhwi4o = mkldnn_Odhwi4o;
@@ -343,6 +355,8 @@ namespace format_tag {
     const format_tag_t OIdhw4i4o = mkldnn_OIdhw4i4o;
     const format_tag_t Oidhw4o = mkldnn_Oidhw4o;
     const format_tag_t OIdhw8i16o2i = mkldnn_OIdhw8i16o2i;
+    const format_tag_t OIdhw8o16i2o = mkldnn_OIdhw8o16i2o;
+    const format_tag_t IOdhw8o16i2o = mkldnn_IOdhw8o16i2o;
     const format_tag_t OIdhw8i8o = mkldnn_OIdhw8i8o;
     const format_tag_t OIdhw8o8i = mkldnn_OIdhw8o8i;
     const format_tag_t gIOw16o16i = mkldnn_gIOw16o16i;
@@ -356,6 +370,7 @@ namespace format_tag {
     const format_tag_t gOIw8i16o2i = mkldnn_gOIw8i16o2i;
     const format_tag_t gOIw8i8o = mkldnn_gOIw8i8o;
     const format_tag_t gOIw8o16i2o = mkldnn_gOIw8o16i2o;
+    const format_tag_t gIOw8o16i2o = mkldnn_gIOw8o16i2o;
     const format_tag_t gOIw8o8i = mkldnn_gOIw8o8i;
     const format_tag_t gOwi16o = mkldnn_gOwi16o;
     const format_tag_t gOwi4o = mkldnn_gOwi4o;
@@ -378,6 +393,7 @@ namespace format_tag {
     const format_tag_t gOIhw8i8o = mkldnn_gOIhw8i8o;
     const format_tag_t gOIhw8o16i2o = mkldnn_gOIhw8o16i2o;
     const format_tag_t OIw4o8i8o4i = mkldnn_OIw4o8i8o4i;
+    const format_tag_t gIOhw8o16i2o = mkldnn_gIOhw8o16i2o;
     const format_tag_t OIhw4o8i8o4i = mkldnn_OIhw4o8i8o4i;
     const format_tag_t OIdhw4o8i8o4i = mkldnn_OIdhw4o8i8o4i;
     const format_tag_t OIhw2o8i8o2i = mkldnn_OIhw2o8i8o2i;
@@ -396,6 +412,8 @@ namespace format_tag {
     const format_tag_t gOIdhw4i4o = mkldnn_gOIdhw4i4o;
     const format_tag_t gOidhw4o = mkldnn_gOidhw4o;
     const format_tag_t gOIdhw8i16o2i = mkldnn_gOIdhw8i16o2i;
+    const format_tag_t gOIdhw8o16i2o = mkldnn_gOIdhw8o16i2o;
+    const format_tag_t gIOdhw8o16i2o = mkldnn_gIOdhw8o16i2o;
     const format_tag_t gOIdhw8i8o = mkldnn_gOIdhw8i8o;
     const format_tag_t gOIdhw8o8i = mkldnn_gOIdhw8o8i;
 }
@@ -414,7 +432,11 @@ namespace engine_kind {
     const engine_kind_t gpu = mkldnn_gpu;
 }
 
-using backend_kind_t = mkldnn_backend_kind_t;
+enum backend_kind_t {
+    mkldnn_backend_native,
+    mkldnn_backend_ocl,
+};
+
 namespace backend_kind {
     const backend_kind_t native = mkldnn_backend_native;
     const backend_kind_t ocl = mkldnn_backend_ocl;
@@ -562,12 +584,6 @@ namespace stream_flags {
     const stream_flags_t default_flags = mkldnn_stream_default_flags;
 }
 using stream_t = mkldnn_stream;
-
-using transpose_t = mkldnn_transpose_t;
-namespace transpose {
-    const transpose_t notrans = mkldnn_notrans;
-    const transpose_t trans = mkldnn_trans;
-}
 
 /* forward declaration of the internal primitive_desc types */
 struct batch_normalization_bwd_pd_t;

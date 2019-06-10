@@ -20,10 +20,11 @@ The following operations are supported:
 | abs          | #mkldnn_eltwise_abs          | \f$ x = \begin{cases} x & \text{if}\ x > 0 \\ \alpha -x & \text{if}\ x \leq 0 \end{cases} \f$
 | bounded_relu | #mkldnn_eltwise_bounded_relu | \f$ x = \begin{cases} \alpha & \text{if}\ x > \alpha \\ \alpha x & \text{if}\ x \leq \alpha \end{cases} \f$
 | elu          | #mkldnn_eltwise_elu          | \f$ x = \begin{cases} x & \text{if}\ x > 0 \\ \alpha (e^x - 1) & \text{if}\ x \leq 0 \end{cases} \f$
+| exp          | #mkldnn_eltwise_exp          | \f$ x = e^x \f$
 | linear       | #mkldnn_eltwise_linear       | \f$ x = \alpha x + \beta \f$
 | logistic     | #mkldnn_eltwise_logistic     | \f$ x = \frac{1}{1+e^{-x}} \f$
 | relu         | #mkldnn_eltwise_relu         | \f$ x = \begin{cases} x & \text{if}\ x > 0 \\ \alpha x & \text{if}\ x \leq 0 \end{cases} \f$
-| soft_relu    | #mkldnn_eltwise_soft_relu    | \f$ x = \log{e}{1+e^x} \f$
+| soft_relu    | #mkldnn_eltwise_soft_relu    | \f$ x = \log_{e}(1+e^x) \f$
 | sqrt         | #mkldnn_eltwise_sqrt         | \f$ x = \sqrt{x} \f$
 | square       | #mkldnn_eltwise_square       | \f$ x = x^2 \f$
 | tanh         | #mkldnn_eltwise_tanh         | \f$ x = \frac{e^z - e^{-z}}{e^z + e^{-z}} \f$
@@ -124,7 +125,3 @@ The eltwise primitive doesn't support any post-ops or attributes.
       with the previous operation if that operation doesn't require its
       \f$dst\f$ to compute the backward propagation (e.g., if the convolution
       operation satisfies these conditions).
-
---------
-
-[Legal information](@ref legal_information)

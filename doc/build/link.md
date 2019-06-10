@@ -57,7 +57,7 @@ defined in the `MKLDNNROOT` environment variable.
 
 ~~~sh
 g++ -std=c++11 -I${MKLDNNROOT}/include -L${MKLDNNROOT}/lib simple_net.cpp -lmkldnn
-clang -std=c++11 -I${MKLDNNROOT}/include -L${MKLDNNROOT}/lib simple_net.cpp -lmkldnn
+clang++ -std=c++11 -I${MKLDNNROOT}/include -L${MKLDNNROOT}/lib simple_net.cpp -lmkldnn
 icpc -std=c++11 -I${MKLDNNROOT}/include -L${MKLDNNROOT}/lib simple_net.cpp -lmkldnn
 ~~~
 
@@ -87,7 +87,3 @@ Applications linked dynamically will resolve the dependencies at runtime.
 Make sure that the dependencies are available in the standard locations
 defined by the operating system or in the locations listed in the `PATH`
 environment variable.
-
---------
-
-[Legal information](@ref legal_information)

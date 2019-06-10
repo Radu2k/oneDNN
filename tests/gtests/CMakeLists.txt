@@ -45,7 +45,8 @@ file(GLOB PRIM_TEST_CASES_SRC
                               test_softmax_forward.cpp
                               test_softmax_backward.cpp
                               test_eltwise.cpp
-                              test_lrn_forward.cpp
+                              test_lrn_forward_f32.cpp
+                              test_lrn_forward_f16.cpp
                               test_lrn_backward.cpp
                               test_pooling_forward.cpp
                               test_pooling_backward.cpp
@@ -66,8 +67,9 @@ file(GLOB PRIM_TEST_CASES_SRC
                               test_deconvolution.cpp
                               test_gemm_f16.cpp
                               test_gemm_f32.cpp
-                              test_gemm_s8u8s32.cpp
+                              test_gemm_u8s8s32.cpp
                               test_gemm_s8s8s32.cpp
+                              test_gemm_bf16bf16f32.cpp
                               test_rnn_forward.cpp
                               )
 

@@ -103,6 +103,8 @@ endfunction()
 
 register_benchdnn_test(test_benchdnn_conv
     cpu "-v1 --conv --batch=inputs/test_conv_all")
+register_benchdnn_test(test_benchdnn_conv_bf16
+    cpu "-v1 --conv --batch=inputs/test_conv_bfloat16")
 register_benchdnn_test(test_benchdnn_deconv
     cpu "-v1 --deconv --batch=inputs/deconv/test_deconv_all")
 register_benchdnn_test(test_benchdnn_rnn
@@ -111,8 +113,12 @@ register_benchdnn_test(test_benchdnn_reorder
     cpu "--reorder --batch=inputs/reorder/test_default")
 register_benchdnn_test(test_benchdnn_bnorm
     cpu "--bnorm  --batch=inputs/bnorm/test_bnorm_all")
+register_benchdnn_test(test_benchdnn_bnorm_bf16
+    cpu "--bnorm  --batch=inputs/bnorm/test_bnorm_bfloat16")
 register_benchdnn_test(test_benchdnn_ip
     cpu "--ip --batch=inputs/ip/test_ip_all")
+register_benchdnn_test(test_benchdnn_ip_bf16
+    cpu "--ip --batch=inputs/ip/test_ip_bfloat16")
 register_benchdnn_test(test_benchdnn_shuffle
     cpu "--shuffle --batch=inputs/shuffle/test_shuffle_all")
 register_benchdnn_test(test_benchdnn_softmax
@@ -138,10 +144,10 @@ if(NOT MKLDNN_GPU_BACKEND STREQUAL "NONE")
         gpu "--ip --batch=inputs/ip/test_ip_gpu")
     register_benchdnn_test(test_benchdnn_rnn
         gpu "--rnn --batch=inputs/rnn/test_rnn_gpu")
+    register_benchdnn_test(test_benchdnn_pool
+        gpu "--pool --batch=inputs/pool/test_pool_gpu")
 endif()
 
 if(MKLDNN_INSTALL_MODE STREQUAL "BUNDLE")
     install(TARGETS benchdnn RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    install(FILES README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/benchdnn)
-    install(DIRECTORY inputs DESTINATION ${CMAKE_INSTALL_DATADIR}/benchdnn)
 endif()

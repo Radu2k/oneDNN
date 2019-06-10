@@ -19,6 +19,7 @@
 
 #include <assert.h>
 
+#include "cpu_isa_traits.hpp"
 #include "c_types_map.hpp"
 #include "type_helpers.hpp"
 #include "utils.hpp"
@@ -43,8 +44,11 @@ struct ref_shuffle_t : public cpu_primitive_t {
             using namespace format_tag;
 
             bool ok = true
-                 && data_type_size
-                    == types::data_type_size(data_md()->data_type);
+                    && data_type_size
+                            == types::data_type_size(data_md()->data_type)
+                    && IMPLICATION(this->desc()->data_desc.data_type
+                                       == data_type::bf16,
+                               mayiuse(avx512_core));
             if (!ok) return status::unimplemented;
 
             if (ndims() == 5) {
@@ -86,6 +90,8 @@ struct ref_shuffle_t : public cpu_primitive_t {
         case nChw16c:  execute_<nChw16c>(ctx); break;
         case nCdhw8c:  execute_<nCdhw8c>(ctx); break;
         case nChw8c:   execute_<nChw8c>(ctx); break;
+        case nCdhw4c:  execute_<nCdhw4c>(ctx); break;
+        case nChw4c:   execute_<nChw4c>(ctx); break;
         case ncdhw:    execute_<ncdhw>(ctx); break;
         case nchw:     execute_<nchw>(ctx); break;
         case ndhwc:    execute_<ndhwc>(ctx); break;

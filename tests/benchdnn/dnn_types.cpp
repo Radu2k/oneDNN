@@ -20,6 +20,8 @@
 #include <string.h>
 #include <math.h>
 
+#include <sstream>
+
 #include "mkldnn.h"
 
 #include "common.hpp"
@@ -27,6 +29,27 @@
 #include "mkldnn_common.hpp"
 #include "mkldnn_debug.hpp"
 #include "src/common/math_utils.hpp"
+
+dims_t str2dims(const char *str) {
+    dims_t dims;
+    do {
+        int len;
+        int64_t dim;
+        int scan = sscanf(str, IFMT "%n", &dim, &len);
+        SAFE_V(scan == 1 ? OK : FAIL);
+        dims.push_back(dim);
+        str += len;
+        SAFE_V(*str == 'x' || *str == '\0' ? OK : FAIL);
+    } while (*str++ != '\0');
+    return dims;
+}
+
+std::ostream &operator<<(std::ostream &s, const dims_t &dims) {
+    s << dims[0];
+    for (size_t d = 1; d < dims.size(); ++d)
+        s << "x" << dims[d];
+    return s;
+}
 
 dir_t str2dir(const char *str) {
 #define CASE(x) if (!strcasecmp(STRINGIFY(x), str)) return x
@@ -54,6 +77,24 @@ const char *dir2str(dir_t dir) {
 #undef CASE
     assert(!"unknown dir");
     return "DIR_UNDEF";
+}
+
+mkldnn_prop_kind_t prop2prop_kind(const dir_t dir) {
+    if (dir == FWD_D)
+        return mkldnn_forward;
+    if (dir == BWD_DW)
+        return mkldnn_backward;
+    assert(!"unknown dir");
+    return mkldnn_prop_kind_undef;
+}
+
+const char *prop2str(mkldnn_prop_kind_t prop) {
+    if (prop == mkldnn_forward)
+        return "FWD_D";
+    if (prop == mkldnn_backward)
+        return "BWD_DW";
+    assert(!"unknown prop_kind");
+    return "unknown prop_kind";
 }
 
 const char *data_kind2str(data_kind_t kind) {
@@ -130,12 +171,6 @@ int attr_t::scale_t::str2scale(const char *str, const char **end_s) {
     return OK;
 }
 
-void attr_t::scale_t::scale2str(char *buffer, char **end_b) const {
-    assert(buffer);
-    buffer += sprintf(buffer, "%s:%g", policy2str(this->policy), this->scale);
-    if (end_b) *end_b = buffer;
-}
-
 attr_t::post_ops_t::kind_t attr_t::post_ops_t::str2kind(const char *str) {
 #define CASE(_knd) if (!strcasecmp(STRINGIFY(_knd), str)) return _knd
     CASE(SUM);
@@ -149,6 +184,7 @@ attr_t::post_ops_t::kind_t attr_t::post_ops_t::str2kind(const char *str) {
     CASE(BRELU);
     CASE(SRELU);
     CASE(LOGISTIC);
+    CASE(EXP);
 #undef CASE
     assert(!"unknown attr::post_ops::kind");
     return KIND_TOTAL;
@@ -167,6 +203,7 @@ const char *attr_t::post_ops_t::kind2str(attr_t::post_ops_t::kind_t kind) {
     CASE(BRELU, "brelu");
     CASE(SRELU, "srelu");
     CASE(LOGISTIC, "logistic");
+    CASE(EXP, "exp");
 #undef CASE
     assert(!"unknown attr::post_ops::kind");
     return "unknown attr::post_ops::kind";
@@ -185,6 +222,7 @@ mkldnn_alg_kind_t attr_t::post_ops_t::kind2mkldnn_kind(
     CASE(BRELU, mkldnn_eltwise_bounded_relu);
     CASE(SRELU, mkldnn_eltwise_soft_relu);
     CASE(LOGISTIC, mkldnn_eltwise_logistic);
+    CASE(EXP, mkldnn_eltwise_exp);
 #undef CASE
     assert(!"unknown attr::post_ops::kind");
     return mkldnn_alg_kind_undef;
@@ -255,41 +293,6 @@ int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
     return FAIL; /* unreachable */
 }
 
-void attr_t::post_ops_t::to_str(char *buffer, char **end_b) const {
-    assert(buffer);
-
-    buffer += sprintf(buffer, "'");
-    for (int idx = 0; idx < len; ++idx) {
-        buffer += sprintf(buffer, "%s", idx > 0 ? ";" : "");
-        const auto &e = entry[idx];
-
-        switch (e.kind) {
-        case SUM:
-            buffer += sprintf(buffer, "%s:%g", kind2str(e.kind), e.sum.scale);
-            break;
-        case RELU:
-        case TANH:
-        case ELU:
-        case SQUARE:
-        case ABS:
-        case SQRT:
-        case LINEAR:
-        case BRELU:
-        case SRELU:
-        case LOGISTIC:
-            buffer += sprintf(buffer, "%s:%g", kind2str(e.kind), e.eltwise.alpha);
-            if (e.eltwise.beta != 0.f || e.eltwise.scale != 1.f)
-                buffer += sprintf(buffer, ":%g:%g", e.eltwise.beta, e.eltwise.scale);
-            break;
-        default:
-            assert(!"unknown kind");
-            buffer += sprintf(buffer, "unknown_kind");
-        }
-    }
-    buffer += sprintf(buffer, "'");
-    if (end_b) *end_b = buffer;
-}
-
 bool attr_t::is_def() const {
     return true
         && oscale.is_def()
@@ -327,11 +330,54 @@ int str2attr(attr_t *attr, const char *str) {
     return OK;
 }
 
-void attr2str(const attr_t *attr, char *buffer) {
-    buffer += sprintf(buffer, ";oscale=");
-    attr->oscale.scale2str(buffer, &buffer);
-    buffer += sprintf(buffer, ";post_ops=");
-    attr->post_ops.to_str(buffer, &buffer);
+std::ostream &operator<<(std::ostream &s, const attr_t::scale_t &scale) {
+    return s << attr_t::scale_t::policy2str(scale.policy) << ":" << scale.scale;
+}
+
+std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t &post_ops) {
+    auto kind2str = &attr_t::post_ops_t::kind2str;
+
+    s << "'";
+
+    for (int idx = 0; idx < post_ops.len; ++idx) {
+        if (idx > 0) s << ";";
+        const auto &e = post_ops.entry[idx];
+
+        using pk = attr_t::post_ops_t::kind_t;
+        switch (e.kind) {
+        case pk::SUM:
+            s << kind2str(e.kind) << ":" << e.sum.scale;
+            break;
+        case pk::RELU:
+        case pk::TANH:
+        case pk::ELU:
+        case pk::SQUARE:
+        case pk::ABS:
+        case pk::SQRT:
+        case pk::LINEAR:
+        case pk::BRELU:
+        case pk::SRELU:
+        case pk::LOGISTIC:
+        case pk::EXP:
+            s << kind2str(e.kind) << ":" << e.eltwise.alpha;
+            if (e.eltwise.beta != 0.f || e.eltwise.scale != 1.f)
+                s << ":" << e.eltwise.beta << ":" << e.eltwise.scale;
+            break;
+        default:
+            assert(!"unknown kind");
+            s << "unknown_kind";
+        }
+    }
+
+    s << "'";
+
+    return s;
+}
+
+std::ostream &operator<<(std::ostream &s, const attr_t &attr) {
+    return s
+        << "oscale=" << attr.oscale
+        << ";post_ops=" << attr.post_ops;
 }
 
 mkldnn_engine_kind_t str2engine_kind(const char *str) {
@@ -403,6 +449,7 @@ mkldnn_primitive_attr_t create_mkldnn_attr(const attr_t &attr,
             case attr_t::post_ops_t::BRELU:
             case attr_t::post_ops_t::SRELU:
             case attr_t::post_ops_t::LOGISTIC:
+            case attr_t::post_ops_t::EXP:
                 DNN_SAFE_V(mkldnn_post_ops_append_eltwise(ops, e.eltwise.scale,
                             e.eltwise.alg, e.eltwise.alpha, e.eltwise.beta));
                 break;
@@ -471,6 +518,7 @@ void maybe_post_ops(float &d, float dst, const attr_t &attr) {
         case pk::BRELU: d = s * bounded_relu_fwd(d, a); break;
         case pk::SRELU: d = s * soft_relu_fwd(d); break;
         case pk::LOGISTIC: d = s * logistic_fwd(d); break;
+        case pk::EXP: d = s * exp_fwd(d); break;
         default: assert(!"unknown attr::post_ops::kind");
         }
     }

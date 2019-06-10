@@ -40,18 +40,22 @@ struct jit_offsets {
 struct jit_rnn_offsets {
     int src_layer_off[3][MAX_NDIMS];
     int src_iter_off[3][MAX_NDIMS];
+    int src_iter_c_off[3][MAX_NDIMS];
     int weights_layer_off[3][MAX_NDIMS];
     int weights_iter_off[3][MAX_NDIMS];
     int bias_off[3][MAX_NDIMS];
     int dst_layer_off[3][MAX_NDIMS];
     int dst_iter_off[3][MAX_NDIMS];
+    int dst_iter_c_off[3][MAX_NDIMS];
     int diff_src_layer_off[3][MAX_NDIMS];
     int diff_src_iter_off[3][MAX_NDIMS];
+    int diff_src_iter_c_off[3][MAX_NDIMS];
     int diff_weights_layer_off[3][MAX_NDIMS];
     int diff_weights_iter_off[3][MAX_NDIMS];
     int diff_bias_off[3][MAX_NDIMS];
     int diff_dst_layer_off[3][MAX_NDIMS];
     int diff_dst_iter_off[3][MAX_NDIMS];
+    int diff_dst_iter_c_off[3][MAX_NDIMS];
     int ws_off[3][MAX_NDIMS];
 };
 
@@ -126,9 +130,8 @@ struct jit_inner_product_conf_t {
     int mb, oc, ic, ic_total;
     int id, ih, iw, od, oh, ow;
     int kd, kh, kw;
-    bool with_bias, with_relu, has_spatial;
+    bool with_bias, has_spatial;
     bool is_forward, is_backward_data, is_backward_weights;
-    float relu_negative_slope;
     data_type_t src_dt;
 };
 
@@ -139,7 +142,9 @@ struct jit_rnn_conf_t {
     int direction_kind;
     bool with_bias;
     bool with_src_iter;
+    bool with_src_iter_c;
     bool with_dst_iter;
+    bool with_dst_iter_c;
     bool is_lbr;
     bool is_forward;
     data_type_t src_dt;
@@ -163,17 +168,21 @@ struct jit_rnn_conf_t {
     int n_parts_wei_st, n_parts_wei_i;
     int src_layer_ndims;
     int src_iter_ndims;
+    int src_iter_c_ndims;
     int weights_layer_ndims;
     int weights_iter_ndims;
     int dst_layer_ndims;
     int dst_iter_ndims;
+    int dst_iter_c_ndims;
     int bias_ndims;
     int diff_src_layer_ndims;
     int diff_src_iter_ndims;
+    int diff_src_iter_c_ndims;
     int diff_weights_layer_ndims;
     int diff_weights_iter_ndims;
     int diff_dst_layer_ndims;
     int diff_dst_iter_ndims;
+    int diff_dst_iter_c_ndims;
     int diff_bias_ndims;
 
     size_t ws_gates_offset;
@@ -185,6 +194,8 @@ struct jit_rnn_conf_t {
 
 /* bnorm */
 struct jit_bnorm_conf_t {
+    data_type_t data_type;
+
     int ndims;
     int mb, ic, mb_chunk, sp_chunk, mb_block;
     int id, ih, iw;
@@ -218,6 +229,21 @@ struct jit_eltwise_conf_t {
     data_type_t data_type;
     alg_kind_t alg;
     bool is_forward;
+    size_t gws_d[3];
+};
+
+/* shuffle */
+struct jit_shuffle_conf_t {
+    data_type_t data_type;
+    int axis;
+    int axis_size;
+    int group_size;
+    int transpose_row;
+    int transpose_col;
+    size_t outer_size;
+    size_t inner_size;
+    size_t dim;
+    int ndims;
     size_t gws_d[3];
 };
 
@@ -270,8 +296,11 @@ inline void set_default_conf(jit_conv_conf_t &jcp, const convolution_desc_t &cd,
         jcp.ngroups = utils::rnd_up(jcp.ngroups, 16);
 
     jcp.f_pad = (ndims == 5) ? cd.padding[0][0] : 0;
+    jcp.back_pad = (ndims == 5) ? cd.padding[1][0] : 0;
     jcp.t_pad = (ndims == 3) ? 0 : cd.padding[0][ndims - 4];
+    jcp.b_pad = (ndims == 3) ? 0 : cd.padding[1][ndims - 4];
     jcp.l_pad = cd.padding[0][ndims - 3];
+    jcp.r_pad = cd.padding[1][ndims - 3];
     jcp.stride_d = (ndims == 5) ? cd.strides[0] : 1;
     jcp.stride_h = (ndims == 3) ? 1 : cd.strides[ndims - 4];
     jcp.stride_w = cd.strides[ndims - 3];
@@ -286,18 +315,19 @@ inline void set_default_conf(jit_conv_conf_t &jcp, const convolution_desc_t &cd,
 
     const int eltwise_ind = p.find(primitive_kind::eltwise);
     jcp.with_eltwise = eltwise_ind != -1;
-
-    if (jcp.with_eltwise) {
+    if (jcp.with_eltwise)
         jcp.eltwise = p.entry_[eltwise_ind].eltwise;
-        jcp.with_relu = jcp.eltwise.alg == alg_kind::eltwise_relu
-                && jcp.eltwise.alpha != 1.0f;
-        if (jcp.with_relu)
-            jcp.negative_slope = jcp.eltwise.alpha;
-    }
+    jcp.with_relu
+            = (jcp.with_eltwise && jcp.eltwise.alg == alg_kind::eltwise_relu);
+    if (jcp.with_relu)
+        jcp.negative_slope = jcp.eltwise.alpha;
 
-    jcp.with_sum_relu = (p.len_ == 2)
-        && jcp.with_relu && jcp.with_sum
-        && sum_idx == 0 && eltwise_ind == 1;
+    if (p.len_ == 2 && sum_idx != -1) {
+        jcp.with_sum_relu = p.entry_[sum_idx].is_sum(jcp.sum_scale == 1.0)
+                && p.entry_[1].is_relu();
+    } else {
+        jcp.with_sum_relu = 0;
+    }
 
     jcp.scale_idx_mult = attr.output_scales_.mask_ == (1 << 1);
 }
@@ -389,6 +419,21 @@ inline void def_offsets(const int offs[4][MAX_NDIMS], ocl_jit_t &jit,
         snprintf(tempstr, 32, " %s_D%d", str, d);
         jit.define_int(tempstr, 0);
     }
+}
+
+inline void def_postops(ocl_jit_t &jit, alg_kind_t alg) {
+    jit.define_int("RELU", alg_kind::eltwise_relu);
+    jit.define_int("LINEAR", alg_kind::eltwise_linear);
+    jit.define_int("BOUNDED_RELU", alg_kind::eltwise_bounded_relu);
+    jit.define_int("SOFT_RELU", alg_kind::eltwise_soft_relu);
+    jit.define_int("LOGISTIC", alg_kind::eltwise_logistic);
+    jit.define_int("TANH", alg_kind::eltwise_tanh);
+    jit.define_int("ELU", alg_kind::eltwise_elu);
+    jit.define_int("SQUARE", alg_kind::eltwise_square);
+    jit.define_int("SQRT", alg_kind::eltwise_sqrt);
+    jit.define_int("ABS", alg_kind::eltwise_abs);
+    jit.define_int("EXP", alg_kind::eltwise_exp);
+    jit.define_int("ALG_KIND", alg);
 }
 
 } // namespace ocl

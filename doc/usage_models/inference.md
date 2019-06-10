@@ -32,7 +32,7 @@ auto conv_descr = convolution_forward::desc(prop_kind::forward_inference, ...);
 
 Compute-intensive Intel MKL-DNN primitives execute with highest performance
 on CPU-friendly data formats. Please see description of data formats
-[here](@ref memory_format_propagation_cpp).
+[here](@ref cpu_memory_format_propagation_cpp).
 
 Performance gains are maximized by reordering once, and then propagating the
 CPU-friendly format through as many layers as possible in your topology.  Intel
@@ -190,6 +190,3 @@ Intel MKL-DNN in order to use int8 inference:
 Please see the dedicated [section](@ref dev_guide_inference_int8) on low
 precision computations in Intel MKL-DNN for a detailed discussion, including how
 to calculate the scaling factors.
-
---------
-[Legal information](@ref legal_information)

@@ -20,6 +20,10 @@
 #    define CASE_3D 0
 #endif
 
+#define HAS_PAD_D (PD != 0 || PD_R != 0)
+#define HAS_PAD_H (PH != 0 || PH_R != 0)
+#define HAS_PAD_W (PW != 0 || PW_R != 0)
+
 #if BWD_WEIGHTS == 1
 
 __attribute__((reqd_work_group_size(SUB_GROUP_SIZE, 1, 1)))
@@ -273,10 +277,10 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
             uint oh = k_ / OW;
             uint ow = k_ % OW;
 
-            if (ow * SW + kw < PW || oh * SH + kh < PH
-                    || ow * SW + kw >= IW + PW || oh * SH + kh >= IH + PH
+            if (ow * SW + kw * (1 + DW) < PW || oh * SH + kh * (1 + DH) < PH
+                    || ow * SW + kw * (1 + DW) >= IW + PW || oh * SH + kh * (1 + DH) >= IH + PH
 #        if CASE_3D
-                    || od * SD + kd < PD || od * SD + kd >= ID + PD
+                    || od * SD + kd * (1 + DD) < PD || od * SD + kd * (1 + DD) >= ID + PD
 #        endif
             ) {
 #        if WITH_BIAS == 1
@@ -295,12 +299,12 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
                 continue;
             }
 
-            const uint ih = oh * SH - PH + kh;
-            const uint iw = ow * SW - PW + kw;
+            const uint ih = oh * SH - PH + kh * (1 + DH);
+            const uint iw = ow * SW - PW + kw * (1 + DW);
             const __global float *src1 = src + ih * IW * IC_BLOCK * MB_BLOCK
                     + iw * IC_BLOCK * MB_BLOCK;
 #        if CASE_3D
-            const uint id = od * SD - PD + kd;
+            const uint id = od * SD - PD + kd * (1 + DD);
             src1 += id * IH * IW * IC_BLOCK * MB_BLOCK;
 #        endif
 #        define TRANSPOSE_8(_block, _row, _col)                       \
@@ -492,9 +496,9 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
         for (int od = 0; od < OD; od++)
             for (int oh = 0; oh < OH; oh++) {
 
-                if (oh * SH + kh < PH || oh * SH + kh >= IH + PH
+                if (oh * SH + kh * (1 + DH) < PH || oh * SH + kh * (1 + DH) >= IH + PH
 #        if CASE_3D
-                        || od * SD + kd < PD || od * SD + kd >= ID + PD
+                        || od * SD + kd * (1 + DD) < PD || od * SD + kd * (1 + DD) >= ID + PD
 #        endif
                 ) {
 #        if WITH_BIAS == 1
@@ -542,9 +546,9 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
                 }
 
                 for (int ow = 0; ow < OW; ow += OW_BLOCK) {
-                    const int id = od * SD - PD + kd;
-                    const int ih = oh * SH - PH + kh;
-                    const int iw = ow * SW - PW + kw;
+                    const int id = od * SD - PD + kd * (1 + DD);
+                    const int ih = oh * SH - PH + kh * (1 + DH);
+                    const int iw = ow * SW - PW + kw * (1 + DW);
                     __global float *src1;
                     int src_ptr2 = src_ptr1 + id * IH * IW * IC_BLOCK
                             + ih * IW * IC_BLOCK + iw * IC_BLOCK;
@@ -556,7 +560,7 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
                         src1 = tails + IC_BLOCK * (2 * PW + KW + IW)
                                 + (iw + PW) * IC_BLOCK;
                     } else if (src_ptr2 < 0) {
-                        src1 = tails + kw * IC_BLOCK;
+                        src1 = tails + kw * (1 + DW) * IC_BLOCK;
                     } else {
                         src1 = src + id * IH * IW * IC_BLOCK
                                 + ih * IW * IC_BLOCK + iw * IC_BLOCK;
@@ -624,7 +628,7 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
                                                 *)(&src1[i * IC_BLOCK * SW])));
                     }
 #            endif
-#            if PW != 0 || KW != 1
+#            if HAS_PAD_W || KW != 1
                     if (iw < 0 || iw + (OW_BLOCK)*SW >= IW) {
                         for (int i = 0; i < OW_BLOCK; i++) {
                             if (iw + i * SW < 0 || iw + i * SW >= IW)

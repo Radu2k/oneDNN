@@ -13,7 +13,7 @@ More precisely, let \f$src\f$, \f$weights\f$, \f$bias\f$ and \f$dst\f$ be \f$N
 \times IC\f$, \f$OC \times IC\f$, \f$OC\f$, \f$N \times OC\f$ tensors (the
 variable names follow the standard @ref dev_guide_conventions). Then:
 
-\f[dst(n, oc) = bias(oc) + \sum_{ic=0}^{IC} src(n, ic) \cdot weights(oc, ic)\f]
+\f[dst(n, oc) = bias(oc) + \sum_{ic=0}^{IC-1} src(n, ic) \cdot weights(oc, ic)\f]
 
 In case when the \f$src\f$ tensor has spatial dimension it is flattened to 2D.
 For example, if it is a 4D \f$N \times IC' \times IH \times IW\f$ tensor, then
@@ -109,7 +109,3 @@ The following post-ops are supported by inner product primitives:
 - Use #mkldnn::memory::format_tag::any for source, weights,
   and destinations memory format tags when create an inner product primitive
   to allow the library to choose the most appropriate memory format.
-
---------
-
-[Legal information](@ref legal_information)

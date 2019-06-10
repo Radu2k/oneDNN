@@ -22,7 +22,7 @@ The function setting takes precedence over the environment variable.
     $ MKLDNN_JIT_DUMP=1 ./simple-net-cpp
 ~~~
 
-This will produce the following output files if running on an CPU supporting
+This will produce the following output files if running on a CPU supporting
 Intel(R) AVX2:
 
 ~~~sh
@@ -37,6 +37,3 @@ Use any disassembler to view the code. For example:
 
 [XED](https://github.com/intelxed/xed) is a decoder tool available as part as
 [Intel(R) Software Development Emulator (Intel(R) SDE)](https://software.intel.com/en-us/articles/intel-software-development-emulator).
-
-
-[Legal information](@ref legal_information)

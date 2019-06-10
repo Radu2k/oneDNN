@@ -175,24 +175,24 @@ inline U square_bwd(T dd, T s) {
 
 template <typename T, typename U = typename utils::remove_reference<T>::type>
 inline U abs_fwd(T s) {
-    return s > 0 ? s : -s;
+    return s > 0 ? s : (U)-s;
 }
 
 template <typename T, typename U = typename utils::remove_reference<T>::type>
 inline U abs_bwd(T dd, T s) {
-    return s > 0 ? dd : s < 0 ? -dd : 0;
+    return s > 0 ? dd : s < 0 ? (U)-dd : (U)0;
 }
 
 template <typename T, typename U = typename utils::remove_reference<T>::type>
 inline U sqrt_fwd(T s) {
-    return s > 0 ? (U)(::sqrtf((float)(s))) : 0;
+    return s > 0 ? (U)(::sqrtf((float)(s))) : (U)0;
 }
 
 template <typename T, typename U = typename utils::remove_reference<T>::type>
 inline U sqrt_bwd(T dd, T s) {
     return s > 0
         ? (U)(dd / (2 * ::sqrtf((float)(s))))
-        : 0;
+        : (U)0;
 }
 
 template <typename T, typename A,
@@ -212,7 +212,7 @@ inline U linear_bwd(T dd, T s, A alpha, A beta) {
 template <typename T, typename A,
          typename U = typename utils::remove_reference<T>::type>
 inline U bounded_relu_fwd(T s, A alpha) {
-    s = s > 0 ? s : 0;
+    s = s > 0 ? s : (U)0;
     return s > alpha ? (U)(alpha) : s;
 }
 
@@ -245,11 +245,22 @@ inline U logistic_bwd(T dd, T s) {
     return dd * v * (1 - v);
 }
 
+template <typename T, typename U = typename utils::remove_reference<T>::type>
+inline U exp_fwd(T s) {
+    return (U)(::expf((float)s));
+}
+
+template <typename T, typename U = typename utils::remove_reference<T>::type>
+inline U exp_bwd(T dd, T s) {
+    return dd * exp_fwd<T, U>(s);
+}
+
 inline bool eltwise_fwd_preserves_zero(alg_kind_t alg, bool jit_impl = false) {
     using namespace alg_kind;
     using namespace utils;
     const bool preserves_zero = true
-        && !one_of(alg, eltwise_linear, eltwise_soft_relu, eltwise_logistic)
+        && !one_of(alg, eltwise_linear, eltwise_soft_relu, eltwise_logistic,
+                eltwise_exp)
         && IMPLICATION(jit_impl, !one_of(alg, eltwise_elu, eltwise_tanh));
     return preserves_zero;
 }

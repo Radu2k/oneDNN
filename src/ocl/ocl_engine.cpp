@@ -34,7 +34,8 @@
 #include "ocl/ref_rnn.hpp"
 #include "ocl/ref_softmax.hpp"
 #include "ocl/ref_convolution.hpp"
-
+#include "ocl/ref_deconvolution.hpp"
+#include "ocl/ref_shuffle.hpp"
 #include "ocl/ocl_engine.hpp"
 
 namespace mkldnn {
@@ -94,6 +95,9 @@ static const pd_create_f ocl_impl_list[] = {
     /*eltwise*/
     INSTANCE(ref_eltwise_fwd_t),
     INSTANCE(ref_eltwise_bwd_t),
+    /*deconv*/
+    INSTANCE(ref_deconvolution_fwd_t),
+    INSTANCE(ref_deconvolution_bwd_data_t),
     /*conv*/
     INSTANCE(jit_gen9_common_convolution_fwd_t<f16>),
     INSTANCE(jit_gen9_common_convolution_fwd_t<f32>),
@@ -105,6 +109,7 @@ static const pd_create_f ocl_impl_list[] = {
     INSTANCE(ref_convolution_fwd_t<u8, s8, u8, s32>),
     INSTANCE(ref_convolution_fwd_t<u8, s8, s8, s32>),
     /*bnorm*/
+    INSTANCE(ref_batch_normalization_fwd_t<f16>),
     INSTANCE(ref_batch_normalization_fwd_t<f32>),
     INSTANCE(ref_batch_normalization_bwd_t<f32>),
     /*pool*/
@@ -114,9 +119,9 @@ static const pd_create_f ocl_impl_list[] = {
     INSTANCE(ref_pooling_fwd_t<f32>),
     INSTANCE(ref_pooling_bwd_t<f32>),
     /* lrn */
-    // TODO add tests for f16
-    //INSTANCE(ref_lrn_fwd_t<f16>),
+    INSTANCE(ref_lrn_fwd_t<f16>),
     INSTANCE(ref_lrn_fwd_t<f32>),
+    INSTANCE(ref_lrn_bwd_t<f32>),
     /*inner_product*/
     INSTANCE(gemm_inner_product_fwd_t<f16>),
     INSTANCE(gemm_inner_product_fwd_t<f32>),
@@ -137,6 +142,10 @@ static const pd_create_f ocl_impl_list[] = {
     INSTANCE(ref_rnn_fwd_f16_t),
     INSTANCE(ref_rnn_fwd_f32_t),
     INSTANCE(ref_rnn_bwd_f32_t),
+    /* shuffle */
+    INSTANCE(ref_shuffle_t<4>),
+    INSTANCE(ref_shuffle_t<2>),
+    INSTANCE(ref_shuffle_t<1>),
     nullptr,
 };
 

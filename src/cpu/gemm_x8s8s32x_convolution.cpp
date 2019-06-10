@@ -66,8 +66,10 @@ _gemm_x8s8s32x_convolution_fwd_t<src_type, dst_type>::pp_ker_t::pp_ker_t(
     , bias_data_type_size_(0)
     , scale_idx_mult_(0)
     , do_bias_(false)
-    , do_relu_(false)
+    , do_eltwise_(false)
     , do_sum_(false)
+    , eltwise_injector_(nullptr)
+    , eltwise_(nullptr)
 {
     using namespace types;
 
@@ -77,16 +79,6 @@ _gemm_x8s8s32x_convolution_fwd_t<src_type, dst_type>::pp_ker_t::pp_ker_t(
     scale_idx_mult_ = (pd->attr()->output_scales_.mask_ == (1 << 1));
 
     auto &post_ops = pd->attr()->post_ops_;
-
-    int entry_idx = -1;
-    for (int idx = 0; idx < post_ops.len_; ++idx) {
-        const auto &e = post_ops.entry_[idx];
-        if (e.is_relu(true, false)) {
-            entry_idx = idx;
-            break;
-        }
-    }
-    do_relu_ = entry_idx >= 0;
 
     do_signed_scaling_ = jcp_.signed_input;
 
@@ -107,11 +99,24 @@ _gemm_x8s8s32x_convolution_fwd_t<src_type, dst_type>::pp_ker_t::pp_ker_t(
         }
     }
 
-    if (!mayiuse(avx512_core))
-        // use fallback code for older CPUs
+    const int eltwise_ind = post_ops.find(primitive_kind::eltwise);
+    do_eltwise_ = eltwise_ind != -1;
+
+    if (!mayiuse(avx512_core)) {
+        if (do_eltwise_) {
+            eltwise_ = new ref_eltwise_scalar_fwd_t(
+                    post_ops.entry_[eltwise_ind].eltwise);
+        }
         return;
-    else
+    } else {
+        if (do_eltwise_) {
+            eltwise_injector_ = new jit_uni_eltwise_injector_f32<avx512_common>(
+                    this, post_ops.entry_[eltwise_ind].eltwise, true,
+                    Xbyak::util::rax, Xbyak::Opmask(2));
+        }
         generate();
+    }
+
 }
 
 template <data_type_t src_type, data_type_t dst_type>
@@ -134,7 +139,6 @@ void _gemm_x8s8s32x_convolution_fwd_t<src_type, dst_type>::pp_ker_t::generate()
     Reg64 reg_rem_mask_vlen = r11;
     Opmask kreg_rem_mask_short = k1;
     Opmask kreg_rem_mask_vlen = k3;
-    Opmask kreg_relu_cmp = k2;
 
     const size_t vlen = vlen_;
 
@@ -184,7 +188,7 @@ void _gemm_x8s8s32x_convolution_fwd_t<src_type, dst_type>::pp_ker_t::generate()
     sub(reg_rem_mask_vlen, 1);
     kmovq(kreg_rem_mask_vlen, reg_rem_mask_vlen);
 
-    if (do_relu_ || dst_type == data_type::u8)
+    if (do_eltwise_ || dst_type == data_type::u8)
         vxorps(vreg_zero, vreg_zero, vreg_zero);
 
     // Load accumulated value, convert to float, apply sum (if any),
@@ -265,9 +269,8 @@ void _gemm_x8s8s32x_convolution_fwd_t<src_type, dst_type>::pp_ker_t::generate()
             vfmadd231ps(vreg_dst(idx), vreg_prev_dst(idx), vreg_sum_scale);
         }
 
-        if (do_relu_) {
-            vcmpps(kreg_relu_cmp, vreg_dst(idx), vreg_zero, _cmp_lt_os);
-            vmulps(vreg_dst(idx) | kreg_relu_cmp, vreg_dst(idx), vreg_nslope);
+        if (do_eltwise_) {
+            eltwise_injector_->compute_vector(vreg_dst(idx).getIdx());
         }
 
         if (dst_type != data_type::f32) {
@@ -466,6 +469,9 @@ void _gemm_x8s8s32x_convolution_fwd_t<src_type, dst_type>::pp_ker_t::generate()
 
     postamble();
 
+    if (do_eltwise_)
+        eltwise_injector_->prepare_table();
+
     ker_ = getCode<decltype(ker_)>();
 }
 
@@ -520,8 +526,8 @@ void _gemm_x8s8s32x_convolution_fwd_t<src_type, dst_type>::pp_ker_t::operator ()
                 d *= scales[(g * jcp_.oc + oc) * scale_idx_mult_];
                 if (do_sum_)
                     d += sum_scale * dst[dst_off];
-                if (do_relu_ && d < 0)
-                    d *= nslope;
+                if (do_eltwise_)
+                    d = eltwise_->compute_scalar(d);
                 dst[dst_off] = qz_a1b0<float, dst_data_t>()(d);
             }
         }
@@ -603,7 +609,8 @@ execute_forward_thr(const int ithr, const int nthr, const src_data_t *src_base,
         const int LDA = M * jcp.ngroups;
         const int LDB = jcp.im2col_sz ? N : K;
         const char *BT = jcp.im2col_sz ? "T" : "N";
-        const int8_t off_a = 0, off_b = 0;
+        const int8_t off_a = 0;
+        const uint8_t off_b = 0;
         const int32_t off_c = 0;
         const float onef = 1.0, zerof = 0.0;
         gemm_s8x8s32("N", BT, jcp.signed_input ? "C" : "F",
@@ -693,7 +700,8 @@ execute_backward_data_thr(const int ithr, const int nthr,
         const int M = jcp.ks * jcp.ic;
         const int N = jcp.os;
         const int K = jcp.oc;
-        const int8_t off_a = 0, off_b = 0;
+        const int8_t off_a = 0;
+        const diff_dst_data_t off_b = 0;
         const int32_t off_c = 0;
         const float onef = 1.0, zerof = 0.0;
         const int LD = K * jcp.ngroups;

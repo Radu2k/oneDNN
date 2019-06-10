@@ -199,9 +199,28 @@ static const rpd_create_f cpu_reorder_impl_list[] = {
     REG_SR_BIDIR(f32, any, f32, gOIdhw16i16o),
 
     /* fp32: blocked <-> blocked with tail */
+    REG_SR_BIDIR(f32, nCw4c, f32, nCw16c),
     REG_SR_BIDIR(f32, nCw8c, f32, nCw16c),
+    REG_SR_BIDIR(f32, nChw4c, f32, nChw16c),
     REG_SR_BIDIR(f32, nChw8c, f32, nChw16c),
+    REG_SR_BIDIR(f32, nCdhw4c, f32, nCdhw16c),
     REG_SR_BIDIR(f32, nCdhw8c, f32, nCdhw16c),
+
+    /* bf16 */
+    REG_SR(f32, nchw, bf16, nChw16c, fmt_order::keep),
+
+    REG_SR(f32, oihw, bf16, OIhw8i16o2i, fmt_order::keep),
+    REG_SR(f32, goihw, bf16, gOIhw8i16o2i, fmt_order::keep),
+    REG_SR(f32, oihw, bf16, OIhw8o16i2o, fmt_order::keep),
+    REG_SR(f32, goihw, bf16, gOIhw8o16i2o, fmt_order::keep),
+    REG_SR(f32, oihw, bf16, IOhw8o16i2o, fmt_order::keep),
+    REG_SR(f32, goihw, bf16, gIOhw8o16i2o, fmt_order::keep),
+    REG_SR(f32, oihw, bf16, OIhw16i16o, fmt_order::keep),
+    REG_SR(f32, goihw, bf16, gOIhw16i16o, fmt_order::keep),
+
+    REG_SR(bf16, any, bf16, any, fmt_order::any, spec::reference),
+    REG_SR(bf16, any, f32, any, fmt_order::any, spec::reference),
+    REG_SR(f32, any, bf16, any, fmt_order::any, spec::reference),
 
     /* int: flat <-> blocked with tail */
     REG_SR_BIDIR(f32, any, s32, nChw16c),

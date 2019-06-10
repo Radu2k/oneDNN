@@ -27,6 +27,10 @@
 #define IDHW_SIZE (ID * IH * IW)
 #define KDHW_SIZE (KD * KH * KW)
 
+#define HAS_PAD_D (PD != 0 || PD_R != 0)
+#define HAS_PAD_H (PH != 0 || PH_R != 0)
+#define HAS_PAD_W (PW != 0 || PW_R != 0)
+
 #define SRC_OFF(n, ic, ih, iw) \
     (((((n * G) * IC + (ic)) * IH + (ih)) * IW + (iw)))
 #define DST_OFF(n, oc, oh, ow) ((((n * G) * OC + (oc)) * OH + (oh)) * OW + (ow))
@@ -92,17 +96,17 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
     float8 blockC01 = 0.0f;
 #    endif
 
-#    if ((PD != 0 && KD == 1) || (PH != 0 && KH == 1) || (PW != 0 && KW == 1))
+#    if ((HAS_PAD_D && KD == 1) || (HAS_PAD_H && KH == 1) || (HAS_PAD_W && KW == 1))
     if (!(id < 0 || id >= ID || ih < 0 || ih >= IH || iw < 0 || iw >= IW)) {
 #    endif
 #    if KH != 1 || KW != 1 || KD != 1
         for (int kd = 0; kd < KD; ++kd)
             for (int kh = 0; kh < KH; ++kh)
                 for (int kw = 0; kw < KW; ++kw) {
-                    if (ih + kh < 0 || ih + kh >= IH || iw + kw < 0
-                            || iw + kw >= IW
+                    if (ih + kh * (1 + DH) < 0 || ih + kh * (1 + DH) >= IH
+                    || iw + kw * (1 + DW) < 0 || iw + kw * (1 + DW) >= IW
 #        if CASE_3D
-                            || id + kd < 0 || id + kd >= ID) {
+                    || id + kd * (1 + DD) < 0 || id + kd * (1 + DD) >= ID) {
 #        else
                     ) {
 #        endif
@@ -114,9 +118,9 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
                     }
 
                     const __global float *src1 = src
-                            + kd * IH * IW * IC_BLOCK * MB_BLOCK
-                            + kh * IW * IC_BLOCK * MB_BLOCK
-                            + kw * IC_BLOCK * MB_BLOCK;
+                            + kd * (1 + DD) * IH * IW * IC_BLOCK * MB_BLOCK
+                            + kh * (1 + DH) * IW * IC_BLOCK * MB_BLOCK
+                            + kw * (1 + DW) * IC_BLOCK * MB_BLOCK;
                     const __global float *wei1 = wei
                             + kd * KH * KW * OC_BLOCK * IC_BLOCK
                             + kh * KW * OC_BLOCK * IC_BLOCK
@@ -191,7 +195,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
 #    if KH != 1 || KW != 1 || KD != 1
                 }
 #    endif
-#    if ((PD != 0 && KD == 1) || (PH != 0 && KH == 1) || (PW != 0 && KW == 1))
+#    if ((HAS_PAD_D && KD == 1) || (HAS_PAD_H && KH == 1) || (HAS_PAD_W && KW == 1))
     }
 #    endif
 
@@ -288,9 +292,9 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
     for (int kd = 0; kd < KD; ++kd)
         for (int kh = 0; kh < KH; ++kh) {
 
-            if (ih + kh < 0 || ih + kh >= IH
+            if (ih + kh * (1 + DH) < 0 || ih + kh * (1 + DH) >= IH
 #        if CASE_3D
-                    || id + kd < 0 || id + kd >= ID) {
+            || id + kd * (1 + DD) < 0 || id + kd * (1 + DD) >= ID) {
 #        else
             ) {
 #        endif
@@ -298,21 +302,23 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
             }
 #        if NHWC == 1
             const __global float *src1
-                    = src + kd * IH * IW * IC + kh * IW * IC + local_id;
+                    = src + kd * (1 + DD) * IH * IW * IC
+                    + kh * (1 + DH) * IW * IC + local_id;
 #            define SP_OFF IC
 #        else
             const __global float *src1
-                    = src + kd * IH * IW + kh * IW + local_id * IDHW_SIZE;
+                    = src + kd * (1 + DD) * IH * IW
+                    + kh * (1 + DH) * IW + local_id * IDHW_SIZE;
 #            define SP_OFF 1
 #        endif
 
-            float tempA[SW * OW_BLOCK + KW];
+            float tempA[SW * OW_BLOCK + KW * (1 + DW)];
             int k = iw;
             if (local_id < 3) {
-#        if OW % OW_BLOCK != 0 || PW != 0
-                if (k < 0 || k + SW * OW_BLOCK + KW >= IW) {
-                    __attribute__((opencl_unroll_hint(SW * OW_BLOCK + KW)))
-                    for (int i = 0; i < SW * OW_BLOCK + KW; i++) {
+#        if OW % OW_BLOCK != 0 || HAS_PAD_W
+                if (k < 0 || k + SW * OW_BLOCK + KW * (1 + DW) >= IW) {
+                    __attribute__((opencl_unroll_hint(SW * OW_BLOCK + KW * (1 + DW))))
+                    for (int i = 0; i < SW * OW_BLOCK + KW * (1 + DW); i++) {
                         if (k >= 0 && k < IW)
                             tempA[i] = src1[i * SP_OFF];
                         else
@@ -321,11 +327,11 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
                     }
                 } else {
 #        endif
-                    __attribute__((opencl_unroll_hint(SW * OW_BLOCK + KW)))
-                    for (int i = 0; i < SW * OW_BLOCK + KW; i++) {
+                    __attribute__((opencl_unroll_hint(SW * OW_BLOCK + KW * (1 + DW))))
+                    for (int i = 0; i < SW * OW_BLOCK + KW * (1 + DW); i++) {
                         tempA[i] = src1[i * SP_OFF];
                     }
-#        if OW % OW_BLOCK != 0 || PW != 0
+#        if OW % OW_BLOCK != 0 || HAS_PAD_W
                 }
 #        endif
             }
@@ -359,7 +365,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
                 if (local_id < 3) {
                     __attribute__((opencl_unroll_hint(OW_BLOCK)))
                     for (int i = 0; i < OW_BLOCK; i++) {
-                        blockA[i] = tempA[kw + i * SW];
+                        blockA[i] = tempA[kw * (1 + DW) + i * SW];
                     }
                 }
                 __attribute__((opencl_unroll_hint(OW_BLOCK)))
@@ -507,7 +513,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
 
     const bool do_if = iw < 0 || iw + SW * OW_BLOCK + KW >= IW;
 
-#        if ((PD != 0 && KD == 1) || (PH != 0 && KH == 1))
+#        if ((HAS_PAD_D && KD == 1) || (HAS_PAD_H && KH == 1))
     if (!(id < 0 || id >= ID || ih < 0 || ih >= IH)) {
 #        endif
         int icb = 0;
@@ -518,23 +524,23 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
                 __attribute__((opencl_unroll_hint(1)))
             for (int kh = 0; kh < KH; ++kh) {
 
-                if (ih + kh < 0 || ih + kh >= IH
+                if (ih + kh * (1 + DH) < 0 || ih + kh * (1 + DH) >= IH
 #            if CASE_3D
-                        || id + kd < 0 || id + kd >= ID) {
+                || id + kd * (1 + DD) < 0 || id + kd * (1 + DD) >= ID) {
 #            else
                 ) {
 #            endif
                     continue;
                 }
                 const __global float *src1
-                        = src + kd * IH * IW * IC_BLOCK + kh * IW * IC_BLOCK;
+                        = src + kd * (1 + DD) * IH * IW * IC_BLOCK
+                        + kh * (1 + DH) * IW * IC_BLOCK;
 
-                float tempA[SW * OW_BLOCK + KW];
+                float tempA[SW * OW_BLOCK + KW * (1 + DW)];
                 int k = iw;
-#            if OW % OW_BLOCK != 0 || PW != 0
                 if (do_if) {
-                    __attribute__((opencl_unroll_hint(SW * OW_BLOCK + KW)))
-                    for (int i = 0; i < SW * OW_BLOCK + KW; i++) {
+                    __attribute__((opencl_unroll_hint(SW * OW_BLOCK + KW * (1 + DW))))
+                    for (int i = 0; i < SW * OW_BLOCK + KW * (1 + DW); i++) {
                         if (k >= 0 && k < IW)
                             tempA[i] = as_float(intel_sub_group_block_read(
                                     (const __global uint
@@ -544,15 +550,12 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
                         k++;
                     }
                 } else {
-#            endif
-                    __attribute__((opencl_unroll_hint(SW * OW_BLOCK + KW)))
-                    for (int i = 0; i < SW * OW_BLOCK + KW; i++) {
+                    __attribute__((opencl_unroll_hint(SW * OW_BLOCK + KW * (1 + DW))))
+                    for (int i = 0; i < SW * OW_BLOCK + KW * (1 + DW); i++) {
                         tempA[i] = as_float(intel_sub_group_block_read(
                                 (const __global uint *)(&src1[i * IC_BLOCK])));
                     }
-#            if OW % OW_BLOCK != 0 || PW != 0
                 }
-#            endif
                 __attribute__((opencl_unroll_hint(KW)))
                 for (int kw = 0; kw < KW; ++kw) {
 
@@ -605,25 +608,25 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
                     float blockA[OW_BLOCK];
                     __attribute__((opencl_unroll_hint(OW_BLOCK)))
                     for (int i = 0; i < OW_BLOCK; i++) {
-                        blockA[i] = tempA[kw + SW * i];
+                        blockA[i] = tempA[kw * (1 + DW) + SW * i];
                     }
 #        else
-#            if OW_BLOCK != 8 || PW != 0
+#            if OW_BLOCK != 8 || HAS_PAD_W
         float blockA[OW_BLOCK];
 #            else
         float8 blockA;
 #            endif
-#            if OW % OW_BLOCK != 0 || PW != 0
+#            if OW % OW_BLOCK != 0 || HAS_PAD_W
         if (ow == OW_LAST) {
             for (int i = 0; i < OW - OW_LAST; i++) {
-#                if PW != 0
+#                if HAS_PAD_W
                 if (iw + i * SW < 0 || iw + i * SW >= IW) {
                     blockA[i] = 0.0f;
                 } else {
 #                endif
                     blockA[i] = as_float(intel_sub_group_block_read(
                             (const __global uint *)(&src1[i * IC_BLOCK * SW])));
-#                if PW != 0
+#                if HAS_PAD_W
                 }
 #                endif
             }
@@ -631,17 +634,17 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
                 blockA[i] = 0.0f;
         } else {
 #            endif
-#            if SW != 1 || OW_BLOCK != 8 || PW != 0
+#            if SW != 1 || OW_BLOCK != 8 || HAS_PAD_W
             __attribute__((opencl_unroll_hint(OW_BLOCK)))
             for (int i = 0; i < OW_BLOCK; i++) {
-#                if PW != 0
+#                if HAS_PAD_W
                 if (iw + i * SW < 0 || iw + i * SW >= IW) {
                     blockA[i] = 0.0f;
                 } else {
 #                endif
                     blockA[i] = as_float(intel_sub_group_block_read(
                             (const __global uint *)(&src1[i * IC_BLOCK * SW])));
-#                if PW != 0
+#                if HAS_PAD_W
                 }
 #                endif
             }
@@ -649,7 +652,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
         blockA = as_float8(
                 intel_sub_group_block_read8((const __global uint *)(&src1[0])));
 #            endif
-#            if OW % OW_BLOCK != 0 || PW != 0
+#            if OW % OW_BLOCK != 0 || HAS_PAD_W
         }
 #            endif
 #        endif
@@ -677,7 +680,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
             wei += OC_BLOCK * KDHW_SIZE * IC_BLOCK;
             icb += IC_BLOCK;
         } while (icb < IC);
-#        if ((PD != 0 && KD == 1) || (PH != 0 && KH == 1))
+#        if ((HAS_PAD_D && KD == 1) || (HAS_PAD_H && KH == 1))
     }
 #        endif
     __global float *dst_write0 = dst + mb * OC * G * ODHW_SIZE
