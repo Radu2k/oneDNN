@@ -25,9 +25,9 @@
 __kernel void
 ref_conv_fwd_kernel(const __global uchar *src,
         const __global char *wei,
-        const __global FLOAT_T *bias,
+        const __global float *bias,
         __global DATA_T *dst,
-        FLOAT_T relu_negative_slope, FLOAT_T sum_scale) {
+        float relu_negative_slope, float sum_scale) {
     const int osp = get_global_id(0);
     const int od = osp / (OW*OH);
     const int ohw = osp % (OW*OH);
@@ -65,7 +65,7 @@ ref_conv_fwd_kernel(const __global uchar *src,
 #   if SUM_SCALE == 1
     sum += dst[0];
 #   else
-    sum = fma(dst[0], (FLOAT_T)sum_scale, sum);
+    sum = fma(dst[0], (float)sum_scale, sum);
 #   endif
     if (sum < 0) sum *= relu_negative_slope;
 #   else
@@ -76,7 +76,7 @@ ref_conv_fwd_kernel(const __global uchar *src,
 #   if SUM_SCALE == 1
     sum += dst[0];
 #   else
-    sum = fma(dst[0], (FLOAT_T)sum_scale, sum);
+    sum = fma(dst[0], (float)sum_scale, sum);
 #   endif
 #  endif
 # endif
