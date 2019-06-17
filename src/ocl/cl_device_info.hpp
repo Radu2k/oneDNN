@@ -32,6 +32,8 @@ enum class cl_device_ext_t {
     khr_fp16 = 1 << 0,
     intel_subgroups = 1 << 1,
     intel_subgroups_short = 1 << 2,
+    // FIXME: internal extension.
+    intel_dot_accumulate = 1 << 3,
     last
 };
 
@@ -42,6 +44,7 @@ static const char *ext2str(cl_device_ext_t ext) {
         CASE(khr_fp16);
         CASE(intel_subgroups);
         CASE(intel_subgroups_short);
+        CASE(intel_dot_accumulate);
     default: return nullptr;
     }
 #undef CASE
@@ -83,6 +86,16 @@ public:
         err = clGetDeviceInfo(
                 device_, CL_DEVICE_NAME, size_name, &c_name[0], &size_name);
         return err;
+
+        // FIXME: do not dispatch based on name in public branch, once
+        // extensions are added into OpenCL these extensions will be identified
+        // along with other and this code should be removed.
+
+        if (strstr(&c_name[0], "Gen12LP") != nullptr) {
+            ext_ |= (uint64_t)cl_device_ext_t::intel_dot_accumulate;
+        }
+
+        return CL_SUCCESS;
     }
 
     bool has(cl_device_ext_t ext) const { return ext_ & (uint64_t)ext; }
