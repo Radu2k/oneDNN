@@ -58,19 +58,19 @@ gen12lp_1x1_conv_fwd_kernel(const __global uchar *src, const __global char *wei,
 
     // Source (At ic = 0)
     src += (mb_group_id % 2) * MB_BLOCK / 2 * MB_OFFSET; // MB block offset
-    src += (mb_group_id / 2) * CHANNEL_BLOCK_OFFSET * IC / IC_BLOCK; // MB offset
+    src += (mb_group_id / 2) * CHANNEL_BLOCK_OFFSET * IC_NCHUNK; // MB offset
     src += oh * PIXEL_HEIGHT_OFFSET; // height offset
     src += ow * PIXEL_WIDTH_OFFSET; // width offset
     
     // Destination
     dst += (mb_group_id % 2) * MB_BLOCK / 2 * MB_OFFSET; // MB block offset
-    dst += (mb_group_id / 2) * CHANNEL_BLOCK_OFFSET * OC / OC_BLOCK; // MB offset
+    dst += (mb_group_id / 2) * CHANNEL_BLOCK_OFFSET * OC_NCHUNK; // MB offset
     dst += CHANNEL_BLOCK_OFFSET * oc_group_id; //OC offset
     dst += oh * PIXEL_HEIGHT_OFFSET;
     dst += ow * PIXEL_WIDTH_OFFSET;
 
     // Weights
-    wei += oc_group_id * KERNEL_BLOCK_OFFSET * IC / IC_BLOCK;
+    wei += oc_group_id * KERNEL_BLOCK_OFFSET * IC_NCHUNK;
 
     // Output accumulators:
     // 8 MB (0-7) x 4 Kernels  (32 8bit ints)
@@ -78,7 +78,7 @@ gen12lp_1x1_conv_fwd_kernel(const __global uchar *src, const __global char *wei,
     // 8 MB (8-15) x 4 Kernels  (32 8bit ints)
     int8 C10 = 0, C11 = 0, C12 = 0, C13 = 0;
     
-    for(uint ic_block_id = 0; ic_block_id < IC/IC_BLOCK; ++ic_block_id)
+    for(uint ic_block_id = 0; ic_block_id < IC_NCHUNK; ++ic_block_id)
     {
         uint8 S0, S1;
         int8 W0, W1, W2, W3;
