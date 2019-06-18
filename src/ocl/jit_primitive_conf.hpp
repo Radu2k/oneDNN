@@ -322,11 +322,14 @@ inline void set_default_conf(jit_conv_conf_t &jcp, const convolution_desc_t &cd,
     if (jcp.with_relu)
         jcp.negative_slope = jcp.eltwise.alpha;
 
-    if (p.len_ == 2 && sum_idx != -1) {
-        jcp.with_sum_relu = p.entry_[sum_idx].is_sum(jcp.sum_scale == 1.0)
-                && p.entry_[1].is_relu();
-    } else {
-        jcp.with_sum_relu = 0;
+    jcp.with_sum_relu = (p.len_ == 2)
+        && jcp.with_relu && jcp.with_sum
+        && sum_idx == 0 && eltwise_ind == 1;
+
+    if (jcp.dst_data_type == data_type::u8
+        && jcp.with_sum_relu) {
+        jcp.with_relu = false;
+        jcp.with_sum_relu = false;
     }
 
     jcp.scale_idx_mult = attr.output_scales_.mask_ == (1 << 1);
