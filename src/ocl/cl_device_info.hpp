@@ -161,6 +161,8 @@ public:
                 device_, CL_DEVICE_NAME, size_name, &c_name[0], &size_name);
         if (err != CL_SUCCESS)
             return err;
+        if (strstr(&c_name[0], "Gen12LP") != nullptr)
+            ext_ |= (uint64_t)cl_device_ext_t::intel_dot_accumulate;
 
         // EU count.
         cl_uint eu_count;
