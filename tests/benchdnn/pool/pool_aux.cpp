@@ -46,12 +46,12 @@ const char *alg2str(alg_t alg) {
     return "unknown algorithm";
 }
 
-alg_t alg_kind2alg(mkldnn_alg_kind_t alg) {
-    if (alg == mkldnn_pooling_max) return MAX;
-    if (alg == mkldnn_pooling_avg) return AVG_NP;
-    if (alg == mkldnn_pooling_avg_include_padding) return AVG_P;
+mkldnn_alg_kind_t alg2alg_kind(alg_t alg) {
+    if (alg == MAX) return mkldnn_pooling_max;
+    if (alg == AVG_NP) return mkldnn_pooling_avg_exclude_padding;
+    if (alg == AVG_P) return mkldnn_pooling_avg_include_padding;
     assert(!"unknown algorithm");
-    return MAX;
+    return mkldnn_alg_kind_undef;
 }
 
 int str2desc(desc_t *desc, const char *str) {
@@ -84,6 +84,7 @@ int str2desc(desc_t *desc, const char *str) {
         if (!strncmp(p, s, strlen(p))) { \
             ok = 1; s += strlen(p); \
             char *end_s; d. c = strtol(s, &end_s, 10); s += (end_s - s); \
+            if (d. c < 0) return FAIL; \
             /* printf("@@@debug: %s: %ld\n", p, d. c); */ \
         } \
     } while (0)
@@ -213,12 +214,14 @@ std::ostream &operator<<(std::ostream &s, const desc_t &d) {
 }
 
 std::ostream &operator<<(std::ostream &s, const prb_t &p) {
+    dump_global_params(s);
+
     if (p.dir != FWD_D)
         s << "--dir=" << dir2str(p.dir) << " ";
     if (p.cfg != conf_f32)
         s << "--cfg=" << cfg2str(p.cfg) << " ";
     if (p.tag != mkldnn_nchw)
-        s << "--tag=" << tag2str(p.tag) << " ";
+        s << "--tag=" << fmt_tag2str(p.tag) << " ";
     if (p.alg != MAX)
         s << "--alg=" << alg2str(p.alg) << " ";
 

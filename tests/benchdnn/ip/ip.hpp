@@ -56,8 +56,10 @@ extern const _dt_conf_t conf_bf16f32bf16;
 
 struct prb_t : public desc_t {
     prb_t(const desc_t &desc, int64_t mb, dir_t dir, const dt_conf_t *cfg,
-            const attr_t &attr)
-        : desc_t(desc), dir(dir), cfg(cfg), attr(attr), ops(0), scales(NULL) {
+            mkldnn_format_tag_t stag, mkldnn_format_tag_t wtag,
+            mkldnn_format_tag_t dtag, const attr_t &attr)
+        : desc_t(desc), dir(dir), cfg(cfg), stag(stag), wtag(wtag), dtag(dtag),
+        attr(attr), ops(0), scales(NULL) {
         if (mb) this->mb = mb;
         count_ops();
         generate_oscales();
@@ -66,6 +68,7 @@ struct prb_t : public desc_t {
 
     dir_t dir;
     const dt_conf_t *cfg;
+    mkldnn_format_tag_t stag, wtag, dtag;
     attr_t attr;
 
     double ops;
@@ -77,6 +80,8 @@ struct prb_t : public desc_t {
     };
 
     void generate_oscales();
+
+    BENCHDNN_DISALLOW_COPY_AND_ASSIGN(prb_t);
 };
 std::ostream &operator<<(std::ostream &s, const prb_t &p);
 
@@ -96,9 +101,12 @@ struct perf_report_t: public base_perf_report_t {
     }
 
     virtual void dump_desc_csv(std::ostream &s) const override {
-        s << p_->mb << ',' << p_->oc << ',' << p_->ic << ',';
-        if (p_->id > 1) s << p_->id << ',';
-        s << p_->ih << ',' << p_->iw;
+        s << p_->mb << ','
+          << p_->oc << ','
+          << p_->ic << ','
+          << p_->id << ','
+          << p_->ih << ','
+          << p_->iw;
     }
 
     virtual double ops() const override { return p_->ops; }

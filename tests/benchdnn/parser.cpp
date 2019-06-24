@@ -25,6 +25,8 @@
 
 namespace parser {
 
+bool last_parsed_is_problem = false;
+
 bool parse_dir(std::vector<dir_t> &dir, const char *str,
         const std::string &option_name/* = "dir"*/) {
     return parse_vector_option(dir, str2dir, str, option_name);
@@ -35,9 +37,19 @@ bool parse_dt(std::vector<mkldnn_data_type_t> &dt, const char *str,
     return parse_vector_option(dt, str2dt, str, option_name);
 }
 
+bool parse_multi_dt(std::vector<std::vector<mkldnn_data_type_t>> &dt,
+        const char *str, const std::string &option_name/* = "sdt"*/) {
+    return parse_multivector_option(dt, str2dt, str, option_name);
+}
+
 bool parse_tag(std::vector<mkldnn_format_tag_t> &tag, const char *str,
         const std::string &option_name/* = "tag"*/) {
-    return parse_vector_option(tag, str2tag, str, option_name);
+    return parse_vector_option(tag, str2fmt_tag, str, option_name);
+}
+
+bool parse_multi_tag(std::vector<std::vector<mkldnn_format_tag_t>> &tag,
+        const char *str, const std::string &option_name/* = "stag"*/) {
+    return parse_multivector_option(tag, str2fmt_tag, str, option_name);
 }
 
 bool parse_mb(std::vector<int64_t> &mb, const char *str,
@@ -47,7 +59,7 @@ bool parse_mb(std::vector<int64_t> &mb, const char *str,
 
 bool parse_attr(attr_t &attr, const char *str,
         const std::string &option_name/* = "attr"*/) {
-    const std::string pattern = "--" + option_name + "=";
+    const std::string pattern = get_pattern(option_name);
     if (pattern.find(str, 0, pattern.size()) != eol) {
         SAFE_V(str2attr(&attr, str + pattern.size()));
         return true;
@@ -62,7 +74,7 @@ bool parse_axis(std::vector<int> &axis, const char *str,
 
 bool parse_test_pattern_match(const char *&match, const char *str,
         const std::string &option_name/* = "match"*/) {
-    const std::string pattern = "--" + option_name + "=";
+    const std::string pattern = get_pattern(option_name);
     if (pattern.find(str, 0, pattern.size()) != eol) {
         match = str + pattern.size();
         return true;
@@ -70,9 +82,14 @@ bool parse_test_pattern_match(const char *&match, const char *str,
     return false;
 }
 
+bool parse_inplace(std::vector<bool> &inplace, const char *str,
+        const std::string &option_name/* = "inplace"*/) {
+    return parse_vector_option(inplace, str2bool, str, option_name);
+}
+
 bool parse_skip_impl(const char *&skip_impl, const char *str,
         const std::string &option_name/* = "skip-impl"*/) {
-    const std::string pattern = "--" + option_name + "=";
+    const std::string pattern = get_pattern(option_name);
     if (pattern.find(str, 0, pattern.size()) != eol) {
         skip_impl = str + pattern.size();
         return true;
@@ -89,7 +106,7 @@ bool parse_allow_unimpl(bool &allow_unimpl, const char *str,
 bool parse_perf_template(const char *&pt, const char *pt_def,
         const char *pt_csv, const char *str,
         const std::string &option_name/* = "perf-template"*/) {
-    const std::string pattern = "--" + option_name + "=";
+    const std::string pattern = get_pattern(option_name);
     if (pattern.find(str, 0, pattern.size()) != eol) {
         const std::string csv_pattern = "csv";
         const std::string def_pattern = "def";
@@ -107,8 +124,8 @@ bool parse_perf_template(const char *&pt, const char *pt_def,
 
 bool parse_reset(void (*reset_func)(), const char *str,
         const std::string &option_name/* = "reset"*/) {
-    const std::string pattern = "--" + option_name;
-    if (pattern.find(str, 0, pattern.size()) != eol) {
+    const std::string pattern = get_pattern(option_name);
+    if (pattern.find(str, 0, pattern.size() - 1) != eol) {
         reset_func();
         return true;
     }
@@ -117,7 +134,7 @@ bool parse_reset(void (*reset_func)(), const char *str,
 
 bool parse_batch(const bench_f bench, const char *str,
         const std::string &option_name/* = "batch"*/) {
-    const std::string pattern = "--" + option_name + "=";
+    const std::string pattern = get_pattern(option_name);
     if (pattern.find(str, 0, pattern.size()) != eol) {
         SAFE_V(batch(str + pattern.size(), bench));
         return true;
@@ -134,12 +151,21 @@ static bool parse_bench_mode(const char *str,
 
 static bool parse_max_ms_per_prb(const char *str,
         const std::string &option_name = "max-ms-per-prb") {
-    if (parse_single_value_option(max_ms_per_prb, atof, str,
-            option_name)) {
+    if (parse_single_value_option(max_ms_per_prb, atof, str, option_name)) {
         if (max_ms_per_prb < 100)
             max_ms_per_prb = 100;
         else if (max_ms_per_prb > 60e3)
             max_ms_per_prb = 60e3;
+        return true;
+    }
+    return false;
+}
+
+static bool parse_fix_times_per_prb(
+        const char *str, const std::string &option_name = "fix-times-per-prb") {
+    if (parse_single_value_option(fix_times_per_prb, atoi, str, option_name)) {
+        if (fix_times_per_prb < 0)
+            fix_times_per_prb = 0;
         return true;
     }
     return false;
@@ -157,13 +183,27 @@ static bool parse_verbose(const char *str,
 
 static bool parse_engine_kind(const char *str,
         const std::string &option_name = "engine") {
-    return parse_single_value_option(engine_tgt_kind, str2engine_kind, str,
-            option_name);
+    if (parse_single_value_option(
+                engine_tgt_kind, str2engine_kind, str, option_name)) {
+
+        DNN_SAFE(mkldnn_stream_destroy(stream_tgt), CRIT);
+        DNN_SAFE(mkldnn_engine_destroy(engine_tgt), CRIT);
+
+        DNN_SAFE(mkldnn_engine_create(&engine_tgt, engine_tgt_kind, 0), CRIT);
+        DNN_SAFE(mkldnn_stream_create(
+                         &stream_tgt, engine_tgt, mkldnn_stream_default_flags),
+                CRIT);
+        return true;
+    }
+    return false;
 }
 
 bool parse_bench_settings(const char *str) {
+    last_parsed_is_problem = false; // if start parsing, expect an option
+
     if (parse_bench_mode(str));
     else if (parse_max_ms_per_prb(str));
+    else if (parse_fix_times_per_prb(str));
     else if (parse_verbose(str));
     else if (parse_engine_kind(str));
     else
@@ -171,8 +211,18 @@ bool parse_bench_settings(const char *str) {
     return true;
 }
 
+void parse_dims(dims_t &dims, const char *str) {
+    parse_vector_str(dims, atoi, str, 'x');
+}
+
+void parse_multi_dims(std::vector<dims_t> &dims, const char *str) {
+    parse_multivector_str(dims, atoi, str, ':', 'x');
+}
+
 /* utilities */
 void catch_unknown_options(const char *str, const char *driver_name) {
+    last_parsed_is_problem = true; // if reached, means problem parsing
+
     const std::string pattern = "--";
     if (pattern.find(str, 0, pattern.size()) != eol) {
         fprintf(stderr, "%s driver: unknown option: `%s`, exiting...\n",
@@ -181,4 +231,9 @@ void catch_unknown_options(const char *str, const char *driver_name) {
     }
 }
 
+int parse_last_argument() {
+    if (!last_parsed_is_problem)
+        fprintf(stderr, "WARNING: No problem found for a given option!\n");
+    return OK;
+}
 }

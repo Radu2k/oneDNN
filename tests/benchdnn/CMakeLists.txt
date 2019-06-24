@@ -45,7 +45,7 @@ register_exe(benchdnn "${SOURCES}" "" "${LIBRT}")
 
 file(COPY inputs DESTINATION .)
 
-if((WIN32 OR MINGW) AND (NOT MKLDNN_BUILD_FOR_CI))
+if(WIN32 AND (NOT MKLDNN_BUILD_FOR_CI))
     string(REPLACE  ";" "\;" PATH "${CTESTCONFIG_PATH};$ENV{PATH}")
     configure_file(
         "${PROJECT_SOURCE_DIR}/cmake/run_with_env.bat.in"
@@ -78,7 +78,7 @@ function(register_benchdnn_test name engine cmd)
                 "$<TARGET_FILE:benchdnn> --engine=${engine} ${ARGV3}")
         endif()
 
-        if(WIN32 OR MINGW)
+        if(WIN32)
             set(cmd "cmd;/c;${PROJECT_BINARY_DIR}/run_with_env.bat;${cmd}")
             set(ARGV2 "cmd;/c;${PROJECT_BINARY_DIR}/run_with_env.bat;${ARGV2}")
         endif()
@@ -107,45 +107,75 @@ register_benchdnn_test(test_benchdnn_conv_bf16
     cpu "-v1 --conv --batch=inputs/test_conv_bfloat16")
 register_benchdnn_test(test_benchdnn_deconv
     cpu "-v1 --deconv --batch=inputs/deconv/test_deconv_all")
+register_benchdnn_test(test_benchdnn_deconv_bf16
+    cpu "-v1 --deconv --batch=inputs/deconv/test_deconv_bfloat16")
 register_benchdnn_test(test_benchdnn_rnn
     cpu "-v1 --rnn --batch=inputs/rnn/test_rnn_small")
 register_benchdnn_test(test_benchdnn_reorder
-    cpu "--reorder --batch=inputs/reorder/test_default")
+    cpu "-v1 --reorder --batch=inputs/reorder/test_reorder_all")
+register_benchdnn_test(test_benchdnn_reorder_bf16
+    cpu "-v1 --reorder --batch=inputs/reorder/test_reorder_bfloat16")
 register_benchdnn_test(test_benchdnn_bnorm
-    cpu "--bnorm  --batch=inputs/bnorm/test_bnorm_all")
+    cpu "-v1 --bnorm  --batch=inputs/bnorm/test_bnorm_all")
 register_benchdnn_test(test_benchdnn_bnorm_bf16
-    cpu "--bnorm  --batch=inputs/bnorm/test_bnorm_bfloat16")
+    cpu "-v1 --bnorm  --batch=inputs/bnorm/test_bnorm_bfloat16")
 register_benchdnn_test(test_benchdnn_ip
-    cpu "--ip --batch=inputs/ip/test_ip_all")
+    cpu "-v1 --ip --batch=inputs/ip/test_ip_all")
 register_benchdnn_test(test_benchdnn_ip_bf16
-    cpu "--ip --batch=inputs/ip/test_ip_bfloat16")
+    cpu "-v1 --ip --batch=inputs/ip/test_ip_bfloat16")
 register_benchdnn_test(test_benchdnn_shuffle
-    cpu "--shuffle --batch=inputs/shuffle/test_shuffle_all")
+    cpu "-v1 --shuffle --batch=inputs/shuffle/test_shuffle_all")
+register_benchdnn_test(test_benchdnn_shuffle_bf16
+    cpu "-v1 --shuffle --batch=inputs/shuffle/test_shuffle_bfloat16")
 register_benchdnn_test(test_benchdnn_softmax
-    cpu "--softmax --batch=inputs/softmax/test_softmax_all")
+    cpu "-v1 --softmax --batch=inputs/softmax/test_softmax_all")
 register_benchdnn_test(test_benchdnn_pool
-    cpu "--pool --batch=inputs/pool/test_pool_all")
+    cpu "-v1 --pool --batch=inputs/pool/test_pool_all")
+register_benchdnn_test(test_benchdnn_pool_bf16
+    cpu "-v1 --pool --batch=inputs/pool/test_pool_bfloat16")
+register_benchdnn_test(test_benchdnn_sum
+    cpu "-v1 --sum --batch=inputs/sum/test_sum_all")
+register_benchdnn_test(test_benchdnn_sum_bf16
+    cpu "-v1 --sum --batch=inputs/sum/test_sum_bfloat16")
+register_benchdnn_test(test_benchdnn_eltwise
+    cpu "-v1 --eltwise --batch=inputs/eltwise/test_eltwise_all")
+register_benchdnn_test(test_benchdnn_eltwise_bf16
+    cpu "-v1 --eltwise --batch=inputs/eltwise/test_eltwise_bfloat16")
+register_benchdnn_test(test_benchdnn_concat
+    cpu "-v1 --concat --batch=inputs/concat/test_concat_all")
+register_benchdnn_test(test_benchdnn_concat_bf16
+    cpu "-v1 --concat --batch=inputs/concat/test_concat_bfloat16")
 register_benchdnn_test(test_benchdnn_regression
     cpu
-    "--conv --batch=inputs/test_conv_regression"
-    "--bnorm --batch=inputs/bnorm/test_bnorm_regressions"
+    "-v1 --conv --batch=inputs/test_conv_regression"
+    "-v1 --bnorm --batch=inputs/bnorm/test_bnorm_regressions"
     )
 register_benchdnn_test(test_benchdnn_regression_large
     cpu
-    "--bnorm --batch=inputs/bnorm/test_bnorm_regressions_large"
+    "-v1 --bnorm --batch=inputs/bnorm/test_bnorm_regressions_large"
     )
 
-if(NOT MKLDNN_GPU_BACKEND STREQUAL "NONE")
+if(NOT MKLDNN_GPU_RUNTIME STREQUAL "NONE")
     register_benchdnn_test(test_benchdnn_conv
         gpu "-v1 --conv --batch=inputs/test_conv_gpu")
+    register_benchdnn_test(test_benchdnn_deconv
+        gpu "-v1 --deconv --batch=inputs/deconv/test_deconv_gpu")
     register_benchdnn_test(test_benchdnn_bnorm
-        gpu "--bnorm --batch=inputs/bnorm/test_bnorm_gpu")
+        gpu "-v1 --bnorm --batch=inputs/bnorm/test_bnorm_gpu")
     register_benchdnn_test(test_benchdnn_ip
-        gpu "--ip --batch=inputs/ip/test_ip_gpu")
+        gpu "-v1 --ip --batch=inputs/ip/test_ip_gpu")
     register_benchdnn_test(test_benchdnn_rnn
-        gpu "--rnn --batch=inputs/rnn/test_rnn_gpu")
+        gpu "-v1 --rnn --batch=inputs/rnn/test_rnn_gpu")
     register_benchdnn_test(test_benchdnn_pool
-        gpu "--pool --batch=inputs/pool/test_pool_gpu")
+        gpu "-v1 --pool --batch=inputs/pool/test_pool_gpu")
+    register_benchdnn_test(test_benchdnn_shuffle
+        gpu "-v1 --shuffle --batch=inputs/shuffle/test_shuffle_gpu")
+    register_benchdnn_test(test_benchdnn_softmax
+        gpu "-v1 --softmax --batch=inputs/softmax/test_softmax_gpu")
+    register_benchdnn_test(test_benchdnn_sum
+        gpu "-v1 --sum --batch=inputs/sum/test_sum_gpu")
+    register_benchdnn_test(test_benchdnn_concat
+        gpu "-v1 --concat --batch=inputs/concat/test_concat_gpu")
 endif()
 
 if(MKLDNN_INSTALL_MODE STREQUAL "BUNDLE")

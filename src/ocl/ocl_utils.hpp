@@ -335,8 +335,7 @@ struct ocl_kernel_t {
     }
 
     ocl_kernel_t &operator=(const ocl_kernel_t &other) {
-        if (&other == this)
-            return *this;
+        MKLDNN_SHORT_CIRCUIT_SELF_ASSIGN(other);
 
         if (kernel_) {
             clReleaseKernel(kernel_);
@@ -392,7 +391,7 @@ struct ocl_kernel_t {
     }
 
 private:
-    static constexpr int max_args = 17;
+    static constexpr int max_args = 20;
 
     cl_kernel kernel_ = nullptr;
     size_t nargs_ = 0;
@@ -465,9 +464,6 @@ struct ocl_jit_t {
         if (program_)
             clReleaseProgram(program_);
     }
-
-    ocl_jit_t(const ocl_jit_t &) = delete;
-    ocl_jit_t &operator=(const ocl_jit_t &) = delete;
 
     ocl_jit_t(ocl_jit_t &&other) {
         code_ = other.code_;
@@ -566,6 +562,8 @@ private:
     size_t code_size_;
     std::vector<char> options_;
     cl_program program_;
+
+    MKLDNN_DISALLOW_COPY_AND_ASSIGN(ocl_jit_t);
 };
 
 } // namespace ocl

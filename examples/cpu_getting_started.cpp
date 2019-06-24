@@ -15,7 +15,10 @@
 *******************************************************************************/
 
 /// @example cpu_getting_started.cpp
-/// Annotated version: @ref cpu_getting_started_cpp
+/// This C++ API example demonstrates basics of Intel MKL-DNN programming
+/// model.
+///
+/// > Annotated version: @ref cpu_getting_started_cpp
 
 #include <iostream>
 #include <sstream>
@@ -25,10 +28,7 @@
 #include <vector>
 
 /// @page cpu_getting_started_cpp Getting started
-///
-/// Full example text: @ref cpu_getting_started.cpp
-///
-/// @section cpu_getting_started_cpp_intro Introduction
+/// > Example code: @ref cpu_getting_started.cpp
 ///
 /// This C++ API example demonstrates basics of Intel MKL-DNN programming
 /// model:
@@ -433,8 +433,8 @@ void cpu_getting_started_tutorial() {
     ///     The @ref mkldnn::memory::get_data_handle() returns a raw handle
     ///     to the buffer which type is engine specific. For CPU engine the
     ///     buffer is always a pointer to `void` which can safely be used.
-    ///     However, for engines other than CPU the handle might be backend
-    ///     specific type, such as `cl_mem` in case of GPU/OpenCL.
+    ///     However, for engines other than CPU the handle might be
+    ///     runtime-specific type, such as `cl_mem` in case of GPU/OpenCL.
     ///
     /// @snippet cpu_getting_started.cpp Check the results
     // [Check the results]
@@ -518,7 +518,7 @@ int main(int argc, char **argv) {
 /// ~~~cpp
 /// relu.execute(cpu_stream, {
 ///         {MKLDNN_ARG_SRC, src_mem},
-///         // {MKLDNN_ARG_DST, dst_mem}, // Opps, forgot about this one
+///         // {MKLDNN_ARG_DST, dst_mem}, // Oops, forgot about this one
 ///     });
 /// ~~~
 ///

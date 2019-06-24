@@ -128,7 +128,7 @@ static inline bool mayiuse(const cpu_isa_t cpu_isa) {
     case avx512_core_bf16:
         return true
             && mayiuse(avx512_core_vnni)
-            && cpu.has(Cpu::tAVX512_BF);
+            && cpu.has(Cpu::tAVX512_BF16);
     case isa_any:
         return true;
     }
@@ -149,10 +149,11 @@ inline bool isa_has_bf16(cpu_isa_t isa) {
     (isa == avx2 ? prefix STRINGIFY(avx2) : \
     (isa == avx512_common ? prefix STRINGIFY(avx512_common) : \
     (isa == avx512_core ? prefix STRINGIFY(avx512_core) : \
+    (isa == avx512_core_vnni ? prefix STRINGIFY(avx512_core_vnni) : \
     (isa == avx512_mic ? prefix STRINGIFY(avx512_mic) : \
     (isa == avx512_mic_4ops ? prefix STRINGIFY(avx512_mic_4ops) : \
     (isa == avx512_core_bf16 ? prefix STRINGIFY(avx512_core_bf16) : \
-    prefix suffix_if_any))))))))
+    prefix suffix_if_any)))))))))
 
 }
 }

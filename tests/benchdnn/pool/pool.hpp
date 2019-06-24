@@ -34,7 +34,7 @@ namespace pool {
 enum alg_t { MAX, AVG_NP, AVG_P };
 alg_t str2alg(const char *str);
 const char *alg2str(alg_t alg);
-alg_t alg_kind2alg(mkldnn_alg_kind_t alg);
+mkldnn_alg_kind_t alg2alg_kind(alg_t alg);
 
 struct desc_t {
     int64_t mb, ic;
@@ -87,6 +87,8 @@ struct prb_t: public desc_t {
     const dt_conf_t *cfg;
     mkldnn_format_tag_t tag;
     alg_t alg;
+
+    BENCHDNN_DISALLOW_COPY_AND_ASSIGN(prb_t);
 };
 std::ostream &operator<<(std::ostream &s, const prb_t &p);
 
@@ -107,19 +109,28 @@ struct perf_report_t: public base_perf_report_t {
     }
 
     virtual void dump_desc_csv(std::ostream &s) const override {
-        const bool print_d = p_->id > 1;
+        s << p_->mb << ','
 
-        s << p_->mb << ',' << p_->ic << ',';
-        if (print_d) s << p_->id << ',';
-        s << p_->ih << ',' << p_->iw << ',';
-        if (print_d) s << p_->od << ',';
-        s << p_->oh << ',' << p_->ow << ',';
-        if (print_d) s << p_->kd << ',';
-        s << p_->kh << ',' << p_->kw << ',';
-        if (print_d) s << p_->sd << ',';
-        s << p_->sh << ',' << p_->sw << ',';
-        if (print_d) s << p_->pd << ',';
-        s << p_->ph << ',' << p_->pw;
+          << p_->ic << ','
+          << p_->id << ','
+          << p_->ih << ','
+          << p_->iw << ','
+
+          << p_->od << ','
+          << p_->oh << ','
+          << p_->ow << ','
+
+          << p_->kd << ','
+          << p_->kh << ','
+          << p_->kw << ','
+
+          << p_->sd << ','
+          << p_->sh << ','
+          << p_->sw << ','
+
+          << p_->pd << ','
+          << p_->ph << ','
+          << p_->pw;
     }
 
     virtual const char *name() const override { return p_->name; }

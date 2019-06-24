@@ -23,6 +23,7 @@
 
 #include "mkldnn.h"
 #include "src/common/bfloat16.hpp"
+#include "src/common/float16.hpp"
 #include "src/common/nstl.hpp"
 
 #include "common.hpp"
@@ -55,9 +56,11 @@
 } while(0)
 
 /* aux */
+using bfloat16_t = mkldnn::impl::bfloat16_t;
+using float16_t = mkldnn::impl::float16_t;
 template <mkldnn_data_type_t> struct prec_traits;
-template <> struct prec_traits<mkldnn_bf16> { typedef mkldnn::impl::bfloat16_t type; };
-template <> struct prec_traits<mkldnn_f16> { typedef mkldnn::impl::float16_t type; };
+template <> struct prec_traits<mkldnn_bf16> { typedef bfloat16_t type; };
+template <> struct prec_traits<mkldnn_f16> { typedef float16_t type; };
 template <> struct prec_traits<mkldnn_f32> { typedef float type; };
 template <> struct prec_traits<mkldnn_s32> { typedef int32_t type; };
 template <> struct prec_traits<mkldnn_s8> { typedef int8_t type; };
@@ -99,6 +102,28 @@ inline int digits_dt(mkldnn_data_type_t dt) {
 
 #undef CASE_ALL
 
+template <mkldnn_data_type_t dt> inline float saturate(float val) {
+    return MAX2(mkldnn::impl::nstl::numeric_limits<
+            typename prec_traits<dt>::type>::lowest(),
+            MIN2(mkldnn::impl::nstl::numeric_limits<
+                typename prec_traits<dt>::type>::max(), mxcsr_round(val)));
+}
+
+inline float maybe_saturate(mkldnn_data_type_t dt, float value) {
+    if (dt == mkldnn_s32 || dt == mkldnn_s8 || dt == mkldnn_u8) {
+        switch (dt) {
+#       define CASE(dt) case dt: { return saturate<dt>(value); }
+        CASE(mkldnn_s32);
+        CASE(mkldnn_s8);
+        CASE(mkldnn_u8);
+#       undef CASE
+        default: assert(!"bad data_type");
+        }
+        return 0;
+    }
+    return value;
+}
+
 /* simplification */
 extern mkldnn_engine_kind_t engine_tgt_kind;
 
@@ -111,19 +136,23 @@ extern mkldnn_stream_t stream_tgt;
 extern "C" mkldnn_status_t mkldnn_engine_create_with_backend(
         mkldnn_engine_t *engine, mkldnn_engine_kind_t kind, int backend_kind,
         size_t index);
+extern "C" mkldnn_status_t mkldnn_engine_get_backend_kind(
+        mkldnn_engine_t engine, int *backend_kind);
 
 inline int init() {
     /* Create engine with CPU native backend: backend_kind == 0 */
     DNN_SAFE(mkldnn_engine_create_with_backend(&engine_ref, mkldnn_cpu, 0, 0),
             CRIT);
-    DNN_SAFE(mkldnn_engine_create(&engine_tgt, engine_tgt_kind, 0), CRIT);
-
     DNN_SAFE(mkldnn_stream_create(
                      &stream_ref, engine_ref, mkldnn_stream_default_flags),
             CRIT);
-    DNN_SAFE(mkldnn_stream_create(
-                     &stream_tgt, engine_tgt, mkldnn_stream_default_flags),
-            CRIT);
+
+    if (!engine_tgt) {
+        DNN_SAFE(mkldnn_engine_create(&engine_tgt, engine_tgt_kind, 0), CRIT);
+        DNN_SAFE(mkldnn_stream_create(
+                         &stream_tgt, engine_tgt, mkldnn_stream_default_flags),
+                CRIT);
+    }
     return OK;
 }
 
@@ -164,6 +193,25 @@ inline mkldnn_status_t execute_and_wait(mkldnn_primitive_t prim,
     if (status != mkldnn_success)
         return status;
     return mkldnn_stream_wait(stream);
+}
+
+inline int measure_perf(benchdnn_timer_t &t, mkldnn_primitive_t prim,
+        args_t &args) {
+    if (bench_mode & PERF) {
+        t.reset();
+        while (true) {
+            DNN_SAFE(execute_and_wait(prim, stream_tgt, args.size(), args),
+                    WARN);
+            t.stamp();
+            const bool stop = false
+                || (fix_times_per_prb && t.times() >= fix_times_per_prb)
+                || (!fix_times_per_prb
+                        && t.total_ms() >= max_ms_per_prb
+                        && t.times() >= min_times_per_prb);
+            if (stop) break;
+        }
+    }
+    return OK;
 }
 
 #endif

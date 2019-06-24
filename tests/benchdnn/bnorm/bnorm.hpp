@@ -39,7 +39,7 @@ const char* check_alg2str(check_alg_t alg);
 using flags_t = unsigned;
 const flags_t GLOB_STATS = mkldnn_use_global_stats;
 const flags_t USE_SCALESHIFT = mkldnn_use_scaleshift;
-const flags_t FUSE_BN_RELU = mkldnn_fuse_bn_relu;
+const flags_t FUSE_NORM_RELU = mkldnn_fuse_norm_relu;
 flags_t str2flags(const char *str);
 const char *flags2str(flags_t flags);
 
@@ -53,10 +53,10 @@ std::ostream &operator<<(std::ostream &s, const desc_t &d);
 
 struct prb_t: public desc_t {
     prb_t(const desc_t &desc, int64_t mb, dir_t dir, mkldnn_data_type_t dt,
-            mkldnn_format_tag_t tag, flags_t flags, const attr_t &attr,
-            check_alg_t check_alg)
+            mkldnn_format_tag_t tag, flags_t flags, bool inplace,
+            const attr_t &attr, check_alg_t check_alg)
         : desc_t(desc), check_alg(check_alg), dir(dir), dt(dt), tag(tag)
-        , flags(flags), attr(attr)
+        , flags(flags), inplace(inplace), attr(attr)
     { if (mb) this->mb = mb; }
     ~prb_t() {}
 
@@ -66,6 +66,7 @@ struct prb_t: public desc_t {
     mkldnn_data_type_t dt;
     mkldnn_format_tag_t tag;
     flags_t flags;
+    bool inplace;
     attr_t attr;
 };
 std::ostream &operator<<(std::ostream &s, const prb_t &p);
@@ -79,9 +80,12 @@ struct perf_report_t: public base_perf_report_t {
     }
 
     virtual void dump_desc_csv(std::ostream &s) const override {
-        s << p_->mb << ',' << p_->ic << ',';
-        if (p_->id > 1) s << p_->id << ',';
-        s << p_->ih << ',' << p_->iw << ',' << p_->eps;
+        s << p_->mb << ','
+          << p_->ic << ','
+          << p_->id << ','
+          << p_->ih << ','
+          << p_->iw << ','
+          << p_->eps;
     }
 
     virtual void dump_flags(std::ostream &s) const override {
@@ -114,16 +118,6 @@ inline void inv_data_off(const prb_t *p, size_t off,
     c = off % p->ic; off /= p->ic;
     mb = off % p->mb; off /= p->mb;
     assert(off == 0);
-}
-
-inline bool is_bnorm_3d(const prb_t *p)
-{
-    return (p->id > 1) ? 1 : 0;
-}
-
-inline float saturate_and_round(float value) {
-    // hard code for s8 data type
-    return MAX2(INT8_MIN, MIN2(INT8_MAX, mxcsr_round(value)));
 }
 
 void compute_ref_fwd(const prb_t *p, const dnn_mem_t &src, dnn_mem_t &mean,

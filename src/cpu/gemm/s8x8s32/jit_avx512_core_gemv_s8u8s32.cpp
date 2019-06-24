@@ -36,6 +36,9 @@ int gemm_s8u8s32_jump_to_gemv_s8u8s32(
 
 template <>
 int gemm_s8u8s32_jump_to_gemv_s8u8s32(
+        gemm_info_t<int8_t, int8_t, int32_t> *arg) { return 0; }
+template <>
+int gemm_s8u8s32_jump_to_gemv_s8u8s32(
         gemm_info_t<bfloat16_t, bfloat16_t, float> *arg) { return 0; }
 
 template <>
@@ -44,12 +47,12 @@ int gemm_s8u8s32_jump_to_gemv_s8u8s32(
 
     gemm_info_t<int8_t, uint8_t, int32_t> arg_gemv = *arg;
 
-    if ((arg->offsetc == FIX_OFFSET) && // Fix offset
+    if ((arg->offsetc == offset_type::fixed) && // Fix offset
         (arg->ao == 0) &&
         (arg->bo == 0) &&
         (arg->co[0] == 0) &&
-        (*(arg->alpha) == 1.0f) &&
-        ((*(arg->beta) == 1.0f) || *(arg->beta) == 0.0f)) {
+        (arg->alpha == 1.0f) &&
+        (arg->beta == 1.0f || arg->beta == 0.0f)) {
 
         if (arg->n == 1) {
 
@@ -61,8 +64,7 @@ int gemm_s8u8s32_jump_to_gemv_s8u8s32(
                     arg_gemv.ldb = 1;
                 }
                 // B transpose arg_gemv.ldb = arg->ldb
-                gemv_threading_driver(&arg_gemv);
-                return 1;
+                return gemv_threading_driver(&arg_gemv);
             }
         }
 
@@ -82,8 +84,7 @@ int gemm_s8u8s32_jump_to_gemv_s8u8s32(
                 else { // A transpose
                     arg_gemv.ldb = 1;
                 }
-                gemv_threading_driver(&arg_gemv);
-                return 1;
+                return gemv_threading_driver(&arg_gemv);
             }
         }
     }
@@ -99,17 +100,17 @@ int gemv_kernel_driver(gemm_info_t<int8_t, uint8_t, int32_t> *arg) {
     uint8_t *a = (uint8_t *) arg->a;
     dim_t lda = arg->lda;
     int8_t *b = (int8_t *) arg->b;
-    float beta = *(arg->beta);
+    float beta = arg->beta;
 
     if (arg->swap) {
         arg->gemv_u8s8s32_kernel(m, n, 1.0f, a, lda, b, beta, arg->c);
     }
     else {
         arg->gemv_s8u8s32_kernel(arg->m, arg->n, 1.0f, arg->a, arg->lda,
-                arg->b, *(arg->beta), arg->c);
+                arg->b, beta, arg->c);
     }
 
-    return 0;
+    return 1;
 }
 
 int gemv_threading_driver(gemm_info_t<int8_t, uint8_t, int32_t> *arg) {
@@ -150,7 +151,7 @@ int gemv_threading_driver(gemm_info_t<int8_t, uint8_t, int32_t> *arg) {
     if (arg->ldb != 1) {
         new_x = (uint8_t *)malloc(n, 64);
         if (new_x == NULL)
-            return 1;
+            return 0;
         for (i = 0; i < n; i++) {
             new_x[i] = (arg->b)[i * arg->ldb];
         }
@@ -166,7 +167,7 @@ int gemv_threading_driver(gemm_info_t<int8_t, uint8_t, int32_t> *arg) {
             if (arg->ldb != 1) {
                 free(new_x);
             }
-            return 1;
+            return 0;
         }
         arg_seq.c = new_y;
         arg_seq.ldc = 1;
@@ -176,7 +177,7 @@ int gemv_threading_driver(gemm_info_t<int8_t, uint8_t, int32_t> *arg) {
     if (nthr == 1) {
 
         if (arg->ldc != 1) {
-            if (*(arg->beta) != 0.0f) {
+            if (arg->beta != 0.0f) {
                 for (i = 0; i < m; i++) {
                     new_y[i] = arg->c[i * arg->ldc];
                 }
@@ -208,7 +209,7 @@ int gemv_threading_driver(gemm_info_t<int8_t, uint8_t, int32_t> *arg) {
             if (arg->ldb != 1) {
                 free(new_x);
             }
-            return 1;
+            return 0;
         }
     }
 
@@ -242,7 +243,7 @@ int gemv_threading_driver(gemm_info_t<int8_t, uint8_t, int32_t> *arg) {
             myN = n_to - n_from;
 
             if (n_id != 0) {
-                arg_loc.beta = &zero;
+                arg_loc.beta = zero;
                 loc_y = tmp_y + (NEXT_THR_STRIDE(m, sizeof(int32_t)))
                     * (n_id - 1) + m_from;
             }
@@ -253,7 +254,7 @@ int gemv_threading_driver(gemm_info_t<int8_t, uint8_t, int32_t> *arg) {
                 else {
                     // need to copy the block of c in new_y
                     loc_y = new_y + m_id * NEXT_THR_STRIDE(MB, sizeof(int32_t));
-                    if (*(arg->beta) != 0.0f) {
+                    if (arg->beta != 0.0f) {
                         for (j = 0; j < myM; j++) {
                             loc_y[j] = arg->c[(m_from + j) * arg->ldc];
                         }
@@ -309,7 +310,7 @@ int gemv_threading_driver(gemm_info_t<int8_t, uint8_t, int32_t> *arg) {
         free(new_y);
     }
 
-    return 0;
+    return 1;
 }
 
 }

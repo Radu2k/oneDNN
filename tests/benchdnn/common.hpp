@@ -94,6 +94,10 @@ extern int verbose;
     } \
 } while (0)
 
+#define BENCHDNN_DISALLOW_COPY_AND_ASSIGN(T) \
+    T(const T&) = delete; \
+    T &operator=(const T&) = delete;
+
 enum prim_t {
     SELF,
     CONV,
@@ -105,6 +109,9 @@ enum prim_t {
     RNN,
     SOFTMAX,
     POOL,
+    SUM,
+    ELTWISE,
+    CONCAT,
     DEF = CONV,
 };
 
@@ -134,11 +141,17 @@ struct benchdnn_timer_t {
 
     double total_ms() const { return ms_[avg]; }
 
-    double ms(mode_t mode = benchdnn_timer_t::min) const
-    { return ms_[mode] / (mode == avg ? times_ : 1); }
+    double ms(mode_t mode = min) const {
+        if (!times()) return 0; // nothing to report
+        return ms_[mode] / (mode == avg ? times() : 1);
+    }
 
-    long long ticks(mode_t mode = min) const
-    { return ticks_[mode] / (mode == avg ? times_ : 1); }
+    double sec(mode_t mode = min) const { return ms(mode) / 1e3; }
+
+    long long ticks(mode_t mode = min) const {
+        if (!times()) return 0; // nothing to report
+        return ticks_[mode] / (mode == avg ? times() : 1);
+    }
 
     benchdnn_timer_t &operator=(const benchdnn_timer_t &rhs);
 
@@ -192,7 +205,7 @@ int batch(const char *fname, bench_f bench);
 /* returns 1 with given probability */
 int flip_coin(ptrdiff_t seed, float probability);
 
-int div_up(const int a, const int b);
+int64_t div_up(const int64_t a, const int64_t b);
 int mxcsr_round(float f);
 
 /* set '0' across *arr:+size */

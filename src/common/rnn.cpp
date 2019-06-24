@@ -83,9 +83,9 @@ status_t check_data_type_consistency_fwd(mkldnn_alg_kind_t cell_kind,
     data_type_t weights_layer_dt = weights_layer_desc->data_type;
 
     bool cell_state_check = IMPLICATION(!is_zero_md(src_iter_c_desc),
-                                    src_iter_c_desc->data_type == f32)
+                          one_of(src_iter_c_desc->data_type, f32, f16))
             && IMPLICATION(!is_zero_md(dst_iter_c_desc),
-                       dst_iter_c_desc->data_type == f32);
+                          one_of(dst_iter_c_desc->data_type, f32, f16));
 
     bool is_f32 = everyone_is(f32, src_layer_dt, dst_layer_dt, weights_iter_dt,
                           weights_layer_dt)
@@ -103,7 +103,6 @@ status_t check_data_type_consistency_fwd(mkldnn_alg_kind_t cell_kind,
                           dst_iter_desc->data_type == f16)
             && IMPLICATION(!is_zero_md(bias_desc), bias_desc->data_type == f16);
 
-#if USE_MKL_PACKED_GEMM
     bool is_u8u8u8 = src_layer_dt == u8
             && IMPLICATION(!is_zero_md(src_iter_desc),
                              src_iter_desc->data_type == u8)
@@ -133,9 +132,6 @@ status_t check_data_type_consistency_fwd(mkldnn_alg_kind_t cell_kind,
             || ((is_u8u8u8 || is_f32u8f32) && is_lstm && is_inference))
             ? success
             : unimplemented;
-#else
-    return cell_state_check && (is_f32 || is_f16) ? success : unimplemented;
-#endif
 }
 
 status_t check_dim_consistency(mkldnn_alg_kind_t cell_kind,

@@ -47,7 +47,7 @@ struct jit_ref_bnorm_common_kernel {
 
         jbn.ic = data_mdw.dims()[1];
         jbn.id = (ndims == 5) ? data_mdw.dims()[2] : 1;
-        jbn.ih = data_mdw.dims()[ndims - 2];
+        jbn.ih = (ndims == 3) ? 1 : data_mdw.dims()[ndims - 2];
         jbn.iw = data_mdw.dims()[ndims - 1];
 
         jbn.is_forward = utils::one_of(bd.prop_kind,
@@ -58,7 +58,7 @@ struct jit_ref_bnorm_common_kernel {
         jbn.use_scaleshift = bdesc->use_scaleshift();
         jbn.save_stats = bdesc->is_training();
         jbn.is_training = bdesc->is_training();
-        jbn.fuse_bn_relu = bdesc->fuse_bn_relu();
+        jbn.fuse_norm_relu = bdesc->fuse_norm_relu();
         jbn.calculate_stats = !bdesc->stats_is_src();
         jbn.with_relu = bdesc->with_relu_post_op();
         jbn.eps = bd.batch_norm_epsilon;
@@ -81,9 +81,10 @@ struct jit_ref_bnorm_common_kernel {
 
         const bool has_padding = !data_mdw.is_dense();
         if (!has_padding
-                && data_mdw.matches_one_of_tag(
-                    NChw16n16c, nChw16c, NCdhw16n16c, nCdhw16c)) {
-            jbn.mb_block = data_mdw.matches_one_of_tag(NChw16n16c, NCdhw16n16c)
+                && data_mdw.matches_one_of_tag(nCw16c, nChw16c, nCdhw16c,
+                        NCw16n16c, NChw16n16c, NCdhw16n16c)) {
+            jbn.mb_block = data_mdw.matches_one_of_tag(
+                                   NCw16n16c, NChw16n16c, NCdhw16n16c)
                     ? 16
                     : 1;
             jbn.mb_chunk = nstl::min((jbn.mb / jbn.mb_block), 256);
@@ -127,7 +128,7 @@ struct jit_ref_bnorm_common_kernel {
         jit.define_int("WITH_RELU", jbn.with_relu);
         jit.define_int("SAVE_STATS", jbn.save_stats);
         jit.define_int("IS_TRAINING", jbn.is_training);
-        jit.define_int("FUSE_BN_RELU", jbn.fuse_bn_relu);
+        jit.define_int("FUSE_BN_RELU", jbn.fuse_norm_relu);
         jit.define_int("CALCULATE_STATS", jbn.calculate_stats);
         jit.define_int("USE_SCALESHIFT", jbn.use_scaleshift);
         jit.define_int("CALCULATE_DIFF_STATS", jbn.calculate_diff_stats);

@@ -35,13 +35,11 @@ const int64_t global_fill_range = 200;
 static int init_pd(const prb_t *p, mkldnn_softmax_desc_t &sd,
         mkldnn_primitive_desc_t &spd, res_t *r) {
     mkldnn_memory_desc_t data_d;
-    mkldnn_dims_t data_dims;
-    const int ndims = (int)p->dims.size();
-    for (int i = 0; i < ndims; ++i)
-        data_dims[i] = p->dims[i];
 
-    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&data_d, ndims, data_dims,
-                p->dt, p->tag), WARN);
+    const int ndims = (int)p->dims.size();
+    DNN_SAFE(mkldnn_memory_desc_init_by_tag(
+                     &data_d, ndims, p->dims.data(), p->dt, p->tag),
+            WARN);
 
     if (p->dir & FLAG_FWD) {
         auto prop = p->dir & FLAG_INF
@@ -57,6 +55,11 @@ static int init_pd(const prb_t *p, mkldnn_softmax_desc_t &sd,
     mkldnn_status_t init_status = mkldnn_primitive_desc_create(&spd, &sd,
             NULL, engine_tgt, NULL);
 
+    if (init_status == mkldnn_unimplemented)
+        return r->state = UNIMPLEMENTED, OK;
+    else
+        SAFE(init_status, WARN);
+
     const char *impl_str = query_impl_info(spd);
     if (maybe_skip(skip_impl, impl_str)) {
         print(2, "SKIPPED: mkldnn implementation: %s\n", impl_str);
@@ -66,22 +69,11 @@ static int init_pd(const prb_t *p, mkldnn_softmax_desc_t &sd,
         print(5, "mkldnn implementation: %s\n", impl_str);
     }
 
-    if (init_status == mkldnn_unimplemented)
-        return r->state = UNIMPLEMENTED, OK;
-    else
-        SAFE(init_status, WARN);
-
     return OK;
 }
 
-static int compare(const prb_t *p, data_kind_t kind, const dnn_mem_t &fp_mem,
-                const dnn_mem_t &dt_mem, res_t *r) {
-    const int64_t N = p->dims[0];
-    const int64_t C = p->dims[1];
-    int64_t SP = 1;
-    for (size_t i = 2; i < p->dims.size(); i++)
-        SP *= p->dims[i];
-
+static int compare(const prb_t *p, const dnn_mem_t &fp_mem,
+        const dnn_mem_t &dt_mem, res_t *r) {
     // FWD
     // When axis_size is big, significant values will be only in points with the
     // biggest values are. So we adjust machine epsilon to the amount of such
@@ -99,16 +91,16 @@ static int compare(const prb_t *p, data_kind_t kind, const dnn_mem_t &fp_mem,
     const float num_significant_values =
         MAX2(div_up(p->dims[p->axis], global_fill_range),
                 MAX2(log2f(p->dims[p->axis]), 10));
-    const float trh = 1e-7 * (p->dir & FLAG_FWD
+    const int f32_mant_digits = 24;
+    const float trh_coeff = (1 << (f32_mant_digits - digits_dt(p->dt)));
+    const float trh = trh_coeff * 1e-7 * (p->dir & FLAG_FWD
         ? num_significant_values : (p->dims[p->axis] + 1));
 
+    const auto nelems = dt_mem.nelems();
     r->errors = 0;
-    r->total = dt_mem.nelems();
+    r->total = nelems;
 
-    for (int64_t n = 0; n < N; ++n)
-    for (int64_t c = 0; c < C; ++c)
-    for (int64_t sp = 0; sp < SP; ++sp) {
-        const int64_t i = (n * C + c) * SP + sp;
+    for (int64_t i = 0; i < nelems; i++) {
         const float dt = dt_mem.get_elem(i);
         const float fp = fp_mem.get_elem(i);
 
@@ -120,11 +112,16 @@ static int compare(const prb_t *p, data_kind_t kind, const dnn_mem_t &fp_mem,
 
         const bool dump = false
             || (!ok && (r->errors < 10 || verbose >= 10))
-            || (verbose >= 50 && i < 30);
+            || (verbose >= 50 && i < 30)
+            || (verbose >= 99);
         if (dump) {
-            print(0, "[%4lu][" IFMT "," IFMT "," IFMT"] "
-                    "fp:%12g dt:%12g diff:%12g rdiff:%12g\n",
-                    (unsigned long)i, n, c, sp, fp, dt, diff, rel_diff);
+            std::stringstream ss;
+            dims_t dims_idx = off2dims_idx(p->dims, i);
+            ss << dims_idx;
+            std::string ind_str = ss.str();
+
+            print(0, "[%4ld][%s] fp:%8g dt:%8g diff:%8g rdiff:%8g\n",
+                    (long)i, ind_str.c_str(), fp, dt, diff, rel_diff);
         }
     }
 
@@ -137,8 +134,8 @@ static int compare(const prb_t *p, data_kind_t kind, const dnn_mem_t &fp_mem,
     return r->state == FAILED ? FAIL : OK;
 }
 
-int fill_data_fwd(const prb_t *p, dnn_mem_t &src, res_t *r) {
-    const int64_t nelems = src.nelems();
+int fill_data_fwd(const prb_t *p, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp) {
+    const auto nelems = mem_fp.nelems();
 
     mkldnn::impl::parallel_nd(nelems, [&](int64_t i) {
             int64_t mb{0}, c{0};
@@ -149,24 +146,28 @@ int fill_data_fwd(const prb_t *p, dnn_mem_t &src, res_t *r) {
                 : -global_fill_range / 2;
             const float gen = ((11 * i) + 37) % global_fill_range;
             const float value = f_min + gen;
-            ((float *)src)[i] = value;
+            mem_fp.set_elem(i, value);
         }
     );
+
+    SAFE(mem_dt.reorder(mem_fp), WARN);
 
     return OK;
 }
 
-int fill_data_bwd(const prb_t *p, dnn_mem_t &src, res_t *r) {
-    const int64_t nelems = src.nelems();
+int fill_data_bwd(const prb_t *p, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp) {
+    const auto nelems = mem_fp.nelems();
 
     // keep all values negative to have sum and sub of same sign, avoiding
     // cancellation error.
     mkldnn::impl::parallel_nd(nelems, [&](int64_t i) {
             const float gen = ((11 * i) + 37) % global_fill_range;
             const float value = -gen / global_fill_range;
-            ((float *)src)[i] = value;
+            mem_fp.set_elem(i, value);
         }
     );
+
+    SAFE(mem_dt.reorder(mem_fp), WARN);
 
     return OK;
 }
@@ -185,63 +186,61 @@ int doit(const prb_t *p, res_t *r) {
 
     const auto fp = mkldnn_f32;
     const auto tag = get_default_tag((int)p->dims.size());
-    auto &data_dt_d = sd.data_desc;
-    dnn_mem_t data_fp(data_dt_d, fp, tag, engine_ref),
-              data_dt(data_dt_d, engine_tgt);
-    dnn_mem_t d_data_fp(data_dt_d, fp, tag, engine_ref),
-              d_data_dt(data_dt_d, engine_tgt);
+    auto &data_desc = sd.data_desc;
+    dnn_mem_t src_fp(data_desc, fp, tag, engine_ref),
+              src_dt(data_desc, engine_tgt);
+
+    dnn_mem_t dst_fp(data_desc, fp, tag, engine_ref);
+    dnn_mem_t dst_dt;
+    if (!p->inplace) {
+        dst_dt = dnn_mem_t(data_desc, engine_tgt);
+        SAFE(dst_dt.reorder(dst_fp), WARN);
+    }
+
+    dnn_mem_t d_dst_fp(data_desc, fp, tag, engine_ref),
+              d_dst_dt(data_desc, engine_tgt);
+
+    dnn_mem_t d_src_fp(data_desc, fp, tag, engine_ref);
+    dnn_mem_t d_src_dt;
+    if (!p->inplace) {
+        d_src_dt = dnn_mem_t(data_desc, engine_tgt);
+        SAFE(d_src_dt.reorder(d_src_fp), WARN);
+    }
 
     args_t args;
 
     if (p->dir & FLAG_FWD) {
-        SAFE(fill_data_fwd(p, data_fp, r), WARN);
-        SAFE(data_dt.reorder(data_fp), WARN);
+        SAFE(fill_data_fwd(p, src_dt, src_fp), WARN);
 
-        args.set(MKLDNN_ARG_SRC, data_dt.m_);
-        args.set(MKLDNN_ARG_DST, data_dt.m_);
+        args.set(MKLDNN_ARG_SRC, src_dt.m_);
+        args.set(MKLDNN_ARG_DST, p->inplace ? src_dt.m_ : dst_dt.m_);
 
         DNN_SAFE(execute_and_wait(s, stream_tgt, args.size(), args), WARN);
 
         if (bench_mode & CORR) {
-            compute_ref_fwd(p, data_fp, data_fp);
-            dnn_mem_t data(data_dt, fp, tag, engine_ref);
-            SAFE(compare(p, DATA, data_fp, data, r), WARN);
+            compute_ref_fwd(p, src_fp, dst_fp);
+            dnn_mem_t dst(p->inplace ? src_dt : dst_dt, fp, tag, engine_ref);
+            SAFE(compare(p, dst_fp, dst, r), WARN);
         }
     } else {
-        SAFE(fill_data_bwd(p, data_fp, r), WARN);
-        SAFE(data_dt.reorder(data_fp), WARN);
+        SAFE(fill_data_bwd(p, src_dt, src_fp), WARN);
+        SAFE(fill_data_bwd(p, d_dst_dt, d_dst_fp), WARN);
 
-        SAFE(fill_data_bwd(p, d_data_fp, r), WARN);
-        SAFE(d_data_dt.reorder(d_data_fp), WARN);
-
-        args.set(MKLDNN_ARG_DST, data_dt.m_);
-        args.set(MKLDNN_ARG_DIFF_DST, d_data_dt.m_);
-        args.set(MKLDNN_ARG_DIFF_SRC, d_data_dt.m_);
+        args.set(MKLDNN_ARG_DST, src_dt.m_);
+        args.set(MKLDNN_ARG_DIFF_DST, d_dst_dt.m_);
+        args.set(MKLDNN_ARG_DIFF_SRC, p->inplace ? d_dst_dt.m_ : d_src_dt.m_);
 
         DNN_SAFE(execute_and_wait(s, stream_tgt, args.size(), args), WARN);
 
         if (bench_mode & CORR) {
-            compute_ref_bwd(p, data_fp, d_data_fp, d_data_fp);
-            dnn_mem_t data(d_data_dt, fp, tag, engine_ref);
-            SAFE(compare(p, DATA, data, d_data_fp, r), WARN);
+            compute_ref_bwd(p, src_fp, d_dst_fp, d_src_fp);
+            dnn_mem_t d_src(p->inplace ? d_dst_dt : d_src_dt, fp, tag,
+                    engine_ref);
+            SAFE(compare(p, d_src_fp, d_src, r), WARN);
         }
     }
 
-    if (bench_mode & PERF) {
-        auto &t = r->timer;
-        t.reset();
-        while (true) {
-            DNN_SAFE(execute_and_wait(s, stream_tgt, args.size(), args),
-                    WARN);
-            t.stamp();
-            const bool stop = false
-                || (fix_times_per_prb && t.times() >= fix_times_per_prb)
-                || (!fix_times_per_prb
-                        && t.total_ms() >= max_ms_per_prb
-                        && t.times() >= min_times_per_prb);
-            if (stop) break;
-        }
-    }
+    measure_perf(r->timer, s, args);
 
     DNN_SAFE(mkldnn_primitive_destroy(s), CRIT);
 

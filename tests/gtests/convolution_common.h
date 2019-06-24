@@ -71,7 +71,7 @@
 #endif
 
 #define FMT_BIAS x
-#define FMT_NO_BIAS format_undef
+#define FMT_NO_BIAS undef
 #define FMT_DATA_BLOCKED nChw8c
 #define FMT_DATA_BLOCKED16 nChw16c
 
@@ -87,6 +87,10 @@
         str, convolution_test, ::testing::Values(__VA_ARGS__))
 #define GPU_INST_TEST_CASE(str, ...) GPU_INST_TEST_CASE_( \
         CONCAT_WITH_UNDERSCORE(TEST_CASE_NAME_PREFIX, str), __VA_ARGS__)
+
+#define INST_TEST_CASE(str, ...) \
+        CPU_INST_TEST_CASE(str, __VA_ARGS__); \
+        GPU_INST_TEST_CASE(str, __VA_ARGS__)
 
 #define PARAMS(src, weights, bias, dst, ...) \
     test_convolution_params_t { ALGORITHM, \

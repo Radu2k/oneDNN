@@ -40,7 +40,7 @@ flags_t str2flags(const char *str) {
     while (str && *str) {
         if (*str == 'G') flags |= GLOB_STATS;
         if (*str == 'S') flags |= USE_SCALESHIFT;
-        if (*str == 'R') flags |= FUSE_BN_RELU;
+        if (*str == 'R') flags |= FUSE_NORM_RELU;
         str++;
     }
     return flags;
@@ -49,14 +49,14 @@ flags_t str2flags(const char *str) {
 const char *flags2str(flags_t flags) {
     if (flags & GLOB_STATS) {
         if (flags & USE_SCALESHIFT)
-            return flags & FUSE_BN_RELU ? "GSR" : "GS";
-        return flags & FUSE_BN_RELU ? "GR" : "G";
+            return flags & FUSE_NORM_RELU ? "GSR" : "GS";
+        return flags & FUSE_NORM_RELU ? "GR" : "G";
     }
 
     if (flags & USE_SCALESHIFT)
-        return flags & FUSE_BN_RELU ? "SR" : "S";
+        return flags & FUSE_NORM_RELU ? "SR" : "S";
 
-    return flags & FUSE_BN_RELU ? "R" : "";
+    return flags & FUSE_NORM_RELU ? "R" : "";
 }
 
 int str2desc(desc_t *desc, const char *str) {
@@ -92,6 +92,7 @@ int str2desc(desc_t *desc, const char *str) {
         if (!strncmp(p, s, strlen(p))) { \
             ok = 1; s += strlen(p); \
             char *end_s; d. c = cvfunc(s, &end_s); s += (end_s - s); \
+            if (d. c < 0) return FAIL; \
             /* printf("@@@debug: %s: " IFMT "\n", p, d. c); */ \
         } \
     } while (0)
@@ -111,10 +112,12 @@ int str2desc(desc_t *desc, const char *str) {
 #   undef CASE_NN
 #   undef CASE_N
 
+    if (d.ic == 0 || (d.id == 0 && d.ih == 0 && d.iw == 0))
+        return FAIL;
+
     if (d.id == 0) d.id = 1;
-    if (d.ih == 0) d.ih = d.iw;
+    if (d.ih == 0) d.ih = 1;
     if (d.iw == 0) d.iw = d.ih;
-    if (d.ic == 0 || d.ih == 0 || d.iw == 0) return FAIL;
 
     *desc = d;
 
@@ -140,18 +143,22 @@ std::ostream &operator<<(std::ostream &s, const desc_t &d) {
 }
 
 std::ostream &operator<<(std::ostream &s, const prb_t &p) {
+    dump_global_params(s);
+
     if (p.dir != FWD_D)
         s << "--dir=" << dir2str(p.dir) << " ";
     if (p.dt != mkldnn_f32)
         s << "--dt=" << dt2str(p.dt) << " ";
     if (p.tag != mkldnn_nchw)
-        s << "--tag=" << tag2str(p.tag) << " ";
+        s << "--tag=" << fmt_tag2str(p.tag) << " ";
     if (p.flags != (flags_t)0)
         s << "--flags=" << flags2str(p.flags) << " ";
     if (p.check_alg != ALG_AUTO)
         s << "--check-alg=" << check_alg2str(p.check_alg) << " ";
     if (!p.attr.is_def())
         s << "--attr=\"" << p.attr << "\" ";
+    if (p.inplace != true)
+        s << "--inplace=" << bool2str(p.inplace) << " ";
 
     s << static_cast<const desc_t &>(p);
 

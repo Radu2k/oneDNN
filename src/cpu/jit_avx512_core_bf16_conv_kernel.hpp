@@ -96,10 +96,14 @@ private:
     reg64_t aux_reg_inp = r12;
     reg64_t aux_reg_ker = r13;
 
+    reg64_t aux_reg_ker_d = r14;
+    reg64_t aux_reg_inp_d = r15;
+
     reg64_t reg_icb = rax;
     reg64_t reg_bias = rbx;
 
     reg64_t reg_kj = abi_not_param1;
+    reg64_t reg_ki = reg_out;
     reg64_t reg_oi = rdx;
     reg64_t reg_kh = rsi;
 
@@ -227,6 +231,9 @@ private:
     reg64_t aux_reg_dst = r14;
     reg64_t aux_reg_ker = r15;
 
+    reg64_t aux_reg_dst_d = r12;
+    reg64_t aux_reg_ker_d = r13;
+    reg64_t reg_ki = reg_src;
 
     reg64_t reg_kj = rax;
     reg64_t reg_oi = rbx;
@@ -374,6 +381,8 @@ private:
     inline void compute_oh_step_common(int ic_block_step);
     inline void compute_oh_step_disp();
     inline void compute_loop();
+    inline void compute_oh_loop_common();
+    inline void compute_od_loop_common();
 
     void generate();
 

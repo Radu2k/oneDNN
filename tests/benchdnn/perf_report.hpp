@@ -27,58 +27,7 @@
 #include "mkldnn.h"
 #include "mkldnn_memory.hpp"
 
-#if 0
-**benchdnn** supports custom performance report. Template is passed via
-command line and consists of terminal and nonterminal symbols. Nonterminal
-symbols are printed as is. Description of terminal symbols is given below.
-There is also a notion of modifiers (marked as @) that change meaning of
-terminal symbols, e.g. sign '-' means minimum of (in terms of time). See
-table of modifiers below.
-
-> **caution:** threads have to be pinned in order to get consistent frequency
-
-Options supported:
-| Syntax        | Primitives               | Description
-| :--           | :--                      | :--
-| %alg%         | Conv                     | Primitive algorithm
-| %attr%        | Bnorm, Conv, IP          | Primitive attributes
-| %axis%        | Shuffle, Softmax         | Shuffle and softmax axis
-| %@bw%         | All with ops             | Bytes per second (modifier extended)
-| %cfg%         | Conv, IP, RNN            | Config, describes data types and filling rules
-| %@clocks%     | All                      | Time in clocks (modifier extended)
-| %desc%        | All                      | Problem descriptor (dimensions and other options included)
-| %DESC%        | All                      | CSV-style problem descriptor (mostly dimensions)
-| %dir%         | All, except RNN, Reorder | Primitive direction
-| %dt%          | Bnorm, Shuffle, Softmax  | Data type (precision)
-| %idt%/%odt%   | Reorder                  | Input/Output data types (precision)
-| %engine%      | All                      | Engine kind
-| %flags%       | Bnorm                    | Batch normalization flags
-| %@flops%      | All with ops             | Ops per second (modifier extended)
-| %@freq%       | All                      | Effective cpu frequency computed as clocks[@] / time[@]
-| %group%       | Shuffle                  | Shuffle group
-| %name%        | All with desc_t          | Problem name
-| %@ops%        | All with ops             | Number of ops required (padding is not taken into account)
-| %prop%        | RNN                      | RNN properties
-| %tag%         | Bnorm, Shuffle, Softmax  | Data format tag (physical memory layout)
-| %itag%/%otag% | Reorder                  | Input/Output data format tag (physical memory layout)
-| %@time%       | All                      | Time in ms (modifier extended)
-
-Modifiers supported:
-| Name  | Description
-| :--   | :--
-| Time: |
-| -     | min (time) -- default
-| 0     | avg (time)
-| +     | max (time)
-|       |
-| Unit: |      (1e0) -- default
-| K     | Kilo (1e3)
-| M     | Mega (1e6)
-| G     | Giga (1e9)
-
-Each primitive has its own descriptor type with options supported. Dimensions
-description can be found internally at each primitive hpp-file.
-#endif
+// Please update doc/knobs_perf_report.md in case of any changes!
 
 struct base_perf_report_t {
     base_perf_report_t(const char *perf_template) : pt_(perf_template) {}
@@ -108,6 +57,18 @@ struct base_perf_report_t {
             return; \
         }
 
+        auto get_flops = [&]() -> double {
+            if (!t.sec(mode)) return 0;
+            return ops() / t.sec(mode) / unit;
+        };
+
+        auto get_bw = [&]() -> double { return get_flops(); };
+
+        auto get_freq = [&]() -> double {
+            if (!t.sec(mode)) return 0;
+            return t.ticks(mode) / t.sec(mode) / unit;
+        };
+
         HANDLE("alg", dump_alg(s));
         HANDLE("cfg", dump_cfg(s));
         HANDLE("DESC", dump_desc_csv(s));
@@ -118,20 +79,20 @@ struct base_perf_report_t {
         HANDLE("dir", if (dir()) s << dir2str(*dir()));
         HANDLE("dt", if (dt()) s << dt2str(*dt()));
         HANDLE("group", if (group()) s << *group());
-        HANDLE("idt", if (idt()) s << dt2str(*idt()));
-        HANDLE("itag", if (itag()) s << tag2str(*itag()));
+        HANDLE("sdt", if (sdt()) s << *sdt());
+        HANDLE("stag", if (stag()) s << *stag());
         HANDLE("name", if (name()) s << name());
-        HANDLE("odt", if (odt()) s << dt2str(*odt()));
-        HANDLE("otag", if (otag()) s << tag2str(*otag()));
+        HANDLE("ddt", if (ddt()) s << dt2str(*ddt()));
+        HANDLE("dtag", if (dtag()) s << fmt_tag2str(*dtag()));
         HANDLE("prop", if (prop()) s << prop2str(*prop()));
-        HANDLE("tag", if (tag()) s << tag2str(*tag()));
+        HANDLE("tag", if (tag()) s << fmt_tag2str(*tag()));
 
-        HANDLE("bw", s << ops() / t.ms(mode) / unit * 1e3);
-        HANDLE("flops", s << ops() / t.ms(mode) / unit * 1e3);
+        HANDLE("bw", s << get_bw());
+        HANDLE("flops", s << get_flops());
         HANDLE("clocks", s << t.ticks(mode) / unit);
         HANDLE("desc", s << prb_str);
         HANDLE("engine", s << engine_kind2str(engine_tgt_kind));
-        HANDLE("freq", s << t.ticks(mode) / t.ms(mode) / unit * 1e3);
+        HANDLE("freq", s << get_freq());
         HANDLE("ops", s << ops() / unit);
         HANDLE("time", s << t.ms(mode) / unit);
 
@@ -164,11 +125,13 @@ struct base_perf_report_t {
     virtual const int64_t *group() const { return nullptr; }
     virtual const dir_t *dir() const { return nullptr; }
     virtual const mkldnn_data_type_t *dt() const { return nullptr; }
-    virtual const mkldnn_data_type_t *idt() const { return nullptr; }
-    virtual const mkldnn_data_type_t *odt() const { return nullptr; }
+    virtual const std::vector<mkldnn_data_type_t> *sdt() const
+    { return nullptr; }
+    virtual const mkldnn_data_type_t *ddt() const { return nullptr; }
     virtual const mkldnn_format_tag_t *tag() const { return nullptr; }
-    virtual const mkldnn_format_tag_t *itag() const { return nullptr; }
-    virtual const mkldnn_format_tag_t *otag() const { return nullptr; }
+    virtual const std::vector<mkldnn_format_tag_t> *stag() const
+    { return nullptr; }
+    virtual const mkldnn_format_tag_t *dtag() const { return nullptr; }
     virtual const mkldnn_prop_kind_t *prop() const { return nullptr; }
 
     /* primitive-specific properties (but with common interface) */

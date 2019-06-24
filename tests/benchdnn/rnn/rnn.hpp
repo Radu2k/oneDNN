@@ -85,6 +85,8 @@ private:
     Telem *_base_ptr;
     int64_t _size;
     int64_t *_dims;
+
+    BENCHDNN_DISALLOW_COPY_AND_ASSIGN(array_offset_calculator);
 };
 
 struct desc_t {
@@ -155,7 +157,7 @@ typedef struct dt_conf_t {
     mkldnn_data_type_t dt;
     int min, max; /* representative */
     int f_min, f_max; /* fill range */
-    float f_mean, f_var; /* mean and variance of normally distributed data */
+    float f_mean, f_stddev; /* mean and std deviation of normally distributed data */
     double eps; /* acceptable error */
 } _dt_conf_t[data_kind_total];
 
@@ -174,11 +176,9 @@ policy_t str2policy(const char *str);
 const char *policy2str(attr_t::scale_t::policy_t policy);
 
 struct prb_t : public desc_t {
-    prb_t(const desc_t desc, const dt_conf_t *cfg,
-            mkldnn_prop_kind_t prop, alg_t alg,
-            mkldnn_rnn_direction_t direction,
-            const attr_t &attr, policy_t scale_policy,
-            unsigned int flags,  activation_t activation,
+    prb_t(const desc_t &desc, const dt_conf_t *cfg, mkldnn_prop_kind_t prop,
+            alg_t alg, mkldnn_rnn_direction_t direction, const attr_t &attr,
+            policy_t scale_policy, unsigned int flags, activation_t activation,
             float alpha, float beta, int mb = 0)
         : desc_t(desc)
         , cfg(cfg)

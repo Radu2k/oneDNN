@@ -32,7 +32,7 @@
 
 #include "mkldnn.h"
 
-#if MKLDNN_WITH_OPENCL
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
 #include <CL/cl.h>
 #endif
 
@@ -313,6 +313,8 @@ enum class algorithm {
     eltwise_logistic = mkldnn_eltwise_logistic,
     /// Eltwise: exponent
     eltwise_exp = mkldnn_eltwise_exp,
+    /// Eltwise: gelu
+    eltwise_gelu = mkldnn_eltwise_gelu,
     /// Local response normalization (LRN) across multiple channels
     lrn_across_channels = mkldnn_lrn_across_channels,
     /// LRN within a single channel
@@ -346,8 +348,8 @@ inline mkldnn_alg_kind_t convert_to_c(algorithm aalgorithm) {
     return static_cast<mkldnn_alg_kind_t>(aalgorithm);
 }
 
-/// Flags for batch-normalization primititve.
-enum class batch_normalization_flags : unsigned {
+/// Flags for batch normalization primitive.
+enum class normalization_flags : unsigned {
     /// Use global statistics
     ///
     /// If specified
@@ -383,12 +385,12 @@ enum class batch_normalization_flags : unsigned {
     ///    fused with ReLU via post ops API
     ///  - on training primitive requires workspace (required to be able to
     ///    perform backward pass)
-    fuse_bn_relu = mkldnn_fuse_bn_relu
+    fuse_norm_relu = mkldnn_fuse_norm_relu
 };
 
-inline mkldnn_batch_normalization_flags_t convert_to_c(
-        batch_normalization_flags aflag) {
-    return static_cast<mkldnn_batch_normalization_flags_t>(aflag);
+inline mkldnn_normalization_flags_t convert_to_c(
+        normalization_flags aflag) {
+    return static_cast<mkldnn_normalization_flags_t>(aflag);
 }
 
 enum class rnn_flags : unsigned {
@@ -438,7 +440,7 @@ inline enum_name operator~(enum_name rhs) {                             \
     return static_cast<enum_name>(~static_cast<unsigned>(rhs));         \
 }                                                                       \
 
-MKLDNN_DEFINE_BITMASK_OPS(batch_normalization_flags)
+MKLDNN_DEFINE_BITMASK_OPS(normalization_flags)
 MKLDNN_DEFINE_BITMASK_OPS(rnn_flags)
 
 #undef MKLDNN_DEFINE_BITMASK_OPS
@@ -815,7 +817,9 @@ struct engine: public handle<mkldnn_engine_t> {
         reset(aengine);
     }
 
-#if MKLDNN_WITH_OPENCL
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
+    /// Constructs an engine of particular @p akind associated with the given
+    /// OpenCL @p device and @p context objects.
     engine(kind akind, cl_device_id device, cl_context context) {
         mkldnn_engine_t aengine;
         error::wrap_c_api(mkldnn_engine_create_ocl(&aengine,
@@ -825,9 +829,12 @@ struct engine: public handle<mkldnn_engine_t> {
     }
 #endif
 
+    /// Constructs an engine from other engine @p aengine.
     explicit engine(const mkldnn_engine_t& aengine)
         : handle(aengine, true) {}
 
+    /// Constructs an engine from the primitive descriptor @p pd
+    /// by querying its engine.
     engine(const handle<mkldnn_primitive_desc_t> &pd) {
         mkldnn_engine_t engine_q;
         error::wrap_c_api(
@@ -837,6 +844,7 @@ struct engine: public handle<mkldnn_engine_t> {
         reset(engine_q, true);
     }
 
+    /// Returns the kind of the engine.
     kind get_kind() const {
         mkldnn_engine_kind_t akind;
         error::wrap_c_api(mkldnn_engine_get_kind(get(), &akind),
@@ -844,7 +852,8 @@ struct engine: public handle<mkldnn_engine_t> {
         return static_cast<engine::kind>(akind);
     }
 
-#if MKLDNN_WITH_OPENCL
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
+    /// Returns the OpenCL context associated with the engine.
     cl_context get_ocl_context() const {
         cl_context context = nullptr;
         error::wrap_c_api(mkldnn_engine_get_ocl_context(get(), &context),
@@ -852,6 +861,7 @@ struct engine: public handle<mkldnn_engine_t> {
         return context;
     }
 
+    /// Returns the OpenCL device associated with the engine.
     cl_device_id get_ocl_device() const {
         cl_device_id device = nullptr;
         error::wrap_c_api(mkldnn_engine_get_ocl_device(get(), &device),
@@ -899,7 +909,7 @@ struct stream: public handle<mkldnn_stream_t> {
     /// @brief Stream flags.
     enum class flags : unsigned {
         /// Default order execution. Either in-order or out-of-order depending
-        /// on the backend.
+        /// on the engine runtime
         default_order = mkldnn_stream_default_order,
         /// In-order execution.
         in_order = mkldnn_stream_default_order,
@@ -921,7 +931,9 @@ struct stream: public handle<mkldnn_stream_t> {
         reset(astream);
     }
 
-#if MKLDNN_WITH_OPENCL
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
+    /// Constructs a stream associated with the engine @p eng and with the
+    /// OpenCL command queue @p queue.
     stream(const engine &eng, cl_command_queue queue) {
         mkldnn_stream_t astream;
         error::wrap_c_api(mkldnn_stream_create_ocl(&astream, eng.get(), queue),
@@ -929,6 +941,7 @@ struct stream: public handle<mkldnn_stream_t> {
         reset(astream);
     }
 
+    /// Returns the OpenCL command queue associated with the stream.
     cl_command_queue get_ocl_command_queue() const {
         cl_command_queue queue = nullptr;
         error::wrap_c_api(mkldnn_stream_get_ocl_command_queue(get(), &queue),
@@ -992,7 +1005,7 @@ struct memory: public handle<mkldnn_memory_t> {
         undef = mkldnn_data_type_undef,
         /// 16-bit/half-precision floating point.
         f16 = mkldnn_f16,
-        /// non-standard 16-bit(bfloat16 w/ 7 bit mantissa) floating point.
+        /// non-standard 16-bit (bfloat16 w/ 7 bit mantissa) floating point.
         bf16 = mkldnn_bf16,
         /// 32-bit/single-precision floating point.
         f32 = mkldnn_f32,
@@ -1335,14 +1348,14 @@ struct memory: public handle<mkldnn_memory_t> {
         ///
         /// @param adims Data dimensions
         /// @param adata_type Data precision/type.
-        /// @param aformat Data layout format tag.
-        desc(const dims &adims, data_type adata_type,
-                format_tag aformat) {
+        /// @param aformat_tag Data layout format tag.
+        desc(const dims &adims, data_type adata_type, format_tag aformat_tag) {
             validate_dims(adims);
-            error::wrap_c_api(mkldnn_memory_desc_init_by_tag(&data, (int)adims.size(),
+            error::wrap_c_api(mkldnn_memory_desc_init_by_tag(&data,
+                        (int)adims.size(),
                         adims.size() == 0 ? nullptr : &adims[0],
-                        convert_to_c(adata_type), convert_to_c(aformat)),
-                    "could not initialize a memory descriptor");
+                        convert_to_c(adata_type), convert_to_c(aformat_tag)),
+                    "could not initialize a memory descriptor by tag");
         }
 
         /// Constructs a memory descriptor by strides.
@@ -1357,7 +1370,7 @@ struct memory: public handle<mkldnn_memory_t> {
                         adims.size() == 0 ? nullptr : &adims[0],
                         convert_to_c(adata_type),
                         astrides.size() == 0 ? nullptr : &astrides[0]),
-                    "could not initialize a memory descriptor");
+                    "could not initialize a memory descriptor by strides");
         }
 
         /// Constructs a memory descriptor from a C API data structure.
@@ -1446,15 +1459,18 @@ struct memory: public handle<mkldnn_memory_t> {
     /// Maps the data of the memory.
     ///
     /// Mapping allows to read/write directly from/to the memory contents for
-    /// backends that do not support direct accessing.
+    /// engines that do not support direct memory access.
     ///
     /// Mapping is an exclusive operation - a memory object cannot be used in
     /// other operations until this memory object is unmapped.
     /// @tparam T Type of the pointer to be mapped.
-    //
+    ///
     /// @note Any primitives working with the memory should be completed before
-    //        mapping. Use stream::wait() to synchronize the corresponding
-    //        execution stream.
+    ///       mapping. Use stream::wait() to synchronize the corresponding
+    ///       execution stream.
+    ///
+    /// @note Map/unmap API is provided mainly for debug/testing purposes and
+    ///       its performance may be suboptimal.
     template <typename T = void>
     T *map_data() const {
         void *mapped_ptr;
@@ -1468,12 +1484,16 @@ struct memory: public handle<mkldnn_memory_t> {
     /// Any changes of the mapped data are synchronized back to the memory
     /// after the call is complete. The mapped pointer must be
     /// obtained through a map_data() call.
+    ///
+    /// @note Map/unmap API is provided mainly for debug/testing purposes and
+    ///       its performance may be suboptimal.
     void unmap_data(void *mapped_ptr) const {
         error::wrap_c_api(mkldnn_memory_unmap_data(get(), mapped_ptr),
                 "could not unmap the data");
     }
 
-#if MKLDNN_WITH_OPENCL
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
+    /// Returns the OpenCL memory object associated with the memory.
     cl_mem get_ocl_mem_object() const {
         cl_mem mem_object;
         error::wrap_c_api(mkldnn_memory_get_ocl_mem_object(get(), &mem_object),
@@ -1481,6 +1501,7 @@ struct memory: public handle<mkldnn_memory_t> {
         return mem_object;
     }
 
+    /// Sets the OpenCL memory object @p mem_object associated with the memory.
     void set_ocl_mem_object(cl_mem mem_object) {
         error::wrap_c_api(mkldnn_memory_set_ocl_mem_object(get(), mem_object),
                 "could not set OpenCL memory object");
@@ -3262,7 +3283,7 @@ struct batch_normalization_forward : public primitive {
         /// @note In-place operation is supported; that is, dst points to the
         ///       same memory as src.
         desc(prop_kind aprop_kind, const memory::desc &src_desc, float epsilon,
-                batch_normalization_flags flags) {
+                normalization_flags flags) {
             error::wrap_c_api(
                     mkldnn_batch_normalization_forward_desc_init(&data,
                             mkldnn::convert_to_c(aprop_kind), &src_desc.data,
@@ -3354,7 +3375,7 @@ struct batch_normalization_backward : public primitive {
         ///       the same memory as diff_dst.
         desc(prop_kind aprop_kind, const memory::desc &diff_data_desc,
                 const memory::desc &data_desc, float epsilon,
-                batch_normalization_flags flags) {
+                normalization_flags flags) {
             error::wrap_c_api(
                     mkldnn_batch_normalization_backward_desc_init(&data,
                             mkldnn::convert_to_c(aprop_kind),
@@ -3655,8 +3676,9 @@ struct inner_product_backward_weights: public primitive {
 /// @sa @ref c_api_rnn in @ref c_api
 /// @{
 
-/// RNN for forward propagation.  Implements descriptor, primitive descriptor,
-/// and primitive.
+/// RNN for forward propagation.
+///
+/// Implements descriptor, primitive descriptor, and primitive.
 struct rnn_forward : public primitive {
 
     /// Descriptor for RNN forward propagation.
@@ -3773,8 +3795,9 @@ struct rnn_forward : public primitive {
     rnn_forward(const primitive_desc &pd): primitive(pd) {}
 };
 
-/// RNN for backward propagation.  Implements descriptor, primitive descriptor,
-/// and primitive.
+/// RNN for backward propagation.
+///
+/// Implements descriptor, primitive descriptor, and primitive.
 struct rnn_backward : public primitive {
 
     /// RNN descriptor for backward propagation.
@@ -3943,6 +3966,9 @@ struct rnn_backward : public primitive {
     rnn_backward(const primitive_desc &pd): primitive(pd) {}
 };
 
+/// LSTM for forward propagation.
+///
+/// Implements descriptor, primitive descriptor, and primitive.
 struct lstm_forward : public primitive {
 
     /// Descriptor for LSTM forward propagation.
@@ -4071,8 +4097,9 @@ struct lstm_forward : public primitive {
     lstm_forward(const primitive_desc &pd): primitive(pd) {}
 };
 
-/// LSTM for backward propagation.  Implements descriptor, primitive descriptor,
-/// and primitive.
+/// LSTM for backward propagation.
+///
+/// Implements descriptor, primitive descriptor, and primitive.
 struct lstm_backward : public primitive {
 
     /// LSTM descriptor for backward propagation.
@@ -4267,6 +4294,9 @@ struct lstm_backward : public primitive {
     lstm_backward(const primitive_desc &pd): primitive(pd) {}
 };
 
+/// GRU for forward propagation.
+///
+/// Implements descriptor, primitive descriptor, and primitive.
 struct gru_forward : public primitive {
 
     /// Descriptor for GRU forward propagation.
@@ -4381,8 +4411,9 @@ struct gru_forward : public primitive {
     gru_forward(const primitive_desc &pd): primitive(pd) {}
 };
 
-/// GRU for backward propagation.  Implements descriptor, primitive descriptor,
-/// and primitive.
+/// GRU for backward propagation.
+///
+/// Implements descriptor, primitive descriptor, and primitive.
 struct gru_backward : public primitive {
 
     /// GRU descriptor for backward propagation.
@@ -4550,6 +4581,9 @@ struct gru_backward : public primitive {
     gru_backward(const primitive_desc &pd): primitive(pd) {}
 };
 
+/// LBR_GRU for forward propagation.
+///
+/// Implements descriptor, primitive descriptor, and primitive.
 struct lbr_gru_forward : public primitive {
 
     /// Descriptor for LBR GRU forward propagation.
@@ -4664,8 +4698,9 @@ struct lbr_gru_forward : public primitive {
     lbr_gru_forward(const primitive_desc &pd): primitive(pd) {}
 };
 
-/// LBR_GRU for backward propagation.  Implements descriptor, primitive descriptor,
-/// and primitive.
+/// LBR_GRU for backward propagation.
+///
+/// Implements descriptor, primitive descriptor, and primitive.
 struct lbr_gru_backward : public primitive {
 
     /// LBR_GRU descriptor for backward propagation.

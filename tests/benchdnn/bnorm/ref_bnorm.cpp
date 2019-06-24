@@ -38,11 +38,9 @@ void compute_ref_fwd(const prb_t *p, const dnn_mem_t &src, dnn_mem_t &mean,
             auto off = data_off(p, mb, c, d, h, w);
             float res = gamma * (((float *)src)[off] - smean) + beta;
             float &D = ((float *)dst)[off];
-            if ((p->flags & FUSE_BN_RELU) && res < 0) res = 0;
+            if ((p->flags & FUSE_NORM_RELU) && res < 0) res = 0;
             maybe_post_ops(res, D, p->attr);
-            D = res;
-            if (p->dt == mkldnn_s8)
-                D = saturate_and_round(res);
+            D = maybe_saturate(p->dt, res);
         }
     });
 }
@@ -69,7 +67,7 @@ void compute_ref_bwd(const prb_t *p, const dnn_mem_t &src,
         for (int64_t w = 0; w < p->iw; ++w) {
             auto off = data_off(p, mb, c, d, h, w);
             float dd = ((float *)d_dst)[off];
-            if ((p->flags & FUSE_BN_RELU) && ((float *)rmask)[off] == 0)
+            if ((p->flags & FUSE_NORM_RELU) && ((float *)rmask)[off] == 0)
                 dd = 0;
 
             d_gamma += dd * (((float *)src)[off] - smean);
@@ -88,7 +86,7 @@ void compute_ref_bwd(const prb_t *p, const dnn_mem_t &src,
         for (int64_t w = 0; w < p->iw; ++w) {
             auto off = data_off(p, mb, c, d, h, w);
             float dd = ((float *)d_dst)[off];
-            if ((p->flags & FUSE_BN_RELU) && ((float *)rmask)[off] == 0)
+            if ((p->flags & FUSE_NORM_RELU) && ((float *)rmask)[off] == 0)
                 dd = 0;
             float ds = dd;
 

@@ -52,20 +52,16 @@ typedef enum {
     mkldnn_success = 0,
     /// The operation failed due to an out-of-memory condition
     mkldnn_out_of_memory = 1,
-    /// The operation failed and should be retried
-    mkldnn_try_again = 2,
     /// The operation failed because of incorrect function arguments
-    mkldnn_invalid_arguments = 3,
-    /// The operation failed because a primitive was not ready for execution
-    mkldnn_not_ready = 4,
+    mkldnn_invalid_arguments = 2,
     /// The operation failed because requested functionality is not implemented
-    mkldnn_unimplemented = 5,
+    mkldnn_unimplemented = 3,
     /// Primitive iterator passed over last primitive descriptor
-    mkldnn_iterator_ends = 6,
+    mkldnn_iterator_ends = 4,
     /// Primitive or engine failed on execution
-    mkldnn_runtime_error = 7,
+    mkldnn_runtime_error = 5,
     /// Queried element is not required for given primitive
-    mkldnn_not_required = 8,
+    mkldnn_not_required = 6,
 } mkldnn_status_t;
 
 /// Data type specification
@@ -74,7 +70,7 @@ typedef enum {
     mkldnn_data_type_undef = 0,
     /// 16-bit/half-precision floating point.
     mkldnn_f16 = 1,
-    /// non-standard 16-bit(bfloat16 w/ 7 bit mantissa) floating point.
+    /// non-standard 16-bit (bfloat16 w/ 7 bit mantissa) floating point.
     mkldnn_bf16 = 2,
     /// 32-bit/single-precision floating point.
     mkldnn_f32 = 3,
@@ -201,7 +197,9 @@ typedef enum {
     mkldnn_ba, ///< permuted 2D tensor
     mkldnn_bac, ///< permuted 3D tensor
     mkldnn_bacd, ///< permuted 4D tensor
+    mkldnn_bca, ///< permuted 3D tensor
     mkldnn_bcda, ///< permuted 4D tensor
+    mkldnn_bcdea, ///< permuted 5D tensor
     mkldnn_cba, ///< permuted 3D tensor
     mkldnn_cdba, ///< permuted 4D tensor
     mkldnn_cdeba, ///< permuted 5D tensor
@@ -376,6 +374,8 @@ typedef enum {
     mkldnn_owi = mkldnn_acb,
     /// 3D CNN weights tensor, an alias to #mkldnn_cba
     mkldnn_wio = mkldnn_cba,
+    /// 3D CNN weights tensor, an alias to #mkldnn_bca
+    mkldnn_iwo = mkldnn_bca,
     /// 4D CNN weights tensor, an alias to #mkldnn_abcd
     mkldnn_oihw = mkldnn_abcd,
     /// 4D CNN weights tensor, an alias to #mkldnn_cdba
@@ -392,6 +392,8 @@ typedef enum {
     mkldnn_dhwio = mkldnn_cdeba,
     /// 5D CNN weights tensor, an alias to #mkldnn_acdeb
     mkldnn_odhwi = mkldnn_acdeb,
+    /// 5D CNN weights tensor, an alias to #mkldnn_bcdea
+    mkldnn_idhwo = mkldnn_bcdea,
 
     /// 4D CNN weights tensor (incl. groups), an alias to #mkldnn_abcd
     mkldnn_goiw = mkldnn_abcd,
@@ -692,6 +694,11 @@ typedef enum {
     mkldnn_eltwise_logistic = 0xaf,
     /// Eltwise: exponent
     mkldnn_eltwise_exp = 0xbf,
+    /// Eltwise: gelu
+    ///
+    /// @note Tanh approximation formula is used to approximate
+    /// cumulative distribution function of a Gaussian
+    mkldnn_eltwise_gelu = 0xcf,
     /// Max pooling
     mkldnn_pooling_max = 0x1ff,
     /// Average pooling include padding
@@ -719,7 +726,7 @@ typedef enum {
     mkldnn_lbr_gru = 0x4fff,
 } mkldnn_alg_kind_t;
 
-/// Flags for batch-normalization primitive.
+/// Flags for batch normalization primitive.
 typedef enum {
     /// Use global statistics
     ///
@@ -754,8 +761,8 @@ typedef enum {
     ///    fused with ReLU via post ops API
     ///  - on training primitive requires workspace (required to be able to
     ///    perform backward pass)
-    mkldnn_fuse_bn_relu = 0x4U,
-} mkldnn_batch_normalization_flags_t;
+    mkldnn_fuse_norm_relu = 0x4U,
+} mkldnn_normalization_flags_t;
 
 /// @}
 
@@ -833,10 +840,13 @@ typedef struct {
     mkldnn_rnn_packed_memory_format_t format;
     int n_parts;
     int n;
+    int ldb;
     int parts[MKLDNN_RNN_MAX_N_PARTS];
     size_t part_pack_size[MKLDNN_RNN_MAX_N_PARTS];
+    unsigned pack_part[MKLDNN_RNN_MAX_N_PARTS];
     size_t offset_compensation;
     size_t size;
+    char reserved[200];
 } mkldnn_rnn_packed_desc_t;
 
 /// Flags for memory special features
@@ -1130,11 +1140,10 @@ typedef struct {
     /// parameter.
     mkldnn_memory_desc_t data_scaleshift_desc;
     mkldnn_memory_desc_t diff_data_scaleshift_desc;
-    /// Mean and variance data memory descriptors.
+    /// Statistics memory descriptor.
     ///
-    /// Mean and variance memory descriptors use 1D #mkldnn_x format[Channels].
-    mkldnn_memory_desc_t mean_desc;
-    mkldnn_memory_desc_t variance_desc;
+    /// Statistics (mean or variance) descriptor use 1D #mkldnn_x format[Channels].
+    mkldnn_memory_desc_t stat_desc;
     /// Batch normalization epsilon parameter.
     float batch_norm_epsilon;
     unsigned flags;
@@ -1555,7 +1564,7 @@ typedef enum {
 /// @brief Stream flags.
 typedef enum {
     /// Default order execution. Either in-order or out-of-order depending on
-    /// the backend.
+    /// the runtime.
     mkldnn_stream_default_order = 0x1U,
     /// In-order execution.
     mkldnn_stream_in_order = 0x2U,

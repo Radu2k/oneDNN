@@ -66,7 +66,7 @@ endif()
 add_subdirectory(common)
 add_subdirectory(cpu)
 
-if(MKLDNN_GPU_BACKEND STREQUAL "OPENCL")
+if(MKLDNN_GPU_RUNTIME STREQUAL "OCL")
     add_subdirectory(ocl)
 endif()
 
@@ -120,6 +120,26 @@ string(TOUPPER "${LIB_NAME}::" LIB_NAMESPACE)
 install(EXPORT ${LIB_EXPORT_NAME}
     NAMESPACE ${LIB_NAMESPACE}
     DESTINATION ${LIB_CONFIG_INSTALL_DIR})
+
+# Install custom find modules for transitive dependencies
+if(MKLDNN_CPU_RUNTIME STREQUAL "TBB")
+    if(WIN32)
+        install(FILES "../cmake/win/TBBConfig.cmake" RENAME "FindTBB.cmake"
+            DESTINATION ${LIB_CONFIG_INSTALL_DIR})
+    elseif(APPLE)
+        install(FILES "../cmake/mac/TBBConfig.cmake" RENAME "FindTBB.cmake"
+            DESTINATION ${LIB_CONFIG_INSTALL_DIR})
+    elseif(UNIX)
+        install(FILES "../cmake/lnx/TBBConfig.cmake" RENAME "FindTBB.cmake"
+            DESTINATION ${LIB_CONFIG_INSTALL_DIR})
+    endif()
+endif()
+
+if(MKLDNN_GPU_RUNTIME STREQUAL "OCL")
+    install(FILES
+        "../cmake/FindOpenCL.cmake"
+        DESTINATION ${LIB_CONFIG_INSTALL_DIR})
+endif()
 
 # On Windows we need to add mkldnn.dll path to CTESTCONFIG_PATH which is later
 # passed to ctest and Visual Studio solutions

@@ -28,6 +28,7 @@
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 #include "ocl/ref_batch_normalization.hpp"
+#include "ocl/ref_convolution.hpp"
 #include "ocl/ref_eltwise.hpp"
 #include "ocl/ref_inner_product.hpp"
 #include "ocl/ref_lrn.hpp"
@@ -99,19 +100,20 @@ static const pd_create_f ocl_impl_list[] = {
     /*deconv*/
     INSTANCE(ref_deconvolution_fwd_t),
     INSTANCE(ref_deconvolution_bwd_data_t),
+    INSTANCE(ref_deconvolution_bwd_weights_t),
     /*conv*/
     INSTANCE(jit_gen9_common_convolution_fwd_t<f16>),
     INSTANCE(jit_gen9_common_convolution_fwd_t<f32>),
+    INSTANCE(jit_gen9_common_convolution_bwd_data_t<f16, f16, f16, f16>),
     INSTANCE(jit_gen9_common_convolution_bwd_data_t<f32, f32, f32, f32>),
     INSTANCE(jit_gen9_common_convolution_bwd_weights_t<f32, f32, f32, f32>),
     /* conv (int) */
     INSTANCE(jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t<u8>),
     INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<u8>),
     INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<s8>),
-    INSTANCE(ref_convolution_fwd_t<u8, s8, u8, s32>),
-    INSTANCE(ref_convolution_fwd_t<u8, s8, s8, s32>),
-    INSTANCE(ref_convolution_bwd_data_t<u8>),
-    INSTANCE(ref_convolution_bwd_data_t<s8>),
+    INSTANCE(ref_convolution_fwd_t),
+    INSTANCE(ref_convolution_bwd_data_t),
+    INSTANCE(ref_convolution_bwd_weights_t),
     /*bnorm*/
     INSTANCE(ref_batch_normalization_fwd_t<f16>),
     INSTANCE(ref_batch_normalization_fwd_t<f32>),

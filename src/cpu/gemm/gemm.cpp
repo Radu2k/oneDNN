@@ -35,14 +35,6 @@
 #include "os_blas.hpp"
 #include "common/bfloat16.hpp"
 
-/* USE_MKL      USE_CBLAS       effect
- * -------      ---------       ------
- * yes          yes             use Intel(R) MKL CBLAS
- * yes          no              use jit
- * no           yes             system-dependent CBLAS
- * no           no              use jit
- */
-
 namespace mkldnn {
 namespace impl {
 namespace cpu {
@@ -69,21 +61,24 @@ mkldnn_status_t check_gemm_input(const char *transa, const char *transb,
     if (with_bias && *beta != 0)
         return mkldnn_unimplemented;
     bool consistency = true
-        && utils::one_of(*transa, 'T', 't', 'N', 'n')
-        && utils::one_of(*transb, 'T', 't', 'N', 'n')
+        && utils::one_of(*transa, 'T', 't', 'N', 'n', 'P', 'p')
+        && utils::one_of(*transb, 'T', 't', 'N', 'n', 'P', 'p')
         && *M >= 0
         && *N >= 0
         && *K >= 0;
 
     if (!consistency)
         return mkldnn_invalid_arguments;
-    bool isTransA = utils::one_of(*transa, 'T', 't');
-    bool isTransB = utils::one_of(*transb, 'T', 't');
-    int nrowA = isTransA ? *K : *M;
-    int nrowB = isTransB ? *N : *K;
+
+    bool is_packed_a = utils::one_of(*transa, 'P', 'p');
+    bool is_packed_b = utils::one_of(*transb, 'P', 'p');
+    bool is_trans_a = utils::one_of(*transa, 'T', 't');
+    bool is_trans_b = utils::one_of(*transb, 'T', 't');
+    int nrow_a = is_trans_a ? *K : *M;
+    int nrow_b = is_trans_b ? *N : *K;
     consistency = true
-        && *lda >= nstl::max(1, nrowA)
-        && *ldb >= nstl::max(1, nrowB)
+        && (is_packed_a || *lda >= nstl::max(1, nrow_a))
+        && (is_packed_b || *ldb >= nstl::max(1, nrow_b))
         && *ldc >= nstl::max(1, *M);
     if (!consistency)
         return mkldnn_invalid_arguments;
@@ -125,7 +120,7 @@ mkldnn_status_t extended_sgemm(const char *transa, const char *transb,
 
         if (bias) {
             // Add bias if necessary (bias is applied to columns of C)
-            cblas_int incx = 1, incy = 1;
+            int incx = 1, incy = 1;
             parallel_nd(*N, [&](int n) {
                 ptrdiff_t offset = (ptrdiff_t)n * (*ldc);
                 cblas_saxpy(*M, 1.0, bias, incx, C + offset, incy);
@@ -136,22 +131,18 @@ mkldnn_status_t extended_sgemm(const char *transa, const char *transb,
     else
 #endif
     {
-        if (mayiuse(avx512_mic)) {
-            status = jit_avx512_common_gemm_f32(transa, transb,
-                    M, N, K, alpha, A, lda, B, ldb, beta, C, ldc, bias);
-        } else if (mayiuse(sse41)) {
-            float *dummy_ao = NULL;
-            float *dummy_bo = NULL;
+    if (mayiuse(sse41)) {
+        float *dummy_ao = NULL;
+        float *dummy_bo = NULL;
 
-            status = gemm_driver(transa, transb, bias ? "C" : NULL, M, N, K,
-                    alpha, A, lda, dummy_ao, B, ldb, dummy_bo, beta, C, ldc,
-                    bias, force_jit_nocopy_gemm);
-        } else {
-            status = ref_gemm<float>(transa, transb,
-                    M, N, K, alpha, A, lda, B, ldb, beta, C, ldc, bias);
-        }
+        status = gemm_driver(transa, transb, bias ? "C" : NULL, M, N, K, alpha,
+                A, lda, dummy_ao, B, ldb, dummy_bo, beta, C, ldc, bias,
+                force_jit_nocopy_gemm);
+    } else {
+        status = ref_gemm<float>(transa, transb,
+                M, N, K, alpha, A, lda, B, ldb, beta, C, ldc, bias);
     }
-
+    }
 
     if (status == mkldnn_success)
         msan_unpoison_matrix(C, *M, *N, *ldc, sizeof(*C));
@@ -240,11 +231,18 @@ mkldnn_status_t gemm_s8x8s32(const char *transa, const char *transb,
     if (*M == 0 || *N == 0 || *K == 0)
         return mkldnn_success;
 
+    bool use_jit = true
+        && mayiuse(avx512_core)
+        && ((*M) * (*N) > 1); // TODO: handle s8-case in gemv
+
     bool use_s8u8 = true
         && utils::everyone_is(0, *ao, *bo) // so far a requirement
         && IMPLICATION(USE_MKL_IGEMM == 0, mayiuse(avx512_core));
 
-    if (use_s8u8)
+    if (use_jit)
+        status = gemm_driver(transa, transb, offsetc, M, N, K,
+                alpha, A, LDA, ao, B, LDB, bo, beta, C, LDC, co, false);
+    else if (use_s8u8)
         status = simple_gemm_s8s8s32(transa, transb, offsetc, M, N, K,
                 alpha, A, LDA, ao, B, LDB, bo, beta, C, LDC, co);
     else

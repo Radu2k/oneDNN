@@ -55,12 +55,14 @@ inline int init_pd(const prb_t *p, mkldnn_inner_product_desc_t &ipd,
 
     DNN_SAFE(mkldnn_memory_desc_init_by_tag(&src_d, ndims,
         is_3d(p) ? src_3d_dims : is_1d(p) ? src_1d_dims : src_2d_dims,
-        p->cfg[SRC].dt, mkldnn_format_tag_any), WARN);
+        p->cfg[SRC].dt, p->stag), WARN);
     DNN_SAFE(mkldnn_memory_desc_init_by_tag(&wei_d, ndims,
         is_3d(p) ? wei_3d_dims : is_1d(p) ? wei_1d_dims : wei_2d_dims,
-        p->cfg[WEI].dt, mkldnn_format_tag_any), WARN);
-    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&bia_d, 1, bia_dims, p->cfg[BIA].dt, mkldnn_format_tag_any), WARN);
-    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&dst_d, 2, dst_dims, p->cfg[DST].dt, mkldnn_format_tag_any), WARN);
+        p->cfg[WEI].dt, p->wtag), WARN);
+    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&bia_d, 1, bia_dims, p->cfg[BIA].dt,
+                mkldnn_format_tag_any), WARN);
+    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&dst_d, 2, dst_dims, p->cfg[DST].dt,
+                p->dtag), WARN);
 
     switch (p->dir) {
     case FWD_D: case FWD_B:
@@ -95,6 +97,9 @@ inline int init_pd(const prb_t *p, mkldnn_inner_product_desc_t &ipd,
     else
         SAFE(init_status, WARN);
 
+    const char *impl_str = query_impl_info(ippd);
+    print(5, "mkldnn implementation: %s\n", impl_str);
+
     auto q = [=](mkldnn_query_t query, int index = 0)
     { return *mkldnn_primitive_desc_query_md(ippd, query, index); };
 
@@ -125,38 +130,28 @@ inline int init_pd(const prb_t *p, mkldnn_inner_product_desc_t &ipd,
 
 inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
         dnn_mem_t &mem_fp, res_t *r) {
-    size_t nelems = mem_dt.nelems();
+    const auto nelems = mem_dt.nelems();
     int64_t non_zero = 0;
     const char *skind = data_kind2str(kind);
 
     r->errors = 0;
     r->total = nelems;
 
-    for (size_t i = 0; i < nelems; ++i) {
-        float dt = ((float*)mem_dt)[i];
-        float fp0 = ((float *)mem_fp)[i];
+    for (int64_t i = 0; i < nelems; ++i) {
+        const float dt = mem_dt.get_elem(i);
+        const float fp0 = mem_fp.get_elem(i);
+        const float fp = maybe_saturate(p->cfg[kind].dt, fp0);
 
-        float fp = fp0;
-        if (p->cfg[kind].dt != mkldnn_f32 && p->cfg[kind].dt != mkldnn_bf16)
-            fp = mxcsr_round(fp0);
-
-        float diff = fabsf(fp - dt);
-        float rel_diff = diff / (fabsf(fp) > FLT_MIN ? fabsf(fp) : 1);
-
-        bool ok = true;
-        if (fp < p->cfg[kind].min)
-            ok = dt == p->cfg[kind].min;
-        else if (fp > p->cfg[kind].max)
-            ok = dt == p->cfg[kind].max;
-        else
-            ok = (fabs(fp) > 1e-5 ? rel_diff : diff) <= p->cfg[kind].eps;
+        const float diff = fabsf(fp - dt);
+        const float rel_diff = diff / (fabsf(fp) > FLT_MIN ? fabsf(fp) : 1);
+        const bool ok = (fabs(fp) > 1e-5 ? rel_diff : diff) <= p->cfg[kind].eps;
 
         if (!ok) {
             r->errors++;
             if (r->errors < 10 || verbose >= 10) {
-                print(0, "[%4lu][%s]"
-                         "fp:%8g fp0:%8g dt:%8g diff:%8g rdiff:%8g\n",
-                        (unsigned long)i, skind, fp, fp0, dt, diff, rel_diff);
+                print(0, "[%4ld][%s]"
+                        "fp:%8g fp0:%8g dt:%8g diff:%8g rdiff:%8g\n",
+                        (long)i, skind, fp, fp0, dt, diff, rel_diff);
             }
         }
         non_zero += fp != 0;
@@ -186,20 +181,20 @@ int fill_data(data_kind_t kind, const prb_t *p, dnn_mem_t &mem_dt,
     dnn_mem_t mem_00(mem_dt.md_, mkldnn_f32, get_default_tag(mem_dt.md_.ndims),
             engine_ref);
 
-    const size_t nelems = mem_dt.nelems();
+    const auto nelems = mem_dt.nelems();
     assert(mem_dt.nelems() == mem_fp.nelems());
 
     const auto &c = p->cfg[kind];
 
     mkldnn::impl::parallel(0, [&](int ithr, int nthr) {
-        size_t chunk_size = (nelems + nthr - 1) / nthr;
-        size_t idx_start = ithr * chunk_size;
-        size_t idx_end = MIN2(idx_start + chunk_size, nelems);
+        int64_t chunk_size = (nelems + nthr - 1) / nthr;
+        int64_t idx_start = ithr * chunk_size;
+        int64_t idx_end = MIN2(idx_start + chunk_size, nelems);
         std::minstd_rand msr;
         std::uniform_int_distribution<> gen(
                 c.f_min, c.f_max);
         msr.discard(kind + idx_start);
-        for (size_t idx = idx_start; idx < idx_end; ++idx) {
+        for (int64_t idx = idx_start; idx < idx_end; ++idx) {
             auto val = (float)gen(msr) * c.f_scale;
             mem_00.set_elem(idx, val);
         }
@@ -238,8 +233,8 @@ int doit(const prb_t *p, res_t *r) {
             ? dnn_mem_t(bia_dt_d, p->cfg[BIA].dt, engine_tgt)
             : dnn_mem_t();
 
-    auto src_tag = is_3d(p) ? mkldnn_ncdhw : is_1d(p) ? mkldnn_ncw : mkldnn_nchw;
-    auto wei_tag = is_3d(p) ? mkldnn_oidhw : is_1d(p) ? mkldnn_oiw : mkldnn_oihw;
+    const auto src_tag = get_default_tag(src_dt.md_.ndims);
+    const auto wei_tag = get_default_tag(wei_dt.md_.ndims);
     dnn_mem_t src_fp(src_dt_d, fp, src_tag, engine_ref);
     dnn_mem_t wei_fp(wei_dt_d, fp, wei_tag, engine_ref);
     dnn_mem_t dst_fp(dst_dt_d, fp, mkldnn_nc, engine_ref);
@@ -299,20 +294,7 @@ int doit(const prb_t *p, res_t *r) {
         }
     }
 
-    if (bench_mode & PERF) {
-        auto &t = r->timer;
-        t.reset();
-        while (true) {
-            DNN_SAFE(execute_and_wait(ip, stream_tgt, args.size(), args), WARN);
-            t.stamp();
-            const bool stop = false
-                || (fix_times_per_prb && t.times() >= fix_times_per_prb)
-                || (!fix_times_per_prb
-                        && t.total_ms() >= max_ms_per_prb
-                        && t.times() >= min_times_per_prb);
-            if (stop) break;
-        }
-    }
+    measure_perf(r->timer, ip, args);
 
     DNN_SAFE(mkldnn_primitive_destroy(ip), CRIT);
 

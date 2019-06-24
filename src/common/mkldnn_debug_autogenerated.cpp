@@ -24,9 +24,7 @@
 const char *mkldnn_status2str(mkldnn_status_t v) {
     if (v == mkldnn_success) return "success";
     if (v == mkldnn_out_of_memory) return "out_of_memory";
-    if (v == mkldnn_try_again) return "try_again";
     if (v == mkldnn_invalid_arguments) return "invalid_arguments";
-    if (v == mkldnn_not_ready) return "not_ready";
     if (v == mkldnn_unimplemented) return "unimplemented";
     if (v == mkldnn_iterator_ends) return "iterator_ends";
     if (v == mkldnn_runtime_error) return "runtime_error";
@@ -74,7 +72,9 @@ const char *mkldnn_fmt_tag2str(mkldnn_format_tag_t v) {
     if (v == mkldnn_ba) return "ba";
     if (v == mkldnn_bac) return "bac";
     if (v == mkldnn_bacd) return "bacd";
+    if (v == mkldnn_bca) return "bca";
     if (v == mkldnn_bcda) return "bcda";
+    if (v == mkldnn_bcdea) return "bcdea";
     if (v == mkldnn_cba) return "cba";
     if (v == mkldnn_cdba) return "cdba";
     if (v == mkldnn_cdeba) return "cdeba";
@@ -212,6 +212,7 @@ const char *mkldnn_fmt_tag2str(mkldnn_format_tag_t v) {
     if (v == mkldnn_oiw) return "oiw";
     if (v == mkldnn_owi) return "owi";
     if (v == mkldnn_wio) return "wio";
+    if (v == mkldnn_iwo) return "iwo";
     if (v == mkldnn_oihw) return "oihw";
     if (v == mkldnn_hwio) return "hwio";
     if (v == mkldnn_ohwi) return "ohwi";
@@ -220,6 +221,7 @@ const char *mkldnn_fmt_tag2str(mkldnn_format_tag_t v) {
     if (v == mkldnn_oidhw) return "oidhw";
     if (v == mkldnn_dhwio) return "dhwio";
     if (v == mkldnn_odhwi) return "odhwi";
+    if (v == mkldnn_idhwo) return "idhwo";
     if (v == mkldnn_goiw) return "goiw";
     if (v == mkldnn_goihw) return "goihw";
     if (v == mkldnn_hwigo) return "hwigo";
@@ -409,6 +411,7 @@ const char *mkldnn_alg_kind2str(mkldnn_alg_kind_t v) {
     if (v == mkldnn_eltwise_soft_relu) return "eltwise_soft_relu";
     if (v == mkldnn_eltwise_logistic) return "eltwise_logistic";
     if (v == mkldnn_eltwise_exp) return "eltwise_exp";
+    if (v == mkldnn_eltwise_gelu) return "eltwise_gelu";
     if (v == mkldnn_pooling_max) return "pooling_max";
     if (v == mkldnn_pooling_avg_include_padding) return "pooling_avg_include_padding";
     if (v == mkldnn_pooling_avg_exclude_padding) return "pooling_avg_exclude_padding";
@@ -423,10 +426,10 @@ const char *mkldnn_alg_kind2str(mkldnn_alg_kind_t v) {
     return "unknown alg_kind";
 }
 
-const char *mkldnn_mkldnn_rnn_flags_t2str(mkldnn_rnn_flags_t v) {
+const char *mkldnn_rnn_flags2str(mkldnn_rnn_flags_t v) {
     if (v == mkldnn_rnn_flags_undef) return "undef";
-    assert(!"unknown mkldnn_rnn_flags_t");
-    return "unknown mkldnn_rnn_flags_t";
+    assert(!"unknown rnn_flags");
+    return "unknown rnn_flags";
 }
 
 const char *mkldnn_rnn_direction2str(mkldnn_rnn_direction_t v) {
@@ -439,11 +442,19 @@ const char *mkldnn_rnn_direction2str(mkldnn_rnn_direction_t v) {
     return "unknown rnn_direction";
 }
 
-const char *mkldnn_mkldnn_scratchpad_mode_t2str(mkldnn_scratchpad_mode_t v) {
+const char *mkldnn_engine_kind2str(mkldnn_engine_kind_t v) {
+    if (v == mkldnn_any_engine) return "any_engine";
+    if (v == mkldnn_cpu) return "cpu";
+    if (v == mkldnn_gpu) return "gpu";
+    assert(!"unknown engine_kind");
+    return "unknown engine_kind";
+}
+
+const char *mkldnn_scratchpad_mode2str(mkldnn_scratchpad_mode_t v) {
     if (v == mkldnn_scratchpad_mode_library) return "scratchpad_mode_library";
     if (v == mkldnn_scratchpad_mode_user) return "scratchpad_mode_user";
-    assert(!"unknown mkldnn_scratchpad_mode_t");
-    return "unknown mkldnn_scratchpad_mode_t";
+    assert(!"unknown scratchpad_mode");
+    return "unknown scratchpad_mode";
 }
 
 

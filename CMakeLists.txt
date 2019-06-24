@@ -56,13 +56,15 @@ else()
 endif()
 
 if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message("FATAL_ERROR" "Intel(R) MKL-DNN supports 64 bit platforms only")
+    message(FATAL_ERROR "Intel(R) MKL-DNN supports 64 bit platforms only")
 endif()
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
     message(STATUS "CMAKE_BUILD_TYPE is unset, defaulting to Release")
     set(CMAKE_BUILD_TYPE "Release")
 endif()
+
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 set(CMAKE_SRC_CCXX_FLAGS)       # SRC specifics
 set(CMAKE_EXAMPLE_CCXX_FLAGS)   # EXAMPLE specifics
@@ -73,25 +75,42 @@ if(UNIX OR MINGW)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 endif()
 
-include(GNUInstallDirs)
-include(CMakePackageConfigHelpers)
+# Tentative remapping of old options to the new one.
+# CAUTION: The old options will soon be removed.
+
+if(MKLDNN_THREADING)
+    set(MKLDNN_CPU_RUNTIME "${MKLDNN_THREADING}" CACHE STRING "" FORCE)
+    message(STATUS "Using the obsolete way to specify the CPU runtime. "
+        "Use MKLDNN_CPU_RUNTIME=${MKLDNN_CPU_RUNTIME} instead.")
+endif()
+
+if(MKLDNN_GPU_BACKEND)
+    if (MKLDNN_GPU_BACKEND STREQUAL "OPENCL")
+        set(MKLDNN_GPU_BACKEND "OCL" CACHE STRING "" FORCE)
+        message(STATUS "Using the obsolete way to specify the OpenCL runtime. "
+            "Use MKLDNN_GPU_RUNTIME=OCL instead.")
+    endif()
+    set(MKLDNN_GPU_RUNTIME "${MKLDNN_GPU_BACKEND}" CACHE STRING "" FORCE)
+    message(STATUS "Using the obsolete way to specify the GPU runtime. "
+        "Use MKLDNN_GPU_RUNTME=${MKLDNN_GPU_RUNTIME} instead.")
+endif()
+
+if (MKLDNN_GPU_RUNTIME STREQUAL "OPENCL")
+    set(MKLDNN_GPU_RUNTIME "OCL" CACHE STRING "" FORCE)
+    message(STATUS "Using the obsolete way to specify the OpenCL runtime. "
+        "Use MKLDNN_GPU_RUNTIME=OCL instead.")
+endif()
 
 include("cmake/utils.cmake")
 include("cmake/options.cmake")
 include("cmake/OpenMP.cmake")
 include("cmake/TBB.cmake")
+include("cmake/OpenCL.cmake")
 include("cmake/platform.cmake")
 include("cmake/SDL.cmake")
 include("cmake/MKL.cmake")
 include("cmake/Doxygen.cmake")
 include("cmake/version.cmake")
-
-if(MKLDNN_GPU_BACKEND STREQUAL "OPENCL")
-    message(STATUS "GPU support is enabled (OpenCL)")
-    include("cmake/OpenCL.cmake")
-else()
-    message(STATUS "GPU support is disabled")
-endif()
 
 enable_testing()
 
@@ -102,6 +121,14 @@ configure_file(
     "${PROJECT_BINARY_DIR}/include/mkldnn_config.h"
 )
 include_directories(${PROJECT_BINARY_DIR}/include)
+
+if(MKLDNN_INSTALL_MODE STREQUAL "BUNDLE" AND NOT DEFINED CMAKE_INSTALL_LIBDIR)
+    # define CMAKE_INSTALL_LIBDIR as "lib" in the case of bundle
+    set(CMAKE_INSTALL_LIBDIR "lib")
+endif()
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 add_subdirectory(src)
 add_subdirectory(examples)

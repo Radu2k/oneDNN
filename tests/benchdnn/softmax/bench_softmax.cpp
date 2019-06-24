@@ -34,6 +34,7 @@ std::vector<mkldnn_data_type_t> dt {mkldnn_f32};
 std::vector<mkldnn_format_tag_t> tag {mkldnn_nchw};
 std::vector<int> axis {1};
 std::vector<int64_t> mb {0};
+std::vector<bool> inplace {true};
 
 dims_t dims;
 const char *skip_impl = "";
@@ -49,6 +50,7 @@ void reset_parameters() {
     tag = {mkldnn_nchw};
     axis = {1};
     mb = {0};
+    inplace = {true};
     skip_impl = "";
     allow_unimpl = false;
 }
@@ -58,12 +60,14 @@ void check_correctness() {
     for (const auto &i_dt: dt)
     for (const auto &i_tag: tag)
     for (const auto &i_axis: axis)
+    for (const auto &i_inplace: inplace)
     for (const auto &i_mb: mb) {
-        const prb_t p(dims, i_dir, i_dt, i_tag, i_axis, i_mb);
+        const prb_t p(dims, i_dir, i_dt, i_tag, i_axis, i_inplace, i_mb);
         std::stringstream ss;
         ss << p;
         const std::string cpp_pstr = ss.str();
         const char *pstr = cpp_pstr.c_str();
+        print(1, "run: %s\n", pstr);
 
         res_t res{};
         const int status = doit(&p, &res);
@@ -90,6 +94,7 @@ int bench(int argc, char **argv) {
         else if (parse_tag(tag, argv[0]));
         else if (parse_axis(axis, argv[0]));
         else if (parse_mb(mb, argv[0]));
+        else if (parse_inplace(inplace, argv[0]));
         else if (parse_skip_impl(skip_impl, argv[0]));
         else if (parse_allow_unimpl(allow_unimpl, argv[0]));
         else if (parse_perf_template(perf_template, perf_template_def,
@@ -98,11 +103,11 @@ int bench(int argc, char **argv) {
         else {
             catch_unknown_options(argv[0], "softmax");
 
-            dims = str2dims(argv[0]);
+            parse_dims(dims, argv[0]);
             check_correctness();
         }
     }
 
-    return OK;
+    return parse_last_argument();
 }
 }

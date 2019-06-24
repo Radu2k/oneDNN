@@ -74,6 +74,7 @@ int str2desc(desc_t *desc, const char *str) {
         if (!strncmp(p, s, strlen(p))) { \
             ok = 1; s += strlen(p); \
             char *end_s; d. c = strtol(s, &end_s, 10); s += (end_s - s); \
+            if (d. c < 0) return FAIL; \
             /* printf("@@@debug: %s: %d\n", p, d. c); */ \
         } \
     } while (0)
@@ -125,6 +126,8 @@ std::ostream &operator<<(std::ostream &s, const desc_t &d) {
 }
 
 std::ostream &operator<<(std::ostream &s, const prb_t &p) {
+    dump_global_params(s);
+
     if (p.dir != FWD_B)
         s << "--dir=" << dir2str(p.dir) << " ";
     if (p.cfg != conf_f32)

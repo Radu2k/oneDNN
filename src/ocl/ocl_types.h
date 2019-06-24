@@ -24,8 +24,8 @@
 #    define DATA_MIN -DATA_MAX
 #    define DATA_ZERO 0.0f
 #    define DATA_ONE 1.0f
-#    define ACC_DATA_T float
-#    define ACC_DATA8_T float8
+#    define DEF_ACC_DATA_T float
+#    define DEF_ACC_DATA8_T float8
 #    define TO_DATA_T(v) (float)(v)
 #    define CONVERT_DATA_T convert_float
 #    define CONVERT_DATA8_T convert_float8
@@ -55,8 +55,8 @@
 #    define DATA_MIN -DATA_MAX
 #    define DATA_ZERO 0.0h
 #    define DATA_ONE 1.0h
-#    define ACC_DATA_T half
-#    define ACC_DATA8_T half8
+#    define DEF_ACC_DATA_T half
+#    define DEF_ACC_DATA8_T half8
 #    define TO_DATA_T(v) (half)(v)
 #    define CONVERT_DATA_T convert_half
 #    define CONVERT_DATA8_T convert_half8
@@ -85,8 +85,8 @@
 #    define DATA_MIN CHAR_MIN
 #    define DATA_ZERO 0
 #    define DATA_ONE 1
-#    define ACC_DATA_T int
-#    define ACC_DATA8_T int8
+#    define DEF_ACC_DATA_T int
+#    define DEF_ACC_DATA8_T int8
 #    define TO_DATA_T(v) (char)(v)
 #    define CONVERT_DATA_T convert_char_sat
 #    define CONVERT_DATA8_T convert_char8_sat
@@ -117,8 +117,8 @@
 #    define DATA_MIN 0
 #    define DATA_ZERO 0
 #    define DATA_ONE 1
-#    define ACC_DATA_T int
-#    define ACC_DATA8_T int8
+#    define DEF_ACC_DATA_T int
+#    define DEF_ACC_DATA8_T int8
 #    define TO_DATA_T(v) (uchar)(v)
 #    define CONVERT_DATA_T convert_uchar_sat
 #    define CONVERT_DATA8_T convert_uchar8_sat
@@ -148,7 +148,7 @@
 
 #if VECT_DT_N == 1
 #    define VECT_DATA_T DATA_T
-#    define VECT_ACC_DATA_T ACC_DATA_T
+#    define VECT_DEF_ACC_DATA_T DEF_ACC_DATA_T
 #    define AS_VECT_DATA_T AS_DATA_T
 #    define VECT_BLOCK_READ BLOCK_READ
 #    define VECT_BLOCK_WRITE BLOCK_WRITE
@@ -163,7 +163,7 @@
 #    define AS_VECT_UINT_T as_uint
 #elif VECT_DT_N == 8
 #    define VECT_DATA_T DATA8_T
-#    define VECT_ACC_DATA_T ACC_DATA8_T
+#    define VECT_DEF_ACC_DATA_T DEF_ACC_DATA8_T
 #    define AS_VECT_DATA_T AS_DATA8_T
 #    define VECT_BLOCK_READ BLOCK_READ8
 #    define VECT_BLOCK_WRITE BLOCK_WRITE8
@@ -177,19 +177,26 @@
 #    define AS_VECT_INT_T as_int8
 #    define AS_VECT_UINT_T as_uint8
 #endif
-
 #if NDIMS == 3
-#    define SRC_OFF(x0, x1, d, d1, x2)                                 \
+#    define SRC_OFF(x0, x1, d, h, x2)                                  \
         (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0          \
                 + ((x1) % SRC_B1) * SRC_SB1 + ((x1) / SRC_B1) * SRC_S1 \
                 + ((x2) % SRC_B2) * SRC_SB2 + ((x2) / SRC_B2) * SRC_S2)
 
-#    define WHT_OFF(x0, x1, d, d1, x2)                                 \
-        (((x0) % WHT_B0) * WHT_SB0 + ((x0) / WHT_B0) * WHT_S0          \
-                + ((x1) % WHT_B1) * WHT_SB1 + ((x1) / WHT_B1) * WHT_S1 \
-                + ((x2) % WHT_B2) * WHT_SB2 + ((x2) / WHT_B2) * WHT_S2)
+#    if WITH_GROUPS == 1
+#       define WHT_OFF(x0, x1, x2, d, h, x3)                              \
+            (((x0) % WHT_B0) * WHT_SB0 + ((x0) / WHT_B0) * WHT_S0          \
+                    + ((x1) % WHT_B1) * WHT_SB1 + ((x1) / WHT_B1) * WHT_S1 \
+                    + ((x2) % WHT_B2) * WHT_SB2 + ((x2) / WHT_B2) * WHT_S2 \
+                    + ((x3) % WHT_B3) * WHT_SB3 + ((x3) / WHT_B3) * WHT_S3)
+#    else
+#       define WHT_OFF(g, x0, x1, d, h, x2)                              \
+            (((x0) % WHT_B0) * WHT_SB0 + ((x0) / WHT_B0) * WHT_S0 \
+                    + ((x1) % WHT_B1) * WHT_SB1 + ((x1) / WHT_B1) * WHT_S1 \
+                    + ((x2) % WHT_B2) * WHT_SB2 + ((x2) / WHT_B2) * WHT_S2)
+#    endif
 
-#    define DST_OFF(x0, x1, d, d1, x2)                                 \
+#    define DST_OFF(x0, x1, d, h, x2)                                  \
         (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0          \
                 + ((x1) % DST_B1) * DST_SB1 + ((x1) / DST_B1) * DST_S1 \
                 + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2)
@@ -200,11 +207,20 @@
                 + ((x2) % SRC_B2) * SRC_SB2 + ((x2) / SRC_B2) * SRC_S2 \
                 + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3)
 
-#    define WHT_OFF(x0, x1, d, x2, x3)                                 \
-        (((x0) % WHT_B0) * WHT_SB0 + ((x0) / WHT_B0) * WHT_S0          \
-                + ((x1) % WHT_B1) * WHT_SB1 + ((x1) / WHT_B1) * WHT_S1 \
-                + ((x2) % WHT_B2) * WHT_SB2 + ((x2) / WHT_B2) * WHT_S2 \
-                + ((x3) % WHT_B3) * WHT_SB3 + ((x3) / WHT_B3) * WHT_S3)
+#    if WITH_GROUPS == 1
+#        define WHT_OFF(x0, x1, x2, d, x3, x4)                             \
+            (((x0) % WHT_B0) * WHT_SB0 + ((x0) / WHT_B0) * WHT_S0          \
+                    + ((x1) % WHT_B1) * WHT_SB1 + ((x1) / WHT_B1) * WHT_S1 \
+                    + ((x2) % WHT_B2) * WHT_SB2 + ((x2) / WHT_B2) * WHT_S2 \
+                    + ((x3) % WHT_B3) * WHT_SB3 + ((x3) / WHT_B3) * WHT_S3 \
+                    + ((x4) % WHT_B4) * WHT_SB4 + ((x4) / WHT_B4) * WHT_S4)
+#    else
+#        define WHT_OFF(g, x1, x2, d, x3, x4)                              \
+            (((x1) % WHT_B0) * WHT_SB0 + ((x1) / WHT_B0) * WHT_S0          \
+                    + ((x2) % WHT_B1) * WHT_SB1 + ((x2) / WHT_B1) * WHT_S1 \
+                    + ((x3) % WHT_B2) * WHT_SB2 + ((x3) / WHT_B2) * WHT_S2 \
+                    + ((x4) % WHT_B3) * WHT_SB3 + ((x4) / WHT_B3) * WHT_S3)
+#    endif
 
 #    define DST_OFF(x0, x1, d, x2, x3)                                 \
         (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0          \
@@ -219,12 +235,22 @@
                 + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3 \
                 + ((x4) % SRC_B4) * SRC_SB4 + ((x4) / SRC_B4) * SRC_S4)
 
-#    define WHT_OFF(x0, x1, x2, x3, x4)                                \
-        (((x0) % WHT_B0) * WHT_SB0 + ((x0) / WHT_B0) * WHT_S0          \
-                + ((x1) % WHT_B1) * WHT_SB1 + ((x1) / WHT_B1) * WHT_S1 \
-                + ((x2) % WHT_B2) * WHT_SB2 + ((x2) / WHT_B2) * WHT_S2 \
-                + ((x3) % WHT_B3) * WHT_SB3 + ((x3) / WHT_B3) * WHT_S3 \
-                + ((x4) % WHT_B4) * WHT_SB4 + ((x4) / WHT_B4) * WHT_S4)
+#    if WITH_GROUPS == 1
+#       define WHT_OFF(x0, x1, x2, x3, x4, x5)                             \
+            (((x0) % WHT_B0) * WHT_SB0 + ((x0) / WHT_B0) * WHT_S0          \
+                    + ((x1) % WHT_B1) * WHT_SB1 + ((x1) / WHT_B1) * WHT_S1 \
+                    + ((x2) % WHT_B2) * WHT_SB2 + ((x2) / WHT_B2) * WHT_S2 \
+                    + ((x3) % WHT_B3) * WHT_SB3 + ((x3) / WHT_B3) * WHT_S3 \
+                    + ((x4) % WHT_B4) * WHT_SB4 + ((x4) / WHT_B4) * WHT_S4 \
+                    + ((x5) % WHT_B5) * WHT_SB5 + ((x5) / WHT_B5) * WHT_S5)
+#    else
+#       define WHT_OFF(g, x1, x2, x3, x4, x5)                              \
+            (((x1) % WHT_B0) * WHT_SB0 + ((x1) / WHT_B0) * WHT_S0          \
+                    + ((x2) % WHT_B1) * WHT_SB1 + ((x2) / WHT_B1) * WHT_S1 \
+                    + ((x3) % WHT_B2) * WHT_SB2 + ((x3) / WHT_B2) * WHT_S2 \
+                    + ((x4) % WHT_B3) * WHT_SB3 + ((x4) / WHT_B3) * WHT_S3 \
+                    + ((x5) % WHT_B4) * WHT_SB4 + ((x5) / WHT_B4) * WHT_S4)
+#    endif
 
 #    define DST_OFF(x0, x1, x2, x3, x4)                                \
         (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0          \

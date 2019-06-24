@@ -69,6 +69,13 @@ struct gemm_inner_product_fwd_t : public primitive_t {
         }
         ~pd_t() { delete gemm_pd_; }
 
+        pd_t &operator=(const pd_t &rhs) {
+            MKLDNN_SHORT_CIRCUIT_SELF_ASSIGN(rhs);
+            delete gemm_pd_;
+            gemm_pd_ = rhs.gemm_pd_->clone();
+            return *this;
+        }
+
         DECLARE_COMMON_PD_T("ocl:gemm", gemm_inner_product_fwd_t);
 
         status_t init() {
@@ -99,8 +106,8 @@ struct gemm_inner_product_fwd_t : public primitive_t {
             if (!ok)
                 return status::unimplemented;
 
-            bool wei_tr = !memory_desc_matches_one_of_tag(*this->weights_md(),
-                    format_tag::hwio, format_tag::dhwio, format_tag::io);
+            const auto &wmd = *this->weights_md();
+            bool wei_tr = wmd.format_desc.blocking.strides[0] != 1;
 
             const int mb = this->MB();
             const int oc = this->OC();
@@ -174,6 +181,13 @@ struct gemm_inner_product_bwd_data_t : public primitive_t {
         }
         ~pd_t() { delete gemm_pd_; }
 
+        pd_t &operator=(const pd_t &rhs) {
+            MKLDNN_SHORT_CIRCUIT_SELF_ASSIGN(rhs);
+            delete gemm_pd_;
+            gemm_pd_ = rhs.gemm_pd_->clone();
+            return *this;
+        }
+
         DECLARE_COMMON_PD_T("ocl:gemm", gemm_inner_product_bwd_data_t);
 
         status_t init() {
@@ -197,8 +211,8 @@ struct gemm_inner_product_bwd_data_t : public primitive_t {
             if (!ok)
                 return status::unimplemented;
 
-            bool wei_tr = memory_desc_matches_one_of_tag(*this->weights_md(),
-                    format_tag::hwio, format_tag::dhwio, format_tag::io);
+            const auto &wmd = *this->weights_md();
+            bool wei_tr = wmd.format_desc.blocking.strides[0] == 1;
 
             const int mb = this->MB();
             const int oc = this->OC();
@@ -252,6 +266,13 @@ struct gemm_inner_product_bwd_weights_t : public primitive_t {
         }
         ~pd_t() { delete gemm_pd_; }
 
+        pd_t &operator=(const pd_t &rhs) {
+            MKLDNN_SHORT_CIRCUIT_SELF_ASSIGN(rhs);
+            delete gemm_pd_;
+            gemm_pd_ = rhs.gemm_pd_->clone();
+            return *this;
+        }
+
         DECLARE_COMMON_PD_T("gemm:ocl", gemm_inner_product_bwd_weights_t);
 
         status_t init() {
@@ -298,8 +319,8 @@ struct gemm_inner_product_bwd_weights_t : public primitive_t {
         }
 
         bool wei_tr() const {
-            return  memory_desc_matches_one_of_tag(*this->diff_weights_md(),
-                    format_tag::hwio, format_tag::dhwio, format_tag::io);
+            const auto &wmd = *this->diff_weights_md();
+            return wmd.format_desc.blocking.strides[0] == 1;
         }
 
         primitive_desc_t *gemm_pd_ = nullptr;

@@ -134,7 +134,7 @@ inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
         || (p->alg & WINO)
         || post_ops_require_integral_check(p);
 
-    size_t nelems = mem_dt.nelems();
+    const auto nelems = mem_dt.nelems();
 
     const char *skind = data_kind2str(kind);
 
@@ -147,14 +147,10 @@ inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
     r->errors = 0;
     r->total = nelems;
 
-    for (size_t i = 0; i < nelems; ++i) {
-        const float dt = ((float*)mem_dt)[i];
-        const float fp0 = ((float*)mem_fp)[i];
-
-        float fp = fp0;
-        if (p->cfg[kind].dt != mkldnn_f16 && p->cfg[kind].dt != mkldnn_f32
-		        && p->cfg[kind].dt != mkldnn_bf16)
-            fp = mxcsr_round(fp0);
+    for (int64_t i = 0; i < nelems; ++i) {
+        const float dt = mem_dt.get_elem(i);
+        const float fp0 = mem_fp.get_elem(i);
+        const float fp = maybe_saturate(p->cfg[kind].dt, fp0);
 
         const float diff = fabsf(fp - dt);
         const float rel_diff = diff / (fabsf(fp) > FLT_MIN ? fabsf(fp) : 1);
@@ -186,13 +182,12 @@ inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
                 case BIA: inv_bia_off_f(p, i, mb_or_g, g_or_oc); break;
                 case DST: inv_dst_off_f(p, i, mb_or_g, g_or_oc, c, d, h, w); break;
                 }
-                print(0, "[%4lu][%s%s]"
+                print(0, "[%4ld][%s%s]"
                         "[" IFMT "," IFMT "," IFMT "," IFMT "," IFMT "," IFMT
                         "] "
                         "fp:%8g fp0:%8g dt:%8g diff:%8g rdiff:%8g\n",
-                        (unsigned long)i,
-                        final_compare == false ? "REORDER " : "",
-                        skind, mb_or_g, g_or_oc, c, d, h, w,
+                        (long)i, final_compare ? "" : "REORDER ", skind,
+                        mb_or_g, g_or_oc, c, d, h, w,
                         fp, fp0, dt, diff, rel_diff);
             }
         }
@@ -207,11 +202,10 @@ inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
             case DST: inv_dst_off_f(p, i, mb_or_g, g_or_oc, c, d, h, w); break;
             }
 
-            print(0, "[%4lu][%s]"
+            print(0, "[%4ld][%s]"
                     "[" IFMT "," IFMT "," IFMT "," IFMT "," IFMT "," IFMT "] "
                     "fp:%8g fp0:%8g dt:%8g\n",
-                    (unsigned long)i,
-                    skind, mb_or_g, g_or_oc, c, d, h, w, fp, fp0, dt);
+                    (long)i, skind, mb_or_g, g_or_oc, c, d, h, w, fp, fp0, dt);
         }
 
         non_zero += fp != 0;
@@ -438,7 +432,7 @@ inline int init_pd(const prb_t *p, mkldnn_convolution_desc_t &cd,
 
     DNN_SAFE(mkldnn_memory_desc_init_by_tag(&src_d, ndims,
         is_conv_3d(p) ? src_3d_dims : is_conv_1d(p) ? src_1d_dims : src_2d_dims,
-        p->cfg[SRC].dt, mkldnn_format_tag_any), WARN);
+        p->cfg[SRC].dt, p->stag), WARN);
 
     DNN_SAFE(mkldnn_memory_desc_init_by_tag(&wei_d, ndims + p->has_groups,
         is_conv_3d(p)
@@ -446,14 +440,14 @@ inline int init_pd(const prb_t *p, mkldnn_convolution_desc_t &cd,
         : is_conv_1d(p)
         ? &wei_1d_dims[!p->has_groups]
         : &wei_2d_dims[!p->has_groups],
-        p->cfg[WEI].dt, mkldnn_format_tag_any), WARN);
+        p->cfg[WEI].dt, p->wtag), WARN);
 
     DNN_SAFE(mkldnn_memory_desc_init_by_tag(&bia_d, 1, bia_dims, p->cfg[BIA].dt,
         mkldnn_format_tag_any), WARN);
 
     DNN_SAFE(mkldnn_memory_desc_init_by_tag(&dst_d, ndims,
         is_conv_3d(p) ? dst_3d_dims : is_conv_1d(p) ? dst_1d_dims : dst_2d_dims,
-        p->cfg[DST].dt, mkldnn_format_tag_any), WARN);
+        p->cfg[DST].dt, p->dtag), WARN);
 
     mkldnn_dim_t strides_nd[] = {p->sd, p->sh, p->sw};
     mkldnn_dim_t dilates_nd[] = {p->dd, p->dh, p->dw};
@@ -575,8 +569,8 @@ int doit(const prb_t *p, res_t *r) {
 
     prb_t *p_temp = nullptr;
     if (p->alg == AUTO || p->alg == WINO) {
-        p_temp = new prb_t((desc_t)*p, p->dir, p->cfg,
-                    p->alg, p->attr, p->mb);
+        p_temp = new prb_t((desc_t)*p, p->dir, p->cfg, p->stag, p->wtag,
+                p->dtag, p->alg, p->attr, p->mb);
         if (p->alg == AUTO) p_temp->alg = alg_kind2alg(cd.alg_kind);
         p_temp->cfg = auto_cfg(p_temp->alg, p->cfg);
         p = p_temp;
@@ -669,20 +663,7 @@ int doit(const prb_t *p, res_t *r) {
         SAFE(FAIL, CRIT);
     }
 
-    if (bench_mode & PERF) {
-        auto &t = r->timer;
-        t.reset();
-        while (true) {
-            DNN_SAFE(execute_and_wait(c, stream_tgt, args.size(), args), WARN);
-            t.stamp();
-            const bool stop = false
-                || (fix_times_per_prb && t.times() >= fix_times_per_prb)
-                || (!fix_times_per_prb
-                        && t.total_ms() >= max_ms_per_prb
-                        && t.times() >= min_times_per_prb);
-            if (stop) break;
-        }
-    }
+    measure_perf(r->timer, c, args);
 
     DNN_SAFE(mkldnn_primitive_destroy(c), CRIT);
 

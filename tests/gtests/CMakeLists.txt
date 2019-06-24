@@ -45,8 +45,7 @@ file(GLOB PRIM_TEST_CASES_SRC
                               test_softmax_forward.cpp
                               test_softmax_backward.cpp
                               test_eltwise.cpp
-                              test_lrn_forward_f32.cpp
-                              test_lrn_forward_f16.cpp
+                              test_lrn_forward.cpp
                               test_lrn_backward.cpp
                               test_pooling_forward.cpp
                               test_pooling_backward.cpp
@@ -88,7 +87,7 @@ foreach(TEST_FILE ${PRIM_TEST_CASES_SRC})
     target_link_libraries(${exe} ${LIB_NAME} mkldnn_gtest ${EXTRA_SHARED_LIBS})
     target_compile_definitions(${exe} PUBLIC -DMKLDNN_TEST_WITH_ENGINE_PARAM)
 
-    if(NOT MKLDNN_GPU_BACKEND STREQUAL "NONE")
+    if(NOT MKLDNN_GPU_RUNTIME STREQUAL "NONE")
         add_test(${exe}_cpu ${exe} COMMAND ${exe} --engine=cpu)
         maybe_configure_windows_test(${exe}_cpu TEST)
 
@@ -102,7 +101,7 @@ endforeach()
 
 add_subdirectory(api)
 
-if(MKLDNN_GPU_BACKEND STREQUAL "OPENCL")
+if(MKLDNN_GPU_RUNTIME STREQUAL "OCL")
     add_subdirectory(ocl)
 endif()
 

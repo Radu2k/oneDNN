@@ -106,10 +106,12 @@ const char *cfg2str(const dt_conf_t *cfg);
 const dt_conf_t *auto_cfg(const alg_t alg, const dt_conf_t *cfg);
 
 struct prb_t: public desc_t {
-    prb_t(const desc_t &desc, dir_t dir, const dt_conf_t *cfg, alg_t alg,
-            const attr_t &attr, int64_t mb = 0, bool is_deconv = false)
-        : desc_t(desc), dir(dir), cfg(cfg), alg(alg), attr(attr)
-        , ops(0), scales(NULL), is_deconv(is_deconv) {
+    prb_t(const desc_t &desc, dir_t dir, const dt_conf_t *cfg,
+            mkldnn_format_tag_t stag, mkldnn_format_tag_t wtag,
+            mkldnn_format_tag_t dtag, alg_t alg, const attr_t &attr,
+            int64_t mb = 0, bool is_deconv = false)
+        : desc_t(desc), dir(dir), cfg(cfg), stag(stag), wtag(wtag), dtag(dtag),
+        alg(alg), attr(attr), ops(0), scales(NULL), is_deconv(is_deconv) {
         if (mb) this->mb = mb;
         count_ops();
         generate_oscales();
@@ -118,6 +120,7 @@ struct prb_t: public desc_t {
 
     dir_t dir;
     const dt_conf_t *cfg;
+    mkldnn_format_tag_t stag, wtag, dtag;
     alg_t alg;
     attr_t attr;
 
@@ -128,9 +131,7 @@ struct prb_t: public desc_t {
     void count_ops();
     void generate_oscales();
 
-private:
-    prb_t(const prb_t &) = delete;
-    prb_t &operator=(const prb_t &) = delete;
+    BENCHDNN_DISALLOW_COPY_AND_ASSIGN(prb_t);
 };
 std::ostream &operator<<(std::ostream &s, const prb_t &p);
 
@@ -151,20 +152,34 @@ struct perf_report_t: public base_perf_report_t {
     }
 
     virtual void dump_desc_csv(std::ostream &s) const override {
-        const bool print_d = p_->id > 1;
+        s << p_->g << ','
+          << p_->mb << ','
 
-        s << p_->mb << ',' << p_->ic << ',';
-        if (print_d) s << p_->id << ',';
-        s << p_->ih << ',' << p_->iw << ',';
-        s << p_->oc << ',';
-        if (print_d) s << p_->od << ',';
-        s << p_->oh << ',' << p_->ow << ',';
-        if (print_d) s << p_->kd << ',';
-        s << p_->kh << ',' << p_->kw << ',';
-        if (print_d) s << p_->sd << ',';
-        s << p_->sh << ',' << p_->sw << ',';
-        if (print_d) s << p_->pd << ',';
-        s << p_->ph << ',' << p_->pw;
+          << p_->ic << ','
+          << p_->id << ','
+          << p_->ih << ','
+          << p_->iw << ','
+
+          << p_->oc << ','
+          << p_->od << ','
+          << p_->oh << ','
+          << p_->ow << ','
+
+          << p_->kd << ','
+          << p_->kh << ','
+          << p_->kw << ','
+
+          << p_->sd << ','
+          << p_->sh << ','
+          << p_->sw << ','
+
+          << p_->pd << ','
+          << p_->ph << ','
+          << p_->pw << ','
+
+          << p_->dd << ','
+          << p_->dh << ','
+          << p_->dw;
     }
 
     virtual double ops() const override { return p_->ops; }

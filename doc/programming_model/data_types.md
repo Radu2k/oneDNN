@@ -25,16 +25,18 @@ Intel MKL-DNN supports training and inference with the following data types:
 | Inference  | f32, bf16, s8/u8   | f32, f16   |
 | Training   | f32, bf16          | f32        |
 
-Note, that using lower precision arithmetic requires changes
-in the deep learning model implementation. See topics for the corresponding
-data types for the details:
+@note
+    Using lower precision arithmetic may require changes in the deep learning
+    model implementation.
+
+See topics for the corresponding data types details:
  * @ref dev_guide_inference_int8
    * @ref dev_guide_attributes_quantization
- * @ref dev_guide_training_bfp16
+ * @ref dev_guide_training_bf16
 
 Individual primitives may have additional limitations with respect to data type
 support based on the precision requirements. The list of data types supported
-by each primitive is included into corresponding sections of the developer
+by each primitive is included in the corresponding sections of the developer
 guide.
 
 ## Hardware Limitations
@@ -46,16 +48,16 @@ Intel MKL-DNN implements this functionality only for the platforms that have
 hardware acceleration for these data types. The table below summarizes the
 current support matrix:
 
-| Data type | CPU                                | GPU           |
-| :---      | :---                               | :---          |
-| f32       | any                                | any           |
-| bf16      | Intel(R) DL-Boost with bfloat16    | not supported |
-| f16       | not supported                      | any           |
-| s8, u8    | Intel(R) AVX512, Intel DL-Boost    | not supported |
+| Data type | CPU                             | GPU           |
+| :---      | :---                            | :---          |
+| f32       | any                             | any           |
+| bf16      | Intel(R) DL Boost with bfloat16 | not supported |
+| f16       | not supported                   | any           |
+| s8, u8    | Intel AVX512, Intel DL Boost    | not supported |
 
 @note
-  Intel MKL-DNN can simulate the blfoat16 data type on CPUs with
-  Intel(R) AVX512 BW. The performance of primitives in this case is
-  approximately 3-4x times lower than the corresponding f32.
-  The primary goal is to allow users to try using bfloat16 before the
-  actual HW will become available.
+  Intel MKL-DNN has functional bfloat16 support on processors with
+  Intel AVX512 Byte and Word Instructions (AVX512BW) support for validation
+  purposes. The performance of bfloat16 primitives on platforms without
+  hardware acceleration for bfloat16 is 3-4x lower in comparison to
+  the same operations on the fp32 data type.

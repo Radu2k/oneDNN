@@ -31,6 +31,8 @@
         if (has_spatial) {                                                  \
             if (is_3d)                                                      \
                 return data_d.off(n, c, d, h, w);                           \
+            else if (is_1d)                                                 \
+                return data_d.off(n, c, w);                                 \
             else                                                            \
                 return data_d.off(n, c, h, w);                              \
         } else {                                                            \
@@ -89,7 +91,7 @@ void ref_batch_normalization_fwd_t<d_type>::execute_forward(
     const dim_t N = pd()->MB();
     const dim_t C = pd()->C();
     dim_t H = 1, W = 1, D = 1;
-    const bool has_spatial = utils::one_of(data_d.ndims(), 4, 5);
+    const bool has_spatial = utils::one_of(data_d.ndims(), 3, 4, 5);
     if (has_spatial) {
         D = pd()->D();
         H = pd()->H();
@@ -100,7 +102,7 @@ void ref_batch_normalization_fwd_t<d_type>::execute_forward(
     const bool use_scaleshift = pd()->use_scaleshift();
     const bool save_stats = pd()->is_training();
     const bool is_training = pd()->is_training();
-    const bool fuse_bn_relu = pd()->fuse_bn_relu();
+    const bool fuse_norm_relu = pd()->fuse_norm_relu();
     const bool calculate_stats = !pd()->stats_is_src();
 
     const bool with_relu = pd()->with_relu_post_op();
@@ -108,6 +110,7 @@ void ref_batch_normalization_fwd_t<d_type>::execute_forward(
         return (with_relu && res < 0.0f) ? 0.0f : res;
     };
     const bool is_3d = data_d.ndims() == 5;
+    const bool is_1d = data_d.ndims() == 3;
 
     // auto data_offset(const memory_desc_wrapper &, int, int, int, int, int)
     DECLARE_DATA_OFFSET;
@@ -149,7 +152,7 @@ void ref_batch_normalization_fwd_t<d_type>::execute_forward(
             auto d_off = data_offset(data_d, n, c, d, h, w);
             acc_data_t bn_res
                     = sm * (maybe_up_convert(src[d_off]) - v_mean) + sv;
-            if (fuse_bn_relu) {
+            if (fuse_norm_relu) {
                 if (bn_res <= 0) {
                     bn_res = 0;
                     if (is_training)
@@ -212,7 +215,7 @@ void ref_batch_normalization_bwd_t<d_type>::execute_backward(
 
     const dim_t N = pd()->MB();
     dim_t H = 1, W = 1, D = 1;
-    const bool has_spatial = utils::one_of(data_d.ndims(), 4, 5);
+    const bool has_spatial = utils::one_of(data_d.ndims(), 3, 4, 5);
     if (has_spatial) {
         D = pd()->D();
         H = pd()->H();
@@ -222,9 +225,10 @@ void ref_batch_normalization_bwd_t<d_type>::execute_backward(
     const float eps = pd()->desc()->batch_norm_epsilon;
     const bool use_scaleshift = pd()->use_scaleshift();
     const bool calculate_diff_stats = !pd()->use_global_stats();
-    const bool fuse_bn_relu = pd()->fuse_bn_relu();
+    const bool fuse_norm_relu = pd()->fuse_norm_relu();
 
     const bool is_3d = data_d.ndims() == 5;
+    const bool is_1d = data_d.ndims() == 3;
 
     // auto data_offset(const memory_desc_wrapper &, int, int, int, int, int)
     DECLARE_DATA_OFFSET;
@@ -245,7 +249,7 @@ void ref_batch_normalization_bwd_t<d_type>::execute_backward(
                     for (dim_t w = 0; w < W; ++w) {
                         const size_t s_off = data_offset(data_d, n, c, d, h, w);
                         acc_data_t dd;
-                        if (fuse_bn_relu && !ws[s_off])
+                        if (fuse_norm_relu && !ws[s_off])
                             dd = 0;
                         else
                             dd = maybe_up_convert(diff_dst[data_offset(
@@ -268,7 +272,7 @@ void ref_batch_normalization_bwd_t<d_type>::execute_backward(
             const size_t s_off = data_offset(data_d, n, c, d, h, w);
             const size_t dd_off = data_offset(diff_data_d, n, c, d, h, w);
             acc_data_t dd;
-            if (fuse_bn_relu && !ws[s_off])
+            if (fuse_norm_relu && !ws[s_off])
                 dd = 0;
             else
                 dd = maybe_up_convert(diff_dst[dd_off]);

@@ -238,14 +238,15 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
     uint end = (oh_chunk + 1) * OH_BLOCK;
     if (end > OD * OH * OW)
         end = OD * OH * OW;
-    const uint mb = mb_chunk * (MB / MB_CHUNK);
+    const uint mb = mb_chunk * (MB_CHUNK_SIZE);
+    const uint mb_end = min((mb_chunk+1) * (MB_CHUNK_SIZE), (uint)MB);
 
     const bool do_bias = (ic == 0 || IS_DW) && kh == 0 && kw == 0 && kd == 0;
 
     src += ic * ID * IH * IW * IC_BLOCK * MB_BLOCK + mb * IC * G * ID * IH * IW
             + g * IC * ID * IH * IW * MB_BLOCK;
     diff_dst += oc * OD * OH * OW * OC_BLOCK * MB_BLOCK
-            + mb * G * OC * OD * OH * OW + g * OC * OD * OH * OW * MB_BLOCK;
+            + g * OC * OD * OH * OW * MB_BLOCK;
 
 #        if WITH_BIAS == 1
     diff_bias += g * OC + oc * OC_BLOCK + local_x + chunk * OC * G;
@@ -260,12 +261,13 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
 #        endif
 
 #        if MB != (MB_CHUNK * MB_BLOCK)
-    uint omb = 0;
+    uint omb = mb;
     do {
         const __global float *diff_dst1 = diff_dst + str * OC_BLOCK * MB_BLOCK
                 + omb * OC * G * OD * OH * OW;
 #        else
-    const __global float *diff_dst1 = diff_dst + str * OC_BLOCK * MB_BLOCK;
+    const __global float *diff_dst1 = diff_dst + str * OC_BLOCK * MB_BLOCK
+        + mb * OC * G * OD * OH * OW;
 #        endif
         for (uint k = str; k < end; k++) {
 #        if CASE_3D
@@ -277,10 +279,15 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
             uint oh = k_ / OW;
             uint ow = k_ % OW;
 
-            if (ow * SW + kw * (1 + DW) < PW || oh * SH + kh * (1 + DH) < PH
-                    || ow * SW + kw * (1 + DW) >= IW + PW || oh * SH + kh * (1 + DH) >= IH + PH
+            const uint ih = oh * SH - PH + kh * (1 + DH);
+            const uint iw = ow * SW - PW + kw * (1 + DW);
 #        if CASE_3D
-                    || od * SD + kd * (1 + DD) < PD || od * SD + kd * (1 + DD) >= ID + PD
+            const uint id = od * SD - PD + kd * (1 + DD);
+#        endif
+
+            if (iw < 0 || ih < 0 || iw >= IW || ih >= IH
+#        if CASE_3D
+                || id < 0 || id >= ID
 #        endif
             ) {
 #        if WITH_BIAS == 1
@@ -299,12 +306,9 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
                 continue;
             }
 
-            const uint ih = oh * SH - PH + kh * (1 + DH);
-            const uint iw = ow * SW - PW + kw * (1 + DW);
             const __global float *src1 = src + ih * IW * IC_BLOCK * MB_BLOCK
                     + iw * IC_BLOCK * MB_BLOCK;
 #        if CASE_3D
-            const uint id = od * SD - PD + kd * (1 + DD);
             src1 += id * IH * IW * IC_BLOCK * MB_BLOCK;
 #        endif
 #        define TRANSPOSE_8(_block, _row, _col)                       \
@@ -342,20 +346,12 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
 #        if IS_DW
             float8 blockA = as_float8(
                     intel_sub_group_block_read8((const __global uint *)(src1)));
+            float8 blockA1 = as_float8(intel_sub_group_block_read8(
+                    (const __global uint *)(src1 + 8 * IC_BLOCK)));
+
             float8 blockB = as_float8(intel_sub_group_block_read8(
                     (const __global uint *)(diff_dst1)));
-
-            for (int i = 0; i < 8; i++) {
-                blockC00 = fma(blockA[i], blockB[i], blockC00);
-            }
-
-#            if WITH_BIAS == 1
-            for (int i = 0; i < 8; i++)
-                bias_loc += blockB[i];
-#            endif
-            blockA = as_float8(intel_sub_group_block_read8(
-                    (const __global uint *)(src1 + 8 * IC_BLOCK)));
-            blockB = as_float8(intel_sub_group_block_read8(
+            float8 blockB1 = as_float8(intel_sub_group_block_read8(
                     (const __global uint *)(diff_dst1 + 8 * OC_BLOCK)));
 
             for (int i = 0; i < 8; i++) {
@@ -365,6 +361,15 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
 #            if WITH_BIAS == 1
             for (int i = 0; i < 8; i++)
                 bias_loc += blockB[i];
+#            endif
+
+            for (int i = 0; i < 8; i++) {
+                blockC00 = fma(blockA1[i], blockB1[i], blockC00);
+            }
+
+#            if WITH_BIAS == 1
+            for (int i = 0; i < 8; i++)
+                bias_loc += blockB1[i];
 #            endif
 #        else
         float8 blockA = as_float8(
@@ -395,7 +400,7 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
 #        if MB != (MB_CHUNK * MB_BLOCK)
         omb += MB_BLOCK;
         src += IC * G * ID * IH * IW * MB_BLOCK;
-    } while (omb < MB / MB_CHUNK);
+    } while (omb < mb_end);
 #        endif
 
 #        if WITH_BIAS == 1
@@ -455,14 +460,15 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
 
     const int mb_chunk = get_global_id(2);
 
-    const int mb = mb_chunk * (MB / MB_CHUNK);
+    const int mb = mb_chunk * MB_CHUNK_SIZE;
+    const int mb_end = min((mb_chunk + 1) * MB_CHUNK_SIZE, (int)MB);
 
     const bool do_bias = (ic == 0 || IS_DW) && kh == 0 && kw == 0 && kd == 0;
 
     src += ic * ID * IH * IW * IC_BLOCK * MB_BLOCK + mb * IC * G * ID * IH * IW
             + g * IC * ID * IH * IW * MB_BLOCK;
     diff_dst += oc * OD * OH * OW * OC_BLOCK * MB_BLOCK
-            + mb * OC * G * OD * OH * OW + g * OC * OD * OH * OW * MB_BLOCK;
+            + g * OC * OD * OH * OW * MB_BLOCK;
 
     int dst_bound = MB * OC * G * OD * OH * OW - 16 * 8;
     int src_bound = MB * IC * G * ID * IH * IW - SW * 16 * 8;
@@ -482,11 +488,11 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
 #        endif
 
     int dst_ptr = oc * OD * OH * OW * OC_BLOCK * MB_BLOCK
-            + mb * OC * G * OD * OH * OW + g * OC * OD * OH * OW;
+            + g * OC * OD * OH * OW;
     int src_ptr = ic * ID * IH * IW * IC_BLOCK * MB_BLOCK
-            + mb * IC * G * ID * IH * IW + g * IC * ID * IH * IW;
+            + g * IC * ID * IH * IW;
 
-    int omb = 0;
+    int omb = mb;
     do {
         const __global float *diff_dst1
                 = diff_dst + omb * OC * G * OD * OH * OW;
@@ -504,35 +510,24 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
 #        if WITH_BIAS == 1
                     if (do_bias) {
                         for (int ow = 0; ow < OW; ow += OW_BLOCK) {
-                            int dst_ptr2 = dst_ptr1 + od * OH * OW * OC_BLOCK
-                                    + oh * OW * OC_BLOCK + ow * OC_BLOCK;
                             float8 blockB;
-#            if OW != OW_LAST
-                            if (dst_ptr2 > dst_bound) {
-                                for (int i = 0; i < OW - OW_LAST; i++) {
-                                    blockB[i] = as_float(
-                                            intel_sub_group_block_read((
-                                                    const __global uint
-                                                            *)(&diff_dst1[i
-                                                    * OC_BLOCK])));
-                                }
+#        if OW != OW_LAST
+                        for (int i = 0; i < 8; i++) {
+                            if (ow + i >= OW) {
+                                blockB[i] = 0.0;
                             } else {
-#            endif
-                                blockB = as_float8(intel_sub_group_block_read8(
-                                        (const __global uint *)(diff_dst1)));
-#            if OW != OW_LAST
+                                blockB[i] = as_float(intel_sub_group_block_read((
+                                    const __global uint
+                                            *)(&diff_dst1[0])));
+                                diff_dst1 += OC_BLOCK;
                             }
-                            if (ow == OW_LAST) {
-                                for (int i = OW - OW_LAST; i < OW_BLOCK; i++) {
-                                    blockB[i] = 0.0f;
-                                }
-                                diff_dst1 += OC_BLOCK * (OW - OW_LAST);
-                            } else {
-                                diff_dst1 += OC_BLOCK * OW_BLOCK;
-                            }
-#            else
-                            diff_dst1 += OC_BLOCK * OW_BLOCK;
-#            endif
+                        }
+#        else
+                        blockB = as_float8(intel_sub_group_block_read8(
+                                (const __global uint *)(diff_dst1)));
+                        diff_dst1 += OC_BLOCK * OW_BLOCK;
+#        endif
+
                             for (int i = 0; i < OW_BLOCK; i++)
                                 bias_loc += blockB[i];
                         }
@@ -552,8 +547,6 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
                     __global float *src1;
                     int src_ptr2 = src_ptr1 + id * IH * IW * IC_BLOCK
                             + ih * IW * IC_BLOCK + iw * IC_BLOCK;
-                    int dst_ptr2 = dst_ptr1 + od * OH * OW * OC_BLOCK
-                            + oh * OW * OC_BLOCK + ow * OC_BLOCK;
 
 #        if IC % 16 == 0 || IS_DW
                     if (src_ptr2 > src_bound) {
@@ -638,28 +631,20 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
 #            endif
 #        endif
 #        if OW != OW_LAST
-                    if (dst_ptr2 > dst_bound) {
-                        for (int i = 0; i < OW - OW_LAST; i++) {
-                            blockB[i] = as_float(intel_sub_group_block_read((
+                        for (int i = 0; i < 8; i++) {
+                            if (ow + i >= OW) {
+                                blockB[i] = 0.0;
+                            } else {
+                                blockB[i] = as_float(intel_sub_group_block_read((
                                     const __global uint
-                                            *)(&diff_dst1[i * OC_BLOCK])));
+                                            *)(&diff_dst1[0])));
+                                diff_dst1 += OC_BLOCK;
+                            }
                         }
-                    } else {
-#        endif
+#        else
                         blockB = as_float8(intel_sub_group_block_read8(
                                 (const __global uint *)(diff_dst1)));
-#        if OW != OW_LAST
-                    }
-                    if (ow == OW_LAST) {
-                        for (int i = OW - OW_LAST; i < OW_BLOCK; i++) {
-                            blockB[i] = 0.0f;
-                        }
-                        diff_dst1 += OC_BLOCK * (OW - OW_LAST);
-                    } else {
                         diff_dst1 += OC_BLOCK * OW_BLOCK;
-                    }
-#        else
-                    diff_dst1 += OC_BLOCK * OW_BLOCK;
 #        endif
 
 #        if IC == 3
@@ -680,7 +665,7 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
             }
         omb += MB_BLOCK;
         src += G * IC * ID * IH * IW * MB_BLOCK;
-    } while (omb < MB / MB_CHUNK);
+    } while (omb < mb_end);
 
 #        if WITH_BIAS == 1
     if (do_bias)
@@ -715,67 +700,6 @@ __kernel void gen9_common_conv_bwd_weights_kernel(
             (__global unsigned int *)(&diff_wei[8 * OC_BLOCK]),
             as_uint8(blockC01));
 #        endif
-#    endif
-
-#    if VER_REF == 1
-    const uint kw = get_global_id(0);
-    const uint kdh = get_global_id(1);
-    const uint kd = kdh / KH;
-    const uint kh = kdh % KH;
-
-    const uint g_ic_oc = get_global_id(2);
-    const uint g = g_ic_oc / (OC * IC);
-    const uint io = g_ic_oc % (OC * IC);
-
-    const uint oc = io / IC;
-    const uint ic = io % IC;
-
-    diff_bias += g * OC;
-    diff_dst += g * OC * OD * OH * OW;
-    src += g * IC * ID * IH * IW;
-
-    if (ic == 0 && kh == 0 && kw == 0 & kd == 0) {
-        float d = 0.0;
-        for (int mb = 0; mb < MB; ++mb)
-            for (int od = 0; od < OD; ++od)
-                for (int oh = 0; oh < OH; ++oh)
-                    for (int ow = 0; ow < OW; ++ow) {
-                        const uint diff_dst_off = mb * G * OC * OD * OH * OW
-                                + oc * OD * OH * OW + od * OH * OW + oh * OW
-                                + ow;
-                        d += diff_dst[diff_dst_off];
-                    }
-        diff_bias[oc] = d;
-    }
-
-    float dw = 0.0;
-    for (int mb = 0; mb < MB; ++mb)
-        for (int od = 0; od < OD; ++od)
-            for (int oh = 0; oh < OH; ++oh)
-                for (int ow = 0; ow < OW; ++ow) {
-                    if (ow * SW + kw * (1 + DW) < PW
-                            || oh * SH + kh * (1 + DH) < PH
-                            || od * SD + kd * (1 + DD) < PD
-                            || ow * SW + kw * (1 + DW) >= IW + PW
-                            || oh * SH + kh * (1 + DH) >= IH + PH
-                            || od * SD + kd * (1 + DD) >= ID + PD)
-                        continue;
-
-                    int id = od * SD - PD + kd * (1 + DD);
-                    int ih = oh * SH - PH + kh * (1 + DH);
-                    int iw = ow * SW - PW + kw * (1 + DW);
-
-                    const uint diff_dst_off = mb * G * OC * OD * OH * OW
-                            + oc * OD * OH * OW + od * OH * OW + oh * OW + ow;
-                    const uint src_off = mb * G * IC * ID * IH * IW
-                            + ic * ID * IH * IW + id * IH * IW + ih * IW + iw;
-
-                    dw += diff_dst[diff_dst_off] * src[src_off];
-                }
-    const uint diff_wei_off = g * IC * OC * KD * KH * KW
-            + oc * IC * KD * KH * KW + ic * KD * KH * KW + kd * KH * KW
-            + kh * KW + kw;
-    diff_wei[diff_wei_off] = dw;
 #    endif
 }
 #endif

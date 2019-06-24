@@ -25,7 +25,7 @@
 #include "mkldnn_version.h"
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-#if MKLDNN_WITH_OPENCL
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
 #   include <CL/cl.h>
 #endif
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -510,14 +510,17 @@ mkldnn_status_t MKLDNN_API mkldnn_memory_get_engine(
 /// For a @p memory, maps the data of the memory to @p mapped_ptr.
 ///
 /// Mapping allows to read/write directly from/to the memory contents for
-/// backends that do not support direct accessing.
+/// engines that do not support direct memory access.
 ///
 /// Mapping is an exclusive operation - a memory object cannot be used in other
 /// operations until this memory object is unmapped.
-//
+///
 /// @note Any primitives working with @p memory should be completed before
-//        mapping the memory. Use mkldnn_stream_wait to synchronize the
-//        corresponding execution stream.
+///       mapping the memory. Use mkldnn_stream_wait to synchronize the
+///       corresponding execution stream.
+///
+/// @note Map/unmap API is provided mainly for debug/testing purposes and its
+///       performance may be suboptimal.
 mkldnn_status_t MKLDNN_API mkldnn_memory_map_data(
         const_mkldnn_memory_t memory, void **mapped_ptr);
 
@@ -526,6 +529,9 @@ mkldnn_status_t MKLDNN_API mkldnn_memory_map_data(
 /// Any changes of the mapped data are synchronized back to the memory after the
 /// call is complete. The mapped pointer must be obtained through a
 /// mkldnn_memory_map_data call.
+///
+/// @note Map/unmap API is provided mainly for debug/testing purposes and its
+///       performance may be suboptimal.
 mkldnn_status_t MKLDNN_API mkldnn_memory_unmap_data(
         const_mkldnn_memory_t memory, void *mapped_ptr);
 
@@ -539,7 +545,7 @@ mkldnn_status_t MKLDNN_API mkldnn_memory_get_data_handle(
 mkldnn_status_t MKLDNN_API mkldnn_memory_set_data_handle(
         mkldnn_memory_t memory, void *handle);
 
-#if MKLDNN_WITH_OPENCL
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
 /// For a @p memory returns the OpenCL memory object associated with it.
 mkldnn_status_t MKLDNN_API mkldnn_memory_get_ocl_mem_object(
         const_mkldnn_memory_t memory, cl_mem *mem_object);
@@ -1217,7 +1223,7 @@ mkldnn_status_t MKLDNN_API mkldnn_lrn_backward_desc_init(
 ///      if #mkldnn_use_global_stats bit-flags is not set in @p flags
 ///      and @p prop_kind = #mkldnn_forward_training
 ///  - workspace (#mkldnn_query_workspace_md, 0),
-///      if #mkldnn_fuse_bn_relu bit-flags is set in @p flags
+///      if #mkldnn_fuse_norm_relu bit-flags is set in @p flags
 ///      and @p prop_kind = #mkldnn_forward_training
 ///
 /// @note In-place operation is supported; that is, dst points to the same memory
@@ -1243,7 +1249,7 @@ mkldnn_status_t MKLDNN_API mkldnn_batch_normalization_forward_desc_init(
 ///  - scale_and_shift (#mkldnn_query_weights_md, 0),
 ///      if #mkldnn_use_scaleshift bit-flags is set in @p flags
 ///  - workspace (#mkldnn_query_workspace_md, 0),
-///      if #mkldnn_fuse_bn_relu bit-flags is set in @p flags
+///      if #mkldnn_fuse_norm_relu bit-flags is set in @p flags
 ///
 /// Outputs:
 ///  - diff_src (#mkldnn_query_diff_src_md, 0)
@@ -1818,7 +1824,7 @@ size_t MKLDNN_API mkldnn_engine_get_count(mkldnn_engine_kind_t kind);
 mkldnn_status_t MKLDNN_API mkldnn_engine_create(mkldnn_engine_t *engine,
         mkldnn_engine_kind_t kind, size_t index);
 
-#if MKLDNN_WITH_OPENCL
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
 /// Creates an @p engine of particular @p kind associated with a given OpenCL
 /// @p device and @p context objects.
 mkldnn_status_t MKLDNN_API mkldnn_engine_create_ocl(mkldnn_engine_t *engine,
@@ -1829,7 +1835,7 @@ mkldnn_status_t MKLDNN_API mkldnn_engine_create_ocl(mkldnn_engine_t *engine,
 mkldnn_status_t MKLDNN_API mkldnn_engine_get_kind(mkldnn_engine_t engine,
         mkldnn_engine_kind_t *kind);
 
-#if MKLDNN_WITH_OPENCL
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
 /// Returns an OpenCL @p context associated with an @p engine.
 mkldnn_status_t MKLDNN_API mkldnn_engine_get_ocl_context(
         mkldnn_engine_t engine, cl_context *context);
@@ -1855,7 +1861,7 @@ mkldnn_status_t MKLDNN_API mkldnn_engine_destroy(mkldnn_engine_t engine);
 mkldnn_status_t MKLDNN_API mkldnn_stream_create(mkldnn_stream_t *stream,
         mkldnn_engine_t engine, unsigned flags);
 
-#if MKLDNN_WITH_OPENCL
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
 /// Creates an execution @p stream for a given @p engine associated with
 /// an OpenCL command @p queue.
 mkldnn_status_t MKLDNN_API mkldnn_stream_create_ocl(mkldnn_stream_t *stream,
@@ -1964,6 +1970,11 @@ mkldnn_status_t MKLDNN_API mkldnn_sgemm(
 ///      because it returns mkldnn_status_t for error handling.
 ///      XERBLA is not supported: no error message will be printed
 ///      in case of incorrect parameters.
+///
+/// @warning
+///      On some architectures the intermediate saturation might happen,
+///      which would lead to unexpected results. For more details, refer to
+///      @ref dev_guide_int8_computations.
 mkldnn_status_t MKLDNN_API mkldnn_gemm_u8s8s32(
         char transa, char transb, char offsetc,
         mkldnn_dim_t M, mkldnn_dim_t N, mkldnn_dim_t K,
@@ -1972,6 +1983,13 @@ mkldnn_status_t MKLDNN_API mkldnn_gemm_u8s8s32(
         const int8_t *B, mkldnn_dim_t ldb, int8_t bo,
         float beta, int32_t *C, mkldnn_dim_t ldc, const int32_t *co);
 
+/// gemm_s8u8s32 and gemm_s8s8s32 perform a matrix-matrix multiplication
+/// operation and add the result to a scalar-matrix product. For the final
+/// result, a vector is added to each row or column of the output matrix.
+///
+/// For full description, see mkldnn_gemm_u8s8s32().
+///
+/// @sa dev_guide_int8_computations
 mkldnn_status_t MKLDNN_API mkldnn_gemm_s8s8s32(
         char transa, char transb, char offsetc,
         mkldnn_dim_t M, mkldnn_dim_t N, mkldnn_dim_t K,
