@@ -39,7 +39,7 @@ template <data_type_t dst_type>
     kernel_.set_arg(1, weights);
     kernel_.set_arg(2, bias);
     kernel_.set_arg(3, dst);
-    kernel_.set_arg(4, jcp.negative_slope);
+    kernel_.set_arg(4, jcp.relu_negative_slope);
     kernel_.set_arg(5, jcp.sum_scale);
     float scales = pd()->attr()->output_scales_.scales_[0];
     kernel_.set_arg(6, scales);
