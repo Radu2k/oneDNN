@@ -115,6 +115,7 @@ static const pd_create_f ocl_impl_list[] = {
     INSTANCE(ref_convolution_bwd_data_t),
     INSTANCE(ref_convolution_bwd_weights_t),
     /*bnorm*/
+    INSTANCE(ref_batch_normalization_fwd_t<s8>),
     INSTANCE(ref_batch_normalization_fwd_t<f16>),
     INSTANCE(ref_batch_normalization_fwd_t<f32>),
     INSTANCE(ref_batch_normalization_bwd_t<f32>),

@@ -134,6 +134,9 @@ struct jit_ref_bnorm_common_kernel {
         jit.define_int("CALCULATE_DIFF_STATS", jbn.calculate_diff_stats);
         jit.define_int("DIFF_SCALESHIFT", jbn.diff_scaleshift);
 
+        if (jbn.data_type == data_type::s8)
+            jit.add_option("-Dcl_intel_subgroups_char");
+
         def_offsets(jit_off.src_off, jit, "SRC", jbn.ndims);
 
         return status::success;

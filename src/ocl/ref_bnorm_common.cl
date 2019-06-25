@@ -271,7 +271,10 @@ __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
                     }
 #        endif
 #        if WITH_RELU
-                    dst[d_off] = max(bn_res, 0.0f);
+                    bn_res = max(bn_res, 0.0f);
+#        endif
+#        if DT_S8 == 1
+                    dst[d_off] = convert_char_sat_rte(bn_res);
 #        else
                     dst[d_off] = bn_res;
 #        endif

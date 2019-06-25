@@ -51,14 +51,12 @@ struct ref_batch_normalization_fwd_t : public primitive_t {
                     && is_fwd()
                     && utils::everyone_is(data_type, src_md()->data_type,
                                dst_md()->data_type)
-                    && IMPLICATION(data_type == data_type::f16,
+                    && IMPLICATION(utils::one_of(data_type, data_type::f16,
+                                data_type::s8),
                                !is_training() && stats_is_src())
                     && (attr()->has_default_values() || with_relu_post_op())
                     && cl_engine->mayiuse(cl_device_ext_t::intel_subgroups);
             if (!ok)
-                return status::unimplemented;
-
-            if (src_md()->data_type == data_type::s8 && !stats_is_src())
                 return status::unimplemented;
 
             if (is_training() && fuse_norm_relu())

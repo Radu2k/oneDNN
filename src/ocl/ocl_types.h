@@ -88,8 +88,8 @@
 #    define DEF_ACC_DATA_T int
 #    define DEF_ACC_DATA8_T int8
 #    define TO_DATA_T(v) (char)(v)
-#    define CONVERT_DATA_T convert_char_sat
-#    define CONVERT_DATA8_T convert_char8_sat
+#    define CONVERT_DATA_T convert_char_sat_rte
+#    define CONVERT_DATA8_T convert_char8_sat_rte
 #    define ROUND rint
 
 #    define BLOCK_READ intel_sub_group_block_read_uc
