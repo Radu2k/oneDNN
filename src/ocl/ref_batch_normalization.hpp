@@ -85,7 +85,7 @@ struct ref_batch_normalization_fwd_t : public primitive_t {
         if (!kernel_)
             return status::runtime_error;
 
-        if (pd()->jbn_.use_16mb_unroll && pd()->jbn_.calculate_stats) {
+        if (pd()->jbn_.ic_block == 16 && pd()->jbn_.calculate_stats) {
             size_t size = 2 * pd()->jbn_.mb_chunk * pd()->jbn_.sp_chunk
                     * pd()->jbn_.ic * sizeof(data_t);
             memory_storage_t *temp_reduce_ptr;
@@ -188,7 +188,7 @@ struct ref_batch_normalization_bwd_t : public primitive_t {
         if (!kernel_)
             return status::runtime_error;
 
-        if (pd()->jbn_.use_16mb_unroll) {
+        if (pd()->jbn_.ic_block == 16) {
             size_t size = 2 * pd()->jbn_.mb_chunk * pd()->jbn_.sp_chunk
                     * pd()->jbn_.ic * sizeof(data_t);
 

@@ -74,7 +74,7 @@ struct jit_ref_bnorm_common_kernel {
         jbn.gws_d[0] = jbn.ic;
         jbn.gws_d[1] = 1;
         jbn.gws_d[2] = 1;
-        jbn.use_16mb_unroll = 0;
+        jbn.ic_block = 1;
         jbn.mb_chunk = 1;
         jbn.sp_chunk = 1;
         jbn.mb_block = 1;
@@ -83,6 +83,7 @@ struct jit_ref_bnorm_common_kernel {
         if (!has_padding
                 && data_mdw.matches_one_of_tag(nCw16c, nChw16c, nCdhw16c,
                         NCw16n16c, NChw16n16c, NCdhw16n16c)) {
+            jbn.ic_block = 16;
             jbn.mb_block = data_mdw.matches_one_of_tag(
                                    NCw16n16c, NChw16n16c, NCdhw16n16c)
                     ? 16
@@ -90,7 +91,6 @@ struct jit_ref_bnorm_common_kernel {
             jbn.mb_chunk = nstl::min((jbn.mb / jbn.mb_block), 256);
             jbn.sp_chunk = nstl::min(jbn.ih * jbn.iw * jbn.id,
                     nstl::max(1, utils::div_up(256, jbn.mb_chunk)));
-            jbn.use_16mb_unroll = 1;
             jbn.lws_d[0] = 1;
             jbn.lws_d[1] = 16;
             jbn.lws_d[2] = 1;
@@ -115,7 +115,7 @@ struct jit_ref_bnorm_common_kernel {
         jit.define_int("LWS_0", jbn.lws_d[0]);
         jit.define_int("LWS_1", jbn.lws_d[1]);
         jit.define_int("LWS_2", jbn.lws_d[2]);
-        jit.define_int("USE_16MB_UNROLL", jbn.use_16mb_unroll);
+        jit.define_int("IC_BLOCK", jbn.ic_block);
         jit.define_int("MB_CHUNK", jbn.mb_chunk);
         jit.define_int("SP_CHUNK", jbn.sp_chunk);
         jit.define_int("MB_BLOCK", jbn.mb_block);
