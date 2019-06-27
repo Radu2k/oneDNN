@@ -17,8 +17,15 @@
 #ifndef MKLDNN_COMMON_HPP
 #define MKLDNN_COMMON_HPP
 
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <set>
+#include <sstream>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include <vector>
 
 #include "mkldnn.h"
@@ -185,6 +192,7 @@ extern "C" mkldnn_status_t mkldnn_engine_get_backend_kind(
 #if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
 extern "C" mkldnn_status_t MKLDNN_API mkldnn_impl_gpu_reorder_set_engine_kind(
         mkldnn_engine_kind_t engine_kind);
+extern "C" int mkldnn_memory_get_sim_id(mkldnn_memory_t mem);
 #endif
 
 inline int init() {
@@ -253,12 +261,125 @@ private:
     std::vector<mkldnn_exec_arg_t> args_;
 };
 
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
+static bool is_gpu_sim() {
+    static const char *sim_env = getenv("MKLDNN_GPU_SIM");
+    static bool _is_sim = sim_env && atoi(sim_env) == 1;
+    return _is_sim;
+}
+
+static bool is_gpu_perf_sim() {
+    static const char *sim_perf_env = getenv("MKLDNN_GPU_PERF_SIM");
+    static bool _is_perf_sim = sim_perf_env && atoi(sim_perf_env) == 1;
+    return _is_perf_sim;
+}
+#endif
+
 inline mkldnn_status_t execute_and_wait(mkldnn_primitive_t prim,
         mkldnn_stream_t stream, int nargs, const mkldnn_exec_arg_t *args) {
+
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
+    mkldnn_primitive_kind_t prim_kind = mkldnn_undefined_primitive;
+
+    if (is_gpu_sim()) {
+        const_mkldnn_primitive_desc_t pd;
+        DNN_SAFE_V(mkldnn_primitive_get_primitive_desc(prim, &pd));
+
+        DNN_SAFE_V(mkldnn_primitive_desc_query(
+                pd, mkldnn_query_primitive_kind, 0, &prim_kind));
+
+        // Skip reorders during performance simulation
+        if (prim_kind == mkldnn_reorder && is_gpu_perf_sim())
+            return mkldnn_success;
+    }
+#endif
+
     mkldnn_status_t status
             = mkldnn_primitive_execute(prim, stream, nargs, args);
     if (status != mkldnn_success) return status;
-    return mkldnn_stream_wait(stream);
+
+    status = mkldnn_stream_wait(stream);
+
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
+    // Handle simulation
+    if (is_gpu_sim()) {
+        // Stop execution on the first non-reorder primitive.
+        // Assume that simulation should be done for this primitive.
+        if (prim_kind != mkldnn_reorder) {
+            // Query the run number and verbosity level
+            const char *sim_run_env = getenv("MKLDNN_GPU_SIM_RUN");
+            const char *sim_verbose_env = getenv("MKLDNN_GPU_SIM_VERBOSE");
+            const int sim_run = !sim_run_env ? -1 : atoi(sim_run_env);
+            const int sim_verbose = atoi(sim_verbose_env);
+
+            // Destroy library objects and exit from benchdnn for the following cases:
+            // - Performance simulation
+            // - First run of functional simulation
+            if (sim_run != 1) {
+                if (sim_verbose > 0)
+                    printf("== benchdnn_sim: Destroying objects...\n");
+
+                DNN_SAFE_V(mkldnn_primitive_destroy(prim));
+
+                // Do not destroy object twice
+                std::set<mkldnn_memory_t> uniq_mems;
+                for (int i = 0; i < nargs; ++i) {
+                    auto ret = uniq_mems.insert(args[i].memory);
+                    if (ret.second) { mkldnn_memory_destroy(args[i].memory); }
+                }
+
+                DNN_SAFE_V(mkldnn_engine_destroy(engine_tgt));
+                DNN_SAFE_V(mkldnn_stream_destroy(stream_tgt));
+
+                exit(0);
+            } else {
+                // Handle second run of functional simulation
+
+                // Keep unique memory objects
+                std::set<mkldnn_memory_t> uniq_mems;
+                for (int i = 0; i < nargs; ++i)
+                    uniq_mems.insert(args[i].memory);
+
+                // Sort memory objects according to their "simulation" IDs
+                std::map<int, mkldnn_memory_t> sorted_mems;
+                for (auto mem : uniq_mems)
+                    sorted_mems[mkldnn_memory_get_sim_id(mem)] = mem;
+
+                // Load memory contents from binaries
+                std::string aub_file(getenv("MKLDNN_GPU_SIM_AUB_FILE"));
+                aub_file.resize(aub_file.length() - strlen(".aub"));
+                int ctr = 0;
+                for (auto &kv : sorted_mems) {
+                    mkldnn_memory_t mem = kv.second;
+                    std::ostringstream fname;
+                    fname << aub_file << std::setfill('0') << std::setw(3)
+                          << ctr << ".bin";
+                    std::ifstream in(fname.str(), std::ios::binary);
+                    assert(in.good());
+                    {
+                        const mkldnn_memory_desc_t *md;
+                        DNN_SAFE_V(mkldnn_memory_get_memory_desc(mem, &md));
+                        size_t sz = mkldnn_memory_desc_get_size(md);
+
+                        if (sim_verbose > 0)
+                            printf("== benchdnn_sim: Load memory object from "
+                                   "%s, "
+                                   "size: %lld\n",
+                                    fname.str().c_str(), (long long)sz);
+
+                        void *ptr;
+                        mkldnn_memory_map_data(mem, &ptr);
+                        in.read((char *)ptr, sz);
+                        mkldnn_memory_unmap_data(mem, ptr);
+                    }
+                    ++ctr;
+                }
+            }
+        }
+    }
+#endif
+
+    return status;
 }
 
 inline int measure_perf(

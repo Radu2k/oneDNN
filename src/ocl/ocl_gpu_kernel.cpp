@@ -17,12 +17,41 @@
 #include <assert.h>
 #include <string>
 #include <CL/cl.h>
+#include <unordered_map>
 
 #include "common/utils.hpp"
 #include "ocl/ocl_gpu_kernel.hpp"
 #include "ocl/ocl_memory_storage.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
+
+// "Simulation" IDs for OpenCL memory objects
+//
+// Assign a number to every OpenCL memory object according to the first time
+// when the memory object was set as a kernel argument using clSetKernelArg.
+static std::unordered_map<cl_mem, int> sim_mem_ids;
+
+extern "C" int MKLDNN_API mkldnn_memory_get_sim_id(
+        const mkldnn::impl::memory_t *mem) {
+    using namespace mkldnn::impl;
+
+    auto *ocl_mem_storage = utils::downcast<ocl::ocl_memory_storage_t *>(
+            mem->memory_storage());
+    cl_mem ocl_mem = ocl_mem_storage->mem_object();
+    return sim_mem_ids[ocl_mem];
+}
+
+static void sim_register_ocl_mem_object(cl_mem ocl_mem) {
+    // Do not track simulation IDs unless running GPU simulation
+    static bool is_gpu_sim
+            = (bool)mkldnn::impl::getenv_int("MKLDNN_GPU_SIM", 0);
+    if (!is_gpu_sim) return;
+
+    if (sim_mem_ids.count(ocl_mem) != 0) return;
+
+    static int sim_mem_counter = 0;
+    sim_mem_ids[ocl_mem] = sim_mem_counter++;
+}
 
 namespace mkldnn {
 namespace impl {
@@ -55,6 +84,7 @@ status_t ocl_gpu_kernel_t::parallel_for(stream_t &stream,
                 ocl_mem = ocl_mem_storage->mem_object();
             }
             set_err = clSetKernelArg(ocl_kernel_, i, sizeof(cl_mem), &ocl_mem);
+            sim_register_ocl_mem_object(ocl_mem);
         } else {
             set_err = clSetKernelArg(ocl_kernel_, i, arg.size(), arg.value());
         }
