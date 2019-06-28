@@ -20,6 +20,7 @@
 DATA_T relu_fwd(DATA_T s, DATA_T alpha) {
     return s > 0 ? s : s * alpha;
 }
+
 DATA_T relu_bwd(DATA_T dd, DATA_T s, DATA_T alpha) {
     return s > 0 ? dd : dd * alpha;
 }
@@ -39,6 +40,24 @@ DATA_T bounded_relu_bwd(DATA_T dd, DATA_T s, DATA_T alpha) {
     return dd * (0 < s && s < alpha ? 1 : 0);
 }
 
+DATA_T square_fwd(DATA_T s){
+    return s*s;
+}
+DATA_T square_bwd(DATA_T dd, DATA_T s){
+    return dd * 2*s;
+}
+
+#if DT_U8 != 1
+DATA_T abs_fwd(DATA_T s){
+    return s > 0 ? s : -s;
+}
+
+DATA_T abs_bwd(DATA_T dd, DATA_T s){
+    return s > 0 ? dd : s < 0 ? -dd : 0;
+}
+#endif
+
+#if DT_F32 == 1 || DT_F16 == 1
 DATA_T soft_relu_fwd(DATA_T s) {
     return s < log(DATA_MAX) ? log1p(exp(s)) : s;
 }
@@ -54,25 +73,11 @@ DATA_T logistic_bwd(DATA_T dd, DATA_T s) {
     return dd * v * (1 - v);
 }
 
-DATA_T square_fwd(DATA_T s){
-    return s*s;
-}
-DATA_T square_bwd(DATA_T dd, DATA_T s){
-    return dd * 2*s;
-}
-
 DATA_T sqrt_fwd(DATA_T s){
     return s > 0 ? (sqrt(s)) : 0;
 }
 DATA_T sqrt_bwd(DATA_T dd, DATA_T s){
     return s > 0 ?  dd / (2 * sqrt(s)) : 0;
-}
-
-DATA_T abs_fwd(DATA_T s){
-    return s > 0 ? s : -s;
-}
-DATA_T abs_bwd(DATA_T dd, DATA_T s){
-    return s > 0 ? dd : s < 0 ? -dd : 0;
 }
 
 DATA_T tanh_fwd(DATA_T s){
@@ -96,11 +101,13 @@ DATA_T exp_fwd(DATA_T s) {
 DATA_T exp_bwd(DATA_T dd, DATA_T s) {
     return dd * exp_fwd(s);
 }
+#endif
 
 DATA_T fwd_eltwise(DATA_T x, DATA_T alpha_, DATA_T beta_) {
 #ifdef ALG_KIND
     switch (ALG_KIND) {
     case RELU: return relu_fwd(x, alpha_); break;
+#if DT_F32 == 1 || DT_F16 == 1
     case LINEAR: return linear_fwd(x, alpha_, beta_); break;
     case BOUNDED_RELU: return bounded_relu_fwd(x, alpha_); break;
     case SOFT_RELU: return soft_relu_fwd(x); break;
@@ -111,6 +118,7 @@ DATA_T fwd_eltwise(DATA_T x, DATA_T alpha_, DATA_T beta_) {
     case SQRT: return sqrt_fwd(x); break;
     case ABS: return abs_fwd(x); break;
     case EXP: return exp_fwd(x); break;
+#endif
     default: return x; break;
     }
 #else
@@ -121,6 +129,7 @@ DATA_T fwd_eltwise(DATA_T x, DATA_T alpha_, DATA_T beta_) {
 DATA_T bwd_eltwise(DATA_T x, DATA_T y, DATA_T alpha_) {
 #ifdef ALG_KIND
     switch (ALG_KIND) {
+#if DT_F32 == 1
     case RELU: return relu_bwd(x, y, alpha_); break;
     case LINEAR: return linear_bwd(x, alpha_); break;
     case BOUNDED_RELU: return bounded_relu_bwd(x, y, alpha_); break;
@@ -132,6 +141,7 @@ DATA_T bwd_eltwise(DATA_T x, DATA_T y, DATA_T alpha_) {
     case SQRT: return sqrt_bwd(x, y); break;
     case ABS: return abs_bwd(x, y); break;
     case EXP: return exp_bwd(x, y); break;
+#endif
     default: return x; break;
     }
 #else

@@ -120,8 +120,8 @@
 #    define DEF_ACC_DATA_T int
 #    define DEF_ACC_DATA8_T int8
 #    define TO_DATA_T(v) (uchar)(v)
-#    define CONVERT_DATA_T convert_uchar_sat
-#    define CONVERT_DATA8_T convert_uchar8_sat
+#    define CONVERT_DATA_T convert_uchar_sat_rte
+#    define CONVERT_DATA8_T convert_uchar8_sat_rte
 #    define ROUND rint
 
 #    define BLOCK_READ intel_sub_group_block_read_uc
@@ -142,6 +142,7 @@
 #    define AS_BLOCK_DATA8_T as_uchar8
 #elif DT_S32 == 1
 #    define DATA_T int
+#    define CONVERT_DATA_T convert_int_sat_rte
 #else
 #    error "Unexpected data type"
 #endif
