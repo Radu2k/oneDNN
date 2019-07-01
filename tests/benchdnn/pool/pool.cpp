@@ -244,6 +244,8 @@ int init_pd_bwd(const prb_t *p, mkldnn_pooling_desc_t &pd,
 }
 
 int doit(const prb_t *p, res_t *r) {
+    if (bench_mode == LIST) return r->state = LISTED, OK;
+
     mkldnn_pooling_desc_t pfd, pbd;
     mkldnn_primitive_desc_t pfpd, pbpd;
     mkldnn_primitive_t pf, pb;

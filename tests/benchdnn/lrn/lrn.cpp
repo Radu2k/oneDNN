@@ -170,6 +170,8 @@ int init_pd_bwd(const prb_t *p, mkldnn_lrn_desc_t &ld,
 }
 
 int doit(const prb_t *p, res_t *r) {
+    if (bench_mode == LIST) return r->state = LISTED, OK;
+
     mkldnn_lrn_desc_t lfd, lbd;
     mkldnn_primitive_desc_t lfpd, lbpd;
     mkldnn_primitive_t lf, lb;

@@ -220,6 +220,8 @@ int fill_data(data_kind_t kind, const prb_t *p, dnn_mem_t &mem_dt,
 }
 
 int doit(const prb_t *p, res_t *r) {
+    if (bench_mode == LIST) return r->state = LISTED, OK;
+
     mkldnn_inner_product_desc_t ipd;
     mkldnn_primitive_desc_t ippd;
     mkldnn_primitive_t ip;

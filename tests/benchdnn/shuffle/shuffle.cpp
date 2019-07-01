@@ -128,6 +128,8 @@ static int init_pd(const prb_t *p, mkldnn_shuffle_desc_t &sd,
 }
 
 int doit(const prb_t *p, res_t *r) {
+    if (bench_mode == LIST) return r->state = LISTED, OK;
+
     mkldnn_shuffle_desc_t sd;
     mkldnn_primitive_desc_t spd;
     mkldnn_primitive_t s {};

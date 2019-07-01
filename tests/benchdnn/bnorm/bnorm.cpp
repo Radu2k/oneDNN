@@ -623,6 +623,8 @@ static int cvt_mask_to_ws(
 }
 
 int doit(const prb_t *p, res_t *r) {
+    if (bench_mode == LIST) return r->state = LISTED, OK;
+
     mkldnn_batch_normalization_desc_t bd;
     mkldnn_primitive_desc_t bpd;
     mkldnn_primitive_t b;
