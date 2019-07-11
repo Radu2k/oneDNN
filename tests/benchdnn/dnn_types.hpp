@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef _DNN_TYPES_HPP
-#define _DNN_TYPES_HPP
+#ifndef DNN_TYPES_HPP
+#define DNN_TYPES_HPP
 
 #include <stdlib.h>
 #include <stddef.h>
@@ -100,6 +100,7 @@ struct attr_t {
             LOGISTIC,
             EXP,
             GELU,
+            SWISH,
             KIND_TOTAL
         };
         static kind_t str2kind(const char *str);
