@@ -14,8 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#define IC_BLOCK 16
-
 #if MB_BLOCK == 16
 #    define MB16
 #    define VECT_DT_N 8
@@ -27,7 +25,7 @@
 
 #if BNORM_FWD == 1
 
-#    if USE_16MB_UNROLL == 1 && DT_F32 == 1
+#    if IC_BLOCK == 16 && DT_F32 == 1
 
 __attribute__((reqd_work_group_size(1, 1, 16)))
 __attribute__((intel_reqd_sub_group_size(16)))
@@ -133,14 +131,14 @@ __kernel void reduce_variance(
 #    endif
 
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2)))
-#    if USE_16MB_UNROLL == 1
+#    if IC_BLOCK == 16
 __attribute__((intel_reqd_sub_group_size(LWS_1)))
 #    endif
 __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
         __global float *variance, __global DATA_T *dst,
         __global float *scaleshift, __global int *ws, float eps) {
 
-#    if USE_16MB_UNROLL == 1
+#    if IC_BLOCK == 16
     const int n = get_global_id(0) * MB_BLOCK;
     const int c = get_group_id(1) * IC_BLOCK;
     const int sp = get_global_id(2);
@@ -211,7 +209,7 @@ __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
     VECT_BLOCK_WRITE((__global BLOCK_DATA_T *)&dst[8 * 16],
             AS_VECT_BLOCK_DATA_T(CONVERT_VECTOR_DATA_T(blockD1)));
 #        endif
-#    else
+#    else // plain data layout
     const int c = get_global_id(0);
 
 #        if USE_SCALESHIFT == 1
@@ -273,7 +271,10 @@ __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
                     }
 #        endif
 #        if WITH_RELU
-                    dst[d_off] = max(bn_res, 0.0f);
+                    bn_res = max(bn_res, 0.0f);
+#        endif
+#        if DT_S8 == 1
+                    dst[d_off] = convert_char_sat_rte(bn_res);
 #        else
                     dst[d_off] = bn_res;
 #        endif
@@ -290,7 +291,7 @@ __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
 
 #if BNORM_BWD == 1
 
-#    if USE_16MB_UNROLL == 1
+#    if IC_BLOCK == 16
 __attribute__((reqd_work_group_size(1, 1, 16)))
 __attribute__((intel_reqd_sub_group_size(16)))
 __kernel void calculate_stats(__global float *src, __global float *mean,
@@ -387,7 +388,7 @@ __kernel void reduce_stats(__global float *reduce_temp,
 #    endif
 
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2)))
-#    if USE_16MB_UNROLL == 1
+#    if IC_BLOCK == 16
 __attribute__((intel_reqd_sub_group_size(LWS_1)))
 #    endif
 __kernel void ref_bnorm_bwd_kernel(__global float *src, __global float *mean,
@@ -395,7 +396,7 @@ __kernel void ref_bnorm_bwd_kernel(__global float *src, __global float *mean,
         __global float *scaleshift, __global int *ws, __global float *diff_src,
         __global float *diff_scaleshift, float eps) {
 
-#    if USE_16MB_UNROLL == 1
+#    if IC_BLOCK == 16
     const int n = get_global_id(0) * MB_BLOCK;
     const int c = get_group_id(1) * IC_BLOCK;
     const int sp = get_global_id(2);

@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef _PARSER_HPP
-#define _PARSER_HPP
+#ifndef PARSER_HPP
+#define PARSER_HPP
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -86,6 +86,12 @@ static bool parse_single_value_option(T &val, F process_func, const char *str,
     if (pattern.find(str, 0, pattern.size()) != eol)
         return val = process_func(str + pattern.size()), true;
     return false;
+}
+
+template <typename T, typename F>
+static bool parse_cfg(T &vec, F process_func, const char *str,
+        const std::string &option_name = "cfg") {
+    return parse_vector_option(vec, process_func, str, option_name);
 }
 
 bool parse_dir(std::vector<dir_t> &dir, const char *str,

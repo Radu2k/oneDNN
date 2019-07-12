@@ -303,6 +303,8 @@ enum class algorithm {
     eltwise_abs = mkldnn_eltwise_abs,
     /// Eltwise: square root
     eltwise_sqrt = mkldnn_eltwise_sqrt,
+    /// Eltwise: x*sigmoid(a*x)
+    eltwise_swish = mkldnn_eltwise_swish,
     /// Eltwise: linear
     eltwise_linear = mkldnn_eltwise_linear,
     /// Eltwise: bounded_relu
@@ -3676,10 +3678,10 @@ struct inner_product_backward_weights: public primitive {
 /// @sa @ref c_api_rnn in @ref c_api
 /// @{
 
-/// RNN for forward propagation.
+/// Vanilla RNN for forward propagation.
 ///
 /// Implements descriptor, primitive descriptor, and primitive.
-struct rnn_forward : public primitive {
+struct vanilla_rnn_forward : public primitive {
 
     /// Descriptor for RNN forward propagation.
     struct desc {
@@ -3790,15 +3792,15 @@ struct rnn_forward : public primitive {
         }
     };
 
-    rnn_forward() = default;
+    vanilla_rnn_forward() = default;
 
-    rnn_forward(const primitive_desc &pd): primitive(pd) {}
+    vanilla_rnn_forward(const primitive_desc &pd): primitive(pd) {}
 };
 
-/// RNN for backward propagation.
+/// Vanilla RNN for backward propagation.
 ///
 /// Implements descriptor, primitive descriptor, and primitive.
-struct rnn_backward : public primitive {
+struct vanilla_rnn_backward : public primitive {
 
     /// RNN descriptor for backward propagation.
     struct desc {
@@ -3861,11 +3863,11 @@ struct rnn_backward : public primitive {
         primitive_desc() = default;
 
         primitive_desc(const desc &desc, const engine &e,
-                const rnn_forward::primitive_desc &hint_fwd_pd)
+                const vanilla_rnn_forward::primitive_desc &hint_fwd_pd)
             : mkldnn::primitive_desc(&desc.data, nullptr, e, hint_fwd_pd.get()) {}
 
         primitive_desc(const desc &desc, const primitive_attr &attr, const engine &e,
-                const rnn_forward::primitive_desc &hint_fwd_pd)
+                const vanilla_rnn_forward::primitive_desc &hint_fwd_pd)
             : mkldnn::primitive_desc(&desc.data, &attr, e, hint_fwd_pd.get()) {}
 
         /// Queries source layer memory descriptor.
@@ -3961,9 +3963,9 @@ struct rnn_backward : public primitive {
         }
     };
 
-    rnn_backward() = default;
+    vanilla_rnn_backward() = default;
 
-    rnn_backward(const primitive_desc &pd): primitive(pd) {}
+    vanilla_rnn_backward(const primitive_desc &pd): primitive(pd) {}
 };
 
 /// LSTM for forward propagation.

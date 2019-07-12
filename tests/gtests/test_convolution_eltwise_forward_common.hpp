@@ -91,6 +91,7 @@ void compute_ref_conv_eltwise_fwd(const test_convolution_sizes_t &c,
             case algorithm::eltwise_soft_relu: d = soft_relu_fwd(d); break;
             case algorithm::eltwise_logistic: d = logistic_fwd(d); break;
             case algorithm::eltwise_exp: d = exp_fwd(d); break;
+            case algorithm::eltwise_swish: d = swish_fwd(d, elt_alpha); break;
             default: assert(!"unknown alg_kind");
             }
         }
@@ -106,6 +107,9 @@ protected:
         test_convolution_eltwise_params_t p
                 = ::testing::TestWithParam<
                 test_convolution_eltwise_params_t>::GetParam();
+        SKIP_IF(p.alg == algorithm::eltwise_swish
+                && get_test_engine_kind() == engine::kind::gpu,
+                "GPU does not support swish yet");
 
         ASSERT_EQ(p.aalgorithm, algorithm::convolution_direct);
         auto eng = engine(get_test_engine_kind(), 0);

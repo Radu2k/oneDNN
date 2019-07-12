@@ -134,7 +134,12 @@ struct jit_inner_product_conf_t {
     int kd, kh, kw;
     bool with_bias, has_spatial;
     bool is_forward, is_backward_data, is_backward_weights;
+
     data_type_t src_dt;
+    data_type_t wei_dt;
+    data_type_t bia_dt;
+    data_type_t dst_dt;
+    data_type_t acc_dt;
 };
 
 /* rnn */
@@ -148,13 +153,12 @@ struct jit_rnn_conf_t {
     bool with_dst_iter;
     bool with_dst_iter_c;
     bool is_lbr;
-    bool is_forward;
+    bool is_fwd;
     data_type_t src_dt;
     data_type_t wei_dt;
 
-
     int n_layer;
-    int n_direction;
+    int n_dir;
     int n_iter;
     int n_gates;
     int n_bias;
@@ -167,7 +171,7 @@ struct jit_rnn_conf_t {
     int dic;
     int dlc;
     int wic;
-    int n_parts_wei_st, n_parts_wei_i;
+    int n_parts_weights_iter, n_parts_weights_layer;
     int src_layer_ndims;
     int src_iter_ndims;
     int src_iter_c_ndims;
@@ -186,12 +190,18 @@ struct jit_rnn_conf_t {
     int diff_dst_iter_ndims;
     int diff_dst_iter_c_ndims;
     int diff_bias_ndims;
+    int states_ws_ld, gates_ws_ld;
 
     size_t ws_gates_offset;
     size_t ws_states_offset;
     size_t ws_diff_states_offset;
     size_t ws_grid_comp_offset;
     size_t ws_cell_comp_offset;
+    size_t ws_h_state_offset;
+    size_t ws_c_state_offset;
+    size_t ws_bias_offset;
+    size_t scratchpad_size;
+    size_t workspace_size;
 };
 
 /* bnorm */
@@ -199,9 +209,9 @@ struct jit_bnorm_conf_t {
     data_type_t data_type;
 
     int ndims;
-    int mb, ic, mb_chunk, sp_chunk, mb_block;
+    int mb, ic, mb_chunk, sp_chunk, mb_block, ic_block;
     int id, ih, iw;
-    bool with_relu, use_16mb_unroll;
+    bool with_relu;
     bool is_forward, is_backward;
     bool use_scaleshift, save_stats, is_training;
     bool fuse_norm_relu, calculate_stats, calculate_diff_stats;
@@ -307,13 +317,15 @@ inline void set_default_conf(jit_conv_conf_t &jcp, const convolution_desc_t &cd,
         jcp.eltwise = p.entry_[eltwise_ind].eltwise;
     jcp.with_relu
             = (jcp.with_eltwise && jcp.eltwise.alg == alg_kind::eltwise_relu);
-    if (jcp.with_relu)
-        jcp.relu_negative_slope = jcp.eltwise.alpha;
-    if (p.len_ == 2 && sum_idx != -1) {
-        jcp.with_sum_relu = p.entry_[sum_idx].is_sum(jcp.sum_scale == 1.0)
-                && p.entry_[1].is_relu();
-    } else {
-        jcp.with_sum_relu = 0;
+
+    jcp.with_sum_relu = (p.len_ == 2)
+        && jcp.with_relu && jcp.with_sum
+        && sum_idx == 0 && eltwise_ind == 1;
+
+    if (jcp.dst_data_type == data_type::u8
+        && jcp.with_sum_relu) {
+        jcp.with_relu = false;
+        jcp.with_sum_relu = false;
     }
 
     jcp.scale_idx_mult = attr.output_scales_.mask_ == (1 << 1);
@@ -424,26 +436,36 @@ inline void def_postops(ocl_jit_t &jit, alg_kind_t alg) {
 }
 
 inline void def_data_type(ocl_jit_t &jit, data_type_t dt, const char *str) {
-    char tempstr[32];
+    char tempstr[64];
     switch (dt) {
+    case data_type::bf16:
+        snprintf(tempstr, sizeof(tempstr), "-D%s_DATA_T=ushort -D%s_DT_BF16",
+                str, str);
+        jit.add_option(tempstr);
+        break;
     case data_type::f16:
-        snprintf(tempstr, 32, "-D%s_DATA_T=half -D%s_DT_F16", str, str);
+        snprintf(tempstr, sizeof(tempstr), "-D%s_DATA_T=half -D%s_DT_F16", str,
+                str);
         jit.add_option(tempstr);
         break;
     case data_type::f32:
-        snprintf(tempstr, 32, "-D%s_DATA_T=float -D%s_DT_F32", str, str);
+        snprintf(tempstr, sizeof(tempstr), "-D%s_DATA_T=float -D%s_DT_F32", str,
+                str);
         jit.add_option(tempstr);
         break;
     case data_type::s8:
-        snprintf(tempstr, 32, "-D%s_DATA_T=char -D%s_DT_S8", str, str);
+        snprintf(tempstr, sizeof(tempstr), "-D%s_DATA_T=char -D%s_DT_S8", str,
+                str);
         jit.add_option(tempstr);
         break;
     case data_type::u8:
-        snprintf(tempstr, 32, "-D%s_DATA_T=uchar -D%s_DT_U8", str, str);
+        snprintf(tempstr, sizeof(tempstr), "-D%s_DATA_T=uchar -D%s_DT_U8", str,
+                str);
         jit.add_option(tempstr);
         break;
     case data_type::s32:
-        snprintf(tempstr, 32, "-D%s_DATA_T=int -D%s_DT_S32", str, str);
+        snprintf(tempstr, sizeof(tempstr), "-D%s_DATA_T=int -D%s_DT_S32", str,
+                str);
         jit.add_option(tempstr);
         break;
     default: assert(!"unsupported data type"); break;

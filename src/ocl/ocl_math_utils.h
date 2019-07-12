@@ -17,6 +17,19 @@
 #ifndef OCL_MATH_UTILS_H
 #define OCL_MATH_UTILS_H
 
+ushort convert_f32_to_bf16(float f) {
+    uint i = as_uint(f);
+    i += 0x00007FFF + ((i & 0x10000) >> 16);
+    ushort2 r = as_ushort2(i);
+    return r[1];
+}
+
+float convert_bf16_to_f32(ushort b) {
+    ushort2 r = { 0, b };
+    float f = as_float(r);
+    return f;
+}
+
 #if IMAD_SUPPORTED == 1
 inline int __imad(char4 a, char4 b, int c) __attribute__((overloadable)) {
     int __builtin_IB_dp4a_ss(int c, int a, int b) __attribute__((const));

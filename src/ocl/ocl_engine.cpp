@@ -115,6 +115,7 @@ static const pd_create_f ocl_impl_list[] = {
     INSTANCE(ref_convolution_bwd_data_t),
     INSTANCE(ref_convolution_bwd_weights_t),
     /*bnorm*/
+    INSTANCE(ref_batch_normalization_fwd_t<s8>),
     INSTANCE(ref_batch_normalization_fwd_t<f16>),
     INSTANCE(ref_batch_normalization_fwd_t<f32>),
     INSTANCE(ref_batch_normalization_bwd_t<f32>),
@@ -125,6 +126,7 @@ static const pd_create_f ocl_impl_list[] = {
     INSTANCE(ref_pooling_fwd_t<f32>),
     INSTANCE(ref_pooling_bwd_t<f32>),
     /* lrn */
+    INSTANCE(ref_lrn_fwd_t<bf16>),
     INSTANCE(ref_lrn_fwd_t<f16>),
     INSTANCE(ref_lrn_fwd_t<f32>),
     INSTANCE(ref_lrn_bwd_t<f32>),
@@ -133,11 +135,17 @@ static const pd_create_f ocl_impl_list[] = {
     INSTANCE(gemm_inner_product_fwd_t<f32>),
     INSTANCE(gemm_inner_product_bwd_data_t<f32>),
     INSTANCE(gemm_inner_product_bwd_weights_t<f32>),
+
+    INSTANCE(ref_inner_product_fwd_t<bf16, bf16, bf16, f32>),
+    INSTANCE(ref_inner_product_bwd_data_t<bf16, bf16, bf16, f32>),
+    INSTANCE(ref_inner_product_bwd_weights_t<bf16>),
+
     INSTANCE(ref_inner_product_fwd_t<f16>),
     INSTANCE(ref_inner_product_fwd_t<f32>),
     INSTANCE(ref_inner_product_bwd_data_t<f32, f32, f32, f32>),
     INSTANCE(ref_inner_product_bwd_weights_t<f32>),
     /*softmax*/
+    INSTANCE(ref_softmax_fwd_t<bf16>),
     INSTANCE(ref_softmax_fwd_t<f16>),
     INSTANCE(ref_softmax_fwd_t<f32>),
     INSTANCE(ref_softmax_bwd_t<f32>),

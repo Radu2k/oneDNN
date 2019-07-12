@@ -15,7 +15,6 @@
 *******************************************************************************/
 
 #include "ocl/ocl_types.h"
-
 #include "ocl/ocl_post_ops.h"
 
 #define IN_OFF(x0, x1, x2, x3, x4, x5) ( \
@@ -56,6 +55,7 @@ __kernel void ref_eltwise_fwd(
     dst[off] = fwd_eltwise(src[off], alpha_, beta_);
 }
 
+#if DT_F32 == 1
 __kernel void ref_eltwise_bwd(__global DATA_T *src, __global DATA_T *diff_src,
         __global DATA_T *diff_dst, float alpha) {
     const int i = get_global_id(0);
@@ -84,3 +84,4 @@ __kernel void ref_eltwise_bwd(__global DATA_T *src, __global DATA_T *diff_src,
 
     diff_src[off] = bwd_eltwise(diff_dst[off], src[off], alpha_);
 }
+#endif

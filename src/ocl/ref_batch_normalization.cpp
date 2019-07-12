@@ -49,7 +49,7 @@ status_t ref_batch_normalization_fwd_t<data_type>::execute_forward(
 
     auto *mean_ptr = &mean_;
     auto *variance_ptr = &variance_;
-    if (jbn.use_16mb_unroll && jbn.calculate_stats && !jbn.save_stats) {
+    if (jbn.ic_block == 16 && jbn.calculate_stats && !jbn.save_stats) {
         mean_ptr = temp_reduce.get();
         variance_ptr = temp_reduce.get();
     }
@@ -60,7 +60,7 @@ status_t ref_batch_normalization_fwd_t<data_type>::execute_forward(
     auto &executor
             = *(utils::downcast<cl_stream_t *>(ctx.stream())->cl_executor());
 
-    if (jbn.use_16mb_unroll && jbn.calculate_stats) {
+    if (jbn.ic_block == 16 && jbn.calculate_stats) {
         status_t status;
 
         calculate_mean_kernel_.set_arg(0, src);
@@ -131,11 +131,11 @@ status_t ref_batch_normalization_bwd_t<data_type>::execute_backward(
 
     const auto &jbn = ker_->jbn;
 
-    auto &diff_scaleshift = (jbn.use_16mb_unroll && !jbn.diff_scaleshift)
+    auto &diff_scaleshift = (jbn.ic_block == 16 && !jbn.diff_scaleshift)
             ? *temp_reduce
             : diff_scaleshift_;
 
-    if (jbn.use_16mb_unroll) {
+    if (jbn.ic_block == 16) {
         status_t status;
 
         calculate_stats_kernel_.set_arg(0, src);
@@ -182,6 +182,7 @@ status_t ref_batch_normalization_bwd_t<data_type>::execute_backward(
     return status;
 }
 
+template struct ref_batch_normalization_fwd_t<data_type::s8>;
 template struct ref_batch_normalization_fwd_t<data_type::f16>;
 template struct ref_batch_normalization_fwd_t<data_type::f32>;
 template struct ref_batch_normalization_bwd_t<data_type::f32>;

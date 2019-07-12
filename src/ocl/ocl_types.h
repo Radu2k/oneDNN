@@ -17,6 +17,8 @@
 #ifndef OCL_TYPES_H
 #define OCL_TYPES_H
 
+#include "ocl/ocl_math_utils.h"
+
 #if DT_F32 == 1
 #    define DATA_T float
 #    define DATA8_T float8
@@ -27,6 +29,7 @@
 #    define DEF_ACC_DATA_T float
 #    define DEF_ACC_DATA8_T float8
 #    define TO_DATA_T(v) (float)(v)
+#    define TO_DEF_ACC_DATA_T(v) (float)(v)
 #    define CONVERT_DATA_T convert_float
 #    define CONVERT_DATA8_T convert_float8
 #    define ROUND
@@ -58,6 +61,7 @@
 #    define DEF_ACC_DATA_T half
 #    define DEF_ACC_DATA8_T half8
 #    define TO_DATA_T(v) (half)(v)
+#    define TO_DEF_ACC_DATA_T(v) (half)(v)
 #    define CONVERT_DATA_T convert_half
 #    define CONVERT_DATA8_T convert_half8
 #    define ROUND
@@ -68,6 +72,35 @@
 #    define BLOCK_WRITE8 intel_sub_group_block_write_us8
 #    define AS_DATA_T as_half
 #    define AS_DATA8_T as_half8
+
+#    define AS_UINT_T as_ushort
+#    define AS_UINT8_T as_ushort8
+
+#    define BLOCK_DATA_T ushort
+#    define BLOCK_DATA8_T ushort8
+#    define AS_BLOCK_DATA_T as_ushort
+#    define AS_BLOCK_DATA8_T as_ushort8
+#elif DT_BF16 == 1
+#    define DATA_T ushort
+#    define DATA8_T ushort8
+#    define DATA_MAX FLT_MAX
+#    define DATA_MIN -DATA_MAX
+#    define DATA_ZERO 0.0f
+#    define DATA_ONE 1.0f
+#    define DEF_ACC_DATA_T float
+#    define DEF_ACC_DATA8_T float8
+#    define TO_DATA_T(v) convert_f32_to_bf16(v)
+#    define TO_DEF_ACC_DATA_T(v) convert_bf16_to_f32(v)
+#    define CONVERT_DATA_T convert_f32_to_bf16
+#    define CONVERT_DATA8_T convert_bf16_8
+#    define ROUND
+
+#    define BLOCK_READ intel_sub_group_block_read_us
+#    define BLOCK_WRITE intel_sub_group_block_write_us
+#    define BLOCK_READ8 intel_sub_group_block_read_us8
+#    define BLOCK_WRITE8 intel_sub_group_block_write_us8
+#    define AS_DATA_T as_bf16
+#    define AS_DATA8_T as_bf16_8
 
 #    define AS_UINT_T as_ushort
 #    define AS_UINT8_T as_ushort8
@@ -88,8 +121,8 @@
 #    define DEF_ACC_DATA_T int
 #    define DEF_ACC_DATA8_T int8
 #    define TO_DATA_T(v) (char)(v)
-#    define CONVERT_DATA_T convert_char_sat
-#    define CONVERT_DATA8_T convert_char8_sat
+#    define CONVERT_DATA_T convert_char_sat_rte
+#    define CONVERT_DATA8_T convert_char8_sat_rte
 #    define ROUND rint
 
 #    define BLOCK_READ intel_sub_group_block_read_uc
@@ -120,8 +153,8 @@
 #    define DEF_ACC_DATA_T int
 #    define DEF_ACC_DATA8_T int8
 #    define TO_DATA_T(v) (uchar)(v)
-#    define CONVERT_DATA_T convert_uchar_sat
-#    define CONVERT_DATA8_T convert_uchar8_sat
+#    define CONVERT_DATA_T convert_uchar_sat_rte
+#    define CONVERT_DATA8_T convert_uchar8_sat_rte
 #    define ROUND rint
 
 #    define BLOCK_READ intel_sub_group_block_read_uc
@@ -142,6 +175,7 @@
 #    define AS_BLOCK_DATA8_T as_uchar8
 #elif DT_S32 == 1
 #    define DATA_T int
+#    define CONVERT_DATA_T convert_int_sat_rte
 #else
 #    error "Unexpected data type"
 #endif
@@ -177,6 +211,101 @@
 #    define AS_VECT_INT_T as_int8
 #    define AS_VECT_UINT_T as_uint8
 #endif
+
+#ifdef SRC_DATA_T
+#    if SRC_DT_BF16
+#        define SRC_TO_REF(x) convert_bf16_to_f32(x)
+#    else
+#        define SRC_TO_REF(x) (x)
+#    endif
+#    if SRC_DT_BF16
+#        define TO_SRC(x) convert_f32_to_bf16(x)
+#    elif SRC_DT_U8
+#        define TO_SRC(x) convert_uchar_sat_rte(x)
+#    elif SRC_DT_S8
+#        define TO_SRC(x) convert_char_sat_rte(x)
+#    elif SRC_DT_S32
+#        define TO_SRC(x) convert_int_sat_rte(x)
+#    else
+#        define TO_SRC(x) (x)
+#    endif
+#endif
+
+#ifdef WEI_DATA_T
+#    if WEI_DT_BF16
+#        define WEI_TO_REF(x) convert_bf16_to_f32(x)
+#        define REF_TO_WEI(x) convert_f32_to_bf16(x)
+#    else
+#        define WEI_TO_REF(x) (x)
+#        define REF_TO_WEI(x) (x)
+#    endif
+#    if WEI_DT_BF16
+#        define TO_WEI(x) convert_f32_to_bf16(x)
+#    elif WEI_DT_U8
+#        define TO_WEI(x) convert_uchar_sat_rte(x)
+#    elif WEI_DT_S8
+#        define TO_WEI(x) convert_char_sat_rte(x)
+#    elif WEI_DT_S32
+#        define TO_WEI(x) convert_int_sat_rte(x)
+#    else
+#        define TO_WEI(x) (x)
+#    endif
+#endif
+
+#ifdef BIA_DATA_T
+#    if BIA_DT_BF16
+#        define BIA_TO_REF(x) convert_bf16_to_f32(x)
+#        define REF_TO_BIA(x) convert_f32_to_bf16(x)
+#    else
+#        define BIA_TO_REF(x) (x)
+#        define REF_TO_BIA(x) (x)
+#    endif
+#    if BIA_DT_BF16
+#        define TO_BIA(x) convert_f32_to_bf16(x)
+#    elif BIA_DT_U8
+#        define TO_BIA(x) convert_uchar_sat_rte(x)
+#    elif BIA_DT_S8
+#        define TO_BIA(x) convert_char_sat_rte(x)
+#    elif BIA_DT_S32
+#        define TO_BIA(x) convert_int_sat_rte(x)
+#    else
+#        define TO_BIA(x) (x)
+#    endif
+#endif
+
+#ifdef DST_DATA_T
+#    if DST_DT_BF16
+#        define DST_TO_REF(x) convert_bf16_to_f32(x)
+#        define REF_TO_DST(x) convert_f32_to_bf16(x)
+#    else
+#        define DST_TO_REF(x) (x)
+#        define REF_TO_DST(x) (x)
+#    endif
+#    if DST_DT_BF16
+#        define TO_DST(x) convert_f32_to_bf16(x)
+#    elif DST_DT_U8
+#        define TO_DST(x) convert_uchar_sat_rte(x)
+#    elif DST_DT_S8
+#        define TO_DST(x) convert_char_sat_rte(x)
+#    elif DST_DT_S32
+#        define TO_DST(x) convert_int_sat_rte(x)
+#    else
+#        define TO_DST(x) (x)
+#    endif
+#endif
+
+#ifdef ACC_DATA_T
+#    if ACC_DT_F16
+#        define TO_ACC(x) convert_half(x)
+#    elif ACC_DT_F32
+#        define TO_ACC(x) convert_float(x)
+#    elif ACC_DT_S32
+#        define TO_ACC(x) convert_int(x)
+#    else
+#        error "Unexpected accumulation data type"
+#    endif
+#endif
+
 #if NDIMS == 3
 #    define SRC_OFF(x0, x1, d, h, x2)                                  \
         (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0          \
