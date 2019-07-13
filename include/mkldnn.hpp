@@ -22,7 +22,7 @@
 
 #include "mkldnn_config.h"
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 #include <stdlib.h>
 #include <memory>
 #include <vector>
@@ -35,8 +35,7 @@
 #if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
 #include <CL/cl.h>
 #endif
-
-#endif
+/// @endcond
 
 namespace mkldnn {
 
@@ -147,7 +146,7 @@ public:
     bool operator!=(const handle &other) const { return !(*this == other); }
 };
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 template <> struct handle_traits<mkldnn_memory_t> {
     static constexpr auto destructor = &mkldnn_memory_destroy;
 };
@@ -163,7 +162,7 @@ template <> struct handle_traits<mkldnn_primitive_t> {
 template <> struct handle_traits<mkldnn_primitive_desc_iterator_t> {
     static constexpr auto destructor = &mkldnn_primitive_desc_iterator_destroy;
 };
-#endif
+/// @endcond
 
 struct stream;
 struct error;
@@ -550,11 +549,11 @@ inline mkldnn_query_t convert_to_c(query aquery) {
 /// @sa @ref c_api_attributes in @ref c_api
 /// @{
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 template <> struct handle_traits<mkldnn_post_ops_t> {
     static constexpr auto destructor = &mkldnn_post_ops_destroy;
 };
-#endif
+/// @endcond
 
 /// Post operations
 ///
@@ -638,11 +637,11 @@ struct post_ops: public handle<mkldnn_post_ops_t> {
     }
 };
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 template <> struct handle_traits<mkldnn_primitive_attr_t> {
     static constexpr auto destructor = &mkldnn_primitive_attr_destroy;
 };
-#endif
+/// @endcond
 
 /// Primitive attributes
 ///
@@ -775,11 +774,11 @@ struct primitive_attr: public handle<mkldnn_primitive_attr_t> {
 /// @sa @ref c_api_engine in @ref c_api
 /// @{
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 template <> struct handle_traits<mkldnn_engine_t> {
     static constexpr auto destructor = &mkldnn_engine_destroy;
 };
-#endif
+/// @endcond
 
 /// An execution engine.
 struct engine: public handle<mkldnn_engine_t> {
@@ -898,11 +897,11 @@ private:
 /// @sa @ref c_api_stream in @ref c_api
 /// @{
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 template <> struct handle_traits<mkldnn_stream_t> {
     static constexpr auto destructor = &mkldnn_stream_destroy;
 };
-#endif
+/// @endcond
 
 /// An execution stream.
 struct stream: public handle<mkldnn_stream_t> {
@@ -4972,8 +4971,8 @@ struct shuffle_backward : public primitive {
 /// @} C++ API
 
 // implementation section
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
 
+/// @cond DO_NOT_DOCUMENT_THIS
 inline primitive::primitive(const_mkldnn_primitive_desc_t c_pd) {
     mkldnn_primitive_t result;
     error::wrap_c_api(mkldnn_primitive_create(&result, c_pd),
@@ -4994,7 +4993,7 @@ inline void primitive::execute(stream &astream,
                 (int)c_args.size(), c_args.data()),
             "could not execute a primitive");
 }
-#endif // DOXYGEN_SHOULD_SKIP_THIS
+/// @endcond
 
 } // namespace mkldnn
 
