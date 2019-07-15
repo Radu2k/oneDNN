@@ -63,7 +63,7 @@ ref_conv_fwd_kernel(const __global uchar *src,
 
     sum *= scales;
 
-# if WITH_SUM_RELU == 1
+# if WITH_SUM_ELTWISE == 1
 #   if SUM_SCALE == 1
     sum += dst[0];
 #   else

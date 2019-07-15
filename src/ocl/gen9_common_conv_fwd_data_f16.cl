@@ -221,7 +221,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global half *src,
             + od * OH * OW * OC_BLOCK * MB_BLOCK + oh * OW * OC_BLOCK * MB_BLOCK
             + ow * OC_BLOCK * MB_BLOCK + ((mb + 1) % MB_BLOCK) * OC_BLOCK;
 
-#        if WITH_SUM_RELU == 1
+#        if WITH_SUM_ELTWISE == 1
     half8 blockS00, blockS01, blockS10, blockS11;
     if (ow == OW_LAST) {
         for (int i = 0; i < OW - OW_LAST; i++) {
@@ -525,7 +525,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global half *src,
             + oc * OC_BLOCK * ODHW_SIZE + od * OH * OW * OC_BLOCK
             + oh * OW * OC_BLOCK + ow * OC_BLOCK;
 
-#        if WITH_SUM_RELU == 1
+#        if WITH_SUM_ELTWISE == 1
     half8 blockS00, blockS10;
     if (ow == OW_LAST) {
         for (int i = 0; i < OW - OW_LAST; i++) {
@@ -794,7 +794,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global half *src,
     __global half *dst_write1 = dst_write0 + OC_BLOCK * ODHW_SIZE * MB_BLOCK;
 #    endif
 
-#    if WITH_SUM_RELU == 1
+#    if WITH_SUM_ELTWISE == 1
     half8 blockS00 = as_half8(intel_sub_group_block_read_us8(
             (const __global ushort *)dst_write0));
     half8 blockS01 = as_half8(intel_sub_group_block_read_us8(
@@ -1307,7 +1307,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global half *src,
             + goc * ODHW_SIZE * OC_BLOCK + g * OC * ODHW_SIZE
             + od * OH * OW * OC_BLOCK + oh * OW * OC_BLOCK + ow * OC_BLOCK;
 
-#    if WITH_SUM_RELU == 1
+#    if WITH_SUM_ELTWISE == 1
 #        if OW_BLOCK != 8 && OW_BLOCK != 16
     half blockS00[OW_BLOCK];
 #        else

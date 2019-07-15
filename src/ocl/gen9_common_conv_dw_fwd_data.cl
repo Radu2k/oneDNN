@@ -106,7 +106,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global DATA_T *src,
                 }
 #    endif
 
-#    if WITH_SUM_RELU == 1
+#    if WITH_SUM_ELTWISE == 1
         DATA_T D00[OW_BLOCK];
         __attribute__((opencl_unroll_hint(OW_BLOCK)))
         for (int k = 0; k < OW_BLOCK; k++) {
@@ -216,7 +216,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global DATA_T *src,
                 }
 #    endif
 
-#    if WITH_SUM_RELU == 1
+#    if WITH_SUM_ELTWISE == 1
         DATA8_T D00 = AS_DATA8_T(BLOCK_READ8((const __global uint *)dst));
         DATA8_T D01 = AS_DATA8_T(
                 BLOCK_READ8((const __global uint *)&dst[8 * OC_BLOCK]));

@@ -106,68 +106,68 @@ gen12lp_1x1_conv_fwd_kernel(const __global uchar *src, const __global char *wei,
 
 
 #if WITH_BIAS
-#if WITH_SUM_RELU
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
+#if WITH_SUM_ELTWISE
+#define BIAS_SUM_ELTWISE(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = fma((float)DST, sum_scale, BIA);            \
     TMP = fma((float)ACC, SCALE, TMP);                \
     RES = convert_uchar_sat(TMP);
-#else // WITH_SUM_RELU
+#else // WITH_SUM_ELTWISE
 #if WITH_RELU
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
+#define BIAS_SUM_ELTWISE(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = fma((float)ACC, SCALE, BIA);                \
     RES = convert_uchar_sat(TMP);
 #else // WITH_RELU
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
+#define BIAS_SUM_ELTWISE(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = fma((float)ACC, SCALE, BIA);                \
     RES = convert_uchar_sat(TMP);
 #endif // WITH_RELU 
-#endif // WITH_SUM_RELU
+#endif // WITH_SUM_ELTWISE
 #else // WITH_BIAS
-#if WITH_SUM_RELU
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE)     \
+#if WITH_SUM_ELTWISE
+#define BIAS_SUM_ELTWISE(RES, TMP, ACC, BIA, DST, SCALE)     \
     TMP = fma((float)ACC, SCALE, (float)DST * sum_scale); \
     RES = convert_uchar_sat(TMP);
-#else // WITH_SUM_RELU
+#else // WITH_SUM_ELTWISE
 #if WITH_RELU
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
+#define BIAS_SUM_ELTWISE(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = (float)ACC * SCALE;                         \
     RES = convert_uchar_sat(TMP);
 #else // WITH_RELU
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST, SCALE) \
+#define BIAS_SUM_ELTWISE(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = (float)ACC * SCALE;                         \
     RES = convert_uchar_sat(TMP);
 #endif // WITH_RELU
-#endif // WITH_SUM_RELU
+#endif // WITH_SUM_ELTWISE
 #endif // WITH_BIAS
 
-#if WITH_SUM_RELU || WITH_SUM
+#if WITH_SUM_ELTWISE || WITH_SUM
 #define PACK(idx)                                             \
     D00 = as_uchar4(D0[idx]);                                 \
-    BIAS_SUM_RELU(S00[0], T00, C00[idx], b0, D00[0], scales); \
-    BIAS_SUM_RELU(S00[1], T01, C01[idx], b1, D00[1], scales); \
-    BIAS_SUM_RELU(S00[2], T02, C02[idx], b2, D00[2], scales); \
-    BIAS_SUM_RELU(S00[3], T03, C03[idx], b3, D00[3], scales); \
+    BIAS_SUM_ELTWISE(S00[0], T00, C00[idx], b0, D00[0], scales); \
+    BIAS_SUM_ELTWISE(S00[1], T01, C01[idx], b1, D00[1], scales); \
+    BIAS_SUM_ELTWISE(S00[2], T02, C02[idx], b2, D00[2], scales); \
+    BIAS_SUM_ELTWISE(S00[3], T03, C03[idx], b3, D00[3], scales); \
     T0[idx] = as_uint(S00);                                   \
     D01 = as_uchar4(D1[idx]);                                 \
-    BIAS_SUM_RELU(S01[0], T10, C10[idx], b0, D01[0], scales); \
-    BIAS_SUM_RELU(S01[1], T11, C11[idx], b1, D01[1], scales); \
-    BIAS_SUM_RELU(S01[2], T12, C12[idx], b2, D01[2], scales); \
-    BIAS_SUM_RELU(S01[3], T13, C13[idx], b3, D01[3], scales); \
+    BIAS_SUM_ELTWISE(S01[0], T10, C10[idx], b0, D01[0], scales); \
+    BIAS_SUM_ELTWISE(S01[1], T11, C11[idx], b1, D01[1], scales); \
+    BIAS_SUM_ELTWISE(S01[2], T12, C12[idx], b2, D01[2], scales); \
+    BIAS_SUM_ELTWISE(S01[3], T13, C13[idx], b3, D01[3], scales); \
     T1[idx] = as_uint(S01);                                   
 
-#else // WITH_SUM_RELU || WITH_SUM
+#else // WITH_SUM_ELTWISE || WITH_SUM
 #define PACK(idx)                                             \
-    BIAS_SUM_RELU(S00[0], T00, C00[idx], b0, D00[0], scales); \
-    BIAS_SUM_RELU(S00[1], T01, C01[idx], b1, D00[1], scales); \
-    BIAS_SUM_RELU(S00[2], T02, C02[idx], b2, D00[2], scales); \
-    BIAS_SUM_RELU(S00[3], T03, C03[idx], b3, D00[3], scales); \
+    BIAS_SUM_ELTWISE(S00[0], T00, C00[idx], b0, D00[0], scales); \
+    BIAS_SUM_ELTWISE(S00[1], T01, C01[idx], b1, D00[1], scales); \
+    BIAS_SUM_ELTWISE(S00[2], T02, C02[idx], b2, D00[2], scales); \
+    BIAS_SUM_ELTWISE(S00[3], T03, C03[idx], b3, D00[3], scales); \
     T0[idx] = as_uint(S00);                                   \
-    BIAS_SUM_RELU(S01[0], T10, C10[idx], b0, D01[0], scales); \
-    BIAS_SUM_RELU(S01[1], T11, C11[idx], b1, D01[1], scales); \
-    BIAS_SUM_RELU(S01[2], T12, C12[idx], b2, D01[2], scales); \
-    BIAS_SUM_RELU(S01[3], T13, C13[idx], b3, D01[3], scales); \
+    BIAS_SUM_ELTWISE(S01[0], T10, C10[idx], b0, D01[0], scales); \
+    BIAS_SUM_ELTWISE(S01[1], T11, C11[idx], b1, D01[1], scales); \
+    BIAS_SUM_ELTWISE(S01[2], T12, C12[idx], b2, D01[2], scales); \
+    BIAS_SUM_ELTWISE(S01[3], T13, C13[idx], b3, D01[3], scales); \
     T1[idx] = as_uint(S01);                                   
-#endif // WITH_SUM_RELU || WITH_SUM
+#endif // WITH_SUM_ELTWISE || WITH_SUM
 
 #if WITH_BIAS
         bias += (oc_group_id + sg_id) * OC_BLOCK + get_sub_group_local_id() * 4;
@@ -176,12 +176,12 @@ gen12lp_1x1_conv_fwd_kernel(const __global uchar *src, const __global char *wei,
         float b2 = bias[2] * scales;
         float b3 = bias[3] * scales;
 #endif // WITH_BIAS
-#if WITH_SUM_RELU || WITH_SUM
+#if WITH_SUM_ELTWISE || WITH_SUM
         uchar4 D00, D01;
         uint8 D0 = intel_sub_group_block_read8((__global uint *)dst);
         uint8 D1 = intel_sub_group_block_read8(
                 (__global uint *)&dst[8 * OC_BLOCK]);
-#endif // WITH_SUM_RELU || WITH_SUM
+#endif // WITH_SUM_ELTWISE || WITH_SUM
         uchar4 S00, S01;
         uint8 T0, T1;
         float T00, T01, T02, T03;
