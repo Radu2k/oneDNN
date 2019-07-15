@@ -199,7 +199,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
     }
 #    endif
 
-#    if WITH_SUM_RELU == 1
+#    if WITH_SUM_ELTWISE == 1
     float8 blockS00 = as_float8(
             intel_sub_group_block_read8((const __global uint *)dst_write0));
     float8 blockS01 = as_float8(intel_sub_group_block_read8(
@@ -410,7 +410,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
 #if OCB == 32
     __global float *dst_write1 = dst_write0 + OC_BLOCK * MB_BLOCK * ODHW_SIZE;
 #endif
-#        if WITH_SUM_RELU == 1
+#        if WITH_SUM_ELTWISE == 1
     float8 blockS00, blockS01;
     if (ow == OW_LAST) {
         for (int i = 0; i < OW - OW_LAST; i++) {
@@ -765,7 +765,7 @@ __kernel void gen9_common_conv_fwd_kernel(const __global float *src,
             + goc * ODHW_SIZE * OC_BLOCK + g * OC * ODHW_SIZE
             + od * OH * OW * OC_BLOCK + oh * OW * OC_BLOCK + ow * OC_BLOCK;
 
-#        if WITH_SUM_RELU == 1
+#        if WITH_SUM_ELTWISE == 1
 #            if OW_BLOCK != 8 && OW_BLOCK != 16
     float blockS00[OW_BLOCK];
 #            else

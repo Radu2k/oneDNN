@@ -93,8 +93,7 @@ struct ref_convolution_kernel_t {
         return status::success;
     }
 
-    status_t apply_const(ocl_jit_t &jit, bool with_eltwise,
-        bool with_sum, alg_kind_t alg) const {
+    status_t apply_const(ocl_jit_t &jit) const {
         jit.define_int("NDIMS", conf_.ndims);
         jit.define_int("G", conf_.ngroups);
         jit.define_int("WITH_GROUPS", conf_.with_groups);
@@ -141,12 +140,12 @@ struct ref_convolution_kernel_t {
         def_data_type(jit, conf_.dst_data_type, "DST");
         def_data_type(jit, conf_.acc_data_type, "ACC");
 
-        if (with_eltwise) {
-            def_postops(jit, alg);
+        if (conf_.with_eltwise) {
+            def_postops(jit, conf_.alg);
         }
-        jit.define_int("WITH_ELTWISE",with_eltwise);
-        jit.define_int("WITH_SUM",with_sum);
-        jit.define_int("WITH_SUM_ELTWISE",with_sum && with_eltwise);
+        jit.define_int("WITH_ELTWISE", conf_.with_eltwise);
+        jit.define_int("WITH_SUM", conf_.with_sum);
+        jit.define_int("WITH_SUM_ELTWISE", conf_.with_sum_eltwise);
 
         return status::success;
     }

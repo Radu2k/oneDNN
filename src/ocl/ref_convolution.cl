@@ -63,12 +63,20 @@ __kernel void ref_convolution_fwd_kernel(const __global SRC_DATA_T *src,
 #if defined(SRC_DT_S8) || defined(SRC_DT_U8)
     tmp *= scales;
 #endif
+#if WITH_SUM_ELTWISE == 1
+    tmp += sum_scale
+            * (DATA_T)DST_TO_REF(dst[DST_OFF(n, g * OC + oc, od, oh, ow)]);
+    tmp = fwd_eltwise(tmp, eltwise_alpha, eltwise_beta);
+#else
+#if WITH_ELTWISE == 1
+    tmp = fwd_eltwise(tmp, eltwise_alpha, eltwise_beta);
+#endif
 #if WITH_SUM == 1
     tmp += sum_scale
             * (DATA_T)DST_TO_REF(dst[DST_OFF(n, g * OC + oc, od, oh, ow)]);
 #endif
-#if WITH_ELTWISE == 1
-    tmp = fwd_eltwise(tmp, eltwise_alpha, eltwise_beta);
+
+
 #endif
     dst[DST_OFF(n, g * OC + oc, od, oh, ow)] = TO_DST(tmp);
 }

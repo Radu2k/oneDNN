@@ -141,7 +141,7 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
         jit.define_int("WITH_BIAS", jcp.with_bias);
         jit.define_int("WITH_RELU", jcp.with_relu);
         jit.define_int("WITH_SUM", jcp.with_sum);
-        jit.define_int("WITH_SUM_RELU", jcp.with_sum_relu);
+        jit.define_int("WITH_SUM_ELTWISE", jcp.with_sum_eltwise);
         jit.define_int("SUM_SCALE", jcp.sum_scale == 1.0);
 
         jit.define_int("SUB_GROUP_SIZE", jcp.sub_group_size);

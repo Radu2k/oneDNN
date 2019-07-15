@@ -163,7 +163,7 @@ conv_dw_fwd_kernel(const __global uchar *src, const __global char *wei,
     S01 = convert_int8(convert_float8(S01) * scales);
 #endif
 
-#if WITH_SUM_RELU
+#if WITH_SUM_ELTWISE
     DATA16_T D00 = AS_DATA16_T(
             intel_sub_group_block_read_uc16((const __global uchar *)dst));
 #if SUM_SCALE
@@ -175,7 +175,7 @@ conv_dw_fwd_kernel(const __global uchar *src, const __global char *wei,
 #endif // SUM_SCALE
     S00 = select(S00, convert_int8(convert_float8(S00) * relu_negative_slope), S00 < 0);
     S01 = select(S01, convert_int8(convert_float8(S01) * relu_negative_slope), S01 < 0);
-#else // WITH_SUM_RELU
+#else // WITH_SUM_ELTWISE
 #if WITH_RELU
     S00 = select(S00, convert_int8(convert_float8(S00) * relu_negative_slope), S00 < 0);
     S01 = select(S01, convert_int8(convert_float8(S01) * relu_negative_slope), S01 < 0);
@@ -191,7 +191,7 @@ conv_dw_fwd_kernel(const __global uchar *src, const __global char *wei,
     S01 += convert_int8(convert_float8(D00.s89abcdef) * sum_scale);
 #endif // SUM_SCALE
 #endif // WITH_SUM
-#endif // WITH_SUM_RELU
+#endif // WITH_SUM_ELTWISE
     const DATA16_T R0 = (DATA16_T)(CONVERT_DATA8_T(S00), CONVERT_DATA8_T(S01));
     intel_sub_group_block_write_uc16((__global uchar *)dst, as_uchar16(R0));
 }

@@ -111,8 +111,7 @@ struct ref_convolution_fwd_t: public primitive_t {
 
     status_t init() override {
         auto jit = ocl_jit_t(ref_convolution_kernel);
-        auto status = pd()->kernel()->apply_const(jit, pd()->with_eltwise(),
-            pd()->with_sum(), pd()->eltwise_alg_kind());
+        auto status = pd()->kernel()->apply_const(jit);
         if (status != status::success)
             return status;
 
@@ -175,8 +174,7 @@ struct ref_convolution_bwd_data_t: public primitive_t {
 
     status_t init() override {
         auto jit = ocl_jit_t(ref_convolution_kernel);
-        auto status = pd()->kernel()->apply_const(jit, false, false,
-            mkldnn_alg_kind_undef);
+        auto status = pd()->kernel()->apply_const(jit);
         if (status != status::success)
             return status;
 
@@ -239,8 +237,7 @@ struct ref_convolution_bwd_weights_t: public primitive_t {
 
     status_t init() override {
         auto jit = ocl_jit_t(ref_convolution_kernel);
-        auto status = pd()->kernel()->apply_const(jit, false, false,
-            mkldnn_alg_kind_undef);
+        auto status = pd()->kernel()->apply_const(jit);
         if (status != status::success)
             return status;
 
