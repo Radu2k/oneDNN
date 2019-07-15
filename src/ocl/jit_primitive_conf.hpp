@@ -317,6 +317,8 @@ inline void set_default_conf(jit_conv_conf_t &jcp, const convolution_desc_t &cd,
         jcp.eltwise = p.entry_[eltwise_ind].eltwise;
     jcp.with_relu
             = (jcp.with_eltwise && jcp.eltwise.alg == alg_kind::eltwise_relu);
+    if (jcp.with_relu)
+        jcp.relu_negative_slope = jcp.eltwise.alpha;
 
     jcp.with_sum_relu = (p.len_ == 2)
         && jcp.with_relu && jcp.with_sum
