@@ -214,6 +214,12 @@ namespace format_tag {
     const format_tag_t aBCd4b8c8b4c = mkldnn_aBCd4b8c8b4c;
     const format_tag_t aBCde4b8c8b4c = mkldnn_aBCde4b8c8b4c;
     const format_tag_t aBCdef4b8c8b4c = mkldnn_aBCdef4b8c8b4c;
+    const format_tag_t BAc4b8a8b4a = mkldnn_BAc4b8a8b4a;
+    const format_tag_t BAcd4b8a8b4a = mkldnn_BAcd4b8a8b4a;
+    const format_tag_t BAcde4b8a8b4a = mkldnn_BAcde4b8a8b4a;
+    const format_tag_t aCBd4c8b8c4b = mkldnn_aCBd4c8b8c4b;
+    const format_tag_t aCBde4c8b8c4b = mkldnn_aCBde4c8b8c4b;
+    const format_tag_t aCBdef4c8b8c4b = mkldnn_aCBdef4c8b8c4b;
     const format_tag_t aBCde2b8c8b2c = mkldnn_aBCde2b8c8b2c;
     const format_tag_t aBCde8c16b2c = mkldnn_aBCde8c16b2c;
     const format_tag_t aBCde8c8b = mkldnn_aBCde8c8b;
@@ -403,6 +409,12 @@ namespace format_tag {
     const format_tag_t gIOhw8o16i2o = mkldnn_gIOhw8o16i2o;
     const format_tag_t OIhw4o8i8o4i = mkldnn_OIhw4o8i8o4i;
     const format_tag_t OIdhw4o8i8o4i = mkldnn_OIdhw4o8i8o4i;
+    const format_tag_t IOw4i8o8i4o = mkldnn_IOw4i8o8i4o;
+    const format_tag_t IOhw4i8o8i4o = mkldnn_IOhw4i8o8i4o;
+    const format_tag_t IOdhw4i8o8i4o = mkldnn_IOdhw4i8o8i4o;
+    const format_tag_t gIOw4i8o8i4o = mkldnn_gIOw4i8o8i4o;
+    const format_tag_t gIOhw4i8o8i4o = mkldnn_gIOhw4i8o8i4o;
+    const format_tag_t gIOdhw4i8o8i4o = mkldnn_gIOdhw4i8o8i4o;
     const format_tag_t OIhw2o8i8o2i = mkldnn_OIhw2o8i8o2i;
     const format_tag_t gOIw4o8i8o4i = mkldnn_gOIw4o8i8o4i;
     const format_tag_t gOIhw4o8i8o4i = mkldnn_gOIhw4o8i8o4i;

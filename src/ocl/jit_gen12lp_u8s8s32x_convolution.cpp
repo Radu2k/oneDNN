@@ -53,10 +53,35 @@ template <data_type_t dst_type>
     return status;
 }
 
+template <data_type_t diff_dst_type>
+    status_t jit_gen12lp_u8s8s32x_convolution_bwd_data_t<diff_dst_type>
+    ::execute_backward_data(const exec_ctx_t &ctx) const {
+    auto &diff_dst = CTX_IN_STORAGE(MKLDNN_ARG_DIFF_DST);
+    auto &weights = CTX_IN_STORAGE(MKLDNN_ARG_WEIGHTS);
+    auto &bias = CTX_IN_STORAGE(MKLDNN_ARG_BIAS);
+    auto &diff_src = CTX_OUT_STORAGE(MKLDNN_ARG_DIFF_SRC);
+
+    const auto &jcp = ker_->jcp;
+
+    kernel_.set_arg(0, diff_src);
+    kernel_.set_arg(1, weights);
+    kernel_.set_arg(2, bias);
+    kernel_.set_arg(3, diff_dst);
+
+    auto nd_range = cl_nd_range_t(jcp.gws_d, jcp.lws_d);
+    auto &executor
+        = *(utils::downcast<cl_stream_t *>(ctx.stream())->cl_executor());
+    status_t status = executor.parallel_for(nd_range, kernel_);
+
+    return status;
+}
+
 using namespace data_type;
 
 template struct jit_gen12lp_u8s8s32x_convolution_fwd_t<u8>;
 template struct jit_gen12lp_u8s8s32x_convolution_fwd_t<s8>;
+template struct jit_gen12lp_u8s8s32x_convolution_bwd_data_t<u8>;
+template struct jit_gen12lp_u8s8s32x_convolution_bwd_data_t<s8>;
 
 } // namespace ocl
 } // namespace impl

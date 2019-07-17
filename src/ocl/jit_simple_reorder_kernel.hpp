@@ -107,10 +107,12 @@ struct jit_simple_reorder_kernel {
 
         if (input_md.matches_one_of_tag(gOIw8o16i2o, gOIhw8o16i2o, gOIw8i16o2i,
                     gOIhw8i16o2i, gOIdhw8i16o2i, gOIw4o8i8o4i, gOIhw4o8i8o4i,
-                    gOIhw2o8i8o2i, gOIdhw4o8i8o4i)
+                    gOIhw2o8i8o2i, gOIdhw4o8i8o4i, gIOw4i8o8i4o, gIOhw4i8o8i4o,
+                    gIOdhw4i8o8i4o)
                 || output_md.matches_one_of_tag(gOIw8o16i2o, gOIhw8o16i2o,
                         gOIw8i16o2i, gOIhw8i16o2i, gOIdhw8i16o2i, gOIw4o8i8o4i,
-                        gOIhw4o8i8o4i, gOIhw2o8i8o2i, gOIdhw4o8i8o4i))
+                        gOIhw4o8i8o4i, gOIhw2o8i8o2i, gOIdhw4o8i8o4i,
+                        gIOw4i8o8i4o, gIOhw4i8o8i4o, gIOdhw4i8o8i4o))
             jrp.with_group = 1;
 
         if (jrp.has_padding || jrp.is_alpha_beta)
@@ -251,9 +253,13 @@ struct jit_simple_reorder_kernel {
                            gOIdhw16o16i)) {
             jit.define_int("IN_OIHW16O16I", 1);
         } else if (input_md.matches_one_of_tag(OIw4o8i8o4i, OIhw4o8i8o4i,
-                           gOIw4o8i8o4i, gOIhw4o8i8o4i,
-                           gOIdhw4o8i8o4i, OIdhw4o8i8o4i)) {
+                           gOIw4o8i8o4i, gOIhw4o8i8o4i, gOIdhw4o8i8o4i,
+                           OIdhw4o8i8o4i)) {
             jit.define_int("IN_OIHW4O8I8O4I", 1);
+        } else if (input_md.matches_one_of_tag(IOw4i8o8i4o, IOhw4i8o8i4o,
+                           IOdhw4i8o8i4o, gIOw4i8o8i4o, gIOhw4i8o8i4o,
+                           gIOdhw4i8o8i4o)) {
+            jit.define_int("IN_IOHW4I8O8I4O", 1);
         } else if (input_md.matches_one_of_tag(OIhw2o8i8o2i, gOIhw2o8i8o2i)) {
             jit.define_int("IN_OIHW2O8I8O2I", 1);
         } else if (input_md.matches_one_of_tag(OIw8o16i2o, OIhw8o16i2o,
@@ -281,9 +287,13 @@ struct jit_simple_reorder_kernel {
                            gOIdhw16o16i)) {
             jit.define_int("OUT_OIHW16O16I", 1);
         } else if (output_md.matches_one_of_tag(OIw4o8i8o4i, OIhw4o8i8o4i,
-                            gOIw4o8i8o4i, gOIhw4o8i8o4i,
-                            gOIdhw4o8i8o4i, OIdhw4o8i8o4i)) {
+                           gOIw4o8i8o4i, gOIhw4o8i8o4i, gOIdhw4o8i8o4i,
+                           OIdhw4o8i8o4i)) {
             jit.define_int("OUT_OIHW4O8I8O4I", 1);
+        } else if (output_md.matches_one_of_tag(IOw4i8o8i4o, IOhw4i8o8i4o,
+                           IOdhw4i8o8i4o, gIOw4i8o8i4o, gIOhw4i8o8i4o,
+                           gIOdhw4i8o8i4o)) {
+            jit.define_int("OUT_IOHW4I8O8I4O", 1);
         } else if (output_md.matches_one_of_tag(OIhw2o8i8o2i, gOIhw2o8i8o2i)) {
             jit.define_int("OUT_OIHW2O8I8O2I", 1);
         } else if (output_md.matches_one_of_tag(OIw8o16i2o, OIhw8o16i2o,

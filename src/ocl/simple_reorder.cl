@@ -90,6 +90,30 @@
                     + ((x5) % SRC_B5) * SRC_SB5 + ((x5) / SRC_B5) * SRC_S5)
 #    endif
 #endif
+
+#if IN_IOHW4I8O8I4O
+#    undef IN_OFF
+#    if WITH_GROUP
+#        define IN_OFF(x0, x1, x2, x3, x4, x5)                             \
+            (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0          \
+                    + 4 * (p[x2 % 32] % 8) + ((p[x2 % 32]) / 8) * 256      \
+                    + ((x2) / SRC_B2) * SRC_S2 + (x1 % 4)                  \
+                    + ((x1 % 32) / 4) * 32 + ((x1) / SRC_B1) * SRC_S1      \
+                    + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3 \
+                    + ((x4) % SRC_B4) * SRC_SB4 + ((x4) / SRC_B4) * SRC_S4 \
+                    + ((x5) % SRC_B5) * SRC_SB5 + ((x5) / SRC_B5) * SRC_S5)
+#    else
+#        define IN_OFF(x0, x1, x2, x3, x4, x5)                               \
+                     (4 * (p[x1 % 32] % 8) + ((p[x1 % 32]) / 8) * 256      \
+                    + ((x1) / SRC_B1) * SRC_S1 + (x0 % 4)                  \
+                    + ((x0 % 32) / 4) * 32 + ((x0) / SRC_B0) * SRC_S0      \
+                    + ((x2) % SRC_B2) * SRC_SB2 + ((x2) / SRC_B2) * SRC_S2 \
+                    + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3 \
+                    + ((x4) % SRC_B4) * SRC_SB4 + ((x4) / SRC_B4) * SRC_S4 \
+                    + ((x5) % SRC_B5) * SRC_SB5 + ((x5) / SRC_B5) * SRC_S5)
+#    endif
+#endif
+
 #if IN_OIHW2O8I8O2I
 #    undef IN_OFF
 #    if WITH_GROUP
@@ -185,6 +209,30 @@
                     + ((x5) % DST_B5) * DST_SB5 + ((x5) / DST_B5) * DST_S5)
 #    endif
 #endif
+
+#if OUT_IOHW4I8O8I4O
+#    undef OUT_OFF
+#    if WITH_GROUP
+#        define OUT_OFF(x0, x1, x2, x3, x4, x5)                            \
+            (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0          \
+                    + 4 * (p[x2 % 32] % 8) + ((p[x2 % 32]) / 8) * 256      \
+                    + ((x2) / DST_B2) * DST_S2 + (x1 % 4)                  \
+                    + ((x1 % 32) / 4) * 32 + ((x1) / DST_B1) * DST_S1      \
+                    + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3 \
+                    + ((x4) % DST_B4) * DST_SB4 + ((x4) / DST_B4) * DST_S4 \
+                    + ((x5) % DST_B5) * DST_SB5 + ((x5) / DST_B5) * DST_S5)
+#    else
+#        define OUT_OFF(x0, x1, x2, x3, x4, x5)                              \
+                     (4 * (p[x1 % 32] % 8) + ((p[x1 % 32]) / 8) * 256      \
+                    + ((x1) / DST_B1) * DST_S1 + (x0 % 4)                  \
+                    + ((x0 % 32) / 4) * 32 + ((x0) / DST_B0) * DST_S0      \
+                    + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2 \
+                    + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3 \
+                    + ((x4) % DST_B4) * DST_SB4 + ((x4) / DST_B4) * DST_S4 \
+                    + ((x5) % DST_B5) * DST_SB5 + ((x5) / DST_B5) * DST_S5)
+#    endif
+#endif
+
 #if OUT_OIHW2O8I8O2I
 #    undef OUT_OFF
 #    if WITH_GROUP

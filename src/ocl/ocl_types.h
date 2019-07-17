@@ -118,6 +118,7 @@
 #    define DATA_MIN CHAR_MIN
 #    define DATA_ZERO 0
 #    define DATA_ONE 1
+#    define INT8_T int8
 #    define DEF_ACC_DATA_T int
 #    define DEF_ACC_DATA8_T int8
 #    define TO_DATA_T(v) (char)(v)
@@ -136,6 +137,7 @@
 
 #    define AS_UINT_T as_uchar
 #    define AS_UINT8_T as_uchar8
+#    define AS_INT8_T as_int8
 
 #    define BLOCK_DATA_T uchar
 #    define BLOCK_DATA8_T uchar8
@@ -150,6 +152,7 @@
 #    define DATA_MIN 0
 #    define DATA_ZERO 0
 #    define DATA_ONE 1
+#    define INT8_T uint8
 #    define DEF_ACC_DATA_T int
 #    define DEF_ACC_DATA8_T int8
 #    define TO_DATA_T(v) (uchar)(v)
@@ -168,6 +171,7 @@
 
 #    define AS_UINT_T as_uchar
 #    define AS_UINT8_T as_uchar8
+#    define AS_INT8_T as_uint8
 
 #    define BLOCK_DATA_T uchar
 #    define BLOCK_DATA8_T uchar8
