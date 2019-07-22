@@ -114,11 +114,6 @@ T bounded_relu_bwd(T dd, T s, A alpha) {
     return dd * ((0 < s && s < alpha) ? 1 : 0);
 }
 
-template <typename T, typename A>
-T swish_fwd(T s, A alpha) {
-    return (T)(s / (1.0f + ::expf(-alpha * (float)s)));
-}
-
 template <typename T>
 T soft_relu_fwd(T s) {
     return s < (T)logf(FLT_MAX) ? T(log1pf(::expf(s))) : s;
@@ -148,12 +143,17 @@ T exp_fwd(T s) {
 
 template <typename T>
 T exp_bwd(T dd, T s) {
-    return dd * exp_fwd<T>(s);
+    return dd * (::expf((float)s));
+}
+
+template <typename T, typename A>
+T swish_fwd(T s, A alpha) {
+    return (T)(s / (1.0f + ::expf(-alpha * (float)s)));
 }
 
 template <typename T, typename A>
 T swish_bwd(T dd, T s, A alpha) {
-    T v = logistic_fwd<T>(alpha * s);
+    float v = logistic_fwd<float>(alpha * s);
     return dd * (v + s * alpha * v * (1 - v));
 }
 
@@ -298,20 +298,14 @@ private:
 protected:
     virtual void SetUp() {
         data_type = data_traits<data_t>::data_type;
-
         SKIP_IF(data_type == memory::data_type::f16
                 && get_test_engine_kind() == engine::kind::cpu,
                 "CPU does not support f16 data type.");
         SKIP_IF(data_type == memory::data_type::bf16
-                && get_test_engine_kind() == engine::kind::gpu,
-                "GPU does not support bf16 data type.");
-        SKIP_IF(data_type == memory::data_type::bf16
+                && get_test_engine_kind() == engine::kind::cpu
                 && !impl::cpu::mayiuse(impl::cpu::avx512_core),
                 "ISA does not support bf16 data type.");
         p = ::testing::TestWithParam<decltype(p)>::GetParam();
-        SKIP_IF(p.alg_kind == algorithm::eltwise_swish
-                && get_test_engine_kind() == engine::kind::gpu,
-                "GPU does not support swish yet");
         catch_expected_failures([=](){Test();}, p.expect_to_fail,
                     p.expected_status);
     }
@@ -442,7 +436,7 @@ TEST_P(eltwise_test_bfloat16, TestsEltwise)
         TEST_CONCAT(str, _f16), eltwise_test_half, ::testing::Values(__VA_ARGS__)); \
     INSTANTIATE_TEST_SUITE_P_( \
         TEST_CONCAT(str, _f32), eltwise_test_float, ::testing::Values(__VA_ARGS__)); \
-    CPU_INSTANTIATE_TEST_SUITE_P( \
+    INSTANTIATE_TEST_SUITE_P_( \
         TEST_CONCAT(str, _bf16), eltwise_test_bfloat16, ::testing::Values(__VA_ARGS__))
 
 INST_TEST_CASE(SimpleZeroDim,

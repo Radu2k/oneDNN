@@ -36,7 +36,7 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12lp_1x1_conv_fwd_kernel(const __global uchar *src, const __global char *wei,
+gen12lp_1x1_conv_fwd_u8s8s32u8_kernel(const __global uchar *src, const __global char *wei,
         const __global float *bias, __global uchar *dst,
         float relu_negative_slope, float sum_scale, float scales) {
 
@@ -61,7 +61,7 @@ gen12lp_1x1_conv_fwd_kernel(const __global uchar *src, const __global char *wei,
     src += (mb_group_id / 2) * CHANNEL_BLOCK_OFFSET * IC_NCHUNK; // MB offset
     src += oh * PIXEL_HEIGHT_OFFSET; // height offset
     src += ow * PIXEL_WIDTH_OFFSET; // width offset
-    
+
     // Destination
     dst += (mb_group_id % 2) * MB_BLOCK / 2 * MB_OFFSET; // MB block offset
     dst += (mb_group_id / 2) * CHANNEL_BLOCK_OFFSET * OC_NCHUNK; // MB offset
@@ -77,7 +77,7 @@ gen12lp_1x1_conv_fwd_kernel(const __global uchar *src, const __global char *wei,
     int8 C00 = 0, C01 = 0, C02 = 0, C03 = 0;
     // 8 MB (8-15) x 4 Kernels  (32 8bit ints)
     int8 C10 = 0, C11 = 0, C12 = 0, C13 = 0;
-    
+
     for(uint ic_block_id = 0; ic_block_id < IC_NCHUNK; ++ic_block_id)
     {
         uint8 S0, S1;
@@ -120,7 +120,7 @@ gen12lp_1x1_conv_fwd_kernel(const __global uchar *src, const __global char *wei,
 #define BIAS_SUM_ELTWISE(RES, TMP, ACC, BIA, DST, SCALE) \
     TMP = fma((float)ACC, SCALE, BIA);                \
     RES = convert_uchar_sat(TMP);
-#endif // WITH_RELU 
+#endif // WITH_RELU
 #endif // WITH_SUM_ELTWISE
 #else // WITH_BIAS
 #if WITH_SUM_ELTWISE
@@ -153,7 +153,7 @@ gen12lp_1x1_conv_fwd_kernel(const __global uchar *src, const __global char *wei,
     BIAS_SUM_ELTWISE(S01[1], T11, C11[idx], b1, D01[1], scales); \
     BIAS_SUM_ELTWISE(S01[2], T12, C12[idx], b2, D01[2], scales); \
     BIAS_SUM_ELTWISE(S01[3], T13, C13[idx], b3, D01[3], scales); \
-    T1[idx] = as_uint(S01);                                   
+    T1[idx] = as_uint(S01);
 
 #else // WITH_SUM_ELTWISE || WITH_SUM
 #define PACK(idx)                                             \
@@ -166,7 +166,7 @@ gen12lp_1x1_conv_fwd_kernel(const __global uchar *src, const __global char *wei,
     BIAS_SUM_ELTWISE(S01[1], T11, C11[idx], b1, D01[1], scales); \
     BIAS_SUM_ELTWISE(S01[2], T12, C12[idx], b2, D01[2], scales); \
     BIAS_SUM_ELTWISE(S01[3], T13, C13[idx], b3, D01[3], scales); \
-    T1[idx] = as_uint(S01);                                   
+    T1[idx] = as_uint(S01);
 #endif // WITH_SUM_ELTWISE || WITH_SUM
 
 #if WITH_BIAS

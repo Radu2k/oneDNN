@@ -30,23 +30,22 @@ status_t jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t<dst_type>::execute_forward(
     auto &dst = CTX_OUT_STORAGE(MKLDNN_ARG_DST);
 
     const auto &jcp = ker_->jcp;
+    auto *compute_stream
+            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
-    kernel_.set_arg(0, src);
-    kernel_.set_arg(1, weights);
-    kernel_.set_arg(2, bias);
-    kernel_.set_arg(3, dst);
-    kernel_.set_arg(4, jcp.relu_negative_slope);
-    kernel_.set_arg(5, jcp.sum_scale);
+    compute::kernel_arg_list_t arg_list;
+    arg_list.set(0, src);
+    arg_list.set(1, weights);
+    arg_list.set(2, bias);
+    arg_list.set(3, dst);
+    arg_list.set(4, jcp.relu_negative_slope);
+    arg_list.set(5, jcp.sum_scale);
 
     float scales = pd()->attr()->output_scales_.scales_[0];
-    kernel_.set_arg(6, scales);
+    arg_list.set(6, scales);
 
-
-    auto &executor
-        = *(utils::downcast<cl_stream_t *>(ctx.stream())->cl_executor());
-
-    auto nd_range = cl_nd_range_t(jcp.gws_d, jcp.lws_d);
-    status_t status = executor.parallel_for(nd_range, kernel_);
+    auto nd_range = compute::nd_range_t(jcp.gws_d, jcp.lws_d);
+    status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
 
     return status;
 }
