@@ -238,7 +238,7 @@ void _jit_avx512_common_conv_fwd_kernel<Zmm>::compute_loop_4fma_1st(
                 size_t kw_unroll = (size_t)(ki + j * stride_w - pad_l);
                 /* Note: protect against potential illegal memory addressing due
                  * to 4fma overflow in source. */
-                assert(kw_unroll + unroll_4fma <= iw);
+                assert(kw_unroll + unroll_4fma <= (size_t)iw);
                 size_t aux_input_offset = (size_t)jcp.typesize_in
                         * (kw_unroll + (size_t)ic * iw * ih * jcp.id);
                 v4fmaddps(vmm_out(j, 0), vmm_ker(0),
@@ -1269,8 +1269,9 @@ status_t jit_avx512_common_conv_fwd_kernel::init_conf(
              *  `l_pad > 0 || r_pad > 0`; when `kw > 1`
              * from incorrect 'get_ow_start' and 'get_ow_end' calculation, so
              * disable for now. */
-            bool not_for_4fma
-                    = (rnd_up(jcp.kw, unroll_4fma) + (jcp.ow - 1) * jcp.stride_w
+            bool not_for_4fma = jcp.l_pad > 0 // needed in case jcp.r_pad < 0
+                    || (rnd_up(jcp.kw, unroll_4fma)
+                                    + (jcp.ow - 1) * jcp.stride_w
                             > jcp.iw);
             bool is_dilated
                     = !everyone_is(0, jcp.dilate_d, jcp.dilate_h, jcp.dilate_w);

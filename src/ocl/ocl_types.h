@@ -22,6 +22,7 @@
 #if DT_F32 == 1
 #    define DATA_T float
 #    define DATA8_T float8
+#    define POST_OP_DATA_T float
 #    define DATA_MAX FLT_MAX
 #    define DATA_MIN -DATA_MAX
 #    define DATA_ZERO 0.0f
@@ -30,6 +31,7 @@
 #    define DEF_ACC_DATA8_T float8
 #    define TO_DATA_T(v) (float)(v)
 #    define TO_DEF_ACC_DATA_T(v) (float)(v)
+#    define DATA_TO_REF convert_float
 #    define CONVERT_DATA_T convert_float
 #    define CONVERT_DATA8_T convert_float8
 #    define ROUND
@@ -53,6 +55,7 @@
 #    pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
 #    define DATA_T half
+#    define POST_OP_DATA_T half
 #    define DATA8_T half8
 #    define DATA_MAX HALF_MAX
 #    define DATA_MIN -DATA_MAX
@@ -62,6 +65,7 @@
 #    define DEF_ACC_DATA8_T half8
 #    define TO_DATA_T(v) (half)(v)
 #    define TO_DEF_ACC_DATA_T(v) (half)(v)
+#    define DATA_TO_REF convert_half
 #    define CONVERT_DATA_T convert_half
 #    define CONVERT_DATA8_T convert_half8
 #    define ROUND
@@ -82,6 +86,7 @@
 #    define AS_BLOCK_DATA8_T as_ushort8
 #elif DT_BF16 == 1
 #    define DATA_T ushort
+#    define POST_OP_DATA_T float
 #    define DATA8_T ushort8
 #    define DATA_MAX FLT_MAX
 #    define DATA_MIN -DATA_MAX
@@ -91,6 +96,7 @@
 #    define DEF_ACC_DATA8_T float8
 #    define TO_DATA_T(v) convert_f32_to_bf16(v)
 #    define TO_DEF_ACC_DATA_T(v) convert_bf16_to_f32(v)
+#    define DATA_TO_REF convert_bf16_to_f32
 #    define CONVERT_DATA_T convert_f32_to_bf16
 #    define CONVERT_DATA8_T convert_bf16_8
 #    define ROUND
@@ -118,9 +124,11 @@
 #    define DATA_MIN CHAR_MIN
 #    define DATA_ZERO 0
 #    define DATA_ONE 1
+#    define INT8_T int8
 #    define DEF_ACC_DATA_T int
 #    define DEF_ACC_DATA8_T int8
 #    define TO_DATA_T(v) (char)(v)
+#    define DATA_TO_REF convert_char
 #    define CONVERT_DATA_T convert_char_sat_rte
 #    define CONVERT_DATA8_T convert_char8_sat_rte
 #    define ROUND rint
@@ -136,6 +144,7 @@
 
 #    define AS_UINT_T as_uchar
 #    define AS_UINT8_T as_uchar8
+#    define AS_INT8_T as_int8
 
 #    define BLOCK_DATA_T uchar
 #    define BLOCK_DATA8_T uchar8
@@ -150,9 +159,11 @@
 #    define DATA_MIN 0
 #    define DATA_ZERO 0
 #    define DATA_ONE 1
+#    define INT8_T uint8
 #    define DEF_ACC_DATA_T int
 #    define DEF_ACC_DATA8_T int8
 #    define TO_DATA_T(v) (uchar)(v)
+#    define DATA_TO_REF convert_uchar
 #    define CONVERT_DATA_T convert_uchar_sat_rte
 #    define CONVERT_DATA8_T convert_uchar8_sat_rte
 #    define ROUND rint
@@ -168,6 +179,7 @@
 
 #    define AS_UINT_T as_uchar
 #    define AS_UINT8_T as_uchar8
+#    define AS_INT8_T as_uint8
 
 #    define BLOCK_DATA_T uchar
 #    define BLOCK_DATA8_T uchar8

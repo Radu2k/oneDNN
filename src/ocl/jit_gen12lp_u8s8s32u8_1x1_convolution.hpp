@@ -20,7 +20,7 @@
 #include <assert.h>
 
 #include "common/c_types_map.hpp"
-#include "ocl/cl_engine.hpp"
+#include "compute/compute.hpp"
 #include "ocl/ocl_convolution_pd.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
@@ -50,6 +50,8 @@ struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t: public primitive_t {
             using namespace prop_kind;
             using namespace data_type;
             assert(this->engine()->kind() == engine_kind::gpu);
+            auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine());
 
             bool ok = true
                 && utils::one_of(this->desc()->prop_kind, forward_training,
@@ -60,7 +62,10 @@ struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t: public primitive_t {
                 && this->desc()->accum_data_type == data_type::s32
                 && this->desc()->dst_desc.data_type == dst_type
                 && IMPLICATION(this->with_bias(),
-                    true && this->desc()->bias_desc.data_type == f32);
+                    true && this->desc()->bias_desc.data_type == f32)
+                && compute_engine->mayiuse(
+                               compute::device_ext_t::intel_subgroups);
+
             if (!ok)
                 return status::unimplemented;
 
@@ -81,16 +86,17 @@ struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t: public primitive_t {
     };
 
     status_t init() override {
-        auto jit = ocl_jit_t(gen12lp_1x1_conv_fwd_data_u8s8s32x_kernel);
-        auto status = jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel::init_const_def(
-            jit, pd()->jcp_);
-        if (status != status::success) return status;
+        const char *kernel_name = "gen12lp_1x1_conv_fwd_u8s8s32u8_kernel";
 
-        status = jit.build(engine());
+        compute::kernel_ctx_t kernel_ctx;
+        auto status = jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel::init_const_def(
+            kernel_ctx, pd()->jcp_);
         if (status != status::success)
             return status;
 
-        kernel_ = jit.get_kernel("gen12lp_1x1_conv_fwd_kernel");
+        auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine());
+        compute_engine->create_kernel(&kernel_, kernel_name, kernel_ctx);
         if (!kernel_)
             return status::runtime_error;
 
@@ -116,7 +122,7 @@ private:
     status_t execute_forward(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd(); }
     jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel *ker_;
-    ocl_kernel_t kernel_;
+    compute::kernel_t kernel_;
 };
 
 }

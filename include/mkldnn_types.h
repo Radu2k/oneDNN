@@ -286,6 +286,9 @@ typedef enum {
     mkldnn_ABc4a8b8a4b,
     mkldnn_ABcd4a8b8a4b,
     mkldnn_ABcde4a8b8a4b,
+    mkldnn_BAc4b8a8b4a,
+    mkldnn_BAcd4b8a8b4a,
+    mkldnn_BAcde4b8a8b4a,
     mkldnn_ABcd2a8b8a2b,
     mkldnn_aBCd4b8c8b4c,
     mkldnn_aBCde4b8c8b4c,
@@ -336,6 +339,9 @@ typedef enum {
     mkldnn_BAc16b16a,
     mkldnn_BAcd16a16b,
     mkldnn_BAcd16b16a,
+    mkldnn_aCBd4c8b8c4b,
+    mkldnn_aCBde4c8b8c4b,
+    mkldnn_aCBdef4c8b8c4b,
 
     /// Just a sentinel, not real memory format tag. Must be changed after new
     /// format tag is added.
@@ -573,10 +579,17 @@ typedef enum {
 
     mkldnn_OIw4o8i8o4i = mkldnn_ABc4a8b8a4b,
     mkldnn_OIhw4o8i8o4i = mkldnn_ABcd4a8b8a4b,
+    mkldnn_IOw4i8o8i4o = mkldnn_BAc4b8a8b4a,
+    mkldnn_IOhw4i8o8i4o = mkldnn_BAcd4b8a8b4a,
+    mkldnn_IOdhw4i8o8i4o = mkldnn_BAcde4b8a8b4a,
+
     mkldnn_OIhw2o8i8o2i = mkldnn_ABcd2a8b8a2b,
     mkldnn_gOIw4o8i8o4i = mkldnn_aBCd4b8c8b4c,
     mkldnn_gOIhw4o8i8o4i = mkldnn_aBCde4b8c8b4c,
     mkldnn_gOIdhw4o8i8o4i = mkldnn_aBCdef4b8c8b4c,
+    mkldnn_gIOw4i8o8i4o = mkldnn_aCBd4c8b8c4b,
+    mkldnn_gIOhw4i8o8i4o = mkldnn_aCBde4c8b8c4b,
+    mkldnn_gIOdhw4i8o8i4o = mkldnn_aCBdef4c8b8c4b,
     mkldnn_gOIhw2o8i8o2i = mkldnn_aBCde2b8c8b2c,
 
     // weights w/ groups, 6D

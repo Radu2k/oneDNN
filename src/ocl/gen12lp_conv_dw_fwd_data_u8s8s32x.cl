@@ -26,7 +26,7 @@ intel_sub_group_block_write_uc16(__global uchar *p, uchar16 data);
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-conv_dw_fwd_kernel(const __global uchar *src, const __global char *wei,
+conv_dw_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char *wei,
         const __global float *bias, __global DATA_T *dst,
         float relu_negative_slope, float sum_scale, float scales) {
 

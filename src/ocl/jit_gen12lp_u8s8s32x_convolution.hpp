@@ -18,13 +18,14 @@
 #define JIT_GEN12LP_U8S8S32X_CONVOLUTION_HPP
 
 #include "common/c_types_map.hpp"
-#include "ocl/cl_engine.hpp"
+#include "compute/compute.hpp"
 #include "ocl/jit_gen12lp_u8s8s32x_conv_kernel.hpp"
 #include "ocl/ocl_convolution_pd.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
 extern const char *gen12lp_conv_fwd_data_u8s8s32x_kernel;
+extern const char *gen12lp_conv_bwd_data_u8s8s32x_kernel;
 extern const char *gen12lp_conv_dw_fwd_data_u8s8s32x_kernel;
 
 namespace mkldnn {
@@ -38,7 +39,7 @@ struct jit_gen12lp_u8s8s32x_convolution_fwd_t : public primitive_t {
                 const primitive_attr_t *attr,
                 const convolution_fwd_pd_t *hint_fwd_pd)
             : ocl_convolution_fwd_pd_t(engine, adesc, attr, hint_fwd_pd)
-            ,jcp_() {}
+            , jcp_() {}
 
         DECLARE_COMMON_PD_T(
                 "ocl:ncsp:any", jit_gen12lp_u8s8s32x_convolution_fwd_t);
@@ -47,12 +48,17 @@ struct jit_gen12lp_u8s8s32x_convolution_fwd_t : public primitive_t {
             using namespace prop_kind;
             using namespace data_type;
             assert(this->engine()->kind() == engine_kind::gpu);
+            auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine());
 
             bool ok = true
                     && utils::one_of(this->desc()->prop_kind, forward_training,
                         forward_inference)
                     && this->desc()->alg_kind == alg_kind::convolution_direct
-                    && expect_data_types(u8, s8, f32, dst_type, s32);
+                    && expect_data_types(u8, s8, f32, dst_type, s32)
+                    && compute_engine->mayiuse(
+                               compute::device_ext_t::intel_subgroups);
+
             if (!ok)
                 return status::unimplemented;
 
@@ -71,27 +77,21 @@ struct jit_gen12lp_u8s8s32x_convolution_fwd_t : public primitive_t {
 
 
     status_t init() override {
-        const char *ocl_kernel_str = nullptr;
+        const char *kernel_name = nullptr;
         if (pd()->jcp_.is_depthwise)
-            ocl_kernel_str = gen12lp_conv_dw_fwd_data_u8s8s32x_kernel;
+            kernel_name = "conv_dw_fwd_u8s8s32x_kernel";
         else
-            ocl_kernel_str = gen12lp_conv_fwd_data_u8s8s32x_kernel;
+            kernel_name = "conv_fwd_u8s8s32x_kernel";
 
-        auto jit = ocl_jit_t(ocl_kernel_str);
+        compute::kernel_ctx_t kernel_ctx;
         auto status = jit_gen12lp_u8s8s32x_conv_fwd_kernel::init_const_def(
-            jit, pd()->jcp_);
+            kernel_ctx, pd()->jcp_);
         if (status != status::success)
             return status;
 
-        status = jit.build(engine());
-        if (status != status::success)
-            return status;
-
-        if (pd()->jcp_.is_depthwise)
-            kernel_ = jit.get_kernel("conv_dw_fwd_kernel");
-        else
-            kernel_ = jit.get_kernel("conv_fwd_kernel");
-        
+        auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine());
+        compute_engine->create_kernel(&kernel_, kernel_name, kernel_ctx);
         if (!kernel_)
             return status::runtime_error;
 
@@ -108,12 +108,93 @@ struct jit_gen12lp_u8s8s32x_convolution_fwd_t : public primitive_t {
         return execute_forward(ctx);
     }
 
-
 private:
     status_t execute_forward(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd(); }
     jit_gen12lp_u8s8s32x_conv_fwd_kernel *ker_;
-    ocl_kernel_t kernel_;
+    compute::kernel_t kernel_;
+};
+
+template <impl::data_type_t dst_type>
+struct jit_gen12lp_u8s8s32x_convolution_bwd_data_t : public primitive_t {
+    struct pd_t : public ocl_convolution_bwd_data_pd_t {
+        pd_t(engine_t *engine, const convolution_desc_t *adesc,
+                const primitive_attr_t *attr,
+                const convolution_fwd_pd_t *hint_fwd_pd)
+            : ocl_convolution_bwd_data_pd_t(engine, adesc, attr, hint_fwd_pd)
+            , jcp_() {}
+
+        DECLARE_COMMON_PD_T(
+                "ocl:ncsp:any", jit_gen12lp_u8s8s32x_convolution_bwd_data_t);
+
+        status_t init() {
+            using namespace prop_kind;
+            using namespace data_type;
+            assert(this->engine()->kind() == engine_kind::gpu);
+            auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine());
+
+            bool ok = true
+                    && IMPLICATION(utils::one_of(dst_type, u8, s8),
+                               expect_data_types(
+                                       u8, s8, f32, dst_type, s32))
+                    && desc()->prop_kind == prop_kind::backward_data
+                    && desc()->alg_kind == alg_kind::convolution_direct
+                    && compute_engine->mayiuse(
+                               compute::device_ext_t::intel_subgroups);
+
+            if (!ok)
+                return status::unimplemented;
+
+            status_t status
+                    = jit_gen12lp_u8s8s32x_conv_bwd_data_kernel::init_conf(
+                    jcp_, *this->desc(), *this->diff_src_md(), *this->weights_md(),
+                    *this->diff_dst_md(), *this->weights_md(1), *this->attr());
+            if (status != status::success)
+                return status;
+
+            ok = set_default_formats_common(
+                    jcp_.src_tag, jcp_.wei_tag, jcp_.dst_tag);
+            return ok ? status::success : status::unimplemented;
+        }
+        jit_conv_conf_t jcp_;
+
+        bool support_bias() const override { return true; }
+    };
+
+    status_t init() override {
+        const char *kernel_name = "conv_bwd_data_u8s8s32x_kernel";
+        compute::kernel_ctx_t kernel_ctx;
+        auto status = jit_gen12lp_u8s8s32x_conv_bwd_data_kernel::init_const_def(
+                kernel_ctx, pd()->jcp_);
+        if (status != status::success)
+            return status;
+
+        auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine());
+        compute_engine->create_kernel(&kernel_, kernel_name, kernel_ctx);
+        if (!kernel_)
+            return status::runtime_error;
+
+        return status::success;
+    }
+
+    jit_gen12lp_u8s8s32x_convolution_bwd_data_t(const pd_t *apd)
+        : primitive_t(apd) {
+        ker_ = new jit_gen12lp_u8s8s32x_conv_bwd_data_kernel(pd()->jcp_);
+    }
+
+    ~jit_gen12lp_u8s8s32x_convolution_bwd_data_t() { delete ker_; }
+
+    virtual status_t execute(const exec_ctx_t &ctx) const override {
+        return execute_backward_data(ctx);
+    }
+
+private:
+    status_t execute_backward_data(const exec_ctx_t &ctx) const;
+    const pd_t *pd() const { return (const pd_t *)primitive_t::pd(); }
+    jit_gen12lp_u8s8s32x_conv_bwd_data_kernel *ker_;
+    compute::kernel_t kernel_;
 };
 
 } // namespace ocl

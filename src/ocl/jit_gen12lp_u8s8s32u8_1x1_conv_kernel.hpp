@@ -86,35 +86,35 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
         return status;
     };
 
-    static status_t init_const_def(ocl_jit_t &jit, const jit_conv_conf_t &jcp) {
-        jit.define_int("MB", jcp.mb);
-        jit.define_int("IC", jcp.ic_without_padding);
-        jit.define_int("IH", jcp.ih);
-        jit.define_int("IW", jcp.iw);
-        jit.define_int("OC", jcp.oc_without_padding);
-        jit.define_int("OH", jcp.oh);
-        jit.define_int("OW", jcp.ow);
-        jit.define_int("KH", jcp.kh);
-        jit.define_int("KW", jcp.kw);
+    static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx, const jit_conv_conf_t &jcp) {
+        kernel_ctx.define_int("MB", jcp.mb);
+        kernel_ctx.define_int("IC", jcp.ic_without_padding);
+        kernel_ctx.define_int("IH", jcp.ih);
+        kernel_ctx.define_int("IW", jcp.iw);
+        kernel_ctx.define_int("OC", jcp.oc_without_padding);
+        kernel_ctx.define_int("OH", jcp.oh);
+        kernel_ctx.define_int("OW", jcp.ow);
+        kernel_ctx.define_int("KH", jcp.kh);
+        kernel_ctx.define_int("KW", jcp.kw);
 
-        jit.define_int("MB_BLOCK", jcp.mb_block);
-        jit.define_int("OC_BLOCK", jcp.oc_block);
-        jit.define_int("IC_BLOCK", jcp.ic_block);
+        kernel_ctx.define_int("MB_BLOCK", jcp.mb_block);
+        kernel_ctx.define_int("OC_BLOCK", jcp.oc_block);
+        kernel_ctx.define_int("IC_BLOCK", jcp.ic_block);
 
-        jit.define_int("WITH_BIAS", jcp.with_bias);
-        jit.define_int("WITH_RELU", jcp.with_relu);
-        jit.define_int("WITH_SUM", jcp.with_sum);
-        jit.define_int("WITH_SUM_ELTWISE", jcp.with_sum_eltwise);
-        jit.define_int("SUM_SCALE", jcp.sum_scale == 1.0);
+        kernel_ctx.define_int("WITH_BIAS", jcp.with_bias);
+        kernel_ctx.define_int("WITH_RELU", jcp.with_relu);
+        kernel_ctx.define_int("WITH_SUM", jcp.with_sum);
+        kernel_ctx.define_int("WITH_SUM_ELTWISE", jcp.with_sum_eltwise);
+        kernel_ctx.define_int("SUM_SCALE", jcp.sum_scale == 1.0);
 
-        jit.define_int("SUB_GROUP_SIZE", jcp.sub_group_size);
+        kernel_ctx.define_int("SUB_GROUP_SIZE", jcp.sub_group_size);
 
-        jit.define_int("LWS_0", jcp.lws_d[0]);
-        jit.define_int("LWS_1", jcp.lws_d[1]);
-        jit.define_int("LWS_2", jcp.lws_d[2]);
+        kernel_ctx.define_int("LWS_0", jcp.lws_d[0]);
+        kernel_ctx.define_int("LWS_1", jcp.lws_d[1]);
+        kernel_ctx.define_int("LWS_2", jcp.lws_d[2]);
 
-        jit.define_int("OC_NCHUNK", jcp.oc / jcp.oc_block);
-        jit.define_int("IC_NCHUNK", jcp.ic / jcp.ic_block); 
+        kernel_ctx.define_int("OC_NCHUNK", jcp.oc / jcp.oc_block);
+        kernel_ctx.define_int("IC_NCHUNK", jcp.ic / jcp.ic_block);
 
         return status::success;
     }
