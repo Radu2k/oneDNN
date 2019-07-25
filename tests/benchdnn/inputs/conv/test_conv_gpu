@@ -38,3 +38,5 @@ mb16ic512ih14oc32oh14kh1ph0n
 --mb=16
 --dir=BWD_D --batch=conv_gpu --batch=conv_dilated --batch=conv_dilated_3d
 
+# test scale and post-ops
+--batch=test_conv_attrs_gpu
