@@ -22,13 +22,13 @@
 #if DT_F32 == 1
 #    define DATA_T float
 #    define DATA8_T float8
-#    define POST_OP_DATA_T float
 #    define DATA_MAX FLT_MAX
 #    define DATA_MIN -DATA_MAX
 #    define DATA_ZERO 0.0f
 #    define DATA_ONE 1.0f
 #    define DEF_ACC_DATA_T float
 #    define DEF_ACC_DATA8_T float8
+#    define POST_OP_DATA_T float
 #    define TO_DATA_T(v) (float)(v)
 #    define TO_DEF_ACC_DATA_T(v) (float)(v)
 #    define DATA_TO_REF convert_float
@@ -55,7 +55,6 @@
 #    pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
 #    define DATA_T half
-#    define POST_OP_DATA_T half
 #    define DATA8_T half8
 #    define DATA_MAX HALF_MAX
 #    define DATA_MIN -DATA_MAX
@@ -63,6 +62,7 @@
 #    define DATA_ONE 1.0h
 #    define DEF_ACC_DATA_T half
 #    define DEF_ACC_DATA8_T half8
+#    define POST_OP_DATA_T half
 #    define TO_DATA_T(v) (half)(v)
 #    define TO_DEF_ACC_DATA_T(v) (half)(v)
 #    define DATA_TO_REF convert_half
@@ -127,6 +127,7 @@
 #    define INT8_T int8
 #    define DEF_ACC_DATA_T int
 #    define DEF_ACC_DATA8_T int8
+#    define POST_OP_DATA_T float
 #    define TO_DATA_T(v) (char)(v)
 #    define DATA_TO_REF convert_char
 #    define CONVERT_DATA_T convert_char_sat_rte
@@ -162,6 +163,7 @@
 #    define INT8_T uint8
 #    define DEF_ACC_DATA_T int
 #    define DEF_ACC_DATA8_T int8
+#    define POST_OP_DATA_T float
 #    define TO_DATA_T(v) (uchar)(v)
 #    define DATA_TO_REF convert_uchar
 #    define CONVERT_DATA_T convert_uchar_sat_rte
@@ -188,6 +190,7 @@
 #elif DT_S32 == 1
 #    define DATA_T int
 #    define CONVERT_DATA_T convert_int_sat_rte
+#    define POST_OP_DATA_T float
 #else
 #    error "Unexpected data type"
 #endif
