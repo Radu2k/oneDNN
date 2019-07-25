@@ -16,6 +16,9 @@
 
 #include "ocl/ocl_types.h"
 #include "ocl/ocl_math_utils.h"
+#if WITH_ELTWISE || WITH_POST_SUM_ELTWISE
+#include "ocl/ocl_post_ops.h"
+#endif
 
 #define KDHW_SIZE KD * KH * KW
 
@@ -28,7 +31,7 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_dw_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char *wei,
         const __global float *bias, __global DATA_T *dst,
-        float relu_negative_slope, float sum_scale, float scales) {
+        float alpha, float beta, float sum_scale, float scales) {
 
     const int osp = get_global_id(1);
     const int od = osp / (OW * OH);
@@ -153,45 +156,44 @@ conv_dw_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char *wei,
 
         wei += OC_BLOCK;
     }
+    float8 tmp00 = convert_float8(S00);
+    float8 tmp01 = convert_float8(S01);
+
+#define DO_ELTWISE() do { \
+    for (uint i = 0; i < 8; i++) { \
+         tmp00[i] = fwd_eltwise(tmp00[i], alpha, beta); \
+         tmp01[i] = fwd_eltwise(tmp01[i], alpha, beta); \
+    } \
+} while (0)
+
 #if WITH_BIAS
     float2 B = as_float2(
             intel_sub_group_block_read2((const __global uint *)&bias[g]));
-    S00 = convert_int8((convert_float8(S00) + B.s01010101) * scales);
-    S01 = convert_int8((convert_float8(S01) + B.s01010101) * scales);
+    tmp00 = (tmp00 + B.s01010101) * scales;
+    tmp01 = (tmp01 + B.s01010101) * scales;
 #else
-    S00 = convert_int8(convert_float8(S00) * scales);
-    S01 = convert_int8(convert_float8(S01) * scales);
+    tmp00 *= scales;
+    tmp01 *= scales;
 #endif
 
-#if WITH_SUM_ELTWISE
+#if WITH_ELTWISE
+    DO_ELTWISE();
+#endif
+#if WITH_SUM
     DATA16_T D00 = AS_DATA16_T(
             intel_sub_group_block_read_uc16((const __global uchar *)dst));
-#if SUM_SCALE
-    S00 += convert_int8(D00.s01234567);
-    S01 += convert_int8(D00.s89abcdef);
-#else // SUM_SCALE
-    S00 += convert_int8(convert_float8(D00.s01234567) * sum_scale);
-    S01 += convert_int8(convert_float8(D00.s89abcdef) * sum_scale);
-#endif // SUM_SCALE
-    S00 = select(S00, convert_int8(convert_float8(S00) * relu_negative_slope), S00 < 0);
-    S01 = select(S01, convert_int8(convert_float8(S01) * relu_negative_slope), S01 < 0);
-#else // WITH_SUM_ELTWISE
-#if WITH_RELU
-    S00 = select(S00, convert_int8(convert_float8(S00) * relu_negative_slope), S00 < 0);
-    S01 = select(S01, convert_int8(convert_float8(S01) * relu_negative_slope), S01 < 0);
-#endif // WITH_RELU
-#if WITH_SUM // WITH_SUM
-    DATA16_T D00 = AS_DATA16_T(
-            intel_sub_group_block_read_uc16((const __global uchar *)dst));
-#if SUM_SCALE
-    S00 += convert_int8(D00.s01234567);
-    S01 += convert_int8(D00.s89abcdef);
-#else // SUM_SCALE
-    S00 += convert_int8(convert_float8(D00.s01234567) * sum_scale);
-    S01 += convert_int8(convert_float8(D00.s89abcdef) * sum_scale);
-#endif // SUM_SCALE
+#    if SUM_SCALE
+    tmp00 += convert_float8(D00.s01234567);
+    tmp01 += convert_float8(D00.s89abcdef);
+#    else // SUM_SCALE
+    tmp00 += convert_float8(D00.s01234567) * sum_scale;
+    tmp01 += convert_float8(D00.s89abcdef) * sum_scale;
+#    endif // SUM_SCALE
 #endif // WITH_SUM
-#endif // WITH_SUM_ELTWISE
-    const DATA16_T R0 = (DATA16_T)(CONVERT_DATA8_T(S00), CONVERT_DATA8_T(S01));
+#if WITH_POST_SUM_ELTWISE
+    DO_ELTWISE();
+#endif
+
+    const DATA16_T R0 = (DATA16_T)(CONVERT_DATA8_T(tmp00), CONVERT_DATA8_T(tmp01));
     intel_sub_group_block_write_uc16((__global uchar *)dst, as_uchar16(R0));
 }

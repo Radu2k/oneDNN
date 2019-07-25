@@ -55,6 +55,7 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
             return status::unimplemented;
 
         jcp.src_data_type = src_mdw.data_type();
+        jcp.dst_data_type = dst_mdw.data_type();
 
         jcp.mb_block = 32;
         jcp.oc_block = 32;
@@ -87,6 +88,7 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
     };
 
     static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx, const jit_conv_conf_t &jcp) {
+        kernel_ctx.set_data_type(jcp.dst_data_type);
         kernel_ctx.define_int("MB", jcp.mb);
         kernel_ctx.define_int("IC", jcp.ic_without_padding);
         kernel_ctx.define_int("IH", jcp.ih);
@@ -102,10 +104,12 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
         kernel_ctx.define_int("IC_BLOCK", jcp.ic_block);
 
         kernel_ctx.define_int("WITH_BIAS", jcp.with_bias);
-        kernel_ctx.define_int("WITH_RELU", jcp.with_relu);
+        kernel_ctx.define_int("WITH_ELTWISE", jcp.with_eltwise);
         kernel_ctx.define_int("WITH_SUM", jcp.with_sum);
-        kernel_ctx.define_int("WITH_SUM_ELTWISE", jcp.with_sum_eltwise);
         kernel_ctx.define_int("SUM_SCALE", jcp.sum_scale == 1.0);
+        kernel_ctx.define_int("WITH_POST_SUM_ELTWISE", jcp.with_post_sum_eltwise);
+        if (jcp.with_eltwise || jcp.with_post_sum_eltwise)
+            def_postops(kernel_ctx, jcp.eltwise.alg);
 
         kernel_ctx.define_int("SUB_GROUP_SIZE", jcp.sub_group_size);
 
