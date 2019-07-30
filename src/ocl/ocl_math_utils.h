@@ -48,13 +48,121 @@ inline int __imad(uchar4 a, char4 b, int c) __attribute__((overloadable)) {
                 return __builtin_IB_dp4a_us(c, as_int(a), as_int(b));
 }
 
+inline int8 __dpas(uint8 a, int8 b, int8 acc) __attribute__((overloadable)) {
+    int8 __builtin_IB_sub_group_idpas_u8_s8_8_8(int8 acc, uint8 a, int8 b)
+            __attribute__((const));
+                return __builtin_IB_sub_group_idpas_u8_s8_8_8(acc, a, b);
+}
+
+inline uint8 intel_sub_group_local_block_read_uint8(const __local uint* p) __attribute__((overloadable)) {
+    uint8 __builtin_IB_simd_block_read_8_local(const __local uint* p) __attribute__((const));
+    return __builtin_IB_simd_block_read_8_local(p);
+}
+
+inline uint intel_sub_group_local_block_read_uint(const __local uint* p) __attribute__((overloadable)) {
+    uint __builtin_IB_simd_block_read_1_local(const __local uint* p) __attribute__((const));
+    return __builtin_IB_simd_block_read_1_local(p);
+}
+
+void intel_sub_group_local_block_write_uint(__local uint* p, uint v)  __attribute__((overloadable)) {
+    void __builtin_IB_simd_block_write_1_local(__local uint* p, uint v);
+    __builtin_IB_simd_block_write_1_local(p, v);
+}
+
+void intel_sub_group_local_block_write_uint2(__local uint* p, uint2 v)  __attribute__((overloadable)) {
+    void __builtin_IB_simd_block_write_2_local(__local uint* p, uint2 v);
+    __builtin_IB_simd_block_write_2_local(p, v);
+}
+
+void intel_sub_group_local_block_write_uint4(__local uint* p, uint4 v)  __attribute__((overloadable)) {
+    void __builtin_IB_simd_block_write_4_local(__local uint* p, uint4 v);
+    __builtin_IB_simd_block_write_4_local(p, v);
+}
+
+void intel_sub_group_local_block_write_uint8(__local uint* p, uint8 v)  __attribute__((overloadable)) {
+    void __builtin_IB_simd_block_write_8_local(__local uint* p, uint8 v);
+    __builtin_IB_simd_block_write_8_local(p, v);
+}
+
+#define IMAD(_O, _I, _W) __imad(_O, _I, _W)
+#define READ_LOCAL_8(_P) intel_sub_group_local_block_read_uint8(_P)
+#define READ_LOCAL_1(_P) intel_sub_group_local_block_read_uint(_P)
+#define WRITE_LOCAL_8(_P, _V) intel_sub_group_local_block_write_uint8(_P, _V)
+#define WRITE_LOCAL_4(_P, _V) intel_sub_group_local_block_write_uint4(_P, _V)
+#define WRITE_LOCAL_2(_P, _V) intel_sub_group_local_block_write_uint2(_P, _V)
+#define WRITE_LOCAL_1(_P, _V) intel_sub_group_local_block_write_uint(_P, _V)
+
+#define mmad8x8(_O, _I, _W) __dpas(_O, _I, _W)
+
 #define IMAD(_O, _I, _W) __imad(_O, _I, _W)
 
 #else
 
 #define IMAD(_O, _I, _W) mmad_4(_O, _I, _W)
+#define READ_LOCAL_8(_P) intel_subgroup_block_read_uint8(_P)
+#define READ_LOCAL_1(_P) intel_subgroup_block_read_uint(_P)
+#define WRITE_LOCAL_8(_P, _V) intel_subgroup_block_write_uint8(_P, _V)
+#define WRITE_LOCAL_4(_P, _V) intel_subgroup_block_write_uint4(_P, _V)
+#define WRITE_LOCAL_2(_P, _V) intel_subgroup_block_write_uint2(_P, _V)
+#define WRITE_LOCAL_1(_P, _V) intel_subgroup_block_write_uint(_P, _V)
 
-#endif
+uint intel_subgroup_block_read_uint(const __local uint* p)
+{
+    uint ret;
+    uint idx = get_sub_group_local_id();
+    ret = p[idx];
+    return ret;
+}
+
+uint8 intel_subgroup_block_read_uint8(const __local uint* p)
+{
+    uint8 ret;
+    uint idx = get_sub_group_local_id();
+    ret.s0 = p[idx]; idx += get_max_sub_group_size();
+    ret.s1 = p[idx]; idx += get_max_sub_group_size();
+    ret.s2 = p[idx]; idx += get_max_sub_group_size();
+    ret.s3 = p[idx]; idx += get_max_sub_group_size();
+    ret.s4 = p[idx]; idx += get_max_sub_group_size();
+    ret.s5 = p[idx]; idx += get_max_sub_group_size();
+    ret.s6 = p[idx]; idx += get_max_sub_group_size();
+    ret.s7 = p[idx];
+    return ret;
+}
+
+void intel_subgroup_block_write_uint(__local uint* p, uint v)
+{
+    uint idx = get_sub_group_local_id();
+    p[idx] = v;
+}
+
+void intel_subgroup_block_write_uint2(__local uint* p, uint2 v)
+{
+    uint idx = get_sub_group_local_id();
+    p[idx] = v.s0; p += get_max_sub_group_size();
+    p[idx] = v.s1;
+}
+
+void intel_subgroup_block_write_uint4(__local uint* p, uint4 v)
+{
+    uint idx = get_sub_group_local_id();
+    p[idx] = v.s0; p += get_max_sub_group_size();
+    p[idx] = v.s1; p += get_max_sub_group_size();
+    p[idx] = v.s2; p += get_max_sub_group_size();
+    p[idx] = v.s3;
+}
+
+void intel_subgroup_block_write_uint8(__local uint* p, uint8 v)
+{
+    uint idx = get_sub_group_local_id();
+    p[idx] = v.s0; p += get_max_sub_group_size();
+    p[idx] = v.s1; p += get_max_sub_group_size();
+    p[idx] = v.s2; p += get_max_sub_group_size();
+    p[idx] = v.s3; p += get_max_sub_group_size();
+    p[idx] = v.s4; p += get_max_sub_group_size();
+    p[idx] = v.s5; p += get_max_sub_group_size();
+    p[idx] = v.s6; p += get_max_sub_group_size();
+    p[idx] = v.s7;
+}
 
 inline int mmad_4(uchar4 input, char4 weight, int acc) __attribute__((overloadable)) {
     acc += (input[0] * weight[0]);
@@ -130,4 +238,5 @@ inline int8 mmad8x8(int8 A_vectors, int8 B_vectors, int8 acc) __attribute__((ove
     return ret;
 }
 
+#endif
 #endif

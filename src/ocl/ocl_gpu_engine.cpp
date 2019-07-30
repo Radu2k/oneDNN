@@ -21,6 +21,7 @@
 #include "ocl/gemm_inner_product.hpp"
 #include "ocl/jit_gen12lp_u8s8s32u8_1x1_convolution.hpp"
 #include "ocl/jit_gen12lp_u8s8s32x_convolution.hpp"
+#include "ocl/jit_gen12hp_u8s8s32x_convolution.hpp"
 #include "ocl/jit_gen9_common_convolution.hpp"
 #include "ocl/jit_gen9_gemm.hpp"
 #include "ocl/ocl_kernel_list.hpp"
@@ -169,6 +170,8 @@ static const pd_create_f ocl_impl_list[] = {
     INSTANCE(jit_gen9_common_convolution_bwd_data_t<f32, f32, f32, f32>),
     INSTANCE(jit_gen9_common_convolution_bwd_weights_t<f32, f32, f32, f32>),
     /* conv (int) */
+    INSTANCE(jit_gen12hp_u8s8s32x_convolution_fwd_t<u8>),
+    INSTANCE(jit_gen12hp_u8s8s32x_convolution_fwd_t<s8>),
     INSTANCE(jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t<u8>),
     INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<u8>),
     INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<s8>),
