@@ -27,18 +27,38 @@ namespace mkldnn {
 namespace impl {
 namespace compute {
 
-enum class device_ext_t {
+enum class device_ext_t : int64_t {
     khr_fp16 = 1 << 0,
     intel_subgroups = 1 << 1,
     intel_subgroups_short = 1 << 2,
     intel_dot_accumulate = 1 << 3,
+    intel_subgroup_matrix_multiply_accumulate = 1 << 4,
+    intel_subgroup_split_matrix_multiply_accumulate = 1 << 5,
     last
 };
+
+static const char *ext2cl_str(compute::device_ext_t ext) {
+#define CASE(x) \
+    case compute::device_ext_t::x: return STRINGIFY(CONCAT2(cl_, x));
+    switch (ext) {
+        CASE(khr_fp16);
+        CASE(intel_subgroups);
+        CASE(intel_subgroups_short);
+        CASE(intel_dot_accumulate);
+        CASE(intel_subgroup_matrix_multiply_accumulate);
+        CASE(intel_subgroup_split_matrix_multiply_accumulate);
+    default: return nullptr;
+    }
+#undef CASE
+}
 
 struct runtime_version_t {
     int major;
     int minor;
     int build;
+
+    runtime_version_t(int major = 0, int minor = 0, int build = 0)
+        : major{ major }, minor{ minor }, build{ build } {}
 
     bool operator==(const runtime_version_t &other) const {
         return (major == other.major) && (minor == other.minor)
@@ -100,9 +120,6 @@ struct device_info_t {
 public:
     virtual status_t init() = 0;
     virtual bool has(device_ext_t ext) const = 0;
-
-    virtual int eu_count() const = 0;
-    virtual int hw_threads() const = 0;
 
     virtual const runtime_version_t &runtime_version() const = 0;
 };
