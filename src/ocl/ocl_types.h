@@ -19,6 +19,8 @@
 
 #include "ocl/ocl_math_utils.h"
 
+#define for_ for
+
 #if DT_F32 == 1
 #    define DATA_T float
 #    define DATA8_T float8
