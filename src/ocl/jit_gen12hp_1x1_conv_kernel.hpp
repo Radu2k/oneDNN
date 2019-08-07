@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef JIT_GEN12HP_U8S8S32X_1x1_CONV_KERNEL_HPP
-#define JIT_GEN12HP_U8S8S32X_1x1_CONV_KERNEL_HPP
+#ifndef JIT_GEN12HP_1x1_CONV_KERNEL_HPP
+#define JIT_GEN12HP_1x1_CONV_KERNEL_HPP
 
 #include "common/c_types_map.hpp"
 #include "ocl/jit_primitive_conf.hpp"
@@ -26,11 +26,12 @@ namespace ocl {
 
 using namespace dnnl::impl::format_tag;
 
-struct jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel {
-    jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel(jit_conv_conf_t ajcp)
-        : jcp(ajcp) {}
+static constexpr bool use_int8_slm_impl = false;
 
-    ~jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel() {}
+struct jit_gen12hp_1x1_conv_fwd_kernel {
+    jit_gen12hp_1x1_conv_fwd_kernel(jit_conv_conf_t ajcp) : jcp(ajcp) {}
+
+    ~jit_gen12hp_1x1_conv_fwd_kernel() {}
 
     static status_t init_conf(jit_conv_conf_t &jcp,
             const convolution_desc_t &cd, const memory_desc_t &src_md,
@@ -46,36 +47,73 @@ struct jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel {
 
         status_t status = status::success;
 
+        bool is_fp16 = src_mdw.data_type() == data_type::f16;
+        bool is_int8 = src_mdw.data_type() == data_type::u8;
+
+        jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
+
+        format_tag_t src_tag = dnnl_format_tag_undef;
+        format_tag_t dst_tag = dnnl_format_tag_undef;
+        format_tag_t wei_tag = dnnl_format_tag_undef;
+
         if (jcp.is_depthwise != false || (jcp.with_groups && jcp.ngroups > 1)
                 || jcp.kh != 1 || jcp.kw != 1)
             return status::unimplemented;
 
-        if (jcp.oc % 32 != 0 || jcp.ic % 32 != 0) return status::unimplemented;
+        if (is_int8) {
+            if (jcp.oc % 32 != 0 || jcp.ic % 32 != 0)
+                return status::unimplemented;
 
-        jcp.src_data_type = src_mdw.data_type();
+            jcp.mb_block = 32;
+            jcp.oc_block = 32;
+            jcp.ic_block = 32;
 
-        jcp.mb_block = 32;
-        jcp.oc_block = 32;
-        jcp.ic_block = 32;
+            jcp.sub_group_size = 8;
+            jcp.lws_d[0] = jcp.sub_group_size;
+            if (use_int8_slm_impl)
+                jcp.lws_d[1] = 8;
+            else
+                jcp.lws_d[1] = 1;
+            jcp.lws_d[2] = 1;
 
-        jcp.sub_group_size = 8;
-        jcp.lws_d[0] = jcp.sub_group_size;
-        jcp.lws_d[1] = 8;
-        jcp.lws_d[2] = 1;
+            jcp.gws_d[0] = jcp.oc / jcp.oc_block * jcp.sub_group_size;
+            if (use_int8_slm_impl)
+                jcp.gws_d[1] = utils::rnd_up(jcp.ow, jcp.lws_d[1]) * jcp.oh;
+            else
+                jcp.gws_d[1] = jcp.ow * jcp.oh;
+            jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block);
 
-        jcp.gws_d[0] = jcp.oc / jcp.oc_block * jcp.sub_group_size;
-        jcp.gws_d[1] = utils::rnd_up(jcp.ow, jcp.lws_d[1]) * jcp.oh;
-        jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block);
+            src_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c);
+            dst_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c);
+            wei_tag = jcp.with_groups
+                    ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i)
+                    : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i);
 
-        jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
+        } else if (is_fp16) {
+            if (jcp.oc % 16 != 0 || jcp.ic % 16 != 0)
+                return status::unimplemented;
 
-        format_tag_t src_tag, dst_tag, wei_tag;
+            jcp.mb_block = 32;
+            jcp.oc_block = 16;
+            jcp.ic_block = 16;
 
-        src_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c);
-        dst_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c);
-        wei_tag = jcp.with_groups
-                ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i)
-                : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i);
+            jcp.sub_group_size = 8;
+            jcp.lws_d[0] = jcp.sub_group_size;
+            jcp.lws_d[1] = 1;
+            jcp.lws_d[2] = 1;
+
+            jcp.gws_d[0] = jcp.oc / jcp.oc_block * jcp.sub_group_size;
+            jcp.gws_d[1] = jcp.ow * jcp.oh;
+            jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block);
+
+            src_tag = utils::pick(jcp.ndims - 3, NCw32n16c, NChw32n16c);
+            dst_tag = utils::pick(jcp.ndims - 3, NCw32n16c, NChw32n16c);
+            wei_tag = jcp.with_groups
+                    ? utils::pick(jcp.ndims - 3, gOIw8i8o, gOIhw8i8o)
+                    : utils::pick(jcp.ndims - 3, OIw8i8o, OIhw8i8o);
+        } else {
+            assert(!"not expected");
+        }
 
         jcp.src_tag = src_tag;
         jcp.wei_tag = wei_tag;
@@ -124,8 +162,7 @@ struct jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel {
 
         kernel_ctx.set_data_type(jcp.dst_data_type);
 
-        // If defined, use SLM for weights
-        // kernel_ctx.define_int("SLM_WEI", 1);
+        if (use_int8_slm_impl) kernel_ctx.define_int("SLM_WEI", 1);
 
         return status::success;
     }

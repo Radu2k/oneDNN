@@ -14,7 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "jit_gen12hp_u8s8s32x_1x1_convolution.hpp"
+#include "jit_gen12hp_1x1_convolution.hpp"
 #include "ocl_stream.hpp"
 
 namespace dnnl {
@@ -22,7 +22,7 @@ namespace impl {
 namespace ocl {
 
 template <data_type_t dst_type>
-status_t jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<dst_type>::execute_forward(
+status_t jit_gen12hp_1x1_convolution_fwd_t<dst_type>::execute_forward(
         const exec_ctx_t &ctx) const {
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
@@ -53,8 +53,9 @@ status_t jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<dst_type>::execute_forward(
 
 using namespace data_type;
 
-template struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<s8>;
-template struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<u8>;
+template struct jit_gen12hp_1x1_convolution_fwd_t<f16>;
+template struct jit_gen12hp_1x1_convolution_fwd_t<s8>;
+template struct jit_gen12hp_1x1_convolution_fwd_t<u8>;
 
 } // namespace ocl
 } // namespace impl

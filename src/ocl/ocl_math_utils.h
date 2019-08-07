@@ -54,6 +54,12 @@ inline int8 __dpas(uint8 a, int8 b, int8 acc) __attribute__((overloadable)) {
     return __builtin_IB_sub_group_idpas_u8_s8_8_8(acc, a, b);
 }
 
+inline float8 __dpas(int8 a, int8 b, float8 acc) __attribute__((overloadable)) {
+    float8 __builtin_IB_sub_group_fdpas_hf_hf_8_8(float8 acc, int8 a, int8 b)
+            __attribute__((const));
+    return __builtin_IB_sub_group_fdpas_hf_hf_8_8(acc, a, b);
+}
+
 inline uint8 intel_sub_group_local_block_read_uint8(const __local uint *p)
         __attribute__((overloadable)) {
     uint8 __builtin_IB_simd_block_read_8_local(const __local uint *p)
@@ -101,8 +107,6 @@ void intel_sub_group_local_block_write_uint8(__local uint *p, uint8 v)
 #define WRITE_LOCAL_1(_P, _V) intel_sub_group_local_block_write_uint(_P, _V)
 
 #define mmad8x8(_O, _I, _W) __dpas(_O, _I, _W)
-
-#define IMAD(_O, _I, _W) __imad(_O, _I, _W)
 
 #else
 
@@ -227,6 +231,48 @@ inline int mmad8(uint8 A_scalars, int8 B_vectors, int acc)
     acc = IMAD(as_uchar4(A_scalars[7]), as_char4(B_vectors[7]), acc);
     return acc;
 }
+
+#if DT_F16 == 1
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+
+inline float mmad_2(half2 input, half2 weight, float acc)
+        __attribute__((overloadable)) {
+    acc += (input[0] * weight[0]);
+    acc += (input[1] * weight[1]);
+    return acc;
+}
+
+inline float mmad8(uint8 A_scalars, int8 B_vectors, float acc)
+        __attribute__((overloadable)) {
+    acc = mmad_2(as_half2(A_scalars[0]), as_half2(B_vectors[0]), acc);
+    acc = mmad_2(as_half2(A_scalars[1]), as_half2(B_vectors[1]), acc);
+    acc = mmad_2(as_half2(A_scalars[2]), as_half2(B_vectors[2]), acc);
+    acc = mmad_2(as_half2(A_scalars[3]), as_half2(B_vectors[3]), acc);
+    acc = mmad_2(as_half2(A_scalars[4]), as_half2(B_vectors[4]), acc);
+    acc = mmad_2(as_half2(A_scalars[5]), as_half2(B_vectors[5]), acc);
+    acc = mmad_2(as_half2(A_scalars[6]), as_half2(B_vectors[6]), acc);
+    acc = mmad_2(as_half2(A_scalars[7]), as_half2(B_vectors[7]), acc);
+    return acc;
+}
+
+inline float8 mmad8x8(uint8 A_vectors, int8 B_vectors, float8 acc)
+        __attribute__((overloadable)) {
+    float8 ret;
+    for (uint i = 0; i < 8; i++) {
+        uint8 A_scalars;
+        A_scalars.s0 = sub_group_broadcast(A_vectors[i], 0);
+        A_scalars.s1 = sub_group_broadcast(A_vectors[i], 1);
+        A_scalars.s2 = sub_group_broadcast(A_vectors[i], 2);
+        A_scalars.s3 = sub_group_broadcast(A_vectors[i], 3);
+        A_scalars.s4 = sub_group_broadcast(A_vectors[i], 4);
+        A_scalars.s5 = sub_group_broadcast(A_vectors[i], 5);
+        A_scalars.s6 = sub_group_broadcast(A_vectors[i], 6);
+        A_scalars.s7 = sub_group_broadcast(A_vectors[i], 7);
+        ret[i] = mmad8(A_scalars, B_vectors, acc[i]);
+    }
+    return ret;
+}
+#endif
 
 inline int8 mmad8x8(uint8 A_vectors, int8 B_vectors, int8 acc)
         __attribute__((overloadable)) {

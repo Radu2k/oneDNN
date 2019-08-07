@@ -14,26 +14,27 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef JIT_GEN12HP_U8S8S32X_1x1_CONVOLUTION_HPP
-#define JIT_GEN12HP_U8S8S32X_1x1_CONVOLUTION_HPP
+#ifndef JIT_GEN12HP_1x1_CONVOLUTION_HPP
+#define JIT_GEN12HP_1x1_CONVOLUTION_HPP
 
 #include <assert.h>
 
 #include "common/c_types_map.hpp"
 #include "compute/compute.hpp"
-#include "ocl/jit_gen12hp_u8s8s32x_1x1_conv_kernel.hpp"
+#include "ocl/jit_gen12hp_1x1_conv_kernel.hpp"
 #include "ocl/ocl_convolution_pd.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
 extern const char *gen12hp_1x1_conv_fwd_data_u8s8s32x_kernel;
+extern const char *gen12hp_1x1_conv_fwd_data_f16_kernel;
 
 namespace dnnl {
 namespace impl {
 namespace ocl {
 
 template <impl::data_type_t dst_type>
-struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
+struct jit_gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
     struct pd_t : public ocl_convolution_fwd_pd_t {
         pd_t(engine_t *engine, const convolution_desc_t *adesc,
                 const primitive_attr_t *attr,
@@ -41,8 +42,7 @@ struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
             : ocl_convolution_fwd_pd_t(engine, adesc, attr, hint_fwd_pd)
             , jcp_() {}
 
-        DECLARE_COMMON_PD_T(
-                "ocl:gen12hp", jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t);
+        DECLARE_COMMON_PD_T("ocl:gen12hp", jit_gen12hp_1x1_convolution_fwd_t);
 
         status_t init() {
             using namespace prop_kind;
@@ -53,14 +53,14 @@ struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
                     && utils::one_of(this->desc()->prop_kind, forward_training,
                             forward_inference)
                     && this->desc()->alg_kind == alg_kind::convolution_direct
-                    && expect_data_types(u8, s8, f32, dst_type, s32);
+                    && utils::one_of(true,
+                            expect_data_types(u8, s8, f32, dst_type, s32),
+                            expect_data_types(f16, f16, f16, dst_type, f16));
             if (!ok) return status::unimplemented;
 
-            status_t status
-                    = jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel::init_conf(jcp_,
-                            *this->desc(), *this->src_md(), *this->weights_md(),
-                            *this->dst_md(), *this->weights_md(1),
-                            *this->attr());
+            status_t status = jit_gen12hp_1x1_conv_fwd_kernel::init_conf(jcp_,
+                    *this->desc(), *this->src_md(), *this->weights_md(),
+                    *this->dst_md(), *this->weights_md(1), *this->attr());
             if (status != status::success) return status;
 
             ok = set_default_formats_common(
@@ -72,10 +72,16 @@ struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
     };
 
     status_t init() override {
-        const char *kernel_name = "gen12hp_1x1_conv_fwd_kernel";
+        const char *kernel_name = nullptr;
+        if (pd()->desc()->src_desc.data_type == data_type::f16)
+            kernel_name = "gen12hp_1x1_conv_fwd_kernel_f16";
+        else if (pd()->desc()->src_desc.data_type == data_type::u8)
+            kernel_name = "gen12hp_1x1_conv_fwd_kernel_u8s8s32x";
+        else
+            assert(!"not expected");
 
         compute::kernel_ctx_t kernel_ctx;
-        auto status = jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel::init_const_def(
+        auto status = jit_gen12hp_1x1_conv_fwd_kernel::init_const_def(
                 kernel_ctx, pd()->jcp_);
         if (status != status::success) return status;
 
@@ -87,12 +93,11 @@ struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
         return status::success;
     }
 
-    jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t(const pd_t *apd)
-        : primitive_impl_t(apd) {
-        ker_ = new jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel(pd()->jcp_);
+    jit_gen12hp_1x1_convolution_fwd_t(const pd_t *apd) : primitive_impl_t(apd) {
+        ker_ = new jit_gen12hp_1x1_conv_fwd_kernel(pd()->jcp_);
     }
 
-    ~jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t() { delete ker_; }
+    ~jit_gen12hp_1x1_convolution_fwd_t() { delete ker_; }
 
     typedef typename prec_traits<dst_type>::type dst_data_t;
 
@@ -103,7 +108,7 @@ struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
 private:
     status_t execute_forward(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
-    jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel *ker_;
+    jit_gen12hp_1x1_conv_fwd_kernel *ker_;
     compute::kernel_t kernel_;
 };
 

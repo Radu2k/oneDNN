@@ -81,7 +81,8 @@ struct jit_gen12hp_u8s8s32x_convolution_fwd_t : public primitive_impl_t {
         return status::success;
     }
 
-    jit_gen12hp_u8s8s32x_convolution_fwd_t(const pd_t *apd) : primitive_impl_t(apd) {
+    jit_gen12hp_u8s8s32x_convolution_fwd_t(const pd_t *apd)
+        : primitive_impl_t(apd) {
         ker_ = new jit_gen12hp_u8s8s32x_conv_fwd_kernel(pd()->jcp_);
     }
 
