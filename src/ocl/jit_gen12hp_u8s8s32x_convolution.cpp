@@ -43,10 +43,11 @@ template <data_type_t dst_type>
     arg_list.set(1, weights);
     arg_list.set(2, bias);
     arg_list.set(3, dst);
-    arg_list.set(4, jcp.relu_negative_slope);
-    arg_list.set(5, jcp.sum_scale);
+    arg_list.set(4, jcp.eltwise.alpha);
+    arg_list.set(5, jcp.eltwise.beta);
+    arg_list.set(6, jcp.sum_scale);
     float scales = pd()->attr()->output_scales_.scales_[0];
-    arg_list.set(6, scales);
+    arg_list.set(7, scales);
 
     auto nd_range = compute::nd_range_t(jcp.gws_d, jcp.lws_d);
     status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);

@@ -212,7 +212,7 @@ uint8 D0, D1, D2, D3;
 #endif
 
 #define PACK(C0, C1, C2, C3, idx) do { \
-        tmp[0] =  C0[idx]; \ 
+        tmp[0] =  C0[idx]; \
         tmp[1] =  C1[idx]; \
         tmp[2] =  C2[idx]; \
         tmp[3] =  C3[idx]; \

@@ -106,10 +106,12 @@ struct jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel {
         kernel_ctx.define_int("IC_BLOCK", jcp.ic_block);
 
         kernel_ctx.define_int("WITH_BIAS", jcp.with_bias);
-        kernel_ctx.define_int("WITH_RELU", jcp.with_relu);
+        kernel_ctx.define_int("WITH_ELTWISE", jcp.with_eltwise);
         kernel_ctx.define_int("WITH_SUM", jcp.with_sum);
-        kernel_ctx.define_int("WITH_SUM_RELU", jcp.with_sum_eltwise);
         kernel_ctx.define_int("SUM_SCALE", jcp.sum_scale == 1.0);
+        kernel_ctx.define_int("WITH_POST_SUM_ELTWISE", jcp.with_post_sum_eltwise);
+        if (jcp.with_eltwise || jcp.with_post_sum_eltwise)
+            def_postops(kernel_ctx, jcp.eltwise.alg);
 
         kernel_ctx.define_int("SUB_GROUP_SIZE", jcp.sub_group_size);
 
