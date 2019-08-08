@@ -40,6 +40,9 @@ struct jit_gen12hp_u8s8s32x_conv_fwd_kernel {
 
         status_t status = status::success;
 
+        if (jcp.is_depthwise) /*TODO: write a dw kernel*/
+            return status::unimplemented;
+
         if (jcp.mb < 8)
             return status::unimplemented;
 
