@@ -33,9 +33,9 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
     ~jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel() {}
 
     static status_t init_conf(jit_conv_conf_t &jcp,
-        const convolution_desc_t &cd, const memory_desc_t &src_md,
-        const memory_desc_t &weights_md, const memory_desc_t &dst_md,
-        const memory_desc_t &bias_md, const primitive_attr_t &attr) {
+            const convolution_desc_t &cd, const memory_desc_t &src_md,
+            const memory_desc_t &weights_md, const memory_desc_t &dst_md,
+            const memory_desc_t &bias_md, const primitive_attr_t &attr) {
 
         const memory_desc_wrapper src_mdw(&src_md);
         const memory_desc_wrapper weights_mdw(&weights_md);
@@ -47,12 +47,11 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
         status_t status = status::success;
 
         if (jcp.is_depthwise != false || (jcp.with_groups && jcp.ngroups > 1)
-            || jcp.kh != 1 || jcp.kw != 1 || jcp.stride_h != 1
-            || jcp.stride_w != 1 || jcp.stride_d != 1)
+                || jcp.kh != 1 || jcp.kw != 1 || jcp.stride_h != 1
+                || jcp.stride_w != 1 || jcp.stride_d != 1)
             return status::unimplemented;
 
-        if (jcp.oc % 32 != 0 || jcp.ic % 32 != 0)
-            return status::unimplemented;
+        if (jcp.oc % 32 != 0 || jcp.ic % 32 != 0) return status::unimplemented;
 
         jcp.src_data_type = src_mdw.data_type();
         jcp.dst_data_type = dst_mdw.data_type();
@@ -77,8 +76,8 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
         src_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c);
         dst_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c);
         wei_tag = jcp.with_groups
-            ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i)
-            : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i);
+                ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i)
+                : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i);
 
         jcp.src_tag = src_tag;
         jcp.wei_tag = wei_tag;
@@ -87,7 +86,8 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
         return status;
     };
 
-    static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx, const jit_conv_conf_t &jcp) {
+    static status_t init_const_def(
+            compute::kernel_ctx_t &kernel_ctx, const jit_conv_conf_t &jcp) {
         kernel_ctx.set_data_type(jcp.dst_data_type);
         kernel_ctx.define_int("MB", jcp.mb);
         kernel_ctx.define_int("IC", jcp.ic_without_padding);
@@ -107,7 +107,8 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
         kernel_ctx.define_int("WITH_ELTWISE", jcp.with_eltwise);
         kernel_ctx.define_int("WITH_SUM", jcp.with_sum);
         kernel_ctx.define_int("SUM_SCALE", jcp.sum_scale == 1.0);
-        kernel_ctx.define_int("WITH_POST_SUM_ELTWISE", jcp.with_post_sum_eltwise);
+        kernel_ctx.define_int(
+                "WITH_POST_SUM_ELTWISE", jcp.with_post_sum_eltwise);
         if (jcp.with_eltwise || jcp.with_post_sum_eltwise)
             def_postops(kernel_ctx, jcp.eltwise.alg);
 
@@ -126,8 +127,8 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
     jit_conv_conf_t jcp;
 };
 
-}
-}
-}
+} // namespace ocl
+} // namespace impl
+} // namespace mkldnn
 
 #endif

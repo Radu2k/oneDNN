@@ -25,7 +25,7 @@ ushort convert_f32_to_bf16(float f) {
 }
 
 float convert_bf16_to_f32(ushort b) {
-    ushort2 r = { 0, b };
+    ushort2 r = {0, b};
     float f = as_float(r);
     return f;
 }
@@ -33,19 +33,19 @@ float convert_bf16_to_f32(ushort b) {
 #if IMAD_SUPPORTED == 1
 inline int __imad(char4 a, char4 b, int c) __attribute__((overloadable)) {
     int __builtin_IB_dp4a_ss(int c, int a, int b) __attribute__((const));
-                return __builtin_IB_dp4a_ss(c, as_int(a), as_int(b));
+    return __builtin_IB_dp4a_ss(c, as_int(a), as_int(b));
 }
 inline int __imad(uchar4 a, uchar4 b, int c) __attribute__((overloadable)) {
     int __builtin_IB_dp4a_uu(int c, int a, int b) __attribute__((const));
-                return __builtin_IB_dp4a_uu(c, as_int(a), as_int(b));
+    return __builtin_IB_dp4a_uu(c, as_int(a), as_int(b));
 }
 inline int __imad(char4 a, uchar4 b, int c) __attribute__((overloadable)) {
     int __builtin_IB_dp4a_su(int c, int a, int b) __attribute__((const));
-                return __builtin_IB_dp4a_su(c, as_int(a), as_int(b));
+    return __builtin_IB_dp4a_su(c, as_int(a), as_int(b));
 }
 inline int __imad(uchar4 a, char4 b, int c) __attribute__((overloadable)) {
     int __builtin_IB_dp4a_us(int c, int a, int b) __attribute__((const));
-                return __builtin_IB_dp4a_us(c, as_int(a), as_int(b));
+    return __builtin_IB_dp4a_us(c, as_int(a), as_int(b));
 }
 
 #define IMAD(_O, _I, _W) __imad(_O, _I, _W)
@@ -56,7 +56,8 @@ inline int __imad(uchar4 a, char4 b, int c) __attribute__((overloadable)) {
 
 #endif
 
-inline int mmad_4(uchar4 input, char4 weight, int acc) __attribute__((overloadable)) {
+inline int mmad_4(uchar4 input, char4 weight, int acc)
+        __attribute__((overloadable)) {
     acc += (input[0] * weight[0]);
     acc += (input[1] * weight[1]);
     acc += (input[2] * weight[2]);
@@ -64,7 +65,8 @@ inline int mmad_4(uchar4 input, char4 weight, int acc) __attribute__((overloadab
     return acc;
 }
 
-inline int mmad_4(char4 input, char4 weight, int acc) __attribute__((overloadable)){
+inline int mmad_4(char4 input, char4 weight, int acc)
+        __attribute__((overloadable)) {
     acc += (input[0] * weight[0]);
     acc += (input[1] * weight[1]);
     acc += (input[2] * weight[2]);
@@ -72,7 +74,8 @@ inline int mmad_4(char4 input, char4 weight, int acc) __attribute__((overloadabl
     return acc;
 }
 
-inline int mmad8(int8 A_scalars, int8 B_vectors, int acc) __attribute__((overloadable)){
+inline int mmad8(int8 A_scalars, int8 B_vectors, int acc)
+        __attribute__((overloadable)) {
     acc = IMAD(as_char4(A_scalars[0]), as_char4(B_vectors[0]), acc);
     acc = IMAD(as_char4(A_scalars[1]), as_char4(B_vectors[1]), acc);
     acc = IMAD(as_char4(A_scalars[2]), as_char4(B_vectors[2]), acc);
@@ -84,7 +87,8 @@ inline int mmad8(int8 A_scalars, int8 B_vectors, int acc) __attribute__((overloa
     return acc;
 }
 
-inline int mmad8(uint8 A_scalars, int8 B_vectors, int acc) __attribute__((overloadable)){
+inline int mmad8(uint8 A_scalars, int8 B_vectors, int acc)
+        __attribute__((overloadable)) {
     acc = IMAD(as_uchar4(A_scalars[0]), as_char4(B_vectors[0]), acc);
     acc = IMAD(as_uchar4(A_scalars[1]), as_char4(B_vectors[1]), acc);
     acc = IMAD(as_uchar4(A_scalars[2]), as_char4(B_vectors[2]), acc);
@@ -96,7 +100,8 @@ inline int mmad8(uint8 A_scalars, int8 B_vectors, int acc) __attribute__((overlo
     return acc;
 }
 
-inline int8 mmad8x8(uint8 A_vectors, int8 B_vectors, int8 acc) __attribute__((overloadable)){
+inline int8 mmad8x8(uint8 A_vectors, int8 B_vectors, int8 acc)
+        __attribute__((overloadable)) {
     int8 ret;
     for (uint i = 0; i < 8; i++) {
         uint8 A_scalars;
@@ -113,7 +118,8 @@ inline int8 mmad8x8(uint8 A_vectors, int8 B_vectors, int8 acc) __attribute__((ov
     return ret;
 }
 
-inline int8 mmad8x8(int8 A_vectors, int8 B_vectors, int8 acc) __attribute__((overloadable)){
+inline int8 mmad8x8(int8 A_vectors, int8 B_vectors, int8 acc)
+        __attribute__((overloadable)) {
     int8 ret;
     for (uint i = 0; i < 8; i++) {
         int8 A_scalars;
@@ -130,19 +136,17 @@ inline int8 mmad8x8(int8 A_vectors, int8 B_vectors, int8 acc) __attribute__((ove
     return ret;
 }
 
-ushort8 convert_f32_to_bf16_vec8(float8 f){
+ushort8 convert_f32_to_bf16_vec8(float8 f) {
     ushort8 r;
-    for (int i = 0; i < 8; i++)
-    {
+    for (int i = 0; i < 8; i++) {
         r[i] = convert_f32_to_bf16(f[i]);
     }
     return r;
 }
 
-float8 convert_bf16_to_f32_vec8(ushort8 b){
+float8 convert_bf16_to_f32_vec8(ushort8 b) {
     float8 f;
-    for (int i = 0; i < 8; i++)
-    {
+    for (int i = 0; i < 8; i++) {
         f[i] = convert_bf16_to_f32(b[i]);
     }
     return f;
