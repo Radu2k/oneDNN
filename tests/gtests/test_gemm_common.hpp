@@ -713,8 +713,8 @@ struct mkldnn_gemm<int8_t, uint8_t, int32_t> {
         if (get_test_engine_kind() == engine::kind::gpu) {
             engine eng(get_test_engine_kind(), 0);
             stream s(eng);
-            cl_command_queue q = s.get_ocl_command_queue();
-            auto status = mkldnn_ocl_gemm_s8u8s32(q, p.transA, p.transB, p.igemm_params.offsetc, p.M, p.N,
+            cl_command_queue q2 = s.get_ocl_command_queue();
+            auto status = mkldnn_ocl_gemm_s8u8s32(q2, p.transA, p.transB, p.igemm_params.offsetc, p.M, p.N,
                     p.K, p.alpha, a_mem.get().get_ocl_mem_object(), p.off.a,
                     p.lda, p.igemm_params.oa(), b_mem.get().get_ocl_mem_object(), p.off.b, p.ldb, (uint8_t)p.igemm_params.ob(), 
                     p.beta, c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc, oc_mem.get().get_ocl_mem_object(), p.off.co);
