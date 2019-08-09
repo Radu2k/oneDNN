@@ -709,18 +709,21 @@ struct mkldnn_gemm<int8_t, uint8_t, int32_t> {
     static mkldnn_status_t call(const test_params &p, const test_memory &a_mem,
             const test_memory &b_mem, const test_memory &c_mem,
             const test_memory &oc_mem) {
-
-        assert(get_test_engine_kind() == engine::kind::gpu);
-        engine eng(get_test_engine_kind(), 0);
-        stream s(eng);
-        cl_command_queue q = s.get_ocl_command_queue();
-        auto status = mkldnn_ocl_gemm_s8u8s32(q, p.transA, p.transB, p.igemm_params.offsetc, p.M, p.N,
-                p.K, p.alpha, a_mem.get().get_ocl_mem_object(), p.off.a,
-                p.lda, p.igemm_params.oa(), b_mem.get().get_ocl_mem_object(), p.off.b, p.ldb, (uint8_t)p.igemm_params.ob(), 
-                p.beta, c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc, oc_mem.get().get_ocl_mem_object(), p.off.co);
-        s.wait();
-        return status;
-    }
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
+        if (get_test_engine_kind() == engine::kind::gpu) {
+            engine eng(get_test_engine_kind(), 0);
+            stream s(eng);
+            cl_command_queue q = s.get_ocl_command_queue();
+            auto status = mkldnn_ocl_gemm_s8u8s32(q, p.transA, p.transB, p.igemm_params.offsetc, p.M, p.N,
+                    p.K, p.alpha, a_mem.get().get_ocl_mem_object(), p.off.a,
+                    p.lda, p.igemm_params.oa(), b_mem.get().get_ocl_mem_object(), p.off.b, p.ldb, (uint8_t)p.igemm_params.ob(), 
+                    p.beta, c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc, oc_mem.get().get_ocl_mem_object(), p.off.co);
+            s.wait();
+            return status;
+        }
+#endif
+        throw error(mkldnn_runtime_error, "unknown gemm");
+    }       
 };
 
 template <>
@@ -729,17 +732,20 @@ struct mkldnn_gemm<uint8_t, uint8_t, int32_t> {
             const test_memory &b_mem, const test_memory &c_mem,
             const test_memory &oc_mem) {
 
-        assert(get_test_engine_kind() == engine::kind::gpu);
-        engine eng(get_test_engine_kind(), 0);
-        stream s(eng);
-        cl_command_queue q = s.get_ocl_command_queue();
-        auto status = mkldnn_ocl_gemm_u8u8s32(q, p.transA, p.transB, p.igemm_params.offsetc, p.M, p.N,
-                p.K, p.alpha, a_mem.get().get_ocl_mem_object(), p.off.a,
-                p.lda, (uint8_t)p.igemm_params.oa(), b_mem.get().get_ocl_mem_object(), p.off.b, p.ldb, (uint8_t)p.igemm_params.ob(), 
-                p.beta, c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc, oc_mem.get().get_ocl_mem_object(), p.off.co);
-        s.wait();
-        return status;
-
+#if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
+        if (get_test_engine_kind() == engine::kind::gpu) {
+            engine eng(get_test_engine_kind(), 0);
+            stream s(eng);
+            cl_command_queue q = s.get_ocl_command_queue();
+            auto status = mkldnn_ocl_gemm_u8u8s32(q, p.transA, p.transB, p.igemm_params.offsetc, p.M, p.N,
+                    p.K, p.alpha, a_mem.get().get_ocl_mem_object(), p.off.a,
+                    p.lda, (uint8_t)p.igemm_params.oa(), b_mem.get().get_ocl_mem_object(), p.off.b, p.ldb, (uint8_t)p.igemm_params.ob(), 
+                    p.beta, c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc, oc_mem.get().get_ocl_mem_object(), p.off.co);
+            s.wait();
+            return status;
+        }
+#endif
+        throw error(mkldnn_runtime_error, "unknown gemm");
     }
 };
 

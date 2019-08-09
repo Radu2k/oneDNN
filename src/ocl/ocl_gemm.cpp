@@ -100,11 +100,11 @@ mkldnn_status_t gemm_generic(cl_command_queue queue, const char *transa,
     mkldnn_memory_desc_t a_desc, b_desc, c_desc;
 
     status = create_gemm_memory_desc(&a_desc, &op_desc, 0, data_type);
-    assert(status == status::success);
+    if (status != status::success) return status;
     status = create_gemm_memory_desc(&b_desc, &op_desc, 1, data_type);
-    assert(status == status::success);
+    if (status != status::success) return status;
     status = create_gemm_memory_desc(&c_desc, &op_desc, 2, data_type);
-    assert(status == status::success);
+    if (status != status::success) return status;
 
     std::unique_ptr<primitive_desc_t> pd;
     primitive_attr_t attr;
@@ -225,13 +225,13 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue,
     mkldnn_memory_desc_t a_desc, b_desc, c_desc, co_desc;
 
     status = create_gemm_memory_desc(&a_desc, &op_desc, 0, a_type);
-    assert(status == status::success);
+    if (status != status::success) return status;
     status = create_gemm_memory_desc(&b_desc, &op_desc, 1, b_type);
-    assert(status == status::success);
+    if (status != status::success) return status;
     status = create_gemm_memory_desc(&c_desc, &op_desc, 2, c_type);
-    assert(status == status::success);
+    if (status != status::success) return status;
     status = create_gemm_memory_desc(&co_desc, &op_desc, 2, c_type);
-    assert(status == status::success);
+    if (status != status::success) return status;
 
     std::unique_ptr<primitive_desc_t> pd;
     primitive_attr_t attr;

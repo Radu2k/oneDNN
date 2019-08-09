@@ -23,6 +23,7 @@
 #include "ocl/jit_gen12lp_u8s8s32x_convolution.hpp"
 #include "ocl/jit_gen9_common_convolution.hpp"
 #include "ocl/jit_gen9_gemm.hpp"
+#include "ocl/jit_gen12lp_gemm.hpp"
 #include "ocl/ocl_kernel_list.hpp"
 #include "ocl/ocl_memory_storage.hpp"
 #include "ocl/ocl_stream.hpp"
@@ -163,57 +164,61 @@ using namespace mkldnn::impl::data_type;
 
 #define INSTANCE(...) &primitive_desc_t::create<__VA_ARGS__::pd_t>
 static const pd_create_f ocl_impl_list[] = {
-        /*eltwise*/
-        INSTANCE(ref_eltwise_fwd_t),
-        INSTANCE(ref_eltwise_bwd_t),
-        /*deconv*/
-        INSTANCE(ref_deconvolution_fwd_t),
-        INSTANCE(ref_deconvolution_bwd_data_t),
-        INSTANCE(ref_deconvolution_bwd_weights_t),
-        /*conv*/
-        INSTANCE(jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t<u8>),
-        INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<u8>),
-        INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<s8>),
+    /*eltwise*/
+    INSTANCE(ref_eltwise_fwd_t),
+    INSTANCE(ref_eltwise_bwd_t),
+    /*deconv*/
+    INSTANCE(ref_deconvolution_fwd_t),
+    INSTANCE(ref_deconvolution_bwd_data_t),
+    INSTANCE(ref_deconvolution_bwd_weights_t),
+    /*conv*/
+    INSTANCE(jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t<u8>),
+    INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<u8>),
+    INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<s8>),
 //        INSTANCE(jit_gen12lp_u8s8s32x_convolution_bwd_data_t<u8>),
 //        INSTANCE(jit_gen12lp_u8s8s32x_convolution_bwd_data_t<s8>),
-        INSTANCE(jit_gen9_common_convolution_fwd_t),
-        INSTANCE(jit_gen9_common_convolution_bwd_data_t),
-        INSTANCE(jit_gen9_common_convolution_bwd_weights_t),
-        INSTANCE(ref_convolution_fwd_t),
-        INSTANCE(ref_convolution_bwd_data_t),
-        INSTANCE(ref_convolution_bwd_weights_t),
-        /*bnorm*/
-        INSTANCE(ref_batch_normalization_fwd_t),
-        INSTANCE(ref_batch_normalization_bwd_t),
-        /*pool*/
-        INSTANCE(ref_pooling_fwd_t),
-        INSTANCE(ref_pooling_bwd_t),
-        /* lrn */
-        INSTANCE(ref_lrn_fwd_t),
-        INSTANCE(ref_lrn_bwd_t),
-        /*inner_product*/
-        INSTANCE(gemm_inner_product_fwd_t),
-        INSTANCE(gemm_inner_product_bwd_data_t),
-        INSTANCE(gemm_inner_product_bwd_weights_t),
-        INSTANCE(ref_inner_product_fwd_t),
-        INSTANCE(ref_inner_product_bwd_data_t),
-        INSTANCE(ref_inner_product_bwd_weights_t),
-        /*softmax*/
-        INSTANCE(ref_softmax_fwd_t),
-        INSTANCE(ref_softmax_bwd_t),
-        /* gemm */
-        INSTANCE(jit_gen9_gemm_t<f16>),
-        INSTANCE(jit_gen9_gemm_t<f32>),
-        /*rnn*/
-        INSTANCE(ref_rnn_fwd_f16_t),
-        INSTANCE(ref_rnn_fwd_f32_t),
-        INSTANCE(ref_rnn_bwd_f32_t),
-        /* shuffle */
-        INSTANCE(ref_shuffle_t),
-        /*layer normalization */
-        INSTANCE(ref_layer_normalization_fwd_t),
-        INSTANCE(ref_layer_normalization_bwd_t),
-        nullptr,
+    INSTANCE(jit_gen9_common_convolution_fwd_t),
+    INSTANCE(jit_gen9_common_convolution_bwd_data_t),
+    INSTANCE(jit_gen9_common_convolution_bwd_weights_t),
+    INSTANCE(ref_convolution_fwd_t),
+    INSTANCE(ref_convolution_bwd_data_t),
+    INSTANCE(ref_convolution_bwd_weights_t),
+    /*bnorm*/
+    INSTANCE(ref_batch_normalization_fwd_t),
+    INSTANCE(ref_batch_normalization_bwd_t),
+    /*pool*/
+    INSTANCE(ref_pooling_fwd_t),
+    INSTANCE(ref_pooling_bwd_t),
+    /* lrn */
+    INSTANCE(ref_lrn_fwd_t),
+    INSTANCE(ref_lrn_bwd_t),
+    /*inner_product*/
+    INSTANCE(gemm_inner_product_fwd_t),
+    INSTANCE(gemm_inner_product_bwd_data_t),
+    INSTANCE(gemm_inner_product_bwd_weights_t),
+    INSTANCE(ref_inner_product_fwd_t),
+    INSTANCE(ref_inner_product_bwd_data_t),
+    INSTANCE(ref_inner_product_bwd_weights_t),
+    /*softmax*/
+    INSTANCE(ref_softmax_fwd_t),
+    INSTANCE(ref_softmax_bwd_t),
+    /* gemm */
+    INSTANCE(jit_gen9_gemm_t<f16>),
+    INSTANCE(jit_gen9_gemm_t<f32>),
+    INSTANCE(jit_gen12lp_gemm_t<s8,s8,s32>),
+    INSTANCE(jit_gen12lp_gemm_t<s8,u8,s32>),
+    INSTANCE(jit_gen12lp_gemm_t<u8,s8,s32>),
+    INSTANCE(jit_gen12lp_gemm_t<u8,u8,s32>),
+    /*rnn*/
+    INSTANCE(ref_rnn_fwd_f16_t),
+    INSTANCE(ref_rnn_fwd_f32_t),
+    INSTANCE(ref_rnn_bwd_f32_t),
+    /* shuffle */
+    INSTANCE(ref_shuffle_t),
+    /*layer normalization */
+    INSTANCE(ref_layer_normalization_fwd_t),
+    INSTANCE(ref_layer_normalization_bwd_t),
+    nullptr,
 };
 
 #undef INSTANCE
