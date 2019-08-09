@@ -214,6 +214,7 @@ typedef enum {
     dnnl_aBc16b,
     dnnl_ABc16b16a,
     dnnl_Abc4a,
+    dnnl_aBc32b,
     /// 3D tensor blocked by 2nd dimension with block size 4
     dnnl_aBc4b,
     dnnl_ABc4b16a4b,
@@ -235,6 +236,7 @@ typedef enum {
     dnnl_aBCd16b16c,
     dnnl_aBCd16c16b,
     dnnl_Abcd4a,
+    dnnl_aBcd32b,
     /// 4D tensor blocked by 2nd dimension with block size 4
     dnnl_aBcd4b,
     dnnl_ABcd4b16a4b,
@@ -266,6 +268,7 @@ typedef enum {
     dnnl_aBCde16c16b,
     dnnl_aBCde2c8b4c,
     dnnl_Abcde4a,
+    dnnl_aBcde32b,
     /// 5D tensor blocked by 2nd dimension with block size 4
     dnnl_aBcde4b,
     dnnl_ABcde4b4a,
@@ -448,7 +451,9 @@ typedef enum {
     // Opaque data types, are not to be used explicitly
 
     // data
-
+    /// 5D CNN activations tensor blocked by channels with block size 32,
+    /// an alias to #dnnl_aBcde32b
+    dnnl_nCdhw32c = dnnl_aBcde32b,
     /// 5D CNN activations tensor blocked by channels with block size 16,
     /// an alias to #dnnl_aBcde16b
     dnnl_nCdhw16c = dnnl_aBcde16b,
@@ -458,6 +463,9 @@ typedef enum {
     /// 5D CNN activations tensor blocked by channels with block size 8,
     /// an alias to #dnnl_aBcde8b
     dnnl_nCdhw8c = dnnl_aBcde8b,
+    /// 4D CNN activations tensor blocked by channels with block size 32,
+    /// an alias to #dnnl_aBcd32b
+    dnnl_nChw32c = dnnl_aBcd32b,
     /// 4D CNN activations tensor blocked by channels with block size 16,
     /// an alias to #dnnl_aBcd16b
     dnnl_nChw16c = dnnl_aBcd16b,
@@ -467,6 +475,9 @@ typedef enum {
     /// 4D CNN activations tensor blocked by channels with block size 8,
     /// an alias to #dnnl_aBcd8b
     dnnl_nChw8c = dnnl_aBcd8b,
+    /// 3D CNN activations tensor blocked by channels with block size 32,
+    /// an alias to #dnnl_aBc32b
+    dnnl_nCw32c = dnnl_aBc32b,
     /// 3D CNN activations tensor blocked by channels with block size 16,
     /// an alias to #dnnl_aBc16b
     dnnl_nCw16c = dnnl_aBc16b,

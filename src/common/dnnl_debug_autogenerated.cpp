@@ -85,6 +85,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_ABc16a16b) return "ABc16a16b";
     if (v == dnnl_ABc32a32b) return "ABc32a32b";
     if (v == dnnl_aBc16b) return "aBc16b";
+    if (v == dnnl_aBc32b) return "aBc32b";
     if (v == dnnl_ABc16b16a) return "ABc16b16a";
     if (v == dnnl_Abc4a) return "Abc4a";
     if (v == dnnl_aBc4b) return "aBc4b";
@@ -101,6 +102,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_Abcd32a) return "Abcd32a";
     if (v == dnnl_ABcd32a32b) return "ABcd32a32b";
     if (v == dnnl_aBcd16b) return "aBcd16b";
+    if (v == dnnl_aBcd32b) return "aBcd32b";
     if (v == dnnl_ABcd16b16a) return "ABcd16b16a";
     if (v == dnnl_aBCd16b16c) return "aBCd16b16c";
     if (v == dnnl_aBCd16c16b) return "aBCd16c16b";
@@ -127,6 +129,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_ABcde16a16b) return "ABcde16a16b";
     if (v == dnnl_BAcde8a16b2a) return "BAcde8a16b2a";
     if (v == dnnl_aBcde16b) return "aBcde16b";
+    if (v == dnnl_aBcde32b) return "aBcde32b";
     if (v == dnnl_ABcde16b16a) return "ABcde16b16a";
     if (v == dnnl_aBCde16b16c) return "aBCde16b16c";
     if (v == dnnl_aBCde16c16b) return "aBCde16c16b";
