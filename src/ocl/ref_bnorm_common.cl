@@ -27,8 +27,8 @@
 
 #    if IC_BLOCK == 16 && DT_F32 == 1
 
-__attribute__((reqd_work_group_size(1, 1, 16)))
-__attribute__((intel_reqd_sub_group_size(16)))
+__attribute__((reqd_work_group_size(1, 1, 16))) // attr:no-format
+__attribute__((intel_reqd_sub_group_size(16))) // attr:no-format
 __kernel void calculate_mean(__global float *src, __global float *mean) {
     const int mb = get_global_id(1);
     const int sp_chunk = get_global_id(0);
@@ -60,7 +60,7 @@ __kernel void calculate_mean(__global float *src, __global float *mean) {
     intel_sub_group_block_write(
             (__global uint *)&mean[chunk * IC + c], as_uint(v_mean));
 }
-__attribute__((reqd_work_group_size(1, 1, 1)))
+__attribute__((reqd_work_group_size(1, 1, 1))) // attr:no-format
 __kernel void reduce_mean(__global float *reduce_temp, __global float *mean) {
     const int c = get_global_id(0);
     reduce_temp += c;
@@ -70,8 +70,8 @@ __kernel void reduce_mean(__global float *reduce_temp, __global float *mean) {
 
     mean[c] = sum / (MB * ID * IH * IW);
 }
-__attribute__((reqd_work_group_size(1, 1, 16)))
-__attribute__((intel_reqd_sub_group_size(16)))
+__attribute__((reqd_work_group_size(1, 1, 16))) // attr:no-format
+__attribute__((intel_reqd_sub_group_size(16))) // attr:no-format
 __kernel void calculate_variance(
         __global float *src, __global float *mean, __global float *variance) {
     const int mb = get_global_id(1);
@@ -114,7 +114,7 @@ __kernel void calculate_variance(
                     + chunk * IC + c],
             as_uint(v_variance));
 }
-__attribute__((reqd_work_group_size(1, 1, 1)))
+__attribute__((reqd_work_group_size(1, 1, 1))) // attr:no-format
 __kernel void reduce_variance(
         __global float *reduce_temp, __global float *variance) {
     const int c = get_global_id(0);
@@ -130,9 +130,9 @@ __kernel void reduce_variance(
 }
 #    endif
 
-__attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2)))
+__attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) // attr:no-format
 #    if IC_BLOCK == 16
-__attribute__((intel_reqd_sub_group_size(LWS_1)))
+__attribute__((intel_reqd_sub_group_size(LWS_1))) // attr:no-format
 #    endif
 __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
         __global float *variance, __global DATA_T *dst,
@@ -229,7 +229,7 @@ __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
             for (int h = 0; h < IH; ++h)
                 for (int w = 0; w < IW; ++w) {
                     uint d_off = SRC_OFF(n, c, d, h, w);
-                    v_mean += src[d_off];
+                    v_mean += TO_DEF_ACC_DATA_T(src[d_off]);
                 }
     }
     v_mean /= MB * ID * IH * IW;
@@ -239,7 +239,7 @@ __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
             for (int h = 0; h < IH; ++h)
                 for (int w = 0; w < IW; ++w) {
                     uint d_off = SRC_OFF(n, c, d, h, w);
-                    float m = src[d_off] - v_mean;
+                    float m = TO_DEF_ACC_DATA_T(src[d_off]) - v_mean;
                     v_variance += m * m;
                 }
     }
@@ -257,7 +257,7 @@ __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
                 for (int w = 0; w < IW; ++w) {
                     uint d_off = SRC_OFF(n, c, d, h, w);
                     float bn_res
-                            = sm * (src[d_off] - v_mean) * sqrt_variance + sv;
+                            = sm * (TO_DEF_ACC_DATA_T(src[d_off]) - v_mean) * sqrt_variance + sv;
 #        if FUSE_BN_RELU == 1
                     if (bn_res <= 0) {
                         bn_res = 0;
@@ -276,7 +276,7 @@ __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
 #        if DT_S8 == 1
                     dst[d_off] = convert_char_sat_rte(bn_res);
 #        else
-                    dst[d_off] = bn_res;
+                    dst[d_off] = TO_DATA_T(bn_res);
 #        endif
                 }
     }
@@ -292,8 +292,8 @@ __kernel void ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
 #if BNORM_BWD == 1
 
 #    if IC_BLOCK == 16
-__attribute__((reqd_work_group_size(1, 1, 16)))
-__attribute__((intel_reqd_sub_group_size(16)))
+__attribute__((reqd_work_group_size(1, 1, 16))) // attr:no-format
+__attribute__((intel_reqd_sub_group_size(16))) // attr:no-format
 __kernel void calculate_stats(__global float *src, __global float *mean,
         __global float *diff_dst, __global int *ws,
         __global float *diff_scaleshift) {
@@ -365,7 +365,7 @@ __kernel void calculate_stats(__global float *src, __global float *mean,
             as_uint(v_diff_beta));
 }
 
-__attribute__((reqd_work_group_size(1, 1, 1)))
+__attribute__((reqd_work_group_size(1, 1, 1))) // attr:no-format
 __kernel void reduce_stats(__global float *reduce_temp,
         __global float *diff_scaleshift, __global float *variance, float eps) {
     const int c = get_global_id(0);
@@ -387,9 +387,9 @@ __kernel void reduce_stats(__global float *reduce_temp,
 }
 #    endif
 
-__attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2)))
+__attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) // attr:no-format
 #    if IC_BLOCK == 16
-__attribute__((intel_reqd_sub_group_size(LWS_1)))
+__attribute__((intel_reqd_sub_group_size(LWS_1))) // attr:no-format
 #    endif
 __kernel void ref_bnorm_bwd_kernel(__global float *src, __global float *mean,
         __global float *variance, __global float *diff_dst,

@@ -20,9 +20,21 @@
 #include "mkldnn_config.h"
 #include "mkldnn_types.h"
 
+#include "cpu_isa_traits.hpp"
+
 namespace mkldnn {
 namespace impl {
 namespace cpu {
+
+#if USE_MKL_PACKED_GEMM
+static inline bool pack_sgemm_supported() {
+    return true;
+}
+#else
+static inline bool pack_sgemm_supported() {
+    return mayiuse(avx);
+}
+#endif
 
 mkldnn_status_t MKLDNN_API sgemm_pack_get_size(const char *identifier,
         const char *transa, const char *transb,  const int *M, const int *N,

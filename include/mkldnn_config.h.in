@@ -17,7 +17,7 @@
 #ifndef MKLDNN_CONFIG_H
 #define MKLDNN_CONFIG_H
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 
 // All symbols shall be internal unless marked as MKLDNN_API
 #if defined _WIN32 || defined __CYGWIN__
@@ -50,7 +50,8 @@
 #else
 #   define MKLDNN_DEPRECATED
 #endif
-#endif // DOXYGEN_SHOULD_SKIP_THIS
+
+/// @endcond
 
 // No runtime (disabled)
 #define MKLDNN_RUNTIME_NONE 0u
@@ -63,11 +64,15 @@
 // OpenCL runtime
 #define MKLDNN_RUNTIME_OCL 256u
 
+// clang-format off
+
 // MKL-DNN CPU engine runtime
 #cmakedefine MKLDNN_CPU_RUNTIME MKLDNN_RUNTIME_${MKLDNN_CPU_RUNTIME_CURRENT}
 
 // MKL-DNN GPU engine runtime
 #cmakedefine MKLDNN_GPU_RUNTIME MKLDNN_RUNTIME_${MKLDNN_GPU_RUNTIME}
+
+// clang-format on
 
 #if defined(MKLDNN_CPU_RUNTIME) && defined(MKLDNN_GPU_RUNTIME)
 #    if (MKLDNN_CPU_RUNTIME == MKLDNN_RUNTIME_NONE) \

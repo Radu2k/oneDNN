@@ -478,6 +478,7 @@ namespace primitive_kind {
     const primitive_kind_t pooling = mkldnn_pooling;
     const primitive_kind_t lrn = mkldnn_lrn;
     const primitive_kind_t batch_normalization = mkldnn_batch_normalization;
+    const primitive_kind_t layer_normalization = mkldnn_layer_normalization;
     const primitive_kind_t inner_product = mkldnn_inner_product;
     const primitive_kind_t rnn = mkldnn_rnn;
     const primitive_kind_t gemm = mkldnn_gemm;
@@ -510,6 +511,7 @@ namespace query {
     const query_t pooling_d = mkldnn_query_pooling_d;
     const query_t lrn_d = mkldnn_query_lrn_d;
     const query_t batch_normalization_d = mkldnn_query_batch_normalization_d;
+    const query_t layer_normalization_d = mkldnn_query_layer_normalization_d;
     const query_t inner_product_d = mkldnn_query_inner_product_d;
     const query_t rnn_d = mkldnn_query_rnn_d;
     const query_t gemm_d = mkldnn_query_gemm_d;
@@ -539,6 +541,7 @@ using eltwise_desc_t = mkldnn_eltwise_desc_t;
 using softmax_desc_t = mkldnn_softmax_desc_t;
 using lrn_desc_t = mkldnn_lrn_desc_t;
 using batch_normalization_desc_t = mkldnn_batch_normalization_desc_t;
+using layer_normalization_desc_t = mkldnn_layer_normalization_desc_t;
 using inner_product_desc_t = mkldnn_inner_product_desc_t;
 
 using rnn_direction_t = mkldnn_rnn_direction_t;
@@ -562,6 +565,7 @@ struct op_desc_t {
         softmax_desc_t softmax;
         lrn_desc_t lrn;
         batch_normalization_desc_t batch_normalization;
+        layer_normalization_desc_t layer_normalization;
         inner_product_desc_t inner_product;
         rnn_desc_t rnn;
         gemm_desc_t gemm;
@@ -583,6 +587,7 @@ struct op_desc_t {
     DECL_CTOR_AND_CONVERTERS(softmax_desc_t, softmax);
     DECL_CTOR_AND_CONVERTERS(lrn_desc_t, lrn);
     DECL_CTOR_AND_CONVERTERS(batch_normalization_desc_t, batch_normalization);
+    DECL_CTOR_AND_CONVERTERS(layer_normalization_desc_t, layer_normalization);
     DECL_CTOR_AND_CONVERTERS(inner_product_desc_t, inner_product);
     DECL_CTOR_AND_CONVERTERS(rnn_desc_t, rnn);
     DECL_CTOR_AND_CONVERTERS(gemm_desc_t, gemm);
@@ -611,6 +616,9 @@ using stream_t = mkldnn_stream;
 struct batch_normalization_bwd_pd_t;
 struct batch_normalization_fwd_pd_t;
 struct batch_normalization_pd_t;
+struct layer_normalization_bwd_pd_t;
+struct layer_normalization_fwd_pd_t;
+struct layer_normalization_pd_t;
 struct concat_pd_t;
 struct convolution_bwd_data_pd_t;
 struct convolution_bwd_weights_pd_t;
@@ -649,4 +657,4 @@ struct sum_pd_t;
 
 #endif
 
-// vim: et ts=4 sw=4 cindent cino^=l0,\:0,N-s
+// vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

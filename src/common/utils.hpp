@@ -126,6 +126,15 @@ constexpr bool one_of(T val, P item, Args... item_others) {
     return val == item || one_of(val, item_others...);
 }
 
+template <typename T, typename P>
+constexpr P map(T pat, P def) {
+    return def;
+}
+template <typename T, typename P, typename... Args>
+constexpr P map(T pat, P def, T item, P ival, Args... item_others) {
+    return pat == item ? ival : map(pat, def, item_others...);
+}
+
 template <typename... Args>
 inline bool any_null(Args... ptrs) { return one_of(nullptr, ptrs...); }
 
@@ -393,4 +402,4 @@ inline void msan_unpoison(void *ptr, size_t size) {
 
 #endif
 
-// vim: et ts=4 sw=4 cindent cino^=l0,\:0,N-s
+// vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

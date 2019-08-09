@@ -27,6 +27,8 @@
 
 #include <cinttypes>
 
+#include "src/common/z_magic.hpp"
+
 #define ABS(a) ((a)>0?(a):(-(a)))
 
 #define MIN2(a,b) ((a)<(b)?(a):(b))
@@ -34,15 +36,6 @@
 
 #define MIN3(a,b,c) MIN2(a,MIN2(b,c))
 #define MAX3(a,b,c) MAX2(a,MAX2(b,c))
-
-#define STRINGIFy(s) #s
-#define STRINGIFY(s) STRINGIFy(s)
-
-#define CHAIn2(a,b) a b
-#define CHAIN2(a,b) CHAIn2(a,b)
-
-#define CONCAt2(a,b) a ## b
-#define CONCAT2(a,b) CONCAt2(a,b)
 
 #if defined(_WIN32) && !defined(__GNUC__)
 #define strncasecmp _strnicmp
@@ -84,6 +77,22 @@ enum { CRIT = 1, WARN = 2 };
     } \
 } while(0)
 
+#define SAFE_CLEAN(f, s, clean)                                               \
+    do {                                                                      \
+        int status = (f);                                                     \
+        if (status != OK) {                                                   \
+            if (s == CRIT || s == WARN) {                                     \
+                fprintf(stderr, "@@@ error [%s:%d]: '%s' -> %d\n",            \
+                        __PRETTY_FUNCTION__, __LINE__, STRINGIFY(f), status); \
+                fflush(0);                                                    \
+                if (s == CRIT)                                                \
+                    exit(1);                                                  \
+            }                                                                 \
+            clean();                                                          \
+            return status;                                                    \
+        }                                                                     \
+    } while (0)
+
 extern int verbose;
 
 #define print(v, fmt, ...) do { \
@@ -105,6 +114,7 @@ enum prim_t {
     IP,
     SHUFFLE,
     REORDER,
+    LNORM,
     BNORM,
     RNN,
     SOFTMAX,
@@ -209,6 +219,7 @@ int batch(const char *fname, bench_f bench);
 int flip_coin(ptrdiff_t seed, float probability);
 
 int64_t div_up(const int64_t a, const int64_t b);
+int64_t next_pow2(int64_t a);
 int mxcsr_round(float f);
 
 /* set '0' across *arr:+size */

@@ -141,8 +141,8 @@ void ref_inner_product_bwd_data_t<diff_src_type, wei_type, diff_dst_type,
             const int KD = pd()->KD();
             const int KH = pd()->KH();
             const int KW = pd()->KW();
-            for (int kd = 0; kd < KD; ++kd)
-            for (int kh = 0; kh < KH; ++kh)
+            for_(int kd = 0; kd < KD; ++kd)
+            for_(int kh = 0; kh < KH; ++kh)
             for (int kw = 0; kw < KW; ++kw) {
                 acc_data_t ds = acc_data_t(0);
                 for (int oc = 0; oc < OC; ++oc) {
@@ -282,4 +282,4 @@ template struct ref_inner_product_bwd_weights_t<data_type::f32>;
 }
 }
 
-// vim: et ts=4 sw=4 cindent cino^=l0,\:0,N-s
+// vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

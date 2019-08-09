@@ -73,6 +73,7 @@ PKIND_TRAITS_INST(softmax);
 PKIND_TRAITS_INST(pooling);
 PKIND_TRAITS_INST(lrn);
 PKIND_TRAITS_INST(batch_normalization);
+PKIND_TRAITS_INST(layer_normalization);
 PKIND_TRAITS_INST(inner_product);
 PKIND_TRAITS_INST(rnn);
 PKIND_TRAITS_INST(gemm);
@@ -83,4 +84,4 @@ PKIND_TRAITS_INST(gemm);
 
 #endif
 
-// vim: et ts=4 sw=4 cindent cino^=l0,\:0,N-s
+// vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

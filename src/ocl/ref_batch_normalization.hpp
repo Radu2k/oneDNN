@@ -53,8 +53,9 @@ struct ref_batch_normalization_fwd_t : public primitive_t {
             bool ok = true && is_fwd()
                     && (utils::everyone_is(f16, src_data_t, dst_data_t)
                         || utils::everyone_is(f32, src_data_t, dst_data_t)
+                        || utils::everyone_is(bf16, src_data_t, dst_data_t)
                         || utils::everyone_is(s8, src_data_t, dst_data_t))
-                    && IMPLICATION(src_data_t == f16 || src_data_t == s8,
+                    && IMPLICATION(utils::one_of(src_data_t, f16, bf16, s8),
                                !is_training() && stats_is_src())
                     && (attr()->has_default_values() || with_relu_post_op())
                     && compute_engine->mayiuse(

@@ -22,7 +22,7 @@
 
 #include "mkldnn_config.h"
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 #include <stdlib.h>
 #include <memory>
 #include <vector>
@@ -35,8 +35,7 @@
 #if MKLDNN_GPU_RUNTIME == MKLDNN_RUNTIME_OCL
 #include <CL/cl.h>
 #endif
-
-#endif
+/// @endcond
 
 namespace mkldnn {
 
@@ -147,7 +146,7 @@ public:
     bool operator!=(const handle &other) const { return !(*this == other); }
 };
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 template <> struct handle_traits<mkldnn_memory_t> {
     static constexpr auto destructor = &mkldnn_memory_destroy;
 };
@@ -163,7 +162,7 @@ template <> struct handle_traits<mkldnn_primitive_t> {
 template <> struct handle_traits<mkldnn_primitive_desc_iterator_t> {
     static constexpr auto destructor = &mkldnn_primitive_desc_iterator_destroy;
 };
-#endif
+/// @endcond
 
 struct stream;
 struct error;
@@ -201,8 +200,10 @@ public:
         pooling = mkldnn_pooling,
         /// An LRN primitive.
         lrn = mkldnn_lrn,
-        /// An batch normalization primitive.
+        /// A batch normalization primitive.
         batch_normalization = mkldnn_batch_normalization,
+        /// A layer normalization primitive.
+        layer_normalization = mkldnn_layer_normalization,
         /// An inner product primitive.
         inner_product = mkldnn_inner_product,
         /// A rnn primitive.
@@ -515,6 +516,8 @@ enum class query {
     lrn_d = mkldnn_query_lrn_d,
     /// batch normalization descriptor
     batch_normalization_d = mkldnn_query_batch_normalization_d,
+    /// layer normalization descriptor
+    layer_normalization_d = mkldnn_query_layer_normalization_d,
     /// inner product descriptor
     inner_product_d = mkldnn_query_inner_product_d,
     /// rnn descriptor
@@ -550,11 +553,11 @@ inline mkldnn_query_t convert_to_c(query aquery) {
 /// @sa @ref c_api_attributes in @ref c_api
 /// @{
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 template <> struct handle_traits<mkldnn_post_ops_t> {
     static constexpr auto destructor = &mkldnn_post_ops_destroy;
 };
-#endif
+/// @endcond
 
 /// Post operations
 ///
@@ -638,11 +641,11 @@ struct post_ops: public handle<mkldnn_post_ops_t> {
     }
 };
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 template <> struct handle_traits<mkldnn_primitive_attr_t> {
     static constexpr auto destructor = &mkldnn_primitive_attr_destroy;
 };
-#endif
+/// @endcond
 
 /// Primitive attributes
 ///
@@ -775,11 +778,11 @@ struct primitive_attr: public handle<mkldnn_primitive_attr_t> {
 /// @sa @ref c_api_engine in @ref c_api
 /// @{
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 template <> struct handle_traits<mkldnn_engine_t> {
     static constexpr auto destructor = &mkldnn_engine_destroy;
 };
-#endif
+/// @endcond
 
 /// An execution engine.
 struct engine: public handle<mkldnn_engine_t> {
@@ -898,11 +901,11 @@ private:
 /// @sa @ref c_api_stream in @ref c_api
 /// @{
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+/// @cond DO_NOT_DOCUMENT_THIS
 template <> struct handle_traits<mkldnn_stream_t> {
     static constexpr auto destructor = &mkldnn_stream_destroy;
 };
-#endif
+/// @endcond
 
 /// An execution stream.
 struct stream: public handle<mkldnn_stream_t> {
@@ -1188,6 +1191,8 @@ struct memory: public handle<mkldnn_memory_t> {
         /// an alias to #mkldnn::memory::format_tag::ab
         nc = mkldnn_nc,
         cn = mkldnn_cn,
+        tn = mkldnn_tn,
+        nt = mkldnn_nt,
         ncw = mkldnn_ncw,
         nwc = mkldnn_nwc,
         /// 4D CNN activations tensor,
@@ -3459,6 +3464,232 @@ struct batch_normalization_backward : public primitive {
 
 /// @}
 
+/// @addtogroup cpp_api_layer_normalization layer normalization
+/// A primitive to perform layer normalization. Normalization is performed over
+/// the last logical axis of data tensor.
+///
+/// Both forward and backward passes support in-place operation; that is, src
+/// and dst point to the same memory for forward pass, and diff_dst and diff_src
+/// point to the same memory for backward pass.
+///
+/// layer normalization supports different flavors controlled by
+/// mkldnn_layer_normalization_desc_t.  For example, layer normalization can
+/// compute the mean and variance on its own or take them as inputs.  It can
+/// either perform scaling and shifting using gamma and beta parameters or not.
+/// Optionally, it can also perform a fused ReLU, which in case of training
+/// would also require a workspace.
+///
+/// @sa @ref dev_guide_layer_normalization in developer guide
+/// @sa @ref c_api_layer_normalization in @ref c_api
+/// @{
+
+/// layer normalization for forward propagation.  Implements descriptor,
+/// primitive descriptor, and primitive.
+struct layer_normalization_forward : public primitive {
+
+    /// Descriptor for layer normalization forward propagation.
+    struct desc {
+        mkldnn_layer_normalization_desc_t data;
+
+        /// Initializes a layer normalization descriptor for forward propagation
+        /// using @p prop_kind (possible values are #mkldnn::forward_training and
+        /// #mkldnn::forward_inference), memory descriptor @p data_desc,
+        /// normalization parameter @p epsilon, and @p flags set using bit flags
+        /// of type mkldnn_layer_normalization_desc_t.
+        ///
+        /// @note In-place operation is supported; that is, dst points to the
+        ///       same memory as src.
+        desc(prop_kind aprop_kind, const memory::desc &src_desc,
+                const memory::desc &stat_desc, float epsilon,
+                normalization_flags flags) {
+            error::wrap_c_api(
+                    mkldnn_layer_normalization_forward_desc_init(&data,
+                            mkldnn::convert_to_c(aprop_kind), &src_desc.data,
+                            &stat_desc.data, epsilon, convert_to_c(flags)),
+                    "could not create a layer normalization forward "
+                    "descriptor");
+        }
+
+        desc(prop_kind aprop_kind, const memory::desc &src_desc, float epsilon,
+                normalization_flags flags) {
+            error::wrap_c_api(
+                    mkldnn_layer_normalization_forward_desc_init(&data,
+                            mkldnn::convert_to_c(aprop_kind), &src_desc.data,
+                            nullptr, epsilon, convert_to_c(flags)),
+                    "could not create a layer normalization forward "
+                    "descriptor");
+        }
+    };
+
+    /// Primitive descriptor for layer normalization forward propagation.
+    struct primitive_desc : public mkldnn::primitive_desc {
+        primitive_desc() = default;
+
+        /// Initializes a primitive descriptor for layer normalization forward
+        /// propagation.
+        primitive_desc(const desc &desc, const engine &e)
+            : mkldnn::primitive_desc(&desc.data, nullptr, e, nullptr) {}
+
+        /// Initializes a primitive descriptor for layer normalization forward
+        /// propagation with attributes defined by @p attr.
+        primitive_desc(
+                const desc &desc, const primitive_attr &attr, const engine &e)
+            : mkldnn::primitive_desc(&desc.data, &attr, e, nullptr) {}
+
+        /// Queries source memory descriptor.
+        memory::desc src_desc() const { return query_md(query::src_md, 0); }
+
+        /// Queries weights (scale and shift) memory descriptor.
+        memory::desc weights_desc() const {
+            return query_md(query::weights_md, 0);
+        }
+
+        /// Queries destination memory descriptor.
+        memory::desc dst_desc() const { return query_md(query::dst_md, 0); }
+
+        /// Queries mean memory descriptor.
+        memory::desc mean_desc() const { return stat_desc(mean); }
+
+        /// Queries variance memory descriptor.
+        memory::desc variance_desc() const { return stat_desc(var); }
+
+        /// Queries workspace memory descriptor.
+        ///
+        /// Returns a zero_md if no worspace is required.
+        memory::desc workspace_desc() const {
+            return query_md(query::workspace_md, 0);
+        }
+
+    private:
+        enum {
+            mean = 1,
+            var = 2,
+        };
+        memory::desc stat_desc(int kind) const {
+            mkldnn_layer_normalization_desc_t *p;
+            error::wrap_c_api(
+                    mkldnn_primitive_desc_query(get(),
+                            mkldnn::convert_to_c(query::layer_normalization_d),
+                            0, &p),
+                    "could not get a layer-normalization descriptor");
+            return query_md(p->flags & mkldnn_use_global_stats ? query::src_md
+                                                               : query::dst_md,
+                    kind);
+        }
+    };
+
+    layer_normalization_forward() = default;
+
+    layer_normalization_forward(const primitive_desc &pd) : primitive(pd) {}
+};
+
+/// layer normalization backward propagation.  Implements descriptor, primitive
+/// descriptor, and primitive.
+struct layer_normalization_backward : public primitive {
+
+    /// Descriptor for layer normalization backward propagation.
+    struct desc {
+        mkldnn_layer_normalization_desc_t data;
+
+        /// Initializes a layer normalization descriptor for backward
+        /// propagation with respect to data and scale-shift parameters using
+        /// memory descriptors @p data_desc and @p diff_data_desc, normalization
+        /// parameter @p epsilon, and @p flags set using bit flags of type
+        /// mkldnn_layer_normalization_desc_t.
+        ///
+        /// @note In-place operation is supported; that is, diff_src points to
+        ///       the same memory as diff_dst.
+        desc(prop_kind aprop_kind, const memory::desc &diff_data_desc,
+                const memory::desc &data_desc, const memory::desc &stat_desc,
+                float epsilon, normalization_flags flags) {
+            error::wrap_c_api(
+                    mkldnn_layer_normalization_backward_desc_init(&data,
+                            mkldnn::convert_to_c(aprop_kind),
+                            &diff_data_desc.data, &data_desc.data,
+                            &stat_desc.data, epsilon, convert_to_c(flags)),
+                    "could not create a layer normalization backward "
+                    "descriptor");
+        }
+
+        desc(prop_kind aprop_kind, const memory::desc &diff_data_desc,
+                const memory::desc &data_desc, float epsilon,
+                normalization_flags flags) {
+            error::wrap_c_api(mkldnn_layer_normalization_backward_desc_init(
+                                      &data, mkldnn::convert_to_c(aprop_kind),
+                                      &diff_data_desc.data, &data_desc.data,
+                                      nullptr, epsilon, convert_to_c(flags)),
+                    "could not create a layer normalization backward "
+                    "descriptor");
+        }
+    };
+
+    /// Primitive descriptor for layer normalization backward propagation.
+    struct primitive_desc : public mkldnn::primitive_desc {
+        primitive_desc() = default;
+
+        /// Initializes a primitive descriptor for layer normalization backward
+        /// propagation.
+        primitive_desc(const desc &desc, const engine &e,
+                const layer_normalization_forward::primitive_desc &hint_fwd_pd)
+            : mkldnn::primitive_desc(
+                    &desc.data, nullptr, e, hint_fwd_pd.get()) {}
+
+        /// Initializes a primitive descriptor for layer normalization backward
+        /// propagation with attributes defined by @p attr.
+        primitive_desc(const desc &desc, const primitive_attr &attr,
+                const engine &e,
+                const layer_normalization_forward::primitive_desc &hint_fwd_pd)
+            : mkldnn::primitive_desc(&desc.data, &attr, e, hint_fwd_pd.get()) {}
+
+        /// Queries source memory descriptor.
+        memory::desc src_desc() const { return query_md(query::src_md, 0); }
+
+        /// Queries mean memory descriptor.
+        memory::desc mean_desc() const { return query_md(query::src_md, 1); }
+
+        /// Queries variance memory descriptor.
+        memory::desc variance_desc() const {
+            return query_md(query::src_md, 2);
+        }
+
+        /// Queries weights (scale and shift) memory descriptor.
+        memory::desc weights_desc() const {
+            return query_md(query::weights_md, 0);
+        }
+
+        /// Queries destination memory descriptor.
+        memory::desc dst_desc() const { return query_md(query::dst_md, 0); }
+
+        /// Queries diff destination memory descriptor.
+        memory::desc diff_dst_desc() const {
+            return query_md(query::diff_dst_md, 0);
+        }
+
+        /// Queries diff source memory descriptor.
+        memory::desc diff_src_desc() const {
+            return query_md(query::diff_src_md, 0);
+        }
+
+        /// Queries diff weights (scale and shift) memory descriptor.
+        memory::desc diff_weights_desc() const {
+            return query_md(query::diff_weights_md, 0);
+        }
+
+        /// Queries workspace memory descriptor.
+        ///
+        /// Returns a zero_md if no worspace is required.
+        memory::desc workspace_desc() const {
+            return query_md(query::workspace_md, 0);
+        }
+    };
+
+    layer_normalization_backward() = default;
+
+    layer_normalization_backward(const primitive_desc &pd) : primitive(pd) {}
+};
+
+/// @}
+
 /// @addtogroup cpp_api_inner_product Inner Product
 /// A primitive to compute an inner product.
 ///
@@ -4972,8 +5203,8 @@ struct shuffle_backward : public primitive {
 /// @} C++ API
 
 // implementation section
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
 
+/// @cond DO_NOT_DOCUMENT_THIS
 inline primitive::primitive(const_mkldnn_primitive_desc_t c_pd) {
     mkldnn_primitive_t result;
     error::wrap_c_api(mkldnn_primitive_create(&result, c_pd),
@@ -4994,7 +5225,7 @@ inline void primitive::execute(stream &astream,
                 (int)c_args.size(), c_args.data()),
             "could not execute a primitive");
 }
-#endif // DOXYGEN_SHOULD_SKIP_THIS
+/// @endcond
 
 } // namespace mkldnn
 

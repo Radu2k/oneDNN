@@ -29,11 +29,9 @@ namespace mkldnn {
 namespace impl {
 namespace cpu {
 
-using namespace mkldnn::impl::math;
-
 template <typename out_t>
 inline out_t round_and_saturate(float f)
-{ return math::saturate<out_t>(out_round<int>(f)); }
+{ return math::saturate<out_t>(math::out_round<int>(f)); }
 
 /* Quantization with alpha == 1 and beta == 0 */
 template <typename in_t, typename out_t, typename enabled = void>
@@ -99,6 +97,16 @@ template <> struct qz<bfloat16_t, bfloat16_t> {
 template <> struct qz<float, bfloat16_t> {
     float operator()(float in, bfloat16_t out, float alpha, float beta)
     { return (bfloat16_t)(alpha * in + (beta ? beta * out : 0)); }
+};
+
+template <> struct qz<float16_t, float16_t> {
+    float operator()(float16_t in, float16_t out, float alpha, float beta)
+    { return (float16_t)(alpha * (float)in + (beta ? beta * (float)out : 0)); }
+};
+
+template <> struct qz<float, float16_t> {
+    float operator()(float in, float16_t out, float alpha, float beta)
+    { return (float16_t)(alpha * in + (beta ? beta * out : 0)); }
 };
 
 }
