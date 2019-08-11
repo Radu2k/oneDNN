@@ -48,12 +48,11 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::launch_x8
     auto &kernel = compute_x8x8s32_kernel_;
     assert(kernel);
     
-    int unroll_m, unroll_n, block_m, block_n, block_k;
+    int unroll_m, unroll_n, block_m, block_n;
     jit_gen12lp_gemm_x8x8s32_kernel<c_type, ao_type, bo_type>::get_unrolls(
             unroll_m, unroll_n);
     block_m = jit_gen12lp_gemm_driver_params<c_type, true>::block_m;
     block_n = jit_gen12lp_gemm_driver_params<c_type, true>::block_n;
-    block_k = jit_gen12lp_gemm_driver_params<c_type, true>::block_k;
     int mm = ((m >= block_m) ? block_m : m);
     int nn = ((n >= block_n) ? block_n : n);
 
@@ -85,8 +84,6 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::launch_x8
     arg_list.set(21, eltwise_alpha);
     arg_list.set(22, eltwise_beta);
 
-    bool transa = (pd()->desc()->transa == mkldnn_trans);
-    bool transb = (pd()->desc()->transb == mkldnn_trans);
 
     size_t nthreads_x = (m + block_m - 1) / block_m;
     size_t nthreads_y = (n + block_n - 1) / block_n;
@@ -149,8 +146,6 @@ status_t jit_gen12lp_gemm_t<a_type, b_type,
     size_t nthreads_x = (m + unroll_m - 1) / unroll_m;
     size_t nthreads_y = (n + unroll_n - 1) / unroll_n;
 
-    int divnumY = 16;
-    
     size_t lthreads_x = 16;
     size_t lthreads_y = 1;
 
@@ -186,8 +181,6 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
     bool transa = (pd()->desc()->transa == mkldnn_trans);
     bool transb = (pd()->desc()->transb == mkldnn_trans);
 
-    auto offsetc = pd()->desc()->offsetc; 
-
     char offsetc_char;
 
     if (pd()->desc()->offsetc == mkldnn_column) offsetc_char = 'C';
@@ -222,13 +215,11 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
     size_t off_c0 = c.get_offset() / sizeof(c_t) + pd()->dyn_offset_c;
     size_t offset_co = co.get_offset() / sizeof(c_t) + pd()->dyn_offset_co;
 
-    bool nocopy = (gemm_type_ == type::no_copy);
-
     bool do_compute = ((k > 0) && (alpha != 0.0f));
     bool do_scale = !((k > 0) && (alpha == 1.0f) && ((beta == 0.0f) || (beta == 1.0f)));
-    bool do_buffer = (do_compute && do_scale);
+    //bool do_buffer = (do_compute && do_scale);
 
-    memory_storage_t *temp_buf_ptr;
+    //memory_storage_t *temp_buf_ptr;
     
     status_t status;
 
@@ -273,6 +264,8 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
                                 size_m, size_n, size_k, eff_beta,
                                 ao, bo, co, offset_co_src, apply_co, apply_eltwise,
                                 eltwise_alpha, eltwise_beta);
+                        if (status)
+                            return status;
                     }
                     else if (do_scale) {
                         auto off_c = 0 + Bm + Bn * m;
@@ -282,6 +275,8 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
                                 size_m, size_n, size_k, eff_beta,
                                 ao, bo, co, offset_co_src, apply_co, 0,
                                 eltwise_alpha, eltwise_beta);
+                        if (status)
+                            return status;
                     }
                 }
             }
@@ -295,6 +290,8 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
                                 alpha, beta,
                                 co, offset_co, alpha_is_zero, 
                                 1, eltwise_alpha, eltwise_beta);
+        if (status)
+            return status;
     }
     return status::success;
 }
