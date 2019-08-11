@@ -136,10 +136,12 @@
 #define DEF_ACC_DATA_T int
 #define DEF_ACC_DATA8_T int8
 #define POST_OP_DATA_T float
-#define TO_DATA_T(v) (char)(v)
+#define TO_DATA_T(v) convert_char_sat_rte(v)
+#define TO_DEF_ACC_DATA_T(v) (float)(v)
 #define DATA_TO_REF convert_char
 #define CONVERT_DATA_T convert_char_sat_rte
 #define CONVERT_DATA8_T convert_char8_sat_rte
+#define CONVERT_FLOAT8_T convert_float8
 #define ROUND rint
 
 #define BLOCK_READ intel_sub_group_block_read_uc
@@ -172,10 +174,12 @@
 #define DEF_ACC_DATA_T int
 #define DEF_ACC_DATA8_T int8
 #define POST_OP_DATA_T float
-#define TO_DATA_T(v) (uchar)(v)
+#define TO_DATA_T(v) convert_uchar_sat_rte(v)
+#define TO_DEF_ACC_DATA_T(v) (float)(v)
 #define DATA_TO_REF convert_uchar
 #define CONVERT_DATA_T convert_uchar_sat_rte
 #define CONVERT_DATA8_T convert_uchar8_sat_rte
+#define CONVERT_FLOAT8_T convert_float8
 #define ROUND rint
 
 #define BLOCK_READ intel_sub_group_block_read_uc
