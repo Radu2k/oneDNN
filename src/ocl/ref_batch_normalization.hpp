@@ -26,7 +26,7 @@
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
-extern const char *ref_bnorm_common_kernel;
+extern const char *ref_bnorm_common_kernel[];
 
 namespace mkldnn {
 namespace impl {

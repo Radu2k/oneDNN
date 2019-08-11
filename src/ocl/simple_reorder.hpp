@@ -24,7 +24,7 @@
 #include "ocl/ocl_reorder_pd.hpp"
 #include "ocl/ocl_utils.hpp"
 
-extern const char *simple_reorder_kernel;
+extern const char *simple_reorder_kernel[];
 
 namespace mkldnn {
 namespace impl {

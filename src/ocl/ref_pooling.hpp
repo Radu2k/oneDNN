@@ -26,7 +26,7 @@
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
-extern const char *ref_pooling_kernel;
+extern const char *ref_pooling_kernel[];
 
 namespace mkldnn {
 namespace impl {

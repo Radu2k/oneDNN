@@ -24,9 +24,9 @@
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
-extern const char *gen12lp_conv_fwd_data_u8s8s32x_kernel;
-extern const char *gen12lp_conv_bwd_data_u8s8s32x_kernel;
-extern const char *gen12lp_conv_dw_fwd_data_u8s8s32x_kernel;
+extern const char *gen12lp_conv_fwd_data_u8s8s32x_kernel[];
+extern const char *gen12lp_conv_bwd_data_u8s8s32x_kernel[];
+extern const char *gen12lp_conv_dw_fwd_data_u8s8s32x_kernel[];
 
 namespace mkldnn {
 namespace impl {

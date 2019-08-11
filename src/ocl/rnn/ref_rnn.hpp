@@ -41,7 +41,7 @@
 #define EMULATED_SCRATCHPAD 1
 #define WS_NAN_FILLING 0
 
-extern const char *ref_rnn_kernel;
+extern const char *ref_rnn_kernel[];
 
 namespace mkldnn {
 namespace impl {

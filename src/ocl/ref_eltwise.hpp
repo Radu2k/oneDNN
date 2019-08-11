@@ -24,7 +24,7 @@
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
-extern const char *ref_eltwise_kernel;
+extern const char *ref_eltwise_kernel[];
 
 namespace mkldnn {
 namespace impl {

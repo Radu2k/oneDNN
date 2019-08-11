@@ -24,7 +24,7 @@
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ref_convolution_kernel.hpp"
 
-extern const char *ref_convolution_kernel;
+extern const char *ref_convolution_kernel[];
 
 namespace mkldnn {
 namespace impl {

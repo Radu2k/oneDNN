@@ -24,7 +24,7 @@
 #include "ocl/ocl_shuffle_pd.hpp"
 #include "ocl/ocl_stream.hpp"
 
-extern const char *ref_shuffle_kernel;
+extern const char *ref_shuffle_kernel[];
 
 namespace mkldnn {
 namespace impl {
