@@ -158,10 +158,6 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue,
         cl_float beta, 
         cl_mem c, dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
-    using a_t = typename prec_traits<a_type>::type;
-    using b_t = typename prec_traits<b_type>::type;
-    using c_t = typename prec_traits<c_type>::type;
-
     status_t status;
 
     // Check inputs

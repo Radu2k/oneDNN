@@ -200,10 +200,6 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
 
     auto eltwise_alpha = pd()->eltwise_alpha();
     auto eltwise_beta = pd()->eltwise_beta();
-    c_t alpha_native, beta_native, one_native;
-    alpha_native = alpha;
-    beta_native = beta;
-    one_native = 1.0f;
 
     auto &a = CTX_IN_STORAGE(MKLDNN_ARG_SRC_0);
     auto &b = CTX_IN_STORAGE(MKLDNN_ARG_SRC_1);
