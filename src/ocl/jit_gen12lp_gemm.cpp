@@ -258,7 +258,7 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
                                 off_a_src, off_b_src, off_c, 
                                 lda, ldb, ldc, 
                                 size_m, size_n, size_k, eff_beta,
-                                ao, bo, co, offset_co_src, apply_co, apply_eltwise,
+                                ao, bo, co, offset_co_src, (int)apply_co, (int)apply_eltwise,
                                 eltwise_alpha, eltwise_beta);
                         if (status)
                             return status;
@@ -284,7 +284,7 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
                                 offsetc_char, off_c0, 
                                 m, n, ldc,  
                                 alpha, beta,
-                                co, offset_co, alpha_is_zero, 
+                                co, offset_co, (int)alpha_is_zero, 
                                 1, eltwise_alpha, eltwise_beta);
         if (status)
             return status;
