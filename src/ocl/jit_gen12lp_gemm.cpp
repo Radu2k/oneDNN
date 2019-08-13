@@ -40,9 +40,9 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::launch_x8
         compute::compute_stream_t *compute_stream,
         const memory_storage_t &a, const memory_storage_t &b,
         const memory_storage_t &c, int64_t offset_a, int64_t offset_b,
-        int64_t offset_c, int32_t lda, int32_t ldb, int32_t ldc, int32_t m,
-        int32_t n, int32_t k, int32_t beta, ao_type ao, bo_type bo, 
-        const memory_storage_t &co, int32_t offset_co, bool apply_co,
+        int64_t offset_c, int64_t lda, int64_t ldb, int64_t ldc, int64_t m,
+        int64_t n, int64_t k, int64_t beta, ao_type ao, bo_type bo, 
+        const memory_storage_t &co, int64_t offset_co, bool apply_co,
         bool apply_eltwise, c_t eltwise_alpha, c_t eltwise_beta) const {
 
     auto &kernel = compute_x8x8s32_kernel_;
@@ -112,8 +112,8 @@ status_t jit_gen12lp_gemm_t<a_type, b_type,
          c_type, ao_type, bo_type>::launch_scale_x8x8s32(
                  compute::compute_stream_t *compute_stream, const memory_storage_t
                  &c_temp, const memory_storage_t &c, char offsetc, int64_t
-                 offset_c, int32_t m, int32_t n, int32_t ldc, float alpha,
-                 float beta, const memory_storage_t &co, int32_t offset_co,
+                 offset_c, int64_t m, int64_t n, int64_t ldc, float alpha,
+                 float beta, const memory_storage_t &co, int64_t offset_co,
                  bool alpha_is_zero, bool apply_eltwise,
                  c_t eltwise_alpha, c_t eltwise_beta) const {
 
