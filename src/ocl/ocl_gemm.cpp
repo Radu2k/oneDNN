@@ -148,13 +148,13 @@ mkldnn_status_t gemm_generic(cl_command_queue queue, const char *transa,
     return s->wait();
 }
 
-template <data_type_t a_type, data_type_t b_type, data_type_t c_type, typename ao_type, typename bo_type>
+template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
 mkldnn_status_t gemm_x8x8s32(cl_command_queue queue, 
         const char *transa, const char *transb, const char *offsetc, 
         dim_t m, dim_t n, dim_t k, 
         cl_float alpha, 
-        cl_mem a, dim_t offset_a, dim_t lda, ao_type ao,
-        cl_mem b, dim_t offset_b, dim_t ldb, bo_type bo,
+        cl_mem a, dim_t offset_a, dim_t lda, typename prec_traits<a_type>::type ao,
+        cl_mem b, dim_t offset_b, dim_t ldb, typename prec_traits<b_type>::type bo,
         cl_float beta, 
         cl_mem c, dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
@@ -193,7 +193,7 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue,
     s.reset(s_ptr);
 
     // Create primitive descriptor
-    using pd_type = typename jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::pd_t;
+    using pd_type = typename jit_gen12lp_gemm_t<a_type, b_type, c_type>::pd_t;
 
     gemm_desc_t op_desc;
     op_desc.primitive_kind = mkldnn_gemm;
@@ -320,7 +320,7 @@ mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_s8s8s32(cl_command_queue queue,
     if ((ao != 0) || bo != 0)
         return status::unimplemented;
     else    
-        return gemm_x8x8s32<data_type::s8, data_type::s8, data_type::s32, int8_t, int8_t>(queue, 
+        return gemm_x8x8s32<data_type::s8, data_type::s8, data_type::s32>(queue, 
             &transb, &transa, c2f_offsetC(&offsetc), 
             n, m, k, 
             alpha, 
@@ -342,7 +342,7 @@ mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_u8s8s32(cl_command_queue queue,
     if ((ao != 0) || bo != 0)
         return status::unimplemented;
     else    
-        return gemm_x8x8s32<data_type::s8, data_type::u8, data_type::s32, int8_t, uint8_t>(queue, 
+        return gemm_x8x8s32<data_type::s8, data_type::u8, data_type::s32>(queue, 
             &transb, &transa, c2f_offsetC(&offsetc), 
             n, m, k, 
             alpha, 
@@ -364,7 +364,7 @@ mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_s8u8s32(cl_command_queue queue,
     if ((ao != 0) || bo != 0)
         return status::unimplemented;
     else    
-        return gemm_x8x8s32<data_type::u8, data_type::s8, data_type::s32, uint8_t, int8_t>(queue, 
+        return gemm_x8x8s32<data_type::u8, data_type::s8, data_type::s32>(queue, 
             &transb, &transa, c2f_offsetC(&offsetc), 
             n, m, k, 
             alpha, 
@@ -386,7 +386,7 @@ mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_u8u8s32(cl_command_queue queue,
     if ((ao != 0) || bo != 0)
         return status::unimplemented;
     else    
-        return gemm_x8x8s32<data_type::u8, data_type::u8, data_type::s32, uint8_t, uint8_t>(queue, 
+        return gemm_x8x8s32<data_type::u8, data_type::u8, data_type::s32>(queue, 
             &transb, &transa, c2f_offsetC(&offsetc), 
             n, m, k, 
             alpha, 

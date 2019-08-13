@@ -33,9 +33,11 @@ namespace impl {
 namespace ocl {
 
 template <impl::data_type_t a_type, impl::data_type_t b_type,
-        impl::data_type_t c_type, typename ao_type, typename bo_type>
+        impl::data_type_t c_type>
 struct jit_gen12lp_gemm_t : public primitive_t {
     using c_t = typename prec_traits<c_type>::type;
+    using ao_t = typename prec_traits<a_type>::type;
+    using bo_t = typename prec_traits<b_type>::type;
 
     enum class type {
         no_copy
@@ -141,7 +143,7 @@ struct jit_gen12lp_gemm_t : public primitive_t {
         bool column_c = (pd()->desc()->offsetc == mkldnn_column);
         bool row_c = (pd()->desc()->offsetc == mkldnn_row);
 
-        auto status = jit_gen12lp_gemm_x8x8s32_kernel<c_type, ao_type, bo_type>::init_const_def(kernel_ctx, 
+        auto status = jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type, c_type>::init_const_def(kernel_ctx, 
                 pd()->desc()->transa, pd()->desc()->transb, fixed_c, column_c, row_c,
                 pd()->with_eltwise(), pd()->eltwise_alg_kind());
         if (status != status::success)
@@ -155,7 +157,7 @@ struct jit_gen12lp_gemm_t : public primitive_t {
         //scale kernel
         kernel_name = "gen12lp_gemm_scale_x8x8s32_kernel";
 
-        status = jit_gen12lp_gemm_scale_x8x8s32_kernel<c_type, ao_type, bo_type>::init_const_def(kernel_ctx, 
+        status = jit_gen12lp_gemm_scale_x8x8s32_kernel<a_type, b_type, c_type>::init_const_def(kernel_ctx, 
                 pd()->with_eltwise(), pd()->eltwise_alg_kind());
         if (status != status::success)
             return status;
@@ -178,7 +180,7 @@ private:
             const memory_storage_t &b, const memory_storage_t &c,
             int64_t offset_a, int64_t offset_b, int64_t offset_c, int64_t lda,
             int64_t ldb, int64_t ldc, int64_t m, int64_t n, int64_t k, 
-            int64_t beta, ao_type ao, bo_type bo, const memory_storage_t &co, 
+            int64_t beta, ao_t ao, bo_t bo, const memory_storage_t &co, 
             int64_t offset_co, bool apply_co, bool apply_eltwise, 
             c_t eltwise_alpha, c_t eltwise_beta) const;
 

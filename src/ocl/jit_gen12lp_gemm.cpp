@@ -35,13 +35,13 @@ struct jit_gen12lp_gemm_driver_params<data_type::s32, true> {
     static constexpr auto block_k = (((32768 / ((block_m >= block_n) ? block_m : block_n)) + 0) & ~3);
 };
 
-template <data_type_t a_type, data_type_t b_type, data_type_t c_type, typename ao_type, typename bo_type>
-status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::launch_x8x8s32(
+template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
+status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_x8x8s32(
         compute::compute_stream_t *compute_stream,
         const memory_storage_t &a, const memory_storage_t &b,
         const memory_storage_t &c, int64_t offset_a, int64_t offset_b,
         int64_t offset_c, int64_t lda, int64_t ldb, int64_t ldc, int64_t m,
-        int64_t n, int64_t k, int64_t beta, ao_type ao, bo_type bo, 
+        int64_t n, int64_t k, int64_t beta, ao_t ao, bo_t bo, 
         const memory_storage_t &co, int64_t offset_co, bool apply_co,
         bool apply_eltwise, c_t eltwise_alpha, c_t eltwise_beta) const {
 
@@ -49,7 +49,7 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::launch_x8
     assert(kernel);
     
     int unroll_m, unroll_n, block_m, block_n;
-    jit_gen12lp_gemm_x8x8s32_kernel<c_type, ao_type, bo_type>::get_unrolls(
+    jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type, c_type>::get_unrolls(
             unroll_m, unroll_n);
     block_m = jit_gen12lp_gemm_driver_params<c_type, true>::block_m;
     block_n = jit_gen12lp_gemm_driver_params<c_type, true>::block_n;
@@ -107,9 +107,8 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::launch_x8
 }
 
 
-template <data_type_t a_type, data_type_t b_type, data_type_t c_type, typename ao_type, typename bo_type>
-status_t jit_gen12lp_gemm_t<a_type, b_type,
-         c_type, ao_type, bo_type>::launch_scale_x8x8s32(
+template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
+status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_scale_x8x8s32(
                  compute::compute_stream_t *compute_stream, const memory_storage_t
                  &c_temp, const memory_storage_t &c, char offsetc, int64_t
                  offset_c, int64_t m, int64_t n, int64_t ldc, float alpha,
@@ -140,7 +139,7 @@ status_t jit_gen12lp_gemm_t<a_type, b_type,
 
     int unroll_m, unroll_n;
 
-    jit_gen12lp_gemm_scale_x8x8s32_kernel<c_type, ao_type, bo_type>::get_unrolls(
+    jit_gen12lp_gemm_scale_x8x8s32_kernel<a_type, b_type, c_type>::get_unrolls(
             unroll_m, unroll_n);
 
     size_t nthreads_x = (m + unroll_m - 1) / unroll_m;
@@ -157,14 +156,14 @@ status_t jit_gen12lp_gemm_t<a_type, b_type,
     return compute_stream->parallel_for(nd_range, kernel, arg_list);
 }
 
-template <data_type_t a_type, data_type_t b_type, data_type_t c_type, typename ao_type, typename bo_type>
-status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute(
+template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
+status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute(
         const exec_ctx_t &ctx) const {
         return execute_standard(ctx);
 }
 
-template <data_type_t a_type, data_type_t b_type, data_type_t c_type, typename ao_type, typename bo_type>
-status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_standard(
+template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
+status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute_standard(
         const exec_ctx_t &ctx) const {
 
     auto *compute_stream
@@ -220,7 +219,7 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
     int block_m, block_n, block_k;
     int slices;
     
-    jit_gen12lp_gemm_x8x8s32_kernel<c_type, ao_type, bo_type>::get_unrolls(unroll_m, unroll_n);
+    jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type, c_type>::get_unrolls(unroll_m, unroll_n);
 
     block_m = jit_gen12lp_gemm_driver_params<c_type, true>::block_m;
     block_n = jit_gen12lp_gemm_driver_params<c_type, true>::block_n;
@@ -291,10 +290,10 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
 
 using namespace data_type;
 
-template struct jit_gen12lp_gemm_t<s8, s8, s32, int8_t, int8_t>;
-template struct jit_gen12lp_gemm_t<s8, u8, s32, int8_t, uint8_t>;
-template struct jit_gen12lp_gemm_t<u8, s8, s32, uint8_t, int8_t>;
-template struct jit_gen12lp_gemm_t<u8, u8, s32, uint8_t, uint8_t>;
+template struct jit_gen12lp_gemm_t<s8, s8, s32>;
+template struct jit_gen12lp_gemm_t<s8, u8, s32>;
+template struct jit_gen12lp_gemm_t<u8, s8, s32>;
+template struct jit_gen12lp_gemm_t<u8, u8, s32>;
 
 } // namespace ocl
 } // namespace impl

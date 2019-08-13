@@ -26,14 +26,14 @@ namespace impl {
 namespace ocl {
 
 struct jit_gen12lp_gemm_kernel {
-    template <impl::data_type_t type, typename ao_type, typename bo_type>
+    template <impl::data_type_t a_type, impl::data_type_t b_type, impl::data_type_t c_type>
     static status_t init_cl_options(compute::kernel_ctx_t &kernel_ctx) {
         using namespace data_type;
 
-        if (type != s32)
+        if (c_type != s32)
             return status::unimplemented;
 
-        kernel_ctx.define_int("DT_S32", type == s32);
+        kernel_ctx.define_int("DT_S32", c_type == s32);
 
         kernel_ctx.add_option("-cl-mad-enable");
         kernel_ctx.add_option("-cl-strict-aliasing");
@@ -52,15 +52,19 @@ struct jit_gen12lp_gemm_kernel {
     };
 };
 
-template <impl::data_type_t type, typename ao_type, typename bo_type>
+template <impl::data_type_t a_type, impl::data_type_t b_type, impl::data_type_t c_type>
 struct jit_gen12lp_gemm_x8x8s32_kernel : public jit_gen12lp_gemm_kernel {
     static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx, bool trans_a, bool trans_b, 
     bool fixed_c, bool column_c, bool row_c, bool with_eltwise, alg_kind_t alg) {
 
-        auto status = init_cl_options<type, ao_type, bo_type>(kernel_ctx);
+        auto status = init_cl_options<a_type, b_type, c_type>(kernel_ctx);
         if (status)
             return status;
-        
+       
+        using ao_type = typename prec_traits<a_type>::type;
+        using bo_type = typename prec_traits<b_type>::type;
+
+
         if ((std::is_same<ao_type, int8_t>::value) && (std::is_same<bo_type, int8_t>::value)) {
             kernel_ctx.add_option("-DS8S8");
         }
@@ -104,11 +108,11 @@ struct jit_gen12lp_gemm_x8x8s32_kernel : public jit_gen12lp_gemm_kernel {
     }
 };
 
-template <impl::data_type_t type, typename ao_type, typename bo_type>
+template <impl::data_type_t a_type, impl::data_type_t b_type, impl::data_type_t c_type>
 struct jit_gen12lp_gemm_scale_x8x8s32_kernel : public jit_gen12lp_gemm_kernel {
     static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx, bool with_eltwise, alg_kind_t alg) {
 
-        auto status = init_cl_options<type, ao_type, bo_type>(kernel_ctx);
+        auto status = init_cl_options<a_type, b_type, c_type>(kernel_ctx);
         if (status)
             return status;
 
