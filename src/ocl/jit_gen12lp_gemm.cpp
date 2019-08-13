@@ -213,9 +213,6 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type, ao_type, bo_type>::execute_s
 
     bool do_compute = ((k > 0) && (alpha != 0.0f));
     bool do_scale = !((k > 0) && (alpha == 1.0f) && ((beta == 0.0f) || (beta == 1.0f)));
-    //bool do_buffer = (do_compute && do_scale);
-
-    //memory_storage_t *temp_buf_ptr;
     
     status_t status;
 

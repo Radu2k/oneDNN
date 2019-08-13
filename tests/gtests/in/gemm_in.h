@@ -141,27 +141,6 @@ constexpr test_igemm_params fix_no_offsets = {'F', false, false, false};
 constexpr test_igemm_params col_no_offsets = {'C', false, false, false};
 constexpr test_igemm_params row_no_offsets = {'R', false, false, false};
 
-INST_TEST_CASE(TestGEMM_expected_failures,
-    test_params{'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, {}, {}, true, mkldnn_invalid_arguments},
-    test_params{'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, {}, {}, true, mkldnn_invalid_arguments},
-    test_params{'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, {}, {}, true, mkldnn_invalid_arguments},
-    test_params{'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, {}, {}, true, mkldnn_invalid_arguments},
-
-    test_params{'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, fix_use_oc, {}, true, mkldnn_invalid_arguments},
-    test_params{'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, fix_use_oc, {}, true, mkldnn_invalid_arguments},
-    test_params{'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, fix_use_oc, {}, true, mkldnn_invalid_arguments},
-    test_params{'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, fix_use_oc, {}, true, mkldnn_invalid_arguments},
-
-    test_params{'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, fix_use_all_offsets, {}, true, mkldnn_invalid_arguments},
-    test_params{'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, fix_use_all_offsets, {}, true, mkldnn_invalid_arguments},
-    test_params{'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, fix_use_all_offsets, {}, true, mkldnn_invalid_arguments},
-    test_params{'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, fix_use_all_offsets, {}, true, mkldnn_invalid_arguments},
-
-    test_params{'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, {}, {true, true}, true, mkldnn_invalid_arguments},
-    test_params{'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, {}, {false, true}, true, mkldnn_invalid_arguments},
-    test_params{'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, {}, {true, false}, true, mkldnn_invalid_arguments},
-    test_params{'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, {}, {false, true}, true, mkldnn_invalid_arguments}
-);
 
 INST_TEST_CASE(TestGEMM_general_cases_fix_offset,
     test_params{'N', 'n', 30, 20, 10, 2.0, 1.0, 60, 50, 80, fix_use_oc},
@@ -229,42 +208,27 @@ INST_TEST_CASE(TestGEMM_general_cases_row_offset,
     test_params{'n', 'n', 2, 2, 10000, 1.0, 2.0, 10000, 2, 2, row_no_offsets}
 );
 
-CPU_INST_TEST_CASE(TestGEMM_expected_failures,
-        test_params {'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, {}, {}, true,
-                mkldnn_invalid_arguments},
-        test_params {'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, {}, {}, true,
-                mkldnn_invalid_arguments},
-        test_params {'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, {}, {}, true,
-                mkldnn_invalid_arguments},
-        test_params {'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, {}, {}, true,
-                mkldnn_invalid_arguments},
+INST_TEST_CASE(TestGEMM_expected_failures,
+    test_params{'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, {}, {}, true, mkldnn_invalid_arguments},
+    test_params{'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, {}, {}, true, mkldnn_invalid_arguments},
+    test_params{'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, {}, {}, true, mkldnn_invalid_arguments},
+    test_params{'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, {}, {}, true, mkldnn_invalid_arguments},
 
-        test_params {'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, fix_use_oc, {}, true,
-                mkldnn_invalid_arguments},
-        test_params {'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, fix_use_oc, {}, true,
-                mkldnn_invalid_arguments},
-        test_params {'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, fix_use_oc, {}, true,
-                mkldnn_invalid_arguments},
-        test_params {'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, fix_use_oc, {}, true,
-                mkldnn_invalid_arguments},
+    test_params{'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, fix_use_oc, {}, true, mkldnn_invalid_arguments},
+    test_params{'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, fix_use_oc, {}, true, mkldnn_invalid_arguments},
+    test_params{'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, fix_use_oc, {}, true, mkldnn_invalid_arguments},
+    test_params{'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, fix_use_oc, {}, true, mkldnn_invalid_arguments},
 
-        test_params {'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, fix_use_all_offsets,
-                {}, true, mkldnn_invalid_arguments},
-        test_params {'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, fix_use_all_offsets,
-                {}, true, mkldnn_invalid_arguments},
-        test_params {'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, fix_use_all_offsets,
-                {}, true, mkldnn_invalid_arguments},
-        test_params {'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, fix_use_all_offsets,
-                {}, true, mkldnn_invalid_arguments},
+    test_params{'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, fix_use_all_offsets, {}, true, mkldnn_invalid_arguments},
+    test_params{'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, fix_use_all_offsets, {}, true, mkldnn_invalid_arguments},
+    test_params{'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, fix_use_all_offsets, {}, true, mkldnn_invalid_arguments},
+    test_params{'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, fix_use_all_offsets, {}, true, mkldnn_invalid_arguments},
 
-        test_params {'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, {}, {true, true},
-                true, mkldnn_invalid_arguments},
-        test_params {'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, {}, {false, true},
-                true, mkldnn_invalid_arguments},
-        test_params {'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, {}, {true, false},
-                true, mkldnn_invalid_arguments},
-        test_params {'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, {}, {false, true},
-                true, mkldnn_invalid_arguments});
+    test_params{'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, {}, {true, true}, true, mkldnn_invalid_arguments},
+    test_params{'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, {}, {false, true}, true, mkldnn_invalid_arguments},
+    test_params{'n', 't', 3, 2, 2, 1.0, 0.0, 3, 1, 8, {}, {true, false}, true, mkldnn_invalid_arguments},
+    test_params{'n', 'd', 3, 2, 1, 1.0, 0.0, 3, 3, 3, {}, {false, true}, true, mkldnn_invalid_arguments}
+);
 
 CPU_INST_TEST_CASE(TestGEMM_general_cases_fix_offset,
         test_params {'N', 'n', 30, 20, 10, 2.0, 1.0, 60, 50, 80, fix_use_oc},

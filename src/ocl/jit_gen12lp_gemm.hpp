@@ -134,7 +134,6 @@ struct jit_gen12lp_gemm_t : public primitive_t {
         compute::kernel_ctx_t kernel_ctx;
         
         memory_storage_t *temp_buf_ptr;
-        //this->engine()->create_memory_storage(&temp_buf_ptr, 128 << 20); 
         this->engine()->create_memory_storage(&temp_buf_ptr, pd()->desc()->m * pd()->desc()->n * sizeof(int)); 
         temp_buf_.reset(temp_buf_ptr);
             
