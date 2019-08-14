@@ -26,8 +26,8 @@ namespace impl {
 namespace ocl {
 
 template <data_type_t dst_type>
-    status_t jit_gen12lp_u8s8s32x_convolution_fwd_t<dst_type>
-    ::execute_forward(const exec_ctx_t &ctx) const {
+status_t jit_gen12lp_u8s8s32x_convolution_fwd_t<dst_type>::execute_forward(
+        const exec_ctx_t &ctx) const {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
@@ -56,8 +56,8 @@ template <data_type_t dst_type>
 }
 
 template <data_type_t diff_dst_type>
-    status_t jit_gen12lp_u8s8s32x_convolution_bwd_data_t<diff_dst_type>
-    ::execute_backward_data(const exec_ctx_t &ctx) const {
+status_t jit_gen12lp_u8s8s32x_convolution_bwd_data_t<
+        diff_dst_type>::execute_backward_data(const exec_ctx_t &ctx) const {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
@@ -90,4 +90,3 @@ template struct jit_gen12lp_u8s8s32x_convolution_bwd_data_t<s8>;
 } // namespace ocl
 } // namespace impl
 } // namespace mkldnn
-

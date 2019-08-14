@@ -32,9 +32,9 @@ struct jit_gen12hp_u8s8s32x_conv_fwd_kernel {
     ~jit_gen12hp_u8s8s32x_conv_fwd_kernel() {};
 
     static status_t init_conf(jit_conv_conf_t &jcp,
-        const convolution_desc_t &cd, const memory_desc_t &src_md,
-        const memory_desc_t &weights_md, const memory_desc_t &dst_md,
-        const memory_desc_t &bias_md, const primitive_attr_t &attr) {
+            const convolution_desc_t &cd, const memory_desc_t &src_md,
+            const memory_desc_t &weights_md, const memory_desc_t &dst_md,
+            const memory_desc_t &bias_md, const primitive_attr_t &attr) {
 
         set_default_conf(jcp, cd, src_md, weights_md, dst_md, attr);
 
@@ -43,12 +43,10 @@ struct jit_gen12hp_u8s8s32x_conv_fwd_kernel {
         if (jcp.is_depthwise) /*TODO: write a dw kernel*/
             return status::unimplemented;
 
-        if (jcp.mb < 8)
-            return status::unimplemented;
+        if (jcp.mb < 8) return status::unimplemented;
 
-        if (!jcp.is_depthwise
-            && jcp.with_groups && jcp.ngroups > 1
-            && (jcp.oc % 32 != 0 || jcp.ic % 32 != 0))
+        if (!jcp.is_depthwise && jcp.with_groups && jcp.ngroups > 1
+                && (jcp.oc % 32 != 0 || jcp.ic % 32 != 0))
             return status::unimplemented;
 
         jcp.sub_group_size = (jcp.is_depthwise) ? 16 : 8;
@@ -73,7 +71,8 @@ struct jit_gen12hp_u8s8s32x_conv_fwd_kernel {
             jcp.lws_d[2] = 1;
 
             jcp.gws_d[0] = utils::rnd_up(jcp.nchunk * 8, jcp.lws_d[0]);
-            jcp.gws_d[1] = jcp.od * jcp.oh * utils::rnd_up(jcp.ow, jcp.lws_d[1]);
+            jcp.gws_d[1]
+                    = jcp.od * jcp.oh * utils::rnd_up(jcp.ow, jcp.lws_d[1]);
             jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block);
             if (divide_mbblock)
                 jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block / 2);
@@ -83,14 +82,17 @@ struct jit_gen12hp_u8s8s32x_conv_fwd_kernel {
 
         format_tag_t src_tag, dst_tag, wei_tag;
 
-        src_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
-        dst_tag = utils::pick(jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+        src_tag = utils::pick(
+                jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+        dst_tag = utils::pick(
+                jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
         if (jcp.is_depthwise) {
             wei_tag = utils::pick(jcp.ndims - 3, Goiw32g, Goihw32g, Goidhw32g);
         } else {
-            wei_tag = jcp.with_groups
-                ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i, gOIdhw4o8i8o4i)
-                : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i, OIdhw4o8i8o4i);
+            wei_tag = jcp.with_groups ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i,
+                              gOIhw4o8i8o4i, gOIdhw4o8i8o4i)
+                                      : utils::pick(jcp.ndims - 3, OIw4o8i8o4i,
+                                              OIhw4o8i8o4i, OIdhw4o8i8o4i);
         }
 
         jcp.src_tag = src_tag;
@@ -137,7 +139,8 @@ struct jit_gen12hp_u8s8s32x_conv_fwd_kernel {
         kernel_ctx.define_int("WITH_ELTWISE", jcp.with_eltwise);
         kernel_ctx.define_int("WITH_SUM", jcp.with_sum);
         kernel_ctx.define_int("SUM_SCALE", jcp.sum_scale == 1.0);
-        kernel_ctx.define_int("WITH_POST_SUM_ELTWISE", jcp.with_post_sum_eltwise);
+        kernel_ctx.define_int(
+                "WITH_POST_SUM_ELTWISE", jcp.with_post_sum_eltwise);
         kernel_ctx.define_int("SUB_GROUP_SIZE", jcp.sub_group_size);
         kernel_ctx.define_int("LWS_0", jcp.lws_d[0]);
         kernel_ctx.define_int("LWS_1", jcp.lws_d[1]);
@@ -160,7 +163,8 @@ struct jit_gen12hp_u8s8s32x_conv_fwd_kernel {
 };
 
 struct jit_gen12hp_u8s8s32x_conv_bwd_data_kernel {
-    jit_gen12hp_u8s8s32x_conv_bwd_data_kernel(jit_conv_conf_t ajcp) : jcp(ajcp) {};
+    jit_gen12hp_u8s8s32x_conv_bwd_data_kernel(jit_conv_conf_t ajcp)
+        : jcp(ajcp) {};
 
     ~jit_gen12hp_u8s8s32x_conv_bwd_data_kernel() {};
 
@@ -178,8 +182,7 @@ struct jit_gen12hp_u8s8s32x_conv_bwd_data_kernel {
 
         status_t status = status::success;
 
-        if (jcp.mb < 8)
-            return status::unimplemented;
+        if (jcp.mb < 8) return status::unimplemented;
 
         if (jcp.with_groups && jcp.ngroups > 1
                 && (jcp.oc % 32 != 0 || jcp.ic % 32 != 0))
@@ -211,9 +214,9 @@ struct jit_gen12hp_u8s8s32x_conv_bwd_data_kernel {
         dst_tag = utils::pick(
                 jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
         wei_tag = jcp.with_groups ? utils::pick(jcp.ndims - 3, gIOw4i8o8i4o,
-                                            gIOhw4i8o8i4o, gIOdhw4i8o8i4o)
+                          gIOhw4i8o8i4o, gIOdhw4i8o8i4o)
                                   : utils::pick(jcp.ndims - 3, IOw4i8o8i4o,
-                                            IOhw4i8o8i4o, IOdhw4i8o8i4o);
+                                          IOhw4i8o8i4o, IOdhw4i8o8i4o);
 
         jcp.src_tag = src_tag;
         jcp.wei_tag = wei_tag;
@@ -222,7 +225,8 @@ struct jit_gen12hp_u8s8s32x_conv_bwd_data_kernel {
         return status;
     }
 
-    static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx, const jit_conv_conf_t &jcp) {
+    static status_t init_const_def(
+            compute::kernel_ctx_t &kernel_ctx, const jit_conv_conf_t &jcp) {
         kernel_ctx.define_int("G", jcp.ngroups);
         kernel_ctx.define_int("MB", jcp.mb);
         kernel_ctx.define_int("IC", jcp.ic);

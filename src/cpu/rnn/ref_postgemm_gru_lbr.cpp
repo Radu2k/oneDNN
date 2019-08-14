@@ -53,8 +53,7 @@ rnn_postgemm_sig(rnn_postgemm_fwd_f32_t::gru_lbr_postgemm) {
                     ws_gates(i, 2, j) + ws_gates(i, 1, j) * Wh_b + bias(2, j));
             states_t_l(i, j) = states_tm1_l(i, j) * ws_gates(i, 0, j)
                     + (1.0f - ws_gates(i, 0, j)) * ws_gates(i, 2, j);
-            if (rnn.is_training)
-                ws_Wh_b(i, j) = Wh_b;
+            if (rnn.is_training) ws_Wh_b(i, j) = Wh_b;
         }
     });
 }
@@ -99,6 +98,6 @@ rnn_postgemm_sig(rnn_postgemm_bwd_f32_t::gru_lbr_postgemm) {
     });
 }
 
-}
-}
-}
+} // namespace cpu
+} // namespace impl
+} // namespace mkldnn

@@ -28,7 +28,7 @@
 #ifdef SLM_WEI
 #define WEI wei_tmp
 #define BLOCK_READ_WHT(data, idx) \
-    data = as_int8(READ_LOCAL_8((__local uint*)&WEI[idx]));
+    data = as_int8(READ_LOCAL_8((__local uint *)&WEI[idx]));
 #else
 #define WEI wei
 #define BLOCK_READ_WHT(data, idx) \
@@ -36,15 +36,17 @@
 #endif
 
 #define BLOCK_READ_DST(data, idx) \
-    data = AS_INT8_T(intel_sub_group_block_read8((__global uint *)&current_dst[idx]));
+    data = AS_INT8_T( \
+            intel_sub_group_block_read8((__global uint *)&current_dst[idx]));
 
 #undef CONVERT_DATA_T
 #define CONVERT_DATA_T convert_uchar_sat
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global char *wei,
-        const __global float *bias, __global DATA_T *dst) {
+gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
+        const __global char *wei, const __global float *bias,
+        __global DATA_T *dst) {
 
 #ifdef MB_FULL_BLOCK
     const int mb_blocks = 1;
@@ -77,8 +79,7 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global 
     const int ih = gih + local_ih;
 
 #ifndef SLM_WEI
-    if (iw >= IW)
-        return;
+    if (iw >= IW) return;
 #endif // SLM_WEI
 
     src += IC_BLOCK * ID * IH * IW * MB_BLOCK * (group_ic + ic);
@@ -102,8 +103,8 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global 
     __local char *wei_loc_base = wei_loc + KW * IC_BLOCK * OC_BLOCK * ic;
 #endif // SLM_WEI
 
-    __attribute__((opencl_unroll_hint))
-    for (int oc_chunk = 0; oc_chunk < OC_NCHUNK; oc_chunk++) {
+    __attribute__((opencl_unroll_hint)) for (int oc_chunk = 0;
+                                             oc_chunk < OC_NCHUNK; oc_chunk++) {
         INT8_T D0, D1, D2, D3;
         int8 W0, W1, W2, W3;
         for (int kd = 0; kd < KD; kd++) {
@@ -129,25 +130,29 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global 
 
 #ifdef SLM_WEI
                 barrier(CLK_LOCAL_MEM_FENCE);
-                const __global char* wei_copy_from = wei + sp * KW * OC_BLOCK * IC_BLOCK / 8;
-                __local char* wei_copy_to = wei_loc_base + sp * KW * OC_BLOCK * IC_BLOCK / 8;
+                const __global char *wei_copy_from
+                        = wei + sp * KW * OC_BLOCK * IC_BLOCK / 8;
+                __local char *wei_copy_to
+                        = wei_loc_base + sp * KW * OC_BLOCK * IC_BLOCK / 8;
                 for (int bl = 0; bl < KW; bl++) {
-                    WRITE_LOCAL_4((__local uint *)&wei_copy_to[bl * 4 * OC_BLOCK],
-                            intel_sub_group_block_read4((__global uint *)&wei_copy_from[bl * 4 * OC_BLOCK]));
+                    WRITE_LOCAL_4(
+                            (__local uint *)&wei_copy_to[bl * 4 * OC_BLOCK],
+                            intel_sub_group_block_read4(
+                                    (__global uint *)&wei_copy_from[bl * 4
+                                            * OC_BLOCK]));
                 }
-                __local char* wei_tmp = wei_loc_base;
+                __local char *wei_tmp = wei_loc_base;
                 barrier(CLK_LOCAL_MEM_FENCE);
 #endif // SLM_WEI
 
-                __attribute__((opencl_unroll_hint))
-                for (int kw = 0; kw < KW; kw++) {
+                __attribute__((opencl_unroll_hint)) for (int kw = 0; kw < KW;
+                                                         kw++) {
                     if ((iw + PW - kw * (1 + DW)) % SW == 0) {
                         const int ow = (iw + PW - kw * (1 + DW)) / SW;
                         if (ow >= 0 && ow < OW) {
-                            __global DATA_T * current_dst = dst + OC_BLOCK
-                                                                  * MB_BLOCK
-                                                                  * (OW * OH * od
-                                                                     + OW * oh + ow);
+                            __global DATA_T *current_dst = dst
+                                    + OC_BLOCK * MB_BLOCK
+                                            * (OW * OH * od + OW * oh + ow);
                             BLOCK_READ_DST(D0, 0);
 #if MB > 8
                             BLOCK_READ_DST(D1, 8 * OC_BLOCK);
@@ -193,30 +198,29 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global 
     }
 
 #if WITH_BIAS
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA)     \
-    TMP = (float)ACC + BIA;                   \
+#define BIAS_SUM_RELU(RES, TMP, ACC, BIA) \
+    TMP = (float)ACC + BIA; \
     RES = CONVERT_DATA_T(TMP);
 #else // WITH_BIAS
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA)     \
-    RES = CONVERT_DATA_T((float)ACC);
+#define BIAS_SUM_RELU(RES, TMP, ACC, BIA) RES = CONVERT_DATA_T((float)ACC);
 #endif // WITH_BIAS
 
-#define PACK(idx)                             \
+#define PACK(idx) \
     BIAS_SUM_RELU(D00[0], T00, C00[idx], b0); \
     BIAS_SUM_RELU(D00[1], T01, C01[idx], b1); \
     BIAS_SUM_RELU(D00[2], T02, C02[idx], b2); \
     BIAS_SUM_RELU(D00[3], T03, C03[idx], b3); \
-    T0[idx] = as_uint(D00);                   \
+    T0[idx] = as_uint(D00); \
     BIAS_SUM_RELU(D01[0], T10, C10[idx], b0); \
     BIAS_SUM_RELU(D01[1], T11, C11[idx], b1); \
     BIAS_SUM_RELU(D01[2], T12, C12[idx], b2); \
     BIAS_SUM_RELU(D01[3], T13, C13[idx], b3); \
-    T1[idx] = as_uint(D01);                   \
+    T1[idx] = as_uint(D01); \
     BIAS_SUM_RELU(D02[0], T20, C20[idx], b0); \
     BIAS_SUM_RELU(D02[1], T21, C21[idx], b1); \
     BIAS_SUM_RELU(D02[2], T22, C22[idx], b2); \
     BIAS_SUM_RELU(D02[3], T23, C23[idx], b3); \
-    T2[idx] = as_uint(D02);                   \
+    T2[idx] = as_uint(D02); \
     BIAS_SUM_RELU(D03[0], T30, C30[idx], b0); \
     BIAS_SUM_RELU(D03[1], T31, C31[idx], b1); \
     BIAS_SUM_RELU(D03[2], T32, C32[idx], b2); \

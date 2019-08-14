@@ -51,7 +51,7 @@ struct array_offset_calculator {
     template <typename... Targs>
     array_offset_calculator(Telem *base, Targs... Fargs)
         : _size(sizeof...(Fargs)) {
-        const int64_t init_list[] = { Fargs... };
+        const int64_t init_list[] = {Fargs...};
         _dims = new int64_t[_size];
         for (int64_t i = 0; i < _size; ++i)
             _dims[i] = init_list[i];
@@ -71,13 +71,14 @@ private:
     }
 
     template <typename... Targs>
-    inline int64_t _offset(int64_t const dimension, int64_t theta, int64_t element) {
+    inline int64_t _offset(
+            int64_t const dimension, int64_t theta, int64_t element) {
         return element + (_dims[dimension] * theta);
     }
 
     template <typename... Targs>
-    inline int64_t _offset(
-            int64_t const dimension, int64_t theta, int64_t element, Targs... Fargs) {
+    inline int64_t _offset(int64_t const dimension, int64_t theta,
+            int64_t element, Targs... Fargs) {
         int64_t t_prime = element + (_dims[dimension] * theta);
         return _offset(dimension + 1, t_prime, Fargs...);
     }
@@ -125,17 +126,17 @@ enum rnn_data_kind_t {
 
 inline const char *rnn_data_kind2str(rnn_data_kind_t kind) {
     switch (kind) {
-    case input: return "INPUT";
-    case states: return "STATES";
-    case weights_input: return "WEIGHTS_INPUT";
-    case weights_states: return "WEIGHTS_STATES";
-    case bias: return "BIAS";
-    case dst_last_layer: return "DST_LAST_LAYER";
-    case dst_last_iteration: return "DST_LAST_ITERATION";
-    case dst_c_last_iteration: return "DST_C_LAST_ITERATION";
-    default:
-        assert(!"incorrect rnn data kind");
-        return "incorrect rnn data kind";
+        case input: return "INPUT";
+        case states: return "STATES";
+        case weights_input: return "WEIGHTS_INPUT";
+        case weights_states: return "WEIGHTS_STATES";
+        case bias: return "BIAS";
+        case dst_last_layer: return "DST_LAST_LAYER";
+        case dst_last_iteration: return "DST_LAST_ITERATION";
+        case dst_c_last_iteration: return "DST_C_LAST_ITERATION";
+        default:
+            assert(!"incorrect rnn data kind");
+            return "incorrect rnn data kind";
     }
 }
 
@@ -157,7 +158,8 @@ typedef struct dt_conf_t {
     mkldnn_data_type_t dt;
     int min, max; /* representative */
     int f_min, f_max; /* fill range */
-    float f_mean, f_stddev; /* mean and std deviation of normally distributed data */
+    float f_mean,
+            f_stddev; /* mean and std deviation of normally distributed data */
     double eps; /* acceptable error */
 } _dt_conf_t[data_kind_total];
 
@@ -201,31 +203,30 @@ struct prb_t : public desc_t {
         set_qparams(-1., 1.);
     }
     ~prb_t() {
-        if (wei_oc_scales)
-            zfree(wei_oc_scales);
+        if (wei_oc_scales) zfree(wei_oc_scales);
     }
 
     void count_ops() {
         // Here, we count only the ops in GEMM portion as there is no
         // theoretical number of ops for the post-gemm operations
-        int64_t num_cells = (int64_t) n_directions() * n_layer * n_iter;
-        int64_t cell_ops = (int64_t) 2 * (n_gates() * dic) * mb * (sic + slc);
+        int64_t num_cells = (int64_t)n_directions() * n_layer * n_iter;
+        int64_t cell_ops = (int64_t)2 * (n_gates() * dic) * mb * (sic + slc);
         int64_t prop_multiplier = prop == mkldnn_backward ? 2 : 1;
         ops = prop_multiplier * num_cells * cell_ops;
     }
 
     int64_t n_directions() const {
         return (direction == mkldnn_bidirectional_concat
-                       || direction == mkldnn_bidirectional_sum) ?
-                2 :
-                1;
+                       || direction == mkldnn_bidirectional_sum)
+                ? 2
+                : 1;
     }
     int64_t n_weights() const { return 1; }
     int64_t n_states() const { return alg == VANILLA_LSTM ? 2 : 1; }
     int64_t n_gates() const {
-        return alg == VANILLA_LSTM ?
-                4 :
-                (alg == VANILLA_GRU || alg == LBR_GRU ? 3 : 1);
+        return alg == VANILLA_LSTM
+                ? 4
+                : (alg == VANILLA_GRU || alg == LBR_GRU ? 3 : 1);
     }
     int64_t n_bias() const {
         return alg == LBR_GRU ? n_gates() + 1 : n_gates();
@@ -255,7 +256,7 @@ private:
 };
 std::ostream &operator<<(std::ostream &s, const prb_t &p);
 
-struct perf_report_t: public base_perf_report_t {
+struct perf_report_t : public base_perf_report_t {
     using base_perf_report_t::base_perf_report_t;
 
     void report(const prb_t *p, const res_t *r, const char *prb_str) {
@@ -269,35 +270,36 @@ struct perf_report_t: public base_perf_report_t {
 
     virtual void dump_desc_csv(std::ostream &s) const override {
         s << alg2str(p_->alg) << "_" << activation2str(p_->activation) << "_"
-            << direction2str(p_->direction);
-        s << "l" << p_->n_layer << "d" << p_->n_directions()
-            << "t" << p_->n_iter << "mb" << p_->mb << "_"
-            << "slc" << p_->slc << "sic" << p_->sic << "dic" << p_->dic;
+          << direction2str(p_->direction);
+        s << "l" << p_->n_layer << "d" << p_->n_directions() << "t"
+          << p_->n_iter << "mb" << p_->mb << "_"
+          << "slc" << p_->slc << "sic" << p_->sic << "dic" << p_->dic;
     }
 
     virtual double ops() const override { return p_->ops; }
     virtual const char *name() const override { return p_->name; }
-    virtual const mkldnn_prop_kind_t *prop() const override { return &p_->prop; }
+    virtual const mkldnn_prop_kind_t *prop() const override {
+        return &p_->prop;
+    }
 
 private:
     const prb_t *p_ = NULL;
 };
 
-void compute_ref_fwd(const prb_t *p, dnn_mem_t &input_m,
-        dnn_mem_t &states_m, dnn_mem_t &c_states_m, dnn_mem_t &weights_input_m,
+void compute_ref_fwd(const prb_t *p, dnn_mem_t &input_m, dnn_mem_t &states_m,
+        dnn_mem_t &c_states_m, dnn_mem_t &weights_input_m,
         dnn_mem_t &weights_states_m, dnn_mem_t &bias_m,
         dnn_mem_t &dst_last_layer_m, dnn_mem_t &dst_last_iteration_m,
         dnn_mem_t &dst_c_last_iteration_m, mkldnn_rnn_direction_t direction);
 
-void compute_ref_bwd(const prb_t *p, dnn_mem_t &input_m,
-        dnn_mem_t &states_m, dnn_mem_t &c_states_m,
-        dnn_mem_t &diff_last_layer_m, dnn_mem_t &diff_last_iteration_m,
-        dnn_mem_t &diff_c_last_iteration_m, dnn_mem_t &weights_input_m,
-        dnn_mem_t &weights_states_m, dnn_mem_t &bias_m,
-        dnn_mem_t &dst_last_layer_m, dnn_mem_t &dst_last_iteration_m,
-        dnn_mem_t &dst_c_last_iteration_m, dnn_mem_t &dst_diff_input_m,
-        dnn_mem_t &dst_diff_states_m, dnn_mem_t &dst_diff_c_states_m,
-        dnn_mem_t &dst_diff_weights_input_m,
+void compute_ref_bwd(const prb_t *p, dnn_mem_t &input_m, dnn_mem_t &states_m,
+        dnn_mem_t &c_states_m, dnn_mem_t &diff_last_layer_m,
+        dnn_mem_t &diff_last_iteration_m, dnn_mem_t &diff_c_last_iteration_m,
+        dnn_mem_t &weights_input_m, dnn_mem_t &weights_states_m,
+        dnn_mem_t &bias_m, dnn_mem_t &dst_last_layer_m,
+        dnn_mem_t &dst_last_iteration_m, dnn_mem_t &dst_c_last_iteration_m,
+        dnn_mem_t &dst_diff_input_m, dnn_mem_t &dst_diff_states_m,
+        dnn_mem_t &dst_diff_c_states_m, dnn_mem_t &dst_diff_weights_input_m,
         dnn_mem_t &dst_diff_weights_states_m, dnn_mem_t &dst_diff_bias_m,
         mkldnn_rnn_direction_t direction);
 
@@ -306,8 +308,8 @@ inline size_t ntc_off_f(const prb_t *p, int64_t n, int64_t t, int64_t c) {
     return (n * p->n_iter + t) * p->slc + c;
 }
 
-inline void inv_ntc_off_f(const prb_t *p,
-        size_t off, int64_t &n, int64_t &t, int64_t &c) {
+inline void inv_ntc_off_f(
+        const prb_t *p, size_t off, int64_t &n, int64_t &t, int64_t &c) {
     c = off % p->slc;
     off /= p->slc;
     t = off % p->n_iter;
@@ -318,14 +320,13 @@ inline void inv_ntc_off_f(const prb_t *p,
 }
 
 // mkldnn_ldnc
-inline size_t ldnc_off_f(const prb_t *p,
-        int64_t l, int64_t d, int64_t n, int64_t c) {
-    return ((l * p->n_directions() + d) * p->mb + n)
-            * p->sic + c;
+inline size_t ldnc_off_f(
+        const prb_t *p, int64_t l, int64_t d, int64_t n, int64_t c) {
+    return ((l * p->n_directions() + d) * p->mb + n) * p->sic + c;
 }
 
-inline void inv_ldnc_off_f(const prb_t *p, size_t off,
-        int64_t &l, int64_t &d, int64_t &n, int64_t &c) {
+inline void inv_ldnc_off_f(const prb_t *p, size_t off, int64_t &l, int64_t &d,
+        int64_t &n, int64_t &c) {
     c = off % p->sic;
     off /= p->sic;
     n = off % p->mb;
@@ -338,14 +339,16 @@ inline void inv_ldnc_off_f(const prb_t *p, size_t off,
 }
 
 // mkldnn_ldigo
-inline size_t ldigo_off_f(const prb_t *p,
-        int64_t l, int64_t d, int64_t w, int64_t ic, int64_t oc) {
+inline size_t ldigo_off_f(const prb_t *p, int64_t l, int64_t d, int64_t w,
+        int64_t ic, int64_t oc) {
     return (((l * p->n_directions() + d) * p->n_weights() + w) * (4 * p->slc)
-            + ic) * p->sic + oc;
+                   + ic)
+            * p->sic
+            + oc;
 }
 
-inline void inv_ldigo_off_f(const prb_t *p, size_t off,
-        int64_t &l, int64_t &d, int64_t &w, int64_t &ic, int64_t &oc) {
+inline void inv_ldigo_off_f(const prb_t *p, size_t off, int64_t &l, int64_t &d,
+        int64_t &w, int64_t &ic, int64_t &oc) {
     oc = off % p->sic;
     off /= p->sic;
     ic = off % (4 * p->slc);
@@ -360,14 +363,16 @@ inline void inv_ldigo_off_f(const prb_t *p, size_t off,
 }
 
 // mkldnn_ldwOcIc
-inline size_t ldwOcIc_off_f(const prb_t *p,
-        int64_t l, int64_t d, int64_t w, int64_t oc, int64_t ic) {
+inline size_t ldwOcIc_off_f(const prb_t *p, int64_t l, int64_t d, int64_t w,
+        int64_t oc, int64_t ic) {
     return (((l * p->n_directions() + d) * p->n_weights() + w) * (4 * p->sic)
-            + oc) * p->slc + ic;
+                   + oc)
+            * p->slc
+            + ic;
 }
 
-inline void inv_ldwOcIc_off_f(const prb_t *p, size_t off, int64_t &l, int64_t &d,
-        int64_t &w, int64_t &oc, int64_t &ic) {
+inline void inv_ldwOcIc_off_f(const prb_t *p, size_t off, int64_t &l,
+        int64_t &d, int64_t &w, int64_t &oc, int64_t &ic) {
     ic = off % p->slc;
     off /= p->slc;
     oc = off % (4 * p->sic);
@@ -382,13 +387,13 @@ inline void inv_ldwOcIc_off_f(const prb_t *p, size_t off, int64_t &l, int64_t &d
 }
 
 // bias: mkldnn_ldgo
-inline size_t ldgo_off_f(const prb_t *p,
-        int64_t l, int64_t d, int64_t b, int64_t c) {
+inline size_t ldgo_off_f(
+        const prb_t *p, int64_t l, int64_t d, int64_t b, int64_t c) {
     return ((l * p->n_directions() + d) * p->n_bias() + b) * p->sic + c;
 }
 
-inline void inv_ldgo_off_f(const prb_t *p, size_t off,
-        int64_t &l, int64_t &d, int64_t &b, int64_t &c) {
+inline void inv_ldgo_off_f(const prb_t *p, size_t off, int64_t &l, int64_t &d,
+        int64_t &b, int64_t &c) {
     c = off % p->sic;
     off /= p->sic;
     b = off % p->n_bias();

@@ -74,10 +74,12 @@ rnn_postgemm_sig(rnn_postgemm_fwd_u8_t::lstm_postgemm) {
     };
 
     auto deq_w = [&](acc_data_t s, int gate, int j) {
-        return pd_->attr()->rnn_weights_qparams_.mask_ == 0 ?
-                saturate<float>(s) * (1.f / (weights_scales[0] * data_scale)) :
-                saturate<float>(s) * (1.f / (weights_scales[gate * rnn.dic + j]
-                                                   * data_scale));
+        return pd_->attr()->rnn_weights_qparams_.mask_ == 0
+                ? saturate<float>(s) * (1.f / (weights_scales[0] * data_scale))
+                : saturate<float>(s)
+                        * (1.f
+                                / (weights_scales[gate * rnn.dic + j]
+                                        * data_scale));
     };
 
     parallel_nd(rnn.mb, [&](int i) {
@@ -138,6 +140,6 @@ rnn_postgemm_sig(rnn_postgemm_bwd_f32_t::lstm_postgemm) {
     });
 }
 
-}
-}
-}
+} // namespace cpu
+} // namespace impl
+} // namespace mkldnn

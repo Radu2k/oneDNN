@@ -21,17 +21,17 @@
 #endif
 
 #ifndef MB_FULL_BLOCK
-#    define MB_FULL_BLOCK
+#define MB_FULL_BLOCK
 #endif
 
 #if KW * OC_BLOCK * IC_BLOCK * OC_GROUP <= 8192
-#    define SLM_WEI
+#define SLM_WEI
 #endif
 
 #ifdef SLM_WEI
 #define WEI wei_tmp
 #define BLOCK_READ_WHT(data, idx) \
-    data = as_int8(READ_LOCAL_8((__local uint*)&wei_tmp[idx]));
+    data = as_int8(READ_LOCAL_8((__local uint *)&wei_tmp[idx]));
 #else
 #define WEI wei
 #define BLOCK_READ_WHT(data, idx) \
@@ -43,9 +43,10 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12hp_conv_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char *wei,
-        const __global float *bias, __global DATA_T *dst,
-        float alpha, float beta, float sum_scale, float scales) {
+gen12hp_conv_fwd_u8s8s32x_kernel(const __global uchar *src,
+        const __global char *wei, const __global float *bias,
+        __global DATA_T *dst, float alpha, float beta, float sum_scale,
+        float scales) {
 
 #ifdef MB_FULL_BLOCK
     const int mb_blocks = 1;
@@ -87,8 +88,7 @@ gen12hp_conv_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char 
     const int ih = gih + local_ih - PH;
 
 #ifndef SLM_WEI
-    if (ow >= OW)
-        return;
+    if (ow >= OW) return;
 #endif // SLM_WEI
 
     dst += OC_BLOCK * OD * OH * OW * MB_BLOCK * (group_oc + oc);
@@ -113,8 +113,8 @@ gen12hp_conv_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char 
     __local char *wei_loc_base = wei_loc + KW * IC_BLOCK * OC_BLOCK * oc;
 #endif // SLM_WEI
 
-    __attribute__((opencl_unroll_hint))
-    for (int ic_chunk = 0; ic_chunk < IC_NCHUNK; ic_chunk++) {
+    __attribute__((opencl_unroll_hint)) for (int ic_chunk = 0;
+                                             ic_chunk < IC_NCHUNK; ic_chunk++) {
         uint8 S0, S1, S2, S3;
         int8 W0, W1, W2, W3;
         for (int kd = 0; kd < KD; kd++) {
@@ -132,18 +132,23 @@ gen12hp_conv_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char 
 
 #ifdef SLM_WEI
                 barrier(CLK_LOCAL_MEM_FENCE);
-                const __global char* wei_copy_from = wei + sp * KW * OC_BLOCK * IC_BLOCK / 8;
-                __local char* wei_copy_to = wei_loc_base + sp * KW * OC_BLOCK * IC_BLOCK / 8;
+                const __global char *wei_copy_from
+                        = wei + sp * KW * OC_BLOCK * IC_BLOCK / 8;
+                __local char *wei_copy_to
+                        = wei_loc_base + sp * KW * OC_BLOCK * IC_BLOCK / 8;
                 for (int bl = 0; bl < KW; bl++) {
-                    WRITE_LOCAL_4((__local uint *)&wei_copy_to[bl * 4 * IC_BLOCK],
-                            intel_sub_group_block_read4((__global uint *)&wei_copy_from[bl * 4 * IC_BLOCK]));
+                    WRITE_LOCAL_4(
+                            (__local uint *)&wei_copy_to[bl * 4 * IC_BLOCK],
+                            intel_sub_group_block_read4(
+                                    (__global uint *)&wei_copy_from[bl * 4
+                                            * IC_BLOCK]));
                 }
-                __local char* wei_tmp = wei_loc_base;
+                __local char *wei_tmp = wei_loc_base;
                 barrier(CLK_LOCAL_MEM_FENCE);
 #endif // SLM_WEI
 
-                __attribute__((opencl_unroll_hint))
-                for (int kw = 0; kw < KW; kw++) {
+                __attribute__((opencl_unroll_hint)) for (int kw = 0; kw < KW;
+                                                         kw++) {
                     if (kw * (1 + DW) + iw >= 0 && kw * (1 + DW) + iw < IW) {
                         BLOCK_READ_SRC(S0, 0);
 #if MB > 8
@@ -191,94 +196,99 @@ gen12hp_conv_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char 
         src += IC_BLOCK * MB_BLOCK * (ID - KD * (1 + DD)) * IH * IW;
     }
 
-float4 tmp;
-uint8 dst_pack;
-uint8 D0, D1, D2, D3;
+    float4 tmp;
+    uint8 dst_pack;
+    uint8 D0, D1, D2, D3;
 
 #if WITH_BIAS
     bias += (group_oc + oc) * OC_BLOCK + get_sub_group_local_id() * 4;
     float4 bia = (float4)(bias[0], bias[1], bias[2], bias[3]);
     bia *= scales;
-    #define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)scales, bia);
+#define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)scales, bia);
 #else
-   #define QUANTIZE_ADD_BIAS() tmp *= scales;
+#define QUANTIZE_ADD_BIAS() tmp *= scales;
 #endif
 
 #if WITH_SUM
-#define DO_SUM(d_pack) do { \
-    DATA4_T d = AS_DATA4_T(d_pack); \
-    float4 df = convert_float4(d); \
-    tmp = fma(df, (float4)sum_scale, tmp); \
-} while (0)
+#define DO_SUM(d_pack) \
+    do { \
+        DATA4_T d = AS_DATA4_T(d_pack); \
+        float4 df = convert_float4(d); \
+        tmp = fma(df, (float4)sum_scale, tmp); \
+    } while (0)
 #else
-#define DO_SUM(d);
+#define DO_SUM(d) ;
 #endif // with_sum
 
-#define ELTWISE() do { \
+#define ELTWISE() \
+    do { \
         tmp[0] = fwd_eltwise(tmp[0], alpha, beta); \
         tmp[1] = fwd_eltwise(tmp[1], alpha, beta); \
         tmp[2] = fwd_eltwise(tmp[2], alpha, beta); \
         tmp[3] = fwd_eltwise(tmp[3], alpha, beta); \
-} while (0) 
+    } while (0)
 
 #if WITH_ELTWISE
 #define DO_ELTWISE() ELTWISE();
 #else
-#define DO_ELTWISE();
+#define DO_ELTWISE() ;
 #endif
 
 #if WITH_POST_SUM_ELTWISE
 #define DO_POST_SUM_ELTWISE() ELTWISE();
 #else
-#define DO_POST_SUM_ELTWISE();
+#define DO_POST_SUM_ELTWISE() ;
 #endif
 
-#define PACK(C0, C1, C2, C3, idx) do { \
-        tmp[0] =  C0[idx]; \
-        tmp[1] =  C1[idx]; \
-        tmp[2] =  C2[idx]; \
-        tmp[3] =  C3[idx]; \
-} while (0)
+#define PACK(C0, C1, C2, C3, idx) \
+    do { \
+        tmp[0] = C0[idx]; \
+        tmp[1] = C1[idx]; \
+        tmp[2] = C2[idx]; \
+        tmp[3] = C3[idx]; \
+    } while (0)
 
-#define CONVERT_PACK(idx) do { \
-    DATA4_T tmp_cvt = \
-    (DATA4_T)(CONVERT_DATA_T(tmp.s0), CONVERT_DATA_T(tmp.s1), \
-            CONVERT_DATA_T(tmp.s2), CONVERT_DATA_T(tmp.s3)); \
-    dst_pack[idx] = as_uint(tmp_cvt); \
-} while (0)
+#define CONVERT_PACK(idx) \
+    do { \
+        DATA4_T tmp_cvt \
+                = (DATA4_T)(CONVERT_DATA_T(tmp.s0), CONVERT_DATA_T(tmp.s1), \
+                        CONVERT_DATA_T(tmp.s2), CONVERT_DATA_T(tmp.s3)); \
+        dst_pack[idx] = as_uint(tmp_cvt); \
+    } while (0)
 
-#define STORE_DST(C0, C1, C2, C3, D, mb_stride) do { \
-    for (int n_i = 0; n_i < 8; n_i++) { \
-        PACK(C0, C1, C2, C3, n_i); \
-        QUANTIZE_ADD_BIAS(); \
-        DO_ELTWISE(); \
-        DO_SUM(D[n_i]); \
-        DO_POST_SUM_ELTWISE(); \
-        CONVERT_PACK(n_i); \
-    } \
-    intel_sub_group_block_write8((__global uint *)&dst[mb_stride * OC_BLOCK], dst_pack); \
-} while (0)
+#define STORE_DST(C0, C1, C2, C3, D, mb_stride) \
+    do { \
+        for (int n_i = 0; n_i < 8; n_i++) { \
+            PACK(C0, C1, C2, C3, n_i); \
+            QUANTIZE_ADD_BIAS(); \
+            DO_ELTWISE(); \
+            DO_SUM(D[n_i]); \
+            DO_POST_SUM_ELTWISE(); \
+            CONVERT_PACK(n_i); \
+        } \
+        intel_sub_group_block_write8( \
+                (__global uint *)&dst[mb_stride * OC_BLOCK], dst_pack); \
+    } while (0)
 
-if (ow < OW) {
+    if (ow < OW) {
 #if WITH_SUM
-    D0 = intel_sub_group_block_read8((__global uint *)dst);
+        D0 = intel_sub_group_block_read8((__global uint *)dst);
 #if MB > 8
-    D1 = intel_sub_group_block_read8((__global uint *)&dst[8 * OC_BLOCK]);
+        D1 = intel_sub_group_block_read8((__global uint *)&dst[8 * OC_BLOCK]);
 #ifdef MB_FULL_BLOCK
-    D2 = intel_sub_group_block_read8((__global uint *)&dst[16 * OC_BLOCK]);
-    D3 = intel_sub_group_block_read8((__global uint *)&dst[24 * OC_BLOCK]);
+        D2 = intel_sub_group_block_read8((__global uint *)&dst[16 * OC_BLOCK]);
+        D3 = intel_sub_group_block_read8((__global uint *)&dst[24 * OC_BLOCK]);
 #endif // MB_FULL_BLOCK
 #endif // MB > 8
 #endif
 
-    STORE_DST(C00, C01, C02, C03, D0, 0);
+        STORE_DST(C00, C01, C02, C03, D0, 0);
 #if MB > 8
-    STORE_DST(C10, C11, C12, C13, D1, 8);
+        STORE_DST(C10, C11, C12, C13, D1, 8);
 #ifdef MB_FULL_BLOCK
-    STORE_DST(C20, C21, C22, C23, D2, 16);
-    STORE_DST(C30, C31, C32, C33, D3, 24);
+        STORE_DST(C20, C21, C22, C23, D2, 16);
+        STORE_DST(C30, C31, C32, C33, D3, 24);
 #endif // MB_FULL_BLOCK
 #endif // MB > 8
-}
-
+    }
 }

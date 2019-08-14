@@ -88,8 +88,7 @@ struct jit_simple_reorder_kernel {
                         gIOw4i8o8i4o, gIOhw4i8o8i4o, gIOdhw4i8o8i4o))
             jrp.with_group = 1;
 
-        if (jrp.has_padding || jrp.scale_quant)
-            return status;
+        if (jrp.has_padding || jrp.scale_quant) return status;
 
         const bool type_s8_u8
                 = utils::one_of(input_md.data_type(), mkldnn_s8, mkldnn_u8)
@@ -177,22 +176,22 @@ struct jit_simple_reorder_kernel {
         auto output_type = output_md.data_type();
 
         switch (input_type) {
-        case mkldnn_u8: kernel_ctx.define_int("IN_TYPE_U8", 1); break;
-        case mkldnn_s8: kernel_ctx.define_int("IN_TYPE_S8", 1); break;
-        case mkldnn_f16: kernel_ctx.define_int("IN_TYPE_F16", 1); break;
-        case mkldnn_s32: kernel_ctx.define_int("IN_TYPE_S32", 1); break;
-        case mkldnn_f32: kernel_ctx.define_int("IN_TYPE_F32", 1); break;
-        case mkldnn_bf16: kernel_ctx.define_int("IN_TYPE_BF16", 1); break;
-        default: return status::invalid_arguments;
+            case mkldnn_u8: kernel_ctx.define_int("IN_TYPE_U8", 1); break;
+            case mkldnn_s8: kernel_ctx.define_int("IN_TYPE_S8", 1); break;
+            case mkldnn_f16: kernel_ctx.define_int("IN_TYPE_F16", 1); break;
+            case mkldnn_s32: kernel_ctx.define_int("IN_TYPE_S32", 1); break;
+            case mkldnn_f32: kernel_ctx.define_int("IN_TYPE_F32", 1); break;
+            case mkldnn_bf16: kernel_ctx.define_int("IN_TYPE_BF16", 1); break;
+            default: return status::invalid_arguments;
         }
         switch (output_type) {
-        case mkldnn_u8: kernel_ctx.define_int("OUT_TYPE_U8", 1); break;
-        case mkldnn_s8: kernel_ctx.define_int("OUT_TYPE_S8", 1); break;
-        case mkldnn_f16: kernel_ctx.define_int("OUT_TYPE_F16", 1); break;
-        case mkldnn_s32: kernel_ctx.define_int("OUT_TYPE_S32", 1); break;
-        case mkldnn_f32: kernel_ctx.define_int("OUT_TYPE_F32", 1); break;
-        case mkldnn_bf16: kernel_ctx.define_int("OUT_TYPE_BF16", 1); break;
-        default: return status::invalid_arguments;
+            case mkldnn_u8: kernel_ctx.define_int("OUT_TYPE_U8", 1); break;
+            case mkldnn_s8: kernel_ctx.define_int("OUT_TYPE_S8", 1); break;
+            case mkldnn_f16: kernel_ctx.define_int("OUT_TYPE_F16", 1); break;
+            case mkldnn_s32: kernel_ctx.define_int("OUT_TYPE_S32", 1); break;
+            case mkldnn_f32: kernel_ctx.define_int("OUT_TYPE_F32", 1); break;
+            case mkldnn_bf16: kernel_ctx.define_int("OUT_TYPE_BF16", 1); break;
+            default: return status::invalid_arguments;
         }
 
         kernel_ctx.define_int("REF_REORDER", jrp.use_ref_impl);

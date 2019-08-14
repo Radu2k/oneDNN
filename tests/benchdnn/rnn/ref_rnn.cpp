@@ -41,7 +41,8 @@ void lstm_activation(int64_t dic, int64_t n_gates, int64_t batch,
             pa(ib, 2, ih) = tanhf(pa(ib, 2, ih));
             pa(ib, 3, ih) = logistic(pa(ib, 3, ih));
             for (int64_t ig = 0; ig < 4; ig++) {
-                print(80, "activation 1 a[" IFMT "][" IFMT "][" IFMT "] = %.7f\n",
+                print(80,
+                        "activation 1 a[" IFMT "][" IFMT "][" IFMT "] = %.7f\n",
                         ib, ig, ih, pa(ib, ig, ih));
             }
         }
@@ -51,16 +52,16 @@ void lstm_activation(int64_t dic, int64_t n_gates, int64_t batch,
 float activation(activation_t f, float x, bool is_fwd = true) {
     float result = 0;
     switch (f) {
-    case RELU: result = is_fwd ? relu(x) : drelu(x); break;
-    case LOGISTIC: result = is_fwd ? logistic(x) : x_m_square(x); break;
-    case TANH: result = is_fwd ? tanhf(x) : one_m_square(x); break;
-    default: assert(!"unknown activation");
+        case RELU: result = is_fwd ? relu(x) : drelu(x); break;
+        case LOGISTIC: result = is_fwd ? logistic(x) : x_m_square(x); break;
+        case TANH: result = is_fwd ? tanhf(x) : one_m_square(x); break;
+        default: assert(!"unknown activation");
     }
     return result;
 }
 
-void rnn_fwd(activation_t f, int64_t sic, int64_t slc, int64_t dic, int64_t wc, int64_t batch,
-        int64_t n_gates, float *dst_iter_h_, float *gates_,
+void rnn_fwd(activation_t f, int64_t sic, int64_t slc, int64_t dic, int64_t wc,
+        int64_t batch, int64_t n_gates, float *dst_iter_h_, float *gates_,
         const float *weights_layer_, const float *weights_iter_h_,
         const float *bias_, const float *src_layer_, const float *src_iter_h_) {
     AOC<float> dst_iter_h(dst_iter_h_, batch, n_gates, wc);
@@ -81,10 +82,10 @@ void rnn_fwd(activation_t f, int64_t sic, int64_t slc, int64_t dic, int64_t wc, 
             }
 }
 
-void gru_fwd(int64_t sic, int64_t slc, int64_t dic, int64_t wc, int64_t batch, int64_t n_gates,
-        float *dst_iter_h_, float *gates_, const float *weights_layer_,
-        const float *weights_iter_h_, const float *bias_,
-        const float *src_layer_, const float *src_iter_h_) {
+void gru_fwd(int64_t sic, int64_t slc, int64_t dic, int64_t wc, int64_t batch,
+        int64_t n_gates, float *dst_iter_h_, float *gates_,
+        const float *weights_layer_, const float *weights_iter_h_,
+        const float *bias_, const float *src_layer_, const float *src_iter_h_) {
     AOC<const float> src_iter_h(src_iter_h_, batch, wc);
     AOC<const float> weights_layer(weights_layer_, slc, n_gates, dic);
     AOC<const float> weights_iter_h(weights_iter_h_, sic, n_gates, dic);
@@ -94,8 +95,8 @@ void gru_fwd(int64_t sic, int64_t slc, int64_t dic, int64_t wc, int64_t batch, i
 
     gemm("C", "N", "N", batch, n_gates * dic, slc, 1.0, src_layer_, wc,
             weights_layer_, n_gates * dic, 0.0, gates_, n_gates * dic);
-    gemm("C", "N", "N", batch, (n_gates - 1) * dic, sic, 1.0, src_iter_h_,
-            wc, weights_iter_h_, n_gates * dic, 1.0, gates_, n_gates * dic);
+    gemm("C", "N", "N", batch, (n_gates - 1) * dic, sic, 1.0, src_iter_h_, wc,
+            weights_iter_h_, n_gates * dic, 1.0, gates_, n_gates * dic);
     for (int64_t i = 0; i < batch; i++)
         for (int64_t j = 0; j < n_gates - 1; j++)
             for (int64_t k = 0; k < dic; k++) {
@@ -118,15 +119,15 @@ void gru_fwd(int64_t sic, int64_t slc, int64_t dic, int64_t wc, int64_t batch, i
 
     for (int64_t i = 0; i < batch; i++)
         for (int64_t k = 0; k < dic; k++) {
-            h_dst(i, k) = (float) ((double) gates(i, 0, k) * src_iter_h(i, k) +
-                              (1.0 - (double) gates(i, 0, k)) * gates(i, 2, k));
+            h_dst(i, k) = (float)((double)gates(i, 0, k) * src_iter_h(i, k)
+                    + (1.0 - (double)gates(i, 0, k)) * gates(i, 2, k));
         }
 }
 
-void gru_lbr_fwd(int64_t sic, int64_t slc, int64_t dic, int64_t wc, int64_t batch, int64_t n_gates,
-        float *dst_iter_h_, float *gates_, const float *weights_layer_,
-        const float *weights_iter_h_, const float *bias_,
-        const float *src_layer_, const float *src_iter_h_,
+void gru_lbr_fwd(int64_t sic, int64_t slc, int64_t dic, int64_t wc,
+        int64_t batch, int64_t n_gates, float *dst_iter_h_, float *gates_,
+        const float *weights_layer_, const float *weights_iter_h_,
+        const float *bias_, const float *src_layer_, const float *src_iter_h_,
         float *ws_local_) {
     AOC<const float> src_iter_h(src_iter_h_, batch, wc);
     AOC<const float> weights_layer(weights_layer_, slc, n_gates, dic);
@@ -136,7 +137,7 @@ void gru_lbr_fwd(int64_t sic, int64_t slc, int64_t dic, int64_t wc, int64_t batc
     AOC<float> h_dst(dst_iter_h_, batch, wc);
     AOC<float> tmp_ws(ws_local_, batch, n_gates, dic);
 
-    gemm("C", "N", "N", batch, n_gates * dic, slc, 1.0,  src_layer_, wc,
+    gemm("C", "N", "N", batch, n_gates * dic, slc, 1.0, src_layer_, wc,
             weights_layer_, n_gates * dic, 0.0, gates_, n_gates * dic);
 
     gemm("C", "N", "N", batch, n_gates * dic, sic, 1.0, src_iter_h_, wc,
@@ -145,29 +146,30 @@ void gru_lbr_fwd(int64_t sic, int64_t slc, int64_t dic, int64_t wc, int64_t batc
     for (int64_t i = 0; i < batch; i++)
         for (int64_t j = 0; j < n_gates - 1; j++)
             for (int64_t k = 0; k < dic; k++) {
-                gates(i, j, k) = logistic(gates(i, j, k) + tmp_ws(i, j, k)
-                    + bias(j, k));
+                gates(i, j, k) = logistic(
+                        gates(i, j, k) + tmp_ws(i, j, k) + bias(j, k));
             }
 
     for (int64_t i = 0; i < batch; i++)
         for (int64_t k = 0; k < dic; k++) {
-            gates(i, 2, k) = tanhf(gates(i, 2, k) + gates(i, 1, k) * (tmp_ws(i, 2, k)
-                + bias(3, k)) + bias(2, k));
+            gates(i, 2, k) = tanhf(gates(i, 2, k)
+                    + gates(i, 1, k) * (tmp_ws(i, 2, k) + bias(3, k))
+                    + bias(2, k));
         }
 
     for (int64_t i = 0; i < batch; i++)
         for (int64_t k = 0; k < dic; k++) {
-            h_dst(i, k) = gates(i, 0, k) * src_iter_h(i, k) +
-                (1 - gates(i, 0, k)) * gates(i, 2, k);
+            h_dst(i, k) = gates(i, 0, k) * src_iter_h(i, k)
+                    + (1 - gates(i, 0, k)) * gates(i, 2, k);
         }
-
 }
 
 // w = [weights_layer | weights_iter] : with order f, i , o, \bar(c)
-void lstm_fwd(const prb_t *p, int64_t sic, int64_t slc, int64_t dic, int64_t wc, int64_t batch,
-        int64_t n_gates, float *dst_iter_h_, float *c_dst_, float *gates_,
-        const float *weights_layer_, const float *weights_iter_h_,
-        const float *bias_, const float *src_layer_, const float *src_iter_h_,
+void lstm_fwd(const prb_t *p, int64_t sic, int64_t slc, int64_t dic, int64_t wc,
+        int64_t batch, int64_t n_gates, float *dst_iter_h_, float *c_dst_,
+        float *gates_, const float *weights_layer_,
+        const float *weights_iter_h_, const float *bias_,
+        const float *src_layer_, const float *src_iter_h_,
         const float *src_iter_c_) {
     AOC<float> h_dst(dst_iter_h_, batch, wc);
     AOC<float> c_dst(c_dst_, batch, wc);
@@ -186,8 +188,7 @@ void lstm_fwd(const prb_t *p, int64_t sic, int64_t slc, int64_t dic, int64_t wc,
             weights_iter_h_, n_gates * dic, 1.0, gates_, n_gates * dic);
 
     auto maybe_deq_w = [&](float g, int64_t oc) {
-        if (p->cfg == conf_f32 || p->cfg == conf_f16)
-            return g;
+        if (p->cfg == conf_f32 || p->cfg == conf_f16) return g;
         float scale = 1.;
         if (p->scale_policy == PER_OC)
             scale = p->wei_oc_scales[oc];
@@ -209,8 +210,7 @@ void lstm_fwd(const prb_t *p, int64_t sic, int64_t slc, int64_t dic, int64_t wc,
     lstm_activation(dic, n_gates, batch, gates_);
 
     auto maybe_q_d = [&](float h) {
-        if (p->cfg == conf_f32 || p->cfg == conf_f16)
-            return h;
+        if (p->cfg == conf_f32 || p->cfg == conf_f16) return h;
         float fp = p->data_scale * h;
         fp = mxcsr_round(fp);
         if (fp + p->data_shift > p->cfg[input].max)
@@ -231,42 +231,43 @@ void lstm_fwd(const prb_t *p, int64_t sic, int64_t slc, int64_t dic, int64_t wc,
 }
 
 void rnn_cell_fwd(const prb_t *p, alg_t alg, activation_t f, int64_t sic,
-        int64_t slc, int64_t dic, int64_t wc, int64_t batch, int64_t n_gates, float *dst_iter_h,
-        float *dst_iter_c, float *gates, const float *weights_layer,
-        const float *weights_iter, const float *bias, const float *src_layer,
-        const float *src_iter_h, const float *src_iter_c, float *ws_local_) {
+        int64_t slc, int64_t dic, int64_t wc, int64_t batch, int64_t n_gates,
+        float *dst_iter_h, float *dst_iter_c, float *gates,
+        const float *weights_layer, const float *weights_iter,
+        const float *bias, const float *src_layer, const float *src_iter_h,
+        const float *src_iter_c, float *ws_local_) {
     switch (alg) {
-    case VANILLA_GRU:
-        gru_fwd(sic, slc, dic, wc, batch, n_gates, dst_iter_h, gates,
-                weights_layer, weights_iter, bias, src_layer, src_iter_h);
-        break;
-    case LBR_GRU:
-        gru_lbr_fwd(sic, slc, dic, wc, batch, n_gates, dst_iter_h, gates,
-                weights_layer, weights_iter, bias, src_layer, src_iter_h,
-                ws_local_);
-        break;
-    case VANILLA_LSTM:
-        lstm_fwd(p, sic, slc, dic, wc, batch, n_gates, dst_iter_h, dst_iter_c,
-                gates, weights_layer, weights_iter, bias, src_layer, src_iter_h,
-                src_iter_c);
-        break;
-    case VANILLA_RNN:
-        rnn_fwd(f, sic, slc, dic, wc, batch, n_gates, dst_iter_h, gates,
-                weights_layer, weights_iter, bias, src_layer, src_iter_h);
-        break;
-    default: break;
+        case VANILLA_GRU:
+            gru_fwd(sic, slc, dic, wc, batch, n_gates, dst_iter_h, gates,
+                    weights_layer, weights_iter, bias, src_layer, src_iter_h);
+            break;
+        case LBR_GRU:
+            gru_lbr_fwd(sic, slc, dic, wc, batch, n_gates, dst_iter_h, gates,
+                    weights_layer, weights_iter, bias, src_layer, src_iter_h,
+                    ws_local_);
+            break;
+        case VANILLA_LSTM:
+            lstm_fwd(p, sic, slc, dic, wc, batch, n_gates, dst_iter_h,
+                    dst_iter_c, gates, weights_layer, weights_iter, bias,
+                    src_layer, src_iter_h, src_iter_c);
+            break;
+        case VANILLA_RNN:
+            rnn_fwd(f, sic, slc, dic, wc, batch, n_gates, dst_iter_h, gates,
+                    weights_layer, weights_iter, bias, src_layer, src_iter_h);
+            break;
+        default: break;
     }
 }
 
-void copy(int64_t dimc, int64_t dimr, int64_t ld_src, int64_t ld_dst, const float *src_,
-        float *dst_, rnn_action_t action = action_copy) {
+void copy(int64_t dimc, int64_t dimr, int64_t ld_src, int64_t ld_dst,
+        const float *src_, float *dst_, rnn_action_t action = action_copy) {
     AOC<const float> src(src_, dimc, ld_src);
     AOC<float> dst(dst_, dimc, ld_dst);
 
     mkldnn::impl::parallel_nd(dimc, [&](int64_t i) {
         for (int64_t j = 0; j < dimr; j++) {
-            dst(i, j) = action == action_sum
-                    ? dst(i, j) + src(i, j) : src(i, j);
+            dst(i, j)
+                    = action == action_sum ? dst(i, j) + src(i, j) : src(i, j);
         }
     });
 }
@@ -279,10 +280,8 @@ void shift(int64_t dimc, int64_t dimr, int64_t ld_src, float *src_, float shift,
             float fp = src(i, j) + shift;
             if (round) {
                 fp = mxcsr_round(fp);
-                if (fp > UINT8_MAX)
-                    fp = UINT8_MAX;
-                if (fp < 0)
-                    fp = 0;
+                if (fp > UINT8_MAX) fp = UINT8_MAX;
+                if (fp < 0) fp = 0;
             }
             src(i, j) = fp;
         }
@@ -313,9 +312,9 @@ void copy_init_fwd(const prb_t *p, alg_t alg, int64_t sic, int64_t slc,
     AOC<float> ws(ws_, n_layer + 2, n_dir, n_iter + 2, n_states, batch * wc);
     AOC<const float> src_layer(src_layer_, n_iter, batch * slc);
     AOC<const float> firstit_states(
-            firstit_states_, n_layer, n_dir,  batch * sic);
+            firstit_states_, n_layer, n_dir, batch * sic);
     AOC<const float> firstit_c_states(
-            firstit_c_states_, n_layer, n_dir,  batch * dic);
+            firstit_c_states_, n_layer, n_dir, batch * dic);
 
     int64_t lay_dest = (lay_dir == bottom2top) ? 0 : n_layer + 1;
     int64_t it_dest = (iter_dir == left2right) ? 0 : n_iter + 1;
@@ -354,9 +353,10 @@ void copy_init_fwd(const prb_t *p, alg_t alg, int64_t sic, int64_t slc,
 /* lstm example:
  * bwd: wsb keeps {dh, dc, dx} for every cell
 */
-void copy_init_bwd(alg_t alg, int64_t sic, int64_t slc, int64_t dic, int64_t dlc, int64_t wc,
-        int64_t batch, int64_t n_layer, int64_t n_iter, int64_t n_dir, int64_t n_states, float *ws_,
-        const float *src_layer_, const float *firstit_states_, const float *firstit_c_states_,
+void copy_init_bwd(alg_t alg, int64_t sic, int64_t slc, int64_t dic,
+        int64_t dlc, int64_t wc, int64_t batch, int64_t n_layer, int64_t n_iter,
+        int64_t n_dir, int64_t n_states, float *ws_, const float *src_layer_,
+        const float *firstit_states_, const float *firstit_c_states_,
         rnn_iter_direction_t iter_dir, rnn_layer_direction_t lay_dir,
         int64_t dir_val, bool is_concat = false) {
     AOC<float> ws(
@@ -393,10 +393,8 @@ void copy_res_fwd(const prb_t *p, alg_t alg, int64_t sic, int64_t slc,
         rnn_iter_direction_t iter_dir, rnn_layer_direction_t lay_dir,
         int64_t dir_val, rnn_action_t action, bool is_concat = false) {
     int64_t lastlay_c = is_concat ? 2 * dlc : dlc;
-    AOC<float> lastit_states(
-            lastit_states_, n_layer, n_dir, batch, dic);
-    AOC<float> lastit_c_states(
-            lastit_c_states_, n_layer, n_dir, batch, dic);
+    AOC<float> lastit_states(lastit_states_, n_layer, n_dir, batch, dic);
+    AOC<float> lastit_c_states(lastit_c_states_, n_layer, n_dir, batch, dic);
     AOC<float> lastlay_states(lastlay_states_, n_iter, batch, lastlay_c);
     AOC<const float> ws(
             ws_, n_layer + 2, n_dir, n_iter + 2, n_states, batch, wc);
@@ -441,15 +439,14 @@ void copy_res_fwd(const prb_t *p, alg_t alg, int64_t sic, int64_t slc,
     }
 }
 
-void copy_res_bwd(alg_t alg, int64_t sic, int64_t slc, int64_t dic, int64_t dlc, int64_t wc,
-        int64_t batch, int64_t n_layer, int64_t n_iter, int64_t n_dir, int64_t n_states,
-        float *lastit_states_, float *lastit_c_states_, float *lastlay_states_, const float *ws_,
+void copy_res_bwd(alg_t alg, int64_t sic, int64_t slc, int64_t dic, int64_t dlc,
+        int64_t wc, int64_t batch, int64_t n_layer, int64_t n_iter,
+        int64_t n_dir, int64_t n_states, float *lastit_states_,
+        float *lastit_c_states_, float *lastlay_states_, const float *ws_,
         rnn_iter_direction_t iter_dir, rnn_layer_direction_t lay_dir,
         int64_t dir_val, rnn_action_t action) {
-    AOC<float> lastit_states(
-            lastit_states_, n_layer, n_dir, batch, sic);
-    AOC<float> lastit_c_states(
-            lastit_c_states_, n_layer, n_dir, batch, dic);
+    AOC<float> lastit_states(lastit_states_, n_layer, n_dir, batch, sic);
+    AOC<float> lastit_c_states(lastit_c_states_, n_layer, n_dir, batch, dic);
     AOC<float> lastlay_states(lastlay_states_, n_iter, batch, slc);
     AOC<const float> ws(
             ws_, n_layer + 2, n_dir, n_iter + 2, n_states + 1, batch, wc);
@@ -510,10 +507,12 @@ void rnn_linear_fwd(const prb_t *p, mkldnn_rnn_direction_t direction,
     float *ws_local_ = new float[ws_local_size];
 
     auto process_direction = [&](rnn_iter_direction_t iter_dir,
-            rnn_layer_direction_t lay_dir, int64_t dir_val, rnn_action_t action) {
+                                     rnn_layer_direction_t lay_dir,
+                                     int64_t dir_val, rnn_action_t action) {
         // we first need to copy the initial states and input into ws
         // it simplifies the logic in the following code
-        print(80, "rnn_linear_fwd: call copy_init dir_val = " IFMT "\n", dir_val);
+        print(80, "rnn_linear_fwd: call copy_init dir_val = " IFMT "\n",
+                dir_val);
         copy_init_fwd(p, alg, sic, slc, dic, dlc, wc, batch, n_layer, n_iter,
                 n_dir, n_states, ws_, src_layer_, src_iter_, src_iter_c_,
                 iter_dir, lay_dir, dir_val);
@@ -521,9 +520,11 @@ void rnn_linear_fwd(const prb_t *p, mkldnn_rnn_direction_t direction,
         // We run the grid of computation
         for (int64_t il = 0; il < n_layer; il++) {
             for (int64_t it = 0; it < n_iter; it++) {
-                print(80, "==== layer = " IFMT " iter = " IFMT " ===\n", il, it);
+                print(80, "==== layer = " IFMT " iter = " IFMT " ===\n", il,
+                        it);
                 int64_t iter = (iter_dir == left2right) ? it + 1 : n_iter - it;
-                int64_t prev_iter = (iter_dir == left2right) ? iter - 1 : iter + 1;
+                int64_t prev_iter
+                        = (iter_dir == left2right) ? iter - 1 : iter + 1;
                 int64_t lay = il + 1;
                 rnn_cell_fwd(p, alg, f, sic, slc, dic, wc, batch, n_gates,
                         &ws(lay, dir_val, iter, H, 0, 0),
@@ -545,21 +546,21 @@ void rnn_linear_fwd(const prb_t *p, mkldnn_rnn_direction_t direction,
     };
 
     switch (direction) {
-    case mkldnn_unidirectional_left2right:
-        process_direction(left2right, bottom2top, 0, action_copy);
-        break;
-    case mkldnn_unidirectional_right2left:
-        process_direction(right2left, bottom2top, 0, action_copy);
-        break;
-    case mkldnn_bidirectional_sum:
-        process_direction(left2right, bottom2top, 0, action_copy);
-        process_direction(right2left, bottom2top, 1, action_sum);
-        break;
-    case mkldnn_bidirectional_concat:
-        process_direction(left2right, bottom2top, 0, action_copy);
-        process_direction(right2left, bottom2top, 1, action_concat);
-        break;
-    default: assert("unknown direction"); break;
+        case mkldnn_unidirectional_left2right:
+            process_direction(left2right, bottom2top, 0, action_copy);
+            break;
+        case mkldnn_unidirectional_right2left:
+            process_direction(right2left, bottom2top, 0, action_copy);
+            break;
+        case mkldnn_bidirectional_sum:
+            process_direction(left2right, bottom2top, 0, action_copy);
+            process_direction(right2left, bottom2top, 1, action_sum);
+            break;
+        case mkldnn_bidirectional_concat:
+            process_direction(left2right, bottom2top, 0, action_copy);
+            process_direction(right2left, bottom2top, 1, action_concat);
+            break;
+        default: assert("unknown direction"); break;
     }
 
     delete[] ws_local_;
@@ -567,10 +568,9 @@ void rnn_linear_fwd(const prb_t *p, mkldnn_rnn_direction_t direction,
 
 void compute_ref_fwd(const prb_t *p, dnn_mem_t &src_layer_m,
         dnn_mem_t &src_iter_m, dnn_mem_t &src_iter_c_m,
-        dnn_mem_t &weights_src_layer_m,
-        dnn_mem_t &weights_src_iter_m, dnn_mem_t &bias_m,
-        dnn_mem_t &dst_last_layer_m, dnn_mem_t &dst_last_iteration_m,
-        dnn_mem_t &dst_c_last_iteration_m,
+        dnn_mem_t &weights_src_layer_m, dnn_mem_t &weights_src_iter_m,
+        dnn_mem_t &bias_m, dnn_mem_t &dst_last_layer_m,
+        dnn_mem_t &dst_last_iteration_m, dnn_mem_t &dst_c_last_iteration_m,
         mkldnn_rnn_direction_t direction) {
 
     assert(direction == mkldnn_unidirectional_left2right
@@ -599,13 +599,13 @@ void compute_ref_fwd(const prb_t *p, dnn_mem_t &src_layer_m,
 // =============================================================================
 // ================ BACKWARD ===================================================
 // =============================================================================
-void rnn_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, int64_t wc,
-        int64_t batch, int64_t n_gates, float *diff_src_layer_, float *diff_src_iter_,
-        float *diff_weights_layer_, float *diff_weights_iter_h_,
-        float *diff_bias_, float *b_gates_, const float *src_layer_,
-        const float *src_iter_, const float *weights_layer_,
-        const float *weights_iter_h_, const float *bias_,
-        const float *dst_iter_h_, const float *gates_,
+void rnn_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic,
+        int64_t wc, int64_t batch, int64_t n_gates, float *diff_src_layer_,
+        float *diff_src_iter_, float *diff_weights_layer_,
+        float *diff_weights_iter_h_, float *diff_bias_, float *b_gates_,
+        const float *src_layer_, const float *src_iter_,
+        const float *weights_layer_, const float *weights_iter_h_,
+        const float *bias_, const float *dst_iter_h_, const float *gates_,
         const float *diff_dst_layer_, const float *diff_dst_iter_h_) {
     AOC<const float> diff_dst_layer(diff_dst_layer_, batch, wc);
     AOC<const float> diff_dst_iter_h(diff_dst_iter_h_, batch, wc);
@@ -621,8 +621,8 @@ void rnn_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, i
 
     gemm("C", "T", "N", sic, n_gates * dic, batch, 1.0, src_iter_, wc, b_gates_,
             n_gates * dic, 1.0, diff_weights_iter_h_, n_gates * dic);
-    gemm("C", "T", "N", slc, n_gates * dic, batch, 1.0, src_layer_, wc, b_gates_,
-            n_gates * dic, 1.0, diff_weights_layer_, n_gates * dic);
+    gemm("C", "T", "N", slc, n_gates * dic, batch, 1.0, src_layer_, wc,
+            b_gates_, n_gates * dic, 1.0, diff_weights_layer_, n_gates * dic);
     for (int64_t b = 0; b < batch; ++b)
         copy(n_gates, dic, dic, dic, &b_gates(b, 0, 0), diff_bias_, action_sum);
 
@@ -632,16 +632,16 @@ void rnn_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, i
             weights_iter_h_, n_gates * dic, 0.0, diff_src_iter_, wc);
 }
 
-void lstm_bwd(alg_t alg, int64_t sic, int64_t slc, int64_t dic, int64_t wc, int64_t batch,
-        int64_t n_gates, float *diff_src_layer_, float *diff_src_iter_h_,
-        float *diff_src_iter_c_, float *diff_weights_layer_,
-        float *diff_weights_iter_h_, float *diff_bias_, float *b_gates_,
-        const float *src_layer_, const float *src_iter_h_,
-        const float *src_iter_c_, const float *weights_layer_,
-        const float *weights_iter_h_, const float *bias_,
-        const float *dst_iter_h_, const float *dst_iter_c_, const float *gates_,
-        const float *diff_dst_layer_, const float *diff_dst_iter_h_,
-        const float *diff_dst_iter_c_) {
+void lstm_bwd(alg_t alg, int64_t sic, int64_t slc, int64_t dic, int64_t wc,
+        int64_t batch, int64_t n_gates, float *diff_src_layer_,
+        float *diff_src_iter_h_, float *diff_src_iter_c_,
+        float *diff_weights_layer_, float *diff_weights_iter_h_,
+        float *diff_bias_, float *b_gates_, const float *src_layer_,
+        const float *src_iter_h_, const float *src_iter_c_,
+        const float *weights_layer_, const float *weights_iter_h_,
+        const float *bias_, const float *dst_iter_h_, const float *dst_iter_c_,
+        const float *gates_, const float *diff_dst_layer_,
+        const float *diff_dst_iter_h_, const float *diff_dst_iter_c_) {
     // TODO: check sic and slc as last dimension in arrays and cycles
     // input
     AOC<const float> diff_dst_layer(diff_dst_layer_, batch, wc);
@@ -687,10 +687,10 @@ void lstm_bwd(alg_t alg, int64_t sic, int64_t slc, int64_t dic, int64_t wc, int6
             b_gates(ib, ohc, ih) = one_m_square(hc) * dhc;
         }
 
-    gemm("C", "T", "N", sic, n_gates * dic, batch, 1.0, src_iter_h_, wc, b_gates_,
-            n_gates * dic, 1.0, diff_weights_iter_h_, n_gates * dic);
-    gemm("C", "T", "N", slc, n_gates * dic, batch, 1.0, src_layer_, wc, b_gates_,
-            n_gates * dic, 1.0, diff_weights_layer_, n_gates * dic);
+    gemm("C", "T", "N", sic, n_gates * dic, batch, 1.0, src_iter_h_, wc,
+            b_gates_, n_gates * dic, 1.0, diff_weights_iter_h_, n_gates * dic);
+    gemm("C", "T", "N", slc, n_gates * dic, batch, 1.0, src_layer_, wc,
+            b_gates_, n_gates * dic, 1.0, diff_weights_layer_, n_gates * dic);
 
     gemm("C", "N", "T", batch, sic, n_gates * dic, 1.0, b_gates_, n_gates * dic,
             weights_iter_h_, n_gates * dic, 0.0, diff_src_iter_h_, wc);
@@ -703,13 +703,13 @@ void lstm_bwd(alg_t alg, int64_t sic, int64_t slc, int64_t dic, int64_t wc, int6
                 diff_bias_[j * dic + k] += b_gates(i, j, k);
 }
 
-void gru_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, int64_t wc,
-        int64_t batch, int64_t n_gates, float *diff_src_layer_, float *diff_src_iter_,
-        float *diff_weights_layer_, float *diff_weights_iter_h_,
-        float *diff_bias_, float *b_gates_, const float *src_layer_,
-        const float *src_iter_, const float *weights_layer_,
-        const float *weights_iter_h_, const float *bias_,
-        const float *dst_iter_h_, const float *gates_,
+void gru_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic,
+        int64_t wc, int64_t batch, int64_t n_gates, float *diff_src_layer_,
+        float *diff_src_iter_, float *diff_weights_layer_,
+        float *diff_weights_iter_h_, float *diff_bias_, float *b_gates_,
+        const float *src_layer_, const float *src_iter_,
+        const float *weights_layer_, const float *weights_iter_h_,
+        const float *bias_, const float *dst_iter_h_, const float *gates_,
         const float *diff_dst_layer_, const float *diff_dst_iter_h_,
         float *ws_local_) {
 
@@ -729,10 +729,10 @@ void gru_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, i
     AOC<float> dhr(dhr_, batch, wc);
     AOC<float> hr(hr_, batch, wc);
 
-// dc = (1 - u) * dh; dc^ = one_m_square(c) * dc;
-// du = (h - u) * dh; du^ = x_m_square(u) * du;
-// dhr = Wc dc^;
-// dr = h * dhr; dr^ = x_m_square(r) * dr;
+    // dc = (1 - u) * dh; dc^ = one_m_square(c) * dc;
+    // du = (h - u) * dh; du^ = x_m_square(u) * du;
+    // dhr = Wc dc^;
+    // dr = h * dhr; dr^ = x_m_square(r) * dr;
     const int64_t ohu = 0;
     const int64_t ohr = 1;
     const int64_t ohc = 2;
@@ -748,8 +748,9 @@ void gru_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, i
             b_gates(ib, ohc, ih) = one_m_square(c) * dc;
             diff_src_iter(ib, ih) = dh * u;
         }
-    gemm("C", "N", "T", batch, sic, dic, 1.0, &(b_gates(0, 2, 0)), n_gates * dic,
-            &(weights_iter_h(0, 2, 0)), n_gates * dic, 0.0, dhr_, wc);
+    gemm("C", "N", "T", batch, sic, dic, 1.0, &(b_gates(0, 2, 0)),
+            n_gates * dic, &(weights_iter_h(0, 2, 0)), n_gates * dic, 0.0, dhr_,
+            wc);
 
     for (int64_t ib = 0; ib < batch; ib++)
         for (int64_t ih = 0; ih < dic; ih++) {
@@ -761,8 +762,8 @@ void gru_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, i
             b_gates(ib, ohr, ih) = x_m_square(r) * dr;
         }
 
-// dWx += xdu^ | xdr^ | xdc^
-// dWh += hdu^ | ddr^ | (h * r)dc^
+    // dWx += xdu^ | xdr^ | xdc^
+    // dWh += hdu^ | ddr^ | (h * r)dc^
     gemm("C", "T", "N", sic, (n_gates - 1) * dic, batch, 1.0, src_iter_, wc,
             b_gates_, n_gates * dic, 1.0, diff_weights_iter_h_, n_gates * dic);
     gemm("C", "T", "N", sic, dic, batch, 1.0, hr_, wc, &(b_gates(0, 2, 0)),
@@ -770,9 +771,9 @@ void gru_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, i
     gemm("C", "T", "N", slc, n_gates * dic, batch, 1.0, src_layer_, wc,
             b_gates_, n_gates * dic, 1.0, diff_weights_layer_, n_gates * dic);
 
-// dx_next = Wxudu^ + Wxrdr^ + Wxcdc^
-// dh_next = dh * u + Whudu^ + Whzdz^ + r * Whcdc^
-    gemm("C", "N", "T", batch, sic, (n_gates - 1)* dic, 1.0, b_gates_,
+    // dx_next = Wxudu^ + Wxrdr^ + Wxcdc^
+    // dh_next = dh * u + Whudu^ + Whzdz^ + r * Whcdc^
+    gemm("C", "N", "T", batch, sic, (n_gates - 1) * dic, 1.0, b_gates_,
             n_gates * dic, weights_iter_h_, n_gates * dic, 1.0, diff_src_iter_,
             wc);
     gemm("C", "N", "T", batch, slc, n_gates * dic, 1.0, b_gates_, n_gates * dic,
@@ -784,8 +785,9 @@ void gru_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, i
                 diff_bias_[j * dic + k] += b_gates(i, j, k);
 }
 
-void gru_lbr_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, int64_t wc,
-        int64_t batch, int64_t n_gates, float *diff_src_layer_, float *diff_src_iter_,
+void gru_lbr_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc,
+        int64_t dic, int64_t wc, int64_t batch, int64_t n_gates,
+        float *diff_src_layer_, float *diff_src_iter_,
         float *diff_weights_layer_, float *diff_weights_iter_h_,
         float *diff_bias_, float *b_gates_, const float *src_layer_,
         const float *src_iter_, const float *weights_layer_,
@@ -818,10 +820,9 @@ void gru_lbr_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t di
     gemm("C", "N", "N", batch, dic, sic, 1.0, src_iter_, wc,
             &weights_iter_h(0, 2, 0), n_gates * dic, 1.0, Wh_b_, dic);
 
-
-// dc = (1 - u) * dh; dc^ = one_m_square(c) * dc;
-// du = (h - c) * dh; du^ = x_m_square(u) * du;
-// dr = (Wh + b) * dc^; dr^ = x_m_square(r) * dr;
+    // dc = (1 - u) * dh; dc^ = one_m_square(c) * dc;
+    // du = (h - c) * dh; du^ = x_m_square(u) * du;
+    // dr = (Wh + b) * dc^; dr^ = x_m_square(r) * dr;
     const int64_t ohu = 0;
     const int64_t ohr = 1;
     const int64_t ohc = 2;
@@ -847,15 +848,17 @@ void gru_lbr_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t di
             diff_src_iter(ib, ih) = dh * u;
         }
 
-    gemm("C", "T", "N", sic, n_gates * dic, batch, 1.0, src_iter_, wc, b_gates_r_,
-            n_gates * dic, 1.0, diff_weights_iter_h_, n_gates * dic);
-    gemm("C", "T", "N", slc, n_gates * dic, batch, 1.0, src_layer_, wc, b_gates_,
-            n_gates * dic, 1.0, diff_weights_layer_, n_gates * dic);
+    gemm("C", "T", "N", sic, n_gates * dic, batch, 1.0, src_iter_, wc,
+            b_gates_r_, n_gates * dic, 1.0, diff_weights_iter_h_,
+            n_gates * dic);
+    gemm("C", "T", "N", slc, n_gates * dic, batch, 1.0, src_layer_, wc,
+            b_gates_, n_gates * dic, 1.0, diff_weights_layer_, n_gates * dic);
 
     gemm("C", "N", "T", batch, slc, n_gates * dic, 1.0, b_gates_, n_gates * dic,
             weights_layer_, n_gates * dic, 0.0, diff_src_layer_, wc);
-    gemm("C", "N", "T", batch, sic, n_gates * dic, 1.0, b_gates_r_, n_gates * dic,
-            weights_iter_h_, n_gates * dic, 1.0, diff_src_iter_, wc);
+    gemm("C", "N", "T", batch, sic, n_gates * dic, 1.0, b_gates_r_,
+            n_gates * dic, weights_iter_h_, n_gates * dic, 1.0, diff_src_iter_,
+            wc);
 
     for (int64_t i = 0; i < batch; i++)
         for (int64_t j = 0; j < n_gates; j++)
@@ -867,12 +870,11 @@ void gru_lbr_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t di
             diff_bias_[3 * dic + k] += b_gates_r(i, 2, k);
 }
 
-
-void rnn_cell_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t dic, int64_t wc,
-        int64_t batch, int64_t n_gates, float *diff_src_layer, float *diff_src_iter_h,
-        float *diff_src_iter_c, float *diff_weights_layer,
-        float *diff_weights_iter, float *diff_bias, float *b_gates,
-        const float *src_layer, const float *src_iter_h,
+void rnn_cell_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc,
+        int64_t dic, int64_t wc, int64_t batch, int64_t n_gates,
+        float *diff_src_layer, float *diff_src_iter_h, float *diff_src_iter_c,
+        float *diff_weights_layer, float *diff_weights_iter, float *diff_bias,
+        float *b_gates, const float *src_layer, const float *src_iter_h,
         const float *src_iter_c, const float *weights_layer,
         const float *weights_iter, const float *bias, const float *dst_iter_h,
         const float *dst_iter_c, const float *gates,
@@ -880,42 +882,43 @@ void rnn_cell_bwd(alg_t alg, activation_t f, int64_t sic, int64_t slc, int64_t d
         const float *diff_dst_iter_c, float *ws_local_) {
 
     switch (alg) {
-    case VANILLA_LSTM:
-        lstm_bwd(alg, sic, slc, dic, wc, batch, n_gates, diff_src_layer,
-                diff_src_iter_h, diff_src_iter_c, diff_weights_layer,
-                diff_weights_iter, diff_bias, b_gates, src_layer, src_iter_h,
-                src_iter_c, weights_layer, weights_iter, bias, dst_iter_h,
-                dst_iter_c, gates, diff_dst_layer, diff_dst_iter_h,
-                diff_dst_iter_c);
-        break;
-    case VANILLA_RNN:
-        rnn_bwd(alg, f, sic, slc, dic, wc, batch, n_gates, diff_src_layer,
-                diff_src_iter_h, diff_weights_layer, diff_weights_iter,
-                diff_bias, b_gates, src_layer, src_iter_h, weights_layer,
-                weights_iter, bias, dst_iter_h, gates, diff_dst_layer,
-                diff_dst_iter_h);
-        break;
-    case VANILLA_GRU:
-        gru_bwd(alg, f, sic, slc, dic, wc, batch, n_gates, diff_src_layer,
-                diff_src_iter_h, diff_weights_layer, diff_weights_iter,
-                diff_bias, b_gates, src_layer, src_iter_h, weights_layer,
-                weights_iter, bias, dst_iter_h, gates, diff_dst_layer,
-                diff_dst_iter_h, ws_local_);
-        break;
-    case LBR_GRU:
-        gru_lbr_bwd(alg, f, sic, slc, dic, wc, batch, n_gates, diff_src_layer,
-                diff_src_iter_h, diff_weights_layer, diff_weights_iter,
-                diff_bias, b_gates, src_layer, src_iter_h, weights_layer,
-                weights_iter, bias, dst_iter_h, gates, diff_dst_layer,
-                diff_dst_iter_h, ws_local_);
-    default: break;
+        case VANILLA_LSTM:
+            lstm_bwd(alg, sic, slc, dic, wc, batch, n_gates, diff_src_layer,
+                    diff_src_iter_h, diff_src_iter_c, diff_weights_layer,
+                    diff_weights_iter, diff_bias, b_gates, src_layer,
+                    src_iter_h, src_iter_c, weights_layer, weights_iter, bias,
+                    dst_iter_h, dst_iter_c, gates, diff_dst_layer,
+                    diff_dst_iter_h, diff_dst_iter_c);
+            break;
+        case VANILLA_RNN:
+            rnn_bwd(alg, f, sic, slc, dic, wc, batch, n_gates, diff_src_layer,
+                    diff_src_iter_h, diff_weights_layer, diff_weights_iter,
+                    diff_bias, b_gates, src_layer, src_iter_h, weights_layer,
+                    weights_iter, bias, dst_iter_h, gates, diff_dst_layer,
+                    diff_dst_iter_h);
+            break;
+        case VANILLA_GRU:
+            gru_bwd(alg, f, sic, slc, dic, wc, batch, n_gates, diff_src_layer,
+                    diff_src_iter_h, diff_weights_layer, diff_weights_iter,
+                    diff_bias, b_gates, src_layer, src_iter_h, weights_layer,
+                    weights_iter, bias, dst_iter_h, gates, diff_dst_layer,
+                    diff_dst_iter_h, ws_local_);
+            break;
+        case LBR_GRU:
+            gru_lbr_bwd(alg, f, sic, slc, dic, wc, batch, n_gates,
+                    diff_src_layer, diff_src_iter_h, diff_weights_layer,
+                    diff_weights_iter, diff_bias, b_gates, src_layer,
+                    src_iter_h, weights_layer, weights_iter, bias, dst_iter_h,
+                    gates, diff_dst_layer, diff_dst_iter_h, ws_local_);
+        default: break;
     }
 }
 
 void rnn_linear_bwd(const prb_t *p, mkldnn_rnn_direction_t direction,
-        const float *diff_dst_iter_, const float *diff_dst_iter_c_, const float *diff_dst_layer_,
-        const float *weights_layer_, const float *weights_iter_h_,
-        const float *bias_, float *diff_src_iter_, float *diff_src_iter_c_, float *diff_src_layer_,
+        const float *diff_dst_iter_, const float *diff_dst_iter_c_,
+        const float *diff_dst_layer_, const float *weights_layer_,
+        const float *weights_iter_h_, const float *bias_, float *diff_src_iter_,
+        float *diff_src_iter_c_, float *diff_src_layer_,
         float *diff_weights_layer_, float *diff_weights_iter_h_,
         float *diff_bias_, float *ws_, const float *gates_) {
 
@@ -954,8 +957,8 @@ void rnn_linear_bwd(const prb_t *p, mkldnn_rnn_direction_t direction,
     AOC<float> ws(ws_, n_layer + 2, n_dir, n_iter + 2, n_states, batch, wc);
     AOC<const float> gates(gates_, n_layer, n_dir, n_iter, batch, n_gates, dic);
 
-    int64_t wsb_size = (n_layer + 2) * n_dir * (n_iter + 2) * (n_states + 1) * batch
-            * wc;
+    int64_t wsb_size = (n_layer + 2) * n_dir * (n_iter + 2) * (n_states + 1)
+            * batch * wc;
     auto *wsb_ = new float[wsb_size];
     init_buffer(wsb_, wsb_size, 0.); // ??!! Temporary. For debug.
     // n_states + 1  -- H, C, X
@@ -964,30 +967,28 @@ void rnn_linear_bwd(const prb_t *p, mkldnn_rnn_direction_t direction,
 
     int64_t ws_local_size;
     switch (p->alg) {
-        case LBR_GRU:
-            ws_local_size = batch * (n_gates + 1) * dic;
-            break;
-        case VANILLA_GRU:
-            ws_local_size = 2 * batch * wc;
-            break;
+        case LBR_GRU: ws_local_size = batch * (n_gates + 1) * dic; break;
+        case VANILLA_GRU: ws_local_size = 2 * batch * wc; break;
         default: ws_local_size = 0;
     }
     float *ws_local_ = new float[ws_local_size];
 
     auto process_direction = [&](rnn_iter_direction_t iter_dir,
-            rnn_layer_direction_t lay_dir, int64_t dir_val, rnn_action_t action) {
+                                     rnn_layer_direction_t lay_dir,
+                                     int64_t dir_val, rnn_action_t action) {
         // we first need to copy the initial states and input into ws
         // it simplifies the logic in the following code
         copy_init_bwd(alg, sic, slc, dic, dlc, wc, batch, n_layer, n_iter,
-                n_dir, n_states, wsb_, diff_dst_layer_, diff_dst_iter_, diff_dst_iter_c_,
-                iter_dir, lay_dir, dir_val,
+                n_dir, n_states, wsb_, diff_dst_layer_, diff_dst_iter_,
+                diff_dst_iter_c_, iter_dir, lay_dir, dir_val,
                 direction == mkldnn_bidirectional_concat);
 
         // We run the grid of computation
         for (int64_t j = n_layer - 1; j >= 0; j--) {
             for (int64_t i = 0; i < n_iter; i++) {
                 int64_t iter = (iter_dir == left2right) ? i + 1 : n_iter - i;
-                int64_t prev_iter = (iter_dir == left2right) ? iter - 1 : iter + 1;
+                int64_t prev_iter
+                        = (iter_dir == left2right) ? iter - 1 : iter + 1;
                 int64_t lay = j + 1;
                 int64_t prev_lay = lay + 1;
 
@@ -1013,33 +1014,32 @@ void rnn_linear_bwd(const prb_t *p, mkldnn_rnn_direction_t direction,
                         &gates(lay - 1, dir_val, ws_iter - 1, 0, 0, 0),
                         &wsb(prev_lay, dir_val, iter, X, 0, 0),
                         &wsb(lay, dir_val, prev_iter, H, 0, 0),
-                        &wsb(lay, dir_val, prev_iter, C, 0, 0),
-                        ws_local_);
+                        &wsb(lay, dir_val, prev_iter, C, 0, 0), ws_local_);
             }
         }
 
         // Finally we copy the results to the result buffers
         copy_res_bwd(alg, sic, slc, dic, dlc, wc, batch, n_layer, n_iter, n_dir,
-                n_states, diff_src_iter_, diff_src_iter_c_, diff_src_layer_, wsb_, iter_dir,
-                lay_dir, dir_val, action);
+                n_states, diff_src_iter_, diff_src_iter_c_, diff_src_layer_,
+                wsb_, iter_dir, lay_dir, dir_val, action);
     };
 
     switch (direction) {
-    case mkldnn_unidirectional_left2right:
-        process_direction(right2left, top2bottom, 0, action_copy);
-        break;
-    case mkldnn_unidirectional_right2left:
-        process_direction(left2right, top2bottom, 0, action_copy);
-        break;
-    case mkldnn_bidirectional_sum:
-        process_direction(right2left, top2bottom, 0, action_copy);
-        process_direction(left2right, top2bottom, 1, action_sum);
-        break;
-    case mkldnn_bidirectional_concat:
-        process_direction(right2left, top2bottom, 0, action_copy);
-        process_direction(left2right, top2bottom, 1, action_sum);
-        break;
-    default: assert("unknown direction"); break;
+        case mkldnn_unidirectional_left2right:
+            process_direction(right2left, top2bottom, 0, action_copy);
+            break;
+        case mkldnn_unidirectional_right2left:
+            process_direction(left2right, top2bottom, 0, action_copy);
+            break;
+        case mkldnn_bidirectional_sum:
+            process_direction(right2left, top2bottom, 0, action_copy);
+            process_direction(left2right, top2bottom, 1, action_sum);
+            break;
+        case mkldnn_bidirectional_concat:
+            process_direction(right2left, top2bottom, 0, action_copy);
+            process_direction(left2right, top2bottom, 1, action_sum);
+            break;
+        default: assert("unknown direction"); break;
     }
 
     delete[] wsb_;
@@ -1047,13 +1047,14 @@ void rnn_linear_bwd(const prb_t *p, mkldnn_rnn_direction_t direction,
     delete[] ws_local_;
 }
 
-void compute_ref_bwd(const prb_t *p, dnn_mem_t &input_m,
-        dnn_mem_t &states_m, dnn_mem_t &c_states_m, dnn_mem_t &diff_last_layer_m,
-        dnn_mem_t &diff_last_iteration_m, dnn_mem_t &diff_c_last_iteration_m, dnn_mem_t &weights_input_m,
-        dnn_mem_t &weights_states_m, dnn_mem_t &bias_m,
-        dnn_mem_t &dst_last_layer_m, dnn_mem_t &dst_last_iteration_m, dnn_mem_t &dst_c_last_iteration_m,
-        dnn_mem_t &dst_diff_input_m, dnn_mem_t &dst_diff_states_m, dnn_mem_t &dst_diff_c_states_m,
-        dnn_mem_t &dst_diff_weights_input_m,
+void compute_ref_bwd(const prb_t *p, dnn_mem_t &input_m, dnn_mem_t &states_m,
+        dnn_mem_t &c_states_m, dnn_mem_t &diff_last_layer_m,
+        dnn_mem_t &diff_last_iteration_m, dnn_mem_t &diff_c_last_iteration_m,
+        dnn_mem_t &weights_input_m, dnn_mem_t &weights_states_m,
+        dnn_mem_t &bias_m, dnn_mem_t &dst_last_layer_m,
+        dnn_mem_t &dst_last_iteration_m, dnn_mem_t &dst_c_last_iteration_m,
+        dnn_mem_t &dst_diff_input_m, dnn_mem_t &dst_diff_states_m,
+        dnn_mem_t &dst_diff_c_states_m, dnn_mem_t &dst_diff_weights_input_m,
         dnn_mem_t &dst_diff_weights_states_m, dnn_mem_t &dst_diff_bias_m,
         mkldnn_rnn_direction_t direction) {
     // !! TODO: add support of strides
@@ -1073,15 +1074,17 @@ void compute_ref_bwd(const prb_t *p, dnn_mem_t &input_m,
             * p->n_gates() * p->dic;
     auto *gates = new float[gates_size];
 
-    rnn_linear_fwd(p, direction, (float *)states_m, (float *)c_states_m, (float *)input_m,
-            (float *)weights_input_m, (float *)weights_states_m,
-            (float *)bias_m, (float *)dst_last_iteration_m, (float *)dst_c_last_iteration_m,
+    rnn_linear_fwd(p, direction, (float *)states_m, (float *)c_states_m,
+            (float *)input_m, (float *)weights_input_m,
+            (float *)weights_states_m, (float *)bias_m,
+            (float *)dst_last_iteration_m, (float *)dst_c_last_iteration_m,
             (float *)dst_last_layer_m, ws, gates);
 
-    rnn_linear_bwd(p, direction, (float *)diff_last_iteration_m, (float *)diff_c_last_iteration_m,
-            (float *)diff_last_layer_m, (float *)weights_input_m,
-            (float *)weights_states_m, (float *)bias_m,
-            (float *)dst_diff_states_m, (float *)dst_diff_c_states_m, (float *)dst_diff_input_m,
+    rnn_linear_bwd(p, direction, (float *)diff_last_iteration_m,
+            (float *)diff_c_last_iteration_m, (float *)diff_last_layer_m,
+            (float *)weights_input_m, (float *)weights_states_m,
+            (float *)bias_m, (float *)dst_diff_states_m,
+            (float *)dst_diff_c_states_m, (float *)dst_diff_input_m,
             (float *)dst_diff_weights_input_m,
             (float *)dst_diff_weights_states_m, (float *)dst_diff_bias_m, ws,
             gates);

@@ -108,6 +108,6 @@ rnn_postgemm_sig(rnn_postgemm_bwd_f32_t::rnn_postgemm) {
     });
 }
 
-}
-}
-}
+} // namespace cpu
+} // namespace impl
+} // namespace mkldnn

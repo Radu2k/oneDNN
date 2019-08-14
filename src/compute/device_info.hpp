@@ -47,7 +47,7 @@ static const char *ext2cl_str(compute::device_ext_t ext) {
         CASE(intel_dot_accumulate);
         CASE(intel_subgroup_matrix_multiply_accumulate);
         CASE(intel_subgroup_split_matrix_multiply_accumulate);
-    default: return nullptr;
+        default: return nullptr;
     }
 #undef CASE
 }
@@ -58,7 +58,7 @@ struct runtime_version_t {
     int build;
 
     runtime_version_t(int major = 0, int minor = 0, int build = 0)
-        : major{ major }, minor{ minor }, build{ build } {}
+        : major {major}, minor {minor}, build {build} {}
 
     bool operator==(const runtime_version_t &other) const {
         return (major == other.major) && (minor == other.minor)
@@ -70,14 +70,10 @@ struct runtime_version_t {
     }
 
     bool operator<(const runtime_version_t &other) const {
-        if (major < other.major)
-            return true;
-        if (major > other.major)
-            return false;
-        if (minor < other.minor)
-            return true;
-        if (minor > other.minor)
-            return false;
+        if (major < other.major) return true;
+        if (major > other.major) return false;
+        if (minor < other.minor) return true;
+        if (minor > other.minor) return false;
         return (build < other.build);
     }
 
@@ -97,14 +93,12 @@ struct runtime_version_t {
         int i_major = 0, i = 0;
 
         for (; s[i] != '.'; i++)
-            if (!s[i])
-                return status::invalid_arguments;
+            if (!s[i]) return status::invalid_arguments;
 
         auto i_minor = ++i;
 
         for (; s[i] != '.'; i++)
-            if (!s[i])
-                return status::invalid_arguments;
+            if (!s[i]) return status::invalid_arguments;
 
         auto i_build = ++i;
 

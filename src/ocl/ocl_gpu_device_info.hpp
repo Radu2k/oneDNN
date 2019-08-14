@@ -17,9 +17,9 @@
 #ifndef OCL_GPU_DEVICE_INFO_HPP
 #define OCL_GPU_DEVICE_INFO_HPP
 
-#include <CL/cl.h>
 #include <string>
 #include <vector>
+#include <CL/cl.h>
 
 #include "common/z_magic.hpp"
 #include "compute/device_info.hpp"
@@ -37,9 +37,8 @@ enum class gpu_arch_t {
 };
 
 inline gpu_arch_t str2gpu_arch(const char *str) {
-#define CASE(_case)                     \
-    if (!strcmp(STRINGIFY(_case), str)) \
-    return gpu_arch_t::_case
+#define CASE(_case) \
+    if (!strcmp(STRINGIFY(_case), str)) return gpu_arch_t::_case
 
     CASE(gen9);
     CASE(gen12lp);
@@ -65,25 +64,25 @@ inline const char *gpu_arch2str(gpu_arch_t arch) {
 static compute::device_ext_t get_extensions(gpu_arch_t gpu_arch) {
     uint64_t extensions = 0;
     switch (gpu_arch) {
-    case gpu_arch_t::gen12hp:
-        extensions |= (uint64_t)compute::device_ext_t::
-                intel_subgroup_matrix_multiply_accumulate;
-        extensions |= (uint64_t)compute::device_ext_t::
-                intel_subgroup_split_matrix_multiply_accumulate;
-    case gpu_arch_t::gen12lp:
-        extensions |= (uint64_t)compute::device_ext_t::intel_dot_accumulate;
-    case gpu_arch_t::gen9:
-        extensions |= (uint64_t)compute::device_ext_t::khr_fp16;
-        extensions |= (uint64_t)compute::device_ext_t::intel_subgroups;
-        extensions |= (uint64_t)compute::device_ext_t::intel_subgroups_short;
-        break;
-    case gpu_arch_t::unknown: break;
+        case gpu_arch_t::gen12hp:
+            extensions |= (uint64_t)compute::device_ext_t::
+                    intel_subgroup_matrix_multiply_accumulate;
+            extensions |= (uint64_t)compute::device_ext_t::
+                    intel_subgroup_split_matrix_multiply_accumulate;
+        case gpu_arch_t::gen12lp:
+            extensions |= (uint64_t)compute::device_ext_t::intel_dot_accumulate;
+        case gpu_arch_t::gen9:
+            extensions |= (uint64_t)compute::device_ext_t::khr_fp16;
+            extensions |= (uint64_t)compute::device_ext_t::intel_subgroups;
+            extensions
+                    |= (uint64_t)compute::device_ext_t::intel_subgroups_short;
+            break;
+        case gpu_arch_t::unknown: break;
     }
     return (compute::device_ext_t)extensions;
 }
 
-class ocl_gpu_device_info_t : public compute::device_info_t
-{
+class ocl_gpu_device_info_t : public compute::device_info_t {
 public:
     ocl_gpu_device_info_t(cl_device_id device) : device_(device) {}
 
@@ -93,7 +92,7 @@ public:
         CHECK(init_attributes());
 
         // OpenCL runtime version
-        size_t size_driver_version{ 0 };
+        size_t size_driver_version {0};
         cl_int err = clGetDeviceInfo(
                 device_, CL_DRIVER_VERSION, 0, nullptr, &size_driver_version);
         OCL_CHECK(err);
@@ -126,8 +125,7 @@ public:
                 i_ext <<= 1) {
             auto ext = (device_ext_t)i_ext;
             // Use real GPU extensions
-            if (!has(real_extensions_, ext))
-                continue;
+            if (!has(real_extensions_, ext)) continue;
 
             // These extensions are not handled properly by the OpenCL runtime.
             // Pass macros for them manually.
@@ -137,9 +135,7 @@ public:
                                 intel_subgroup_split_matrix_multiply_accumulate))
                 opts += std::string("-D") + ext2cl_str(ext) + " ";
         }
-        if (!opts.empty()) {
-            opts[opts.size() - 1] = '\0';
-        }
+        if (!opts.empty()) { opts[opts.size() - 1] = '\0'; }
         return opts;
     }
 
@@ -155,7 +151,7 @@ public:
 private:
     status_t init_arch() {
         // Device name
-        size_t size_name{ 0 };
+        size_t size_name {0};
         cl_int err = clGetDeviceInfo(
                 device_, CL_DEVICE_NAME, 0, nullptr, &size_name);
         OCL_CHECK(err);
@@ -202,7 +198,7 @@ private:
 
     status_t init_extensions() {
         // Handle extensions provided by the OpenCL runtime
-        size_t size_ext{ 0 };
+        size_t size_ext {0};
         cl_int err = clGetDeviceInfo(
                 device_, CL_DEVICE_EXTENSIONS, 0, nullptr, &size_ext);
         OCL_CHECK(err);
@@ -240,15 +236,15 @@ private:
         int32_t threads_per_eu = 7;
 
         switch (gpu_arch_) {
-        case gpu_arch_t::gen9: threads_per_eu = 7; break;
-        case gpu_arch_t::gen12lp: threads_per_eu = 7; break;
-        case gpu_arch_t::gen12hp:
-            // Default is 8 threads, 128 GRF registers per thread. But we
-            // set 4 threads configuration (with 256 registers) for better
-            // performance.
-            threads_per_eu = 4;
-            break;
-        default: break;
+            case gpu_arch_t::gen9: threads_per_eu = 7; break;
+            case gpu_arch_t::gen12lp: threads_per_eu = 7; break;
+            case gpu_arch_t::gen12hp:
+                // Default is 8 threads, 128 GRF registers per thread. But we
+                // set 4 threads configuration (with 256 registers) for better
+                // performance.
+                threads_per_eu = 4;
+                break;
+            default: break;
         }
 
         hw_threads_ = eu_count_ * threads_per_eu;

@@ -16,9 +16,9 @@
 
 #include <float.h>
 #include <math.h>
+#include <random>
 #include <stdio.h>
 #include <stdlib.h>
-#include <random>
 
 #include "mkldnn.h"
 
@@ -96,35 +96,35 @@ inline int init_pd(const prb_t *p, mkldnn_rnn_desc_t rd[2],
     int the_stride = 1;
     /// @todo we need to add stride support for diff_* tensors too
     mkldnn_memory_desc_t input_d, states_d, c_states_d, weights_input_d,
-        weights_states_d, bias_d, dst_last_layer_d, dst_last_iteration_d,
-        dst_c_last_iteration_d, diff_input_d, diff_states_d, diff_c_states_d,
-        diff_weights_input_d, diff_weights_states_d, diff_bias_d,
-        diff_last_layer_d, diff_last_iteration_d, diff_c_last_iteration_d;
+            weights_states_d, bias_d, dst_last_layer_d, dst_last_iteration_d,
+            dst_c_last_iteration_d, diff_input_d, diff_states_d,
+            diff_c_states_d, diff_weights_input_d, diff_weights_states_d,
+            diff_bias_d, diff_last_layer_d, diff_last_iteration_d,
+            diff_c_last_iteration_d;
 
     // dimensions with ref
-    mkldnn_dims_t input_dims = { p->n_iter, p->mb, p->slc };
+    mkldnn_dims_t input_dims = {p->n_iter, p->mb, p->slc};
     // bidirectional = 2, s for lstm = 2, for all other = 1
     mkldnn_dims_t weights_input_dims
-            = { p->n_layer, p->n_directions(), p->slc, p->n_gates(), p->dic };
+            = {p->n_layer, p->n_directions(), p->slc, p->n_gates(), p->dic};
     mkldnn_dims_t weights_states_dims
-            = { p->n_layer, p->n_directions(), p->sic, p->n_gates(), p->dic };
-    mkldnn_dims_t bias_dims
-            = { p->n_layer, p->n_directions(), p->n_gates() + is_gru_lbr, p->dic };
+            = {p->n_layer, p->n_directions(), p->sic, p->n_gates(), p->dic};
+    mkldnn_dims_t bias_dims = {
+            p->n_layer, p->n_directions(), p->n_gates() + is_gru_lbr, p->dic};
     // mkldnn_tnc
     int64_t lastlay_dlc = (p->direction == mkldnn_bidirectional_concat)
             ? 2 * p->dlc
             : p->dlc;
-    mkldnn_dims_t dst_last_layer_dims = { p->n_iter, p->mb, lastlay_dlc };
+    mkldnn_dims_t dst_last_layer_dims = {p->n_iter, p->mb, lastlay_dlc};
 
     DNN_SAFE(mkldnn_memory_desc_init_by_tag(
                      &input_d, 3, input_dims, p->cfg[input].dt, mkldnn_tnc),
             WARN);
     input_d.format_desc.blocking.strides[0] += the_stride;
 
-    mkldnn_dims_t states_dims
-        = { p->n_layer, p->n_directions(), p->mb, p->sic };
-    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&states_d, 4, states_dims,
-                     p->cfg[states].dt, mkldnn_ldnc),
+    mkldnn_dims_t states_dims = {p->n_layer, p->n_directions(), p->mb, p->sic};
+    DNN_SAFE(mkldnn_memory_desc_init_by_tag(
+                     &states_d, 4, states_dims, p->cfg[states].dt, mkldnn_ldnc),
             WARN);
     states_d.format_desc.blocking.strides[2] = p->sic + the_stride;
     for (int d = 1; d >= 0; --d)
@@ -133,7 +133,7 @@ inline int init_pd(const prb_t *p, mkldnn_rnn_desc_t rd[2],
                 * states_d.dims[d + 1];
 
     mkldnn_dims_t c_states_dims
-        = { p->n_layer, p->n_directions(), p->mb, p->dic };
+            = {p->n_layer, p->n_directions(), p->mb, p->dic};
     DNN_SAFE(mkldnn_memory_desc_init_by_tag(&c_states_d, 4, c_states_dims,
                      p->cfg[c_states].dt, mkldnn_ldnc),
             WARN);
@@ -143,47 +143,47 @@ inline int init_pd(const prb_t *p, mkldnn_rnn_desc_t rd[2],
                 = c_states_d.format_desc.blocking.strides[d + 1]
                 * c_states_d.dims[d + 1];
 
-
-    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&weights_input_d, 5, weights_input_dims,
-                     p->cfg[weights_input].dt, mkldnn_format_tag_any),
+    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&weights_input_d, 5,
+                     weights_input_dims, p->cfg[weights_input].dt,
+                     mkldnn_format_tag_any),
             WARN);
 
-    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&weights_states_d, 5, weights_states_dims,
-                     p->cfg[weights_states].dt, mkldnn_format_tag_any),
+    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&weights_states_d, 5,
+                     weights_states_dims, p->cfg[weights_states].dt,
+                     mkldnn_format_tag_any),
             WARN);
 
-    DNN_SAFE(mkldnn_memory_desc_init_by_tag(
-                     &bias_d, 4, bias_dims, p->cfg[bias].dt, mkldnn_format_tag_any),
+    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&bias_d, 4, bias_dims,
+                     p->cfg[bias].dt, mkldnn_format_tag_any),
             WARN);
 
-    DNN_SAFE(mkldnn_memory_desc_init_by_tag(&dst_last_layer_d, 3, dst_last_layer_dims,
-                     p->cfg[dst_last_layer].dt, mkldnn_tnc),
+    DNN_SAFE(
+            mkldnn_memory_desc_init_by_tag(&dst_last_layer_d, 3,
+                    dst_last_layer_dims, p->cfg[dst_last_layer].dt, mkldnn_tnc),
             WARN);
     dst_last_layer_d.format_desc.blocking.strides[0] += the_stride;
 
     mkldnn_dims_t dst_last_iteration_dims
-            = { p->n_layer, p->n_directions(), p->mb, p->dic };
+            = {p->n_layer, p->n_directions(), p->mb, p->dic};
     DNN_SAFE(mkldnn_memory_desc_init_by_tag(&dst_last_iteration_d, 4,
                      dst_last_iteration_dims, p->cfg[dst_last_iteration].dt,
                      mkldnn_ldnc),
             WARN);
 
-    dst_last_iteration_d.format_desc.blocking.strides[2]
-            = p->dic + the_stride;
+    dst_last_iteration_d.format_desc.blocking.strides[2] = p->dic + the_stride;
     for (int d = 1; d >= 0; --d)
         dst_last_iteration_d.format_desc.blocking.strides[d]
                 = dst_last_iteration_d.format_desc.blocking.strides[d + 1]
                 * dst_last_iteration_d.dims[d + 1];
 
     mkldnn_dims_t dst_c_last_iteration_dims
-            = { p->n_layer, p->n_directions(), p->mb, p->dic };
+            = {p->n_layer, p->n_directions(), p->mb, p->dic};
     DNN_SAFE(mkldnn_memory_desc_init_by_tag(&dst_c_last_iteration_d, 4,
                      dst_c_last_iteration_dims, p->cfg[dst_c_last_iteration].dt,
                      mkldnn_ldnc),
             WARN);
 
-    dst_last_iteration_d.format_desc.blocking.strides[2]
-            = p->dic + the_stride;
+    dst_last_iteration_d.format_desc.blocking.strides[2] = p->dic + the_stride;
     for (int d = 1; d >= 0; --d)
         dst_last_iteration_d.format_desc.blocking.strides[d]
                 = dst_last_iteration_d.format_desc.blocking.strides[d + 1]
@@ -193,9 +193,10 @@ inline int init_pd(const prb_t *p, mkldnn_rnn_desc_t rd[2],
     // When inference, we use forward_inference
     // When training, we use forward_training
     {
-        mkldnn_status_t init_status = init_rnn_fwd_desc(rd, p, fwd_prop, &input_d,
-                &states_d, &c_states_d, &weights_input_d, &weights_states_d, &bias_d,
-                &dst_last_layer_d, &dst_last_iteration_d, &dst_c_last_iteration_d);
+        mkldnn_status_t init_status = init_rnn_fwd_desc(rd, p, fwd_prop,
+                &input_d, &states_d, &c_states_d, &weights_input_d,
+                &weights_states_d, &bias_d, &dst_last_layer_d,
+                &dst_last_iteration_d, &dst_c_last_iteration_d);
         if (init_status == mkldnn_unimplemented)
             return r->state = UNIMPLEMENTED, OK;
         else
@@ -209,16 +210,18 @@ inline int init_pd(const prb_t *p, mkldnn_rnn_desc_t rd[2],
         DNN_SAFE(mkldnn_memory_desc_init_by_tag(&diff_states_d, 4, states_dims,
                          p->cfg[dst_diff_states].dt, mkldnn_format_tag_any),
                 WARN);
-        DNN_SAFE(mkldnn_memory_desc_init_by_tag(&diff_c_states_d, 4, c_states_dims,
-                         p->cfg[dst_diff_c_states].dt, mkldnn_format_tag_any),
+        DNN_SAFE(mkldnn_memory_desc_init_by_tag(&diff_c_states_d, 4,
+                         c_states_dims, p->cfg[dst_diff_c_states].dt,
+                         mkldnn_format_tag_any),
                 WARN);
         DNN_SAFE(mkldnn_memory_desc_init_by_tag(&diff_weights_input_d, 5,
                          weights_input_dims, p->cfg[dst_diff_weights_input].dt,
                          mkldnn_format_tag_any),
                 WARN);
-        DNN_SAFE(mkldnn_memory_desc_init_by_tag(&diff_weights_states_d, 5,
-                         weights_states_dims,
-                         p->cfg[dst_diff_weights_states].dt, mkldnn_format_tag_any),
+        DNN_SAFE(
+                mkldnn_memory_desc_init_by_tag(&diff_weights_states_d, 5,
+                        weights_states_dims, p->cfg[dst_diff_weights_states].dt,
+                        mkldnn_format_tag_any),
                 WARN);
         DNN_SAFE(mkldnn_memory_desc_init_by_tag(&diff_bias_d, 4, bias_dims,
                          p->cfg[dst_diff_bias].dt, mkldnn_format_tag_any),
@@ -233,18 +236,18 @@ inline int init_pd(const prb_t *p, mkldnn_rnn_desc_t rd[2],
                 WARN);
         DNN_SAFE(mkldnn_memory_desc_init_by_tag(&diff_c_last_iteration_d, 4,
                          dst_c_last_iteration_dims,
-                         p->cfg[diff_c_last_iteration].dt, mkldnn_format_tag_any),
+                         p->cfg[diff_c_last_iteration].dt,
+                         mkldnn_format_tag_any),
                 WARN);
-        DNN_SAFE(init_rnn_bwd_desc(rd + 1, p, p->prop,
-                         &input_d, &states_d, &c_states_d, &weights_input_d,
-                         &weights_states_d, &bias_d, &dst_last_layer_d,
-                         &dst_last_iteration_d, &dst_c_last_iteration_d,
-                         &diff_input_d, &diff_states_d,  &diff_c_states_d,
-                         &diff_weights_input_d, &diff_weights_states_d,
-                         &diff_bias_d, &diff_last_layer_d,
-                         &diff_last_iteration_d, &diff_c_last_iteration_d),
+        DNN_SAFE(init_rnn_bwd_desc(rd + 1, p, p->prop, &input_d, &states_d,
+                         &c_states_d, &weights_input_d, &weights_states_d,
+                         &bias_d, &dst_last_layer_d, &dst_last_iteration_d,
+                         &dst_c_last_iteration_d, &diff_input_d, &diff_states_d,
+                         &diff_c_states_d, &diff_weights_input_d,
+                         &diff_weights_states_d, &diff_bias_d,
+                         &diff_last_layer_d, &diff_last_iteration_d,
+                         &diff_c_last_iteration_d),
                 WARN);
-
     }
     auto mkldnn_attr = create_mkldnn_rnn_attr(p);
     mkldnn_status_t init_status = mkldnn_success;
@@ -261,8 +264,9 @@ inline int init_pd(const prb_t *p, mkldnn_rnn_desc_t rd[2],
     }
     mkldnn_primitive_attr_destroy(mkldnn_attr);
 
-    auto q = [=](mkldnn_query_t query, int rpd_idx, int index = 0)
-    { return *mkldnn_primitive_desc_query_md(rpd[rpd_idx], query, index); };
+    auto q = [=](mkldnn_query_t query, int rpd_idx, int index = 0) {
+        return *mkldnn_primitive_desc_query_md(rpd[rpd_idx], query, index);
+    };
 
     for (int i = 0; i < 1 + (int)is_bwd; i++) {
         rd[i].src_layer_desc = q(mkldnn_query_src_md, i);
@@ -295,13 +299,13 @@ inline int init_pd(const prb_t *p, mkldnn_rnn_desc_t rd[2],
 }
 
 int doit(const prb_t *p, res_t *r) {
-    res_t res_zero{};
+    res_t res_zero {};
     *r = res_zero;
 
     const auto fp = mkldnn_f32;
 
-    if (p->alg != VANILLA_LSTM && p->alg != VANILLA_RNN
-        && p->alg != VANILLA_GRU && p->alg != LBR_GRU) {
+    if (p->alg != VANILLA_LSTM && p->alg != VANILLA_RNN && p->alg != VANILLA_GRU
+            && p->alg != LBR_GRU) {
         printf("p->alg: %d\n", (int)p->alg);
         r->state = UNIMPLEMENTED;
         return OK;
@@ -355,10 +359,9 @@ int doit(const prb_t *p, res_t *r) {
 
     mkldnn_rnn_desc_t rd[2];
     mkldnn_primitive_desc_t rpd[2] = {nullptr};
-    mkldnn_primitive_t c{};
+    mkldnn_primitive_t c {};
     SAFE(init_pd(p, rd, rpd, r), WARN);
-    if (r->state == SKIPPED || r->state == UNIMPLEMENTED)
-        return OK;
+    if (r->state == SKIPPED || r->state == UNIMPLEMENTED) return OK;
 
     auto &input_dt_d = rd[0].src_layer_desc;
     auto &states_dt_d = rd[0].src_iter_desc;
@@ -394,8 +397,8 @@ int doit(const prb_t *p, res_t *r) {
             dst_last_layer_dt_d, p->cfg[dst_last_layer].dt, engine_tgt);
     dst_last_iteration_dt = new dnn_mem_t(
             dst_last_iteration_dt_d, p->cfg[dst_last_iteration].dt, engine_tgt);
-    dst_c_last_iteration_dt = new dnn_mem_t(
-            dst_c_last_iteration_dt_d, p->cfg[dst_c_last_iteration].dt, engine_tgt);
+    dst_c_last_iteration_dt = new dnn_mem_t(dst_c_last_iteration_dt_d,
+            p->cfg[dst_c_last_iteration].dt, engine_tgt);
 
     if (is_bwd) {
         bwd_weights_input_dt
@@ -404,7 +407,8 @@ int doit(const prb_t *p, res_t *r) {
                 = new dnn_mem_t(bwd_weights_states_dt_d, fp, engine_tgt);
         dst_diff_input_dt = new dnn_mem_t(diff_src_layer_dt_d, fp, engine_tgt);
         dst_diff_states_dt = new dnn_mem_t(diff_src_iter_dt_d, fp, engine_tgt);
-        dst_diff_c_states_dt = new dnn_mem_t(diff_src_iter_c_dt_d, fp, engine_tgt);
+        dst_diff_c_states_dt
+                = new dnn_mem_t(diff_src_iter_c_dt_d, fp, engine_tgt);
         dst_diff_weights_input_dt
                 = new dnn_mem_t(diff_weights_layer_dt_d, fp, engine_tgt);
         dst_diff_weights_states_dt
@@ -474,8 +478,8 @@ int doit(const prb_t *p, res_t *r) {
             WARN);
     if (p->alg == VANILLA_LSTM)
         SAFE(fill_memory(p, dst_c_last_iteration, *dst_c_last_iteration_dt,
-                 *dst_c_last_iteration_fp),
-            WARN);
+                     *dst_c_last_iteration_fp),
+                WARN);
 
     if (is_bwd) {
         SAFE(bwd_weights_states_dt->reorder(*weights_states_dt), WARN);
@@ -488,8 +492,8 @@ int doit(const prb_t *p, res_t *r) {
                 WARN);
         if (p->alg == VANILLA_LSTM)
             SAFE(fill_memory(p, dst_diff_c_states, *dst_diff_c_states_dt,
-                     *dst_diff_c_states_fp),
-                WARN);
+                         *dst_diff_c_states_fp),
+                    WARN);
         SAFE(fill_memory(p, dst_diff_weights_input, *dst_diff_weights_input_dt,
                      *dst_diff_weights_input_fp),
                 WARN);
@@ -506,9 +510,9 @@ int doit(const prb_t *p, res_t *r) {
                      *diff_last_iteration_fp),
                 WARN);
         if (p->alg == VANILLA_LSTM)
-            SAFE(fill_memory(p, diff_c_last_iteration, *diff_c_last_iteration_dt,
-                     *diff_c_last_iteration_fp),
-                WARN);
+            SAFE(fill_memory(p, diff_c_last_iteration,
+                         *diff_c_last_iteration_dt, *diff_c_last_iteration_fp),
+                    WARN);
     }
 
     args_t args;
@@ -530,16 +534,16 @@ int doit(const prb_t *p, res_t *r) {
         args.set(MKLDNN_ARG_DST_ITER, dst_last_iteration_dt->m_);
         if (p->alg == VANILLA_LSTM)
             args.set(MKLDNN_ARG_DST_ITER_C, dst_c_last_iteration_dt->m_);
-        if (workspace_dt)
-            args.set(MKLDNN_ARG_WORKSPACE, workspace_dt->m_);
+        if (workspace_dt) args.set(MKLDNN_ARG_WORKSPACE, workspace_dt->m_);
 
 #ifdef CALL_MKLDNN_RNN
         DNN_SAFE(execute_and_wait(c, stream_tgt, args.size(), args), WARN);
 #endif
         if ((p->prop == mkldnn_forward) && (bench_mode & CORR)) {
-            compute_ref_fwd(p, *input_fp, *states_fp, *c_states_fp, *weights_input_fp,
-                    *weights_states_fp, *bias_fp, *dst_last_layer_fp,
-                    *dst_last_iteration_fp, *dst_c_last_iteration_fp, p->direction);
+            compute_ref_fwd(p, *input_fp, *states_fp, *c_states_fp,
+                    *weights_input_fp, *weights_states_fp, *bias_fp,
+                    *dst_last_layer_fp, *dst_last_iteration_fp,
+                    *dst_c_last_iteration_fp, p->direction);
             dnn_mem_t dst_last_layer(
                     *dst_last_layer_dt, fp, mkldnn_tnc, engine_ref);
             dnn_mem_t dst_last_iteration(
@@ -552,10 +556,10 @@ int doit(const prb_t *p, res_t *r) {
                     WARN);
             if (p->alg == VANILLA_LSTM) {
                 dnn_mem_t dst_c_last_iteration(
-                    *dst_c_last_iteration_dt, fp, mkldnn_ldnc, engine_ref);
+                        *dst_c_last_iteration_dt, fp, mkldnn_ldnc, engine_ref);
                 SAFE(compare_dst_c_last_iteration(p, dst_c_last_iteration,
-                         *dst_c_last_iteration_fp, r, true),
-                    WARN);
+                             *dst_c_last_iteration_fp, r, true),
+                        WARN);
             }
         }
     }
@@ -597,11 +601,13 @@ int doit(const prb_t *p, res_t *r) {
 #endif
 
         if (bench_mode & CORR) {
-            compute_ref_bwd(p, *input_fp, *states_fp, *c_states_fp, *diff_last_layer_fp,
-                    *diff_last_iteration_fp, *diff_c_last_iteration_fp, *weights_input_fp,
+            compute_ref_bwd(p, *input_fp, *states_fp, *c_states_fp,
+                    *diff_last_layer_fp, *diff_last_iteration_fp,
+                    *diff_c_last_iteration_fp, *weights_input_fp,
                     *weights_states_fp, *bias_fp, *dst_last_layer_fp,
-                    *dst_last_iteration_fp, *dst_c_last_iteration_fp, *dst_diff_input_fp,
-                    *dst_diff_states_fp, *dst_diff_c_states_fp, *dst_diff_weights_input_fp,
+                    *dst_last_iteration_fp, *dst_c_last_iteration_fp,
+                    *dst_diff_input_fp, *dst_diff_states_fp,
+                    *dst_diff_c_states_fp, *dst_diff_weights_input_fp,
                     *dst_diff_weights_states_fp, *dst_diff_bias_fp,
                     p->direction);
 
@@ -617,10 +623,10 @@ int doit(const prb_t *p, res_t *r) {
                     WARN);
             if (p->alg == VANILLA_LSTM) {
                 dnn_mem_t dst_c_last_iteration(
-                    *dst_c_last_iteration_dt, fp, mkldnn_ldnc, engine_ref);
+                        *dst_c_last_iteration_dt, fp, mkldnn_ldnc, engine_ref);
                 SAFE(compare_dst_last_iteration(p, dst_c_last_iteration,
-                         *dst_c_last_iteration_fp, r, true),
-                    WARN);
+                             *dst_c_last_iteration_fp, r, true),
+                        WARN);
             }
 
             dnn_mem_t diff_input(
@@ -634,8 +640,9 @@ int doit(const prb_t *p, res_t *r) {
             if (p->alg == VANILLA_LSTM) {
                 dnn_mem_t diff_c_states(
                         *dst_diff_c_states_dt, fp, mkldnn_ldnc, engine_ref);
-                SAFE(compare_states(p, diff_c_states, *dst_diff_c_states_fp, r, true),
-                    WARN);
+                SAFE(compare_states(
+                             p, diff_c_states, *dst_diff_c_states_fp, r, true),
+                        WARN);
             }
 
             dnn_mem_t diff_weights_input(

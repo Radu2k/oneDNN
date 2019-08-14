@@ -136,7 +136,6 @@ rnn_postgemm_sig(rnn_postgemm_bwd_f32_t::gru_part2_postgemm) {
 }
 
 #undef AOC
-}
-}
-}
-    
+} // namespace cpu
+} // namespace impl
+} // namespace mkldnn

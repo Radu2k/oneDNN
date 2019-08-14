@@ -42,13 +42,11 @@ status_t ocl_cross_engine_reorder_t::execute(const exec_ctx_t &ctx) const {
         if (scales) {
             void *tmp_ptr = nullptr;
             status = scales->map_data(&tmp_ptr);
-            if (status != status::success)
-                return status;
+            if (status != status::success) return status;
             memcpy(tmp_ptr, pd()->attr()->output_scales_.scales_,
                     pd()->attr()->output_scales_.count_ * sizeof(float));
             status = scales->unmap_data(tmp_ptr);
-            if (status != status::success)
-                return status;
+            if (status != status::success) return status;
         }
 
         compute::kernel_arg_list_t arg_list;
@@ -63,9 +61,7 @@ status_t ocl_cross_engine_reorder_t::execute(const exec_ctx_t &ctx) const {
     };
 
     if (in_e_kind == engine_kind::gpu && out_e_kind == engine_kind::cpu) {
-        if (do_reorder) {
-            status = ocl_reorder(input, *temp_buf);
-        }
+        if (do_reorder) { status = ocl_reorder(input, *temp_buf); }
         if (status == status::success) {
             // Copy to cpu
             memory_desc_wrapper dst_mdw(pd()->dst_md());

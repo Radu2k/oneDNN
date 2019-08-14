@@ -30,10 +30,8 @@ struct ocl_reorder_pd_t : public reorder_pd_t {
     using reorder_pd_t::reorder_pd_t;
 
     status_t init() {
-        bool args_ok = true
-                && attr()->has_default_values();
-        if (!args_ok)
-            return status::unimplemented;
+        bool args_ok = true && attr()->has_default_values();
+        if (!args_ok) return status::unimplemented;
         return status::success;
     }
 };

@@ -53,28 +53,25 @@ struct jit_gen12lp_u8s8s32x_convolution_fwd_t : public primitive_t {
 
             bool ok = true
                     && utils::one_of(this->desc()->prop_kind, forward_training,
-                        forward_inference)
+                            forward_inference)
                     && this->desc()->alg_kind == alg_kind::convolution_direct
                     && expect_data_types(u8, s8, f32, dst_type, s32)
                     && compute_engine->mayiuse(
-                               compute::device_ext_t::intel_subgroups);
+                            compute::device_ext_t::intel_subgroups);
 
-            if (!ok)
-                return status::unimplemented;
+            if (!ok) return status::unimplemented;
 
-            status_t status = jit_gen12lp_u8s8s32x_conv_fwd_kernel::init_conf(jcp_,
-                *this->desc(), *this->src_md(), *this->weights_md(),
-                *this->dst_md(), *this->weights_md(1), *this->attr());
-            if (status != status::success)
-                return status;
+            status_t status = jit_gen12lp_u8s8s32x_conv_fwd_kernel::init_conf(
+                    jcp_, *this->desc(), *this->src_md(), *this->weights_md(),
+                    *this->dst_md(), *this->weights_md(1), *this->attr());
+            if (status != status::success) return status;
 
             ok = set_default_formats_common(
-                jcp_.src_tag, jcp_.wei_tag, jcp_.dst_tag);
+                    jcp_.src_tag, jcp_.wei_tag, jcp_.dst_tag);
             return ok ? status::success : status::unimplemented;
         }
         jit_conv_conf_t jcp_;
     };
-
 
     status_t init() override {
         const char *kernel_name = nullptr;
@@ -85,15 +82,13 @@ struct jit_gen12lp_u8s8s32x_convolution_fwd_t : public primitive_t {
 
         compute::kernel_ctx_t kernel_ctx;
         auto status = jit_gen12lp_u8s8s32x_conv_fwd_kernel::init_const_def(
-            kernel_ctx, pd()->jcp_);
-        if (status != status::success)
-            return status;
+                kernel_ctx, pd()->jcp_);
+        if (status != status::success) return status;
 
         auto *compute_engine
-                    = utils::downcast<compute::compute_engine_t *>(engine());
+                = utils::downcast<compute::compute_engine_t *>(engine());
         compute_engine->create_kernel(&kernel_, kernel_name, kernel_ctx);
-        if (!kernel_)
-            return status::runtime_error;
+        if (!kernel_) return status::runtime_error;
 
         return status::success;
     }
@@ -136,22 +131,20 @@ struct jit_gen12lp_u8s8s32x_convolution_bwd_data_t : public primitive_t {
 
             bool ok = true
                     && IMPLICATION(utils::one_of(dst_type, u8, s8),
-                               expect_data_types(
-                                       u8, s8, f32, dst_type, s32))
+                            expect_data_types(u8, s8, f32, dst_type, s32))
                     && desc()->prop_kind == prop_kind::backward_data
                     && desc()->alg_kind == alg_kind::convolution_direct
                     && compute_engine->mayiuse(
-                               compute::device_ext_t::intel_subgroups);
+                            compute::device_ext_t::intel_subgroups);
 
-            if (!ok)
-                return status::unimplemented;
+            if (!ok) return status::unimplemented;
 
             status_t status
-                    = jit_gen12lp_u8s8s32x_conv_bwd_data_kernel::init_conf(
-                    jcp_, *this->desc(), *this->diff_src_md(), *this->weights_md(),
-                    *this->diff_dst_md(), *this->weights_md(1), *this->attr());
-            if (status != status::success)
-                return status;
+                    = jit_gen12lp_u8s8s32x_conv_bwd_data_kernel::init_conf(jcp_,
+                            *this->desc(), *this->diff_src_md(),
+                            *this->weights_md(), *this->diff_dst_md(),
+                            *this->weights_md(1), *this->attr());
+            if (status != status::success) return status;
 
             ok = set_default_formats_common(
                     jcp_.src_tag, jcp_.wei_tag, jcp_.dst_tag);
@@ -167,14 +160,12 @@ struct jit_gen12lp_u8s8s32x_convolution_bwd_data_t : public primitive_t {
         compute::kernel_ctx_t kernel_ctx;
         auto status = jit_gen12lp_u8s8s32x_conv_bwd_data_kernel::init_const_def(
                 kernel_ctx, pd()->jcp_);
-        if (status != status::success)
-            return status;
+        if (status != status::success) return status;
 
         auto *compute_engine
-                    = utils::downcast<compute::compute_engine_t *>(engine());
+                = utils::downcast<compute::compute_engine_t *>(engine());
         compute_engine->create_kernel(&kernel_, kernel_name, kernel_ctx);
-        if (!kernel_)
-            return status::runtime_error;
+        if (!kernel_) return status::runtime_error;
 
         return status::success;
     }

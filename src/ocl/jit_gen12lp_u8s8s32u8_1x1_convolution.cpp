@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "ocl_stream.hpp"
 #include "jit_gen12lp_u8s8s32u8_1x1_convolution.hpp"
+#include "ocl_stream.hpp"
 
 namespace mkldnn {
 namespace impl {
@@ -55,6 +55,6 @@ using namespace data_type;
 
 template struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t<u8>;
 
-}
-}
-}
+} // namespace ocl
+} // namespace impl
+} // namespace mkldnn

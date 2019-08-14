@@ -20,8 +20,8 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 #endif
 
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                             \
-    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0          \
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0 \
             + ((x1) % SRC_B1) * SRC_SB1 + ((x1) / SRC_B1) * SRC_S1 \
             + ((x2) % SRC_B2) * SRC_SB2 + ((x2) / SRC_B2) * SRC_S2 \
             + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3 \
@@ -31,17 +31,17 @@
 #if IN_OIHW8O16I2O
 #undef IN_OFF
 #if WITH_GROUP
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                                        \
-    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0 + (x1 % 2)          \
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0 + (x1 % 2) \
             + ((x1 % 16) / 2) * 32 + ((x1) / SRC_B1) * SRC_S1 + 2 * (x2 % 16) \
-            + ((x2) / SRC_B2) * SRC_S2 + ((x3) % SRC_B3) * SRC_SB3            \
-            + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4            \
-            + ((x4) / SRC_B4) * SRC_S4 + ((x5) % SRC_B5) * SRC_SB5            \
+            + ((x2) / SRC_B2) * SRC_S2 + ((x3) % SRC_B3) * SRC_SB3 \
+            + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4 \
+            + ((x4) / SRC_B4) * SRC_S4 + ((x5) % SRC_B5) * SRC_SB5 \
             + ((x5) / SRC_B5) * SRC_S5)
 #else
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                             \
-    ((x0 % 2) + ((x0 % 16) / 2) * 32 + ((x0) / SRC_B0) * SRC_S0    \
-            + 2 * (x1 % 16) + ((x1) / SRC_B1) * SRC_S1             \
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
+    ((x0 % 2) + ((x0 % 16) / 2) * 32 + ((x0) / SRC_B0) * SRC_S0 \
+            + 2 * (x1 % 16) + ((x1) / SRC_B1) * SRC_S1 \
             + ((x2) % SRC_B2) * SRC_SB2 + ((x2) / SRC_B2) * SRC_S2 \
             + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3 \
             + ((x4) % SRC_B4) * SRC_SB4 + ((x4) / SRC_B4) * SRC_S4 \
@@ -52,17 +52,17 @@
 #if IN_OIHW8I16O2I
 #undef IN_OFF
 #if WITH_GROUP
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                                        \
-    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0 + (x2 % 2)          \
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0 + (x2 % 2) \
             + ((x2 % 16) / 2) * 32 + ((x2) / SRC_B2) * SRC_S2 + 2 * (x1 % 16) \
-            + ((x1) / SRC_B1) * SRC_S1 + ((x3) % SRC_B3) * SRC_SB3            \
-            + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4            \
-            + ((x4) / SRC_B4) * SRC_S4 + ((x5) % SRC_B5) * SRC_SB5            \
+            + ((x1) / SRC_B1) * SRC_S1 + ((x3) % SRC_B3) * SRC_SB3 \
+            + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4 \
+            + ((x4) / SRC_B4) * SRC_S4 + ((x5) % SRC_B5) * SRC_SB5 \
             + ((x5) / SRC_B5) * SRC_S5)
 #else
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                             \
-    ((x1 % 2) + ((x1 % 16) / 2) * 32 + ((x1) / SRC_B1) * SRC_S1    \
-            + 2 * (x0 % 16) + ((x0) / SRC_B0) * SRC_S0             \
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
+    ((x1 % 2) + ((x1 % 16) / 2) * 32 + ((x1) / SRC_B1) * SRC_S1 \
+            + 2 * (x0 % 16) + ((x0) / SRC_B0) * SRC_S0 \
             + ((x2) % SRC_B2) * SRC_SB2 + ((x2) / SRC_B2) * SRC_S2 \
             + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3 \
             + ((x4) % SRC_B4) * SRC_SB4 + ((x4) / SRC_B4) * SRC_S4 \
@@ -73,21 +73,21 @@
 #if IN_OIHW4O8I8O4I
 #undef IN_OFF
 #if WITH_GROUP
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                                   \
-    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0                \
-            + 4 * (p[x1 % 32] % 8) + ((p[x1 % 32]) / 8) * 256            \
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0 \
+            + 4 * (p[x1 % 32] % 8) + ((p[x1 % 32]) / 8) * 256 \
             + ((x1) / SRC_B1) * SRC_S1 + (x2 % 4) + ((x2 % 32) / 4) * 32 \
-            + ((x2) / SRC_B2) * SRC_S2 + ((x3) % SRC_B3) * SRC_SB3       \
-            + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4       \
-            + ((x4) / SRC_B4) * SRC_S4 + ((x5) % SRC_B5) * SRC_SB5       \
+            + ((x2) / SRC_B2) * SRC_S2 + ((x3) % SRC_B3) * SRC_SB3 \
+            + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4 \
+            + ((x4) / SRC_B4) * SRC_S4 + ((x5) % SRC_B5) * SRC_SB5 \
             + ((x5) / SRC_B5) * SRC_S5)
 #else
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                                   \
-    (4 * (p[x0 % 32] % 8) + (p[x0 % 32] / 8) * 256 + ((x0) / SRC_B0) * SRC_S0     \
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
+    (4 * (p[x0 % 32] % 8) + (p[x0 % 32] / 8) * 256 + ((x0) / SRC_B0) * SRC_S0 \
             + (x1 % 4) + ((x1 % 32) / 4) * 32 + ((x1) / SRC_B1) * SRC_S1 \
-            + ((x2) % SRC_B2) * SRC_SB2 + ((x2) / SRC_B2) * SRC_S2       \
-            + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3       \
-            + ((x4) % SRC_B4) * SRC_SB4 + ((x4) / SRC_B4) * SRC_S4       \
+            + ((x2) % SRC_B2) * SRC_SB2 + ((x2) / SRC_B2) * SRC_S2 \
+            + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3 \
+            + ((x4) % SRC_B4) * SRC_SB4 + ((x4) / SRC_B4) * SRC_S4 \
             + ((x5) % SRC_B5) * SRC_SB5 + ((x5) / SRC_B5) * SRC_S5)
 #endif
 #endif
@@ -95,41 +95,41 @@
 #if IN_IOHW4I8O8I4O
 #undef IN_OFF
 #if WITH_GROUP
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                                   \
-    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0                \
-            + 4 * (p[x2 % 32] % 8) + ((p[x2 % 32]) / 8) * 256            \
-            + ((x2) / SRC_B2) * SRC_S2 + (x1 % 4)                        \
-            + ((x1 % 32) / 4) * 32 + ((x1) / SRC_B1) * SRC_S1            \
-            + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3       \
-            + ((x4) % SRC_B4) * SRC_SB4 + ((x4) / SRC_B4) * SRC_S4       \
-            + ((x5) % SRC_B5) * SRC_SB5 + ((x5) / SRC_B5) * SRC_S5)
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0 \
+            + 4 * (p[x2 % 32] % 8) + ((p[x2 % 32]) / 8) * 256 \
+            + ((x2) / SRC_B2) * SRC_S2 + (x1 % 4) + ((x1 % 32) / 4) * 32 \
+            + ((x1) / SRC_B1) * SRC_S1 + ((x3) % SRC_B3) * SRC_SB3 \
+            + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4 \
+            + ((x4) / SRC_B4) * SRC_S4 + ((x5) % SRC_B5) * SRC_SB5 \
+            + ((x5) / SRC_B5) * SRC_S5)
 #else
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                                   \
-    (4 * (p[x1 % 32] % 8) + ((p[x1 % 32]) / 8) * 256                     \
-            + ((x1) / SRC_B1) * SRC_S1 + (x0 % 4)                        \
-            + ((x0 % 32) / 4) * 32 + ((x0) / SRC_B0) * SRC_S0            \
-            + ((x2) % SRC_B2) * SRC_SB2 + ((x2) / SRC_B2) * SRC_S2       \
-            + ((x3) % SRC_B3) * SRC_SB3 + ((x3) / SRC_B3) * SRC_S3       \
-            + ((x4) % SRC_B4) * SRC_SB4 + ((x4) / SRC_B4) * SRC_S4       \
-            + ((x5) % SRC_B5) * SRC_SB5 + ((x5) / SRC_B5) * SRC_S5)
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
+    (4 * (p[x1 % 32] % 8) + ((p[x1 % 32]) / 8) * 256 \
+            + ((x1) / SRC_B1) * SRC_S1 + (x0 % 4) + ((x0 % 32) / 4) * 32 \
+            + ((x0) / SRC_B0) * SRC_S0 + ((x2) % SRC_B2) * SRC_SB2 \
+            + ((x2) / SRC_B2) * SRC_S2 + ((x3) % SRC_B3) * SRC_SB3 \
+            + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4 \
+            + ((x4) / SRC_B4) * SRC_S4 + ((x5) % SRC_B5) * SRC_SB5 \
+            + ((x5) / SRC_B5) * SRC_S5)
 #endif
 #endif
 
 #if IN_OIHW2O8I8O2I
 #undef IN_OFF
 #if WITH_GROUP
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                                 \
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
     (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0 + ((x2) % 2) \
-            + ((x1) % 8) * 2 + (((x2) % 16) / 2) * 16                  \
-            + (((x1) % 16) / 8) * 128 + ((x1) / SRC_B1) * SRC_S1       \
-            + ((x2) / SRC_B2) * SRC_S2 + ((x3) % SRC_B3) * SRC_SB3     \
-            + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4     \
-            + ((x4) / SRC_B4) * SRC_S4 + ((x5) % SRC_B5) * SRC_SB5     \
+            + ((x1) % 8) * 2 + (((x2) % 16) / 2) * 16 \
+            + (((x1) % 16) / 8) * 128 + ((x1) / SRC_B1) * SRC_S1 \
+            + ((x2) / SRC_B2) * SRC_S2 + ((x3) % SRC_B3) * SRC_SB3 \
+            + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4 \
+            + ((x4) / SRC_B4) * SRC_S4 + ((x5) % SRC_B5) * SRC_SB5 \
             + ((x5) / SRC_B5) * SRC_S5)
 #else
-#define IN_OFF(x0, x1, x2, x3, x4, x5)                             \
-    (((x1) % 2) + ((x0) % 8) * 2 + (((x1) % 16) / 2) * 16          \
-            + (((x0) % 16) / 8) * 128 + ((x0) / SRC_B0) * SRC_S0   \
+#define IN_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x1) % 2) + ((x0) % 8) * 2 + (((x1) % 16) / 2) * 16 \
+            + (((x0) % 16) / 8) * 128 + ((x0) / SRC_B0) * SRC_S0 \
             + ((x1) / SRC_B1) * SRC_S1 + ((x2) % SRC_B2) * SRC_SB2 \
             + ((x2) / SRC_B2) * SRC_S2 + ((x3) % SRC_B3) * SRC_SB3 \
             + ((x3) / SRC_B3) * SRC_S3 + ((x4) % SRC_B4) * SRC_SB4 \
@@ -138,8 +138,8 @@
 #endif
 #endif
 
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                            \
-    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0          \
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0 \
             + ((x1) % DST_B1) * DST_SB1 + ((x1) / DST_B1) * DST_S1 \
             + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2 \
             + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3 \
@@ -149,17 +149,17 @@
 #if OUT_OIHW8O16I2O
 #undef OUT_OFF
 #if WITH_GROUP
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                                       \
-    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0 + (x1 % 2)          \
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0 + (x1 % 2) \
             + ((x1 % 16) / 2) * 32 + ((x1) / DST_B1) * DST_S1 + 2 * (x2 % 16) \
-            + ((x2) / DST_B2) * DST_S2 + ((x3) % DST_B3) * DST_SB3            \
-            + ((x3) / DST_B3) * DST_S3 + ((x4) % DST_B4) * DST_SB4            \
-            + ((x4) / DST_B4) * DST_S4 + ((x5) % DST_B5) * DST_SB5            \
+            + ((x2) / DST_B2) * DST_S2 + ((x3) % DST_B3) * DST_SB3 \
+            + ((x3) / DST_B3) * DST_S3 + ((x4) % DST_B4) * DST_SB4 \
+            + ((x4) / DST_B4) * DST_S4 + ((x5) % DST_B5) * DST_SB5 \
             + ((x5) / DST_B5) * DST_S5)
 #else
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                            \
-    ((x0 % 2) + ((x0 % 16) / 2) * 32 + ((x0) / DST_B0) * DST_S0    \
-            + 2 * (x1 % 16) + ((x1) / DST_B1) * DST_S1             \
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
+    ((x0 % 2) + ((x0 % 16) / 2) * 32 + ((x0) / DST_B0) * DST_S0 \
+            + 2 * (x1 % 16) + ((x1) / DST_B1) * DST_S1 \
             + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2 \
             + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3 \
             + ((x4) % DST_B4) * DST_SB4 + ((x4) / DST_B4) * DST_S4 \
@@ -170,17 +170,17 @@
 #if OUT_OIHW8I16O2I
 #undef OUT_OFF
 #if WITH_GROUP
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                                       \
-    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0 + (x2 % 2)          \
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0 + (x2 % 2) \
             + ((x2 % 16) / 2) * 32 + ((x2) / DST_B2) * DST_S2 + 2 * (x1 % 16) \
-            + ((x1) / DST_B1) * DST_S1 + ((x3) % DST_B3) * DST_SB3            \
-            + ((x3) / DST_B3) * DST_S3 + ((x4) % DST_B4) * DST_SB4            \
-            + ((x4) / DST_B4) * DST_S4 + ((x5) % DST_B5) * DST_SB5            \
+            + ((x1) / DST_B1) * DST_S1 + ((x3) % DST_B3) * DST_SB3 \
+            + ((x3) / DST_B3) * DST_S3 + ((x4) % DST_B4) * DST_SB4 \
+            + ((x4) / DST_B4) * DST_S4 + ((x5) % DST_B5) * DST_SB5 \
             + ((x5) / DST_B5) * DST_S5)
 #else
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                            \
-    ((x1 % 2) + ((x1 % 16) / 2) * 32 + ((x1) / DST_B1) * DST_S1    \
-            + 2 * (x0 % 16) + ((x0) / DST_B0) * DST_S0             \
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
+    ((x1 % 2) + ((x1 % 16) / 2) * 32 + ((x1) / DST_B1) * DST_S1 \
+            + 2 * (x0 % 16) + ((x0) / DST_B0) * DST_S0 \
             + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2 \
             + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3 \
             + ((x4) % DST_B4) * DST_SB4 + ((x4) / DST_B4) * DST_S4 \
@@ -191,21 +191,21 @@
 #if OUT_OIHW4O8I8O4I
 #undef OUT_OFF
 #if WITH_GROUP
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                                  \
-    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0                \
-            + 4 * (p[x1 % 32] % 8) + ((p[x1 % 32]) / 8) * 256            \
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0 \
+            + 4 * (p[x1 % 32] % 8) + ((p[x1 % 32]) / 8) * 256 \
             + ((x1) / DST_B1) * DST_S1 + (x2 % 4) + ((x2 % 32) / 4) * 32 \
-            + ((x2) / DST_B2) * DST_S2 + ((x3) % DST_B3) * DST_SB3       \
-            + ((x3) / DST_B3) * DST_S3 + ((x4) % DST_B4) * DST_SB4       \
-            + ((x4) / DST_B4) * DST_S4 + ((x5) % DST_B5) * DST_SB5       \
+            + ((x2) / DST_B2) * DST_S2 + ((x3) % DST_B3) * DST_SB3 \
+            + ((x3) / DST_B3) * DST_S3 + ((x4) % DST_B4) * DST_SB4 \
+            + ((x4) / DST_B4) * DST_S4 + ((x5) % DST_B5) * DST_SB5 \
             + ((x5) / DST_B5) * DST_S5)
 #else
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                                  \
-    (4 * (p[x0 % 32] % 8) + (p[x0  % 32] / 8) * 256 + ((x0) / DST_B0) * DST_S0     \
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
+    (4 * (p[x0 % 32] % 8) + (p[x0 % 32] / 8) * 256 + ((x0) / DST_B0) * DST_S0 \
             + (x1 % 4) + ((x1 % 32) / 4) * 32 + ((x1) / DST_B1) * DST_S1 \
-            + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2       \
-            + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3       \
-            + ((x4) % DST_B4) * DST_SB4 + ((x4) / DST_B4) * DST_S4       \
+            + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2 \
+            + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3 \
+            + ((x4) % DST_B4) * DST_SB4 + ((x4) / DST_B4) * DST_S4 \
             + ((x5) % DST_B5) * DST_SB5 + ((x5) / DST_B5) * DST_S5)
 #endif
 #endif
@@ -213,44 +213,44 @@
 #if OUT_IOHW4I8O8I4O
 #undef OUT_OFF
 #if WITH_GROUP
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                                  \
-    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0                \
-            + 4 * (p[x2 % 32] % 8) + ((p[x2 % 32]) / 8) * 256            \
-            + ((x2) / DST_B2) * DST_S2 + (x1 % 4)                        \
-            + ((x1 % 32) / 4) * 32 + ((x1) / DST_B1) * DST_S1            \
-            + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3       \
-            + ((x4) % DST_B4) * DST_SB4 + ((x4) / DST_B4) * DST_S4       \
-            + ((x5) % DST_B5) * DST_SB5 + ((x5) / DST_B5) * DST_S5)
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
+    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0 \
+            + 4 * (p[x2 % 32] % 8) + ((p[x2 % 32]) / 8) * 256 \
+            + ((x2) / DST_B2) * DST_S2 + (x1 % 4) + ((x1 % 32) / 4) * 32 \
+            + ((x1) / DST_B1) * DST_S1 + ((x3) % DST_B3) * DST_SB3 \
+            + ((x3) / DST_B3) * DST_S3 + ((x4) % DST_B4) * DST_SB4 \
+            + ((x4) / DST_B4) * DST_S4 + ((x5) % DST_B5) * DST_SB5 \
+            + ((x5) / DST_B5) * DST_S5)
 #else
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                                  \
-    (4 * (p[x1 % 32] % 8) + ((p[x1 % 32]) / 8) * 256                     \
-            + ((x1) / DST_B1) * DST_S1 + (x0 % 4)                        \
-            + ((x0 % 32) / 4) * 32 + ((x0) / DST_B0) * DST_S0            \
-            + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2       \
-            + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3       \
-            + ((x4) % DST_B4) * DST_SB4 + ((x4) / DST_B4) * DST_S4       \
-            + ((x5) % DST_B5) * DST_SB5 + ((x5) / DST_B5) * DST_S5)
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
+    (4 * (p[x1 % 32] % 8) + ((p[x1 % 32]) / 8) * 256 \
+            + ((x1) / DST_B1) * DST_S1 + (x0 % 4) + ((x0 % 32) / 4) * 32 \
+            + ((x0) / DST_B0) * DST_S0 + ((x2) % DST_B2) * DST_SB2 \
+            + ((x2) / DST_B2) * DST_S2 + ((x3) % DST_B3) * DST_SB3 \
+            + ((x3) / DST_B3) * DST_S3 + ((x4) % DST_B4) * DST_SB4 \
+            + ((x4) / DST_B4) * DST_S4 + ((x5) % DST_B5) * DST_SB5 \
+            + ((x5) / DST_B5) * DST_S5)
 #endif
 #endif
 
 #if OUT_OIHW2O8I8O2I
 #undef OUT_OFF
 #if WITH_GROUP
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                                \
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
     (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0 + ((x2) % 2) \
-            + ((x1) % 8) * 2 + (((x2) % 16) / 2) * 16                  \
-            + (((x1) % 16) / 8) * 128 + ((x1) / DST_B1) * DST_S1       \
-            + ((x2) / DST_B2) * DST_S2 + ((x3) % DST_B3) * DST_SB3     \
-            + ((x3) / DST_B3) * DST_S3 + ((x4) % DST_B4) * DST_SB4     \
-            + ((x4) / DST_B4) * DST_S4 + ((x5) % DST_B5) * DST_SB5     \
+            + ((x1) % 8) * 2 + (((x2) % 16) / 2) * 16 \
+            + (((x1) % 16) / 8) * 128 + ((x1) / DST_B1) * DST_S1 \
+            + ((x2) / DST_B2) * DST_S2 + ((x3) % DST_B3) * DST_SB3 \
+            + ((x3) / DST_B3) * DST_S3 + ((x4) % DST_B4) * DST_SB4 \
+            + ((x4) / DST_B4) * DST_S4 + ((x5) % DST_B5) * DST_SB5 \
             + ((x5) / DST_B5) * DST_S5)
 #else
-#define OUT_OFF(x0, x1, x2, x3, x4, x5)                                     \
+#define OUT_OFF(x0, x1, x2, x3, x4, x5) \
     ((x1 % 2) + (x0 % 8) * 2 + ((x1 % 16) / 2) * 16 + ((x0 % 16) / 8) * 128 \
-            + ((x0) / DST_B0) * DST_S0 + ((x1) / DST_B1) * DST_S1           \
-            + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2          \
-            + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3          \
-            + ((x4) % DST_B4) * DST_SB4 + ((x4) / DST_B4) * DST_S4          \
+            + ((x0) / DST_B0) * DST_S0 + ((x1) / DST_B1) * DST_S1 \
+            + ((x2) % DST_B2) * DST_SB2 + ((x2) / DST_B2) * DST_S2 \
+            + ((x3) % DST_B3) * DST_SB3 + ((x3) / DST_B3) * DST_S3 \
+            + ((x4) % DST_B4) * DST_SB4 + ((x4) / DST_B4) * DST_S4 \
             + ((x5) % DST_B5) * DST_SB5 + ((x5) / DST_B5) * DST_S5)
 #endif
 #endif
@@ -497,59 +497,59 @@ ushort8 float_to_bfloat8(float8 b) {
 
 #if SCALE_QUANT
 
-#define REORDER(_out, _in, _a, _b)               \
-    do {                                         \
+#define REORDER(_out, _in, _a, _b) \
+    do { \
         const float _x = CONVERT_IN_TO_F32(_in); \
-        const float _s = _a * _x + _b;           \
-        _out = CONVERT_F32_TO_OUT(_s);           \
+        const float _s = _a * _x + _b; \
+        _out = CONVERT_F32_TO_OUT(_s); \
     } while (0)
-#define REORDER8(_out, _in, _a, _b)                 \
-    do {                                            \
+#define REORDER8(_out, _in, _a, _b) \
+    do { \
         const float8 _x = CONVERT_IN_TO_F32_8(_in); \
-        const float8 _s = _a * _x + _b;             \
-        _out = CONVERT_F32_TO_OUT8(_s);             \
+        const float8 _s = _a * _x + _b; \
+        _out = CONVERT_F32_TO_OUT8(_s); \
     } while (0)
 
 #elif WITH_SUM_A
 
-#define REORDER(_out, _in, _a, _b)               \
-    do {                                         \
+#define REORDER(_out, _in, _a, _b) \
+    do { \
         const float _x = CONVERT_IN_TO_F32(_in); \
-        const float _s = _a * _x;                \
-        _out = CONVERT_F32_TO_OUT(_s);           \
+        const float _s = _a * _x; \
+        _out = CONVERT_F32_TO_OUT(_s); \
     } while (0)
-#define REORDER8(_out, _in, _a, _b)                 \
-    do {                                            \
+#define REORDER8(_out, _in, _a, _b) \
+    do { \
         const float8 _x = CONVERT_IN_TO_F32_8(_in); \
-        const float8 _s = _a * _x;                  \
-        _out = CONVERT_F32_TO_OUT8(_s);             \
+        const float8 _s = _a * _x; \
+        _out = CONVERT_F32_TO_OUT8(_s); \
     } while (0)
 
 #elif WITH_SUM_AB
 
-#define REORDER(_out, _in, _a, _b)                 \
-    do {                                           \
-        const float _x = CONVERT_IN_TO_F32(_in);   \
+#define REORDER(_out, _in, _a, _b) \
+    do { \
+        const float _x = CONVERT_IN_TO_F32(_in); \
         const float _y = CONVERT_OUT_TO_F32(_out); \
-        const float _s = _a * _x + _b * _y;        \
-        _out = CONVERT_F32_TO_OUT(_s);             \
+        const float _s = _a * _x + _b * _y; \
+        _out = CONVERT_F32_TO_OUT(_s); \
     } while (0)
-#define REORDER8(_out, _in, _a, _b)                   \
-    do {                                              \
-        const float8 _x = CONVERT_IN_TO_F32_8(_in);   \
+#define REORDER8(_out, _in, _a, _b) \
+    do { \
+        const float8 _x = CONVERT_IN_TO_F32_8(_in); \
         const float8 _y = CONVERT_OUT_TO_F32_8(_out); \
-        const float8 _s = _a * _x + _b * _y;          \
-        _out = CONVERT_F32_TO_OUT8(_s);               \
+        const float8 _s = _a * _x + _b * _y; \
+        _out = CONVERT_F32_TO_OUT8(_s); \
     } while (0)
 
 #else // WITH_SUM_AB == 0
 
-#define REORDER(_out, _in, _a, _b)     \
-    do {                               \
+#define REORDER(_out, _in, _a, _b) \
+    do { \
         _out = CONVERT_IN_TO_OUT(_in); \
     } while (0)
-#define REORDER8(_out, _in, _a, _b)     \
-    do {                                \
+#define REORDER8(_out, _in, _a, _b) \
+    do { \
         _out = CONVERT_IN_TO_OUT8(_in); \
     } while (0)
 
@@ -573,8 +573,8 @@ ushort8 float_to_bfloat8(float8 b) {
 #define SCALE_S4 (SCALE_D5)
 #define SCALE_S5 (1)
 
-#define SCALE_OFF(x0, x1, x2, x3, x4, x5)                           \
-    ((x0)*SCALE_S0 * MASK_D(0) + (x1)*SCALE_S1 * MASK_D(1)          \
+#define SCALE_OFF(x0, x1, x2, x3, x4, x5) \
+    ((x0)*SCALE_S0 * MASK_D(0) + (x1)*SCALE_S1 * MASK_D(1) \
             + (x2)*SCALE_S2 * MASK_D(2) + (x3)*SCALE_S3 * MASK_D(3) \
             + (x4)*SCALE_S4 * MASK_D(4) + (x5)*SCALE_S5 * MASK_D(5))
 
@@ -591,8 +591,8 @@ any2any_kernel(__global DT_IN *input, __global DT_OUT *output, float alpha,
     input += SRC_OFFSET_PAD;
     output += DST_OFFSET_PAD;
 
-    const int p[32] = { 0, 8, 16, 24, 1, 9, 17, 25, 2, 10, 18, 26, 3, 11, 19,
-        27, 4, 12, 20, 28, 5, 13, 21, 29, 6, 14, 22, 30, 7, 15, 23, 31 };
+    const int p[32] = {0, 8, 16, 24, 1, 9, 17, 25, 2, 10, 18, 26, 3, 11, 19, 27,
+            4, 12, 20, 28, 5, 13, 21, 29, 6, 14, 22, 30, 7, 15, 23, 31};
 
 #if REF_REORDER
 

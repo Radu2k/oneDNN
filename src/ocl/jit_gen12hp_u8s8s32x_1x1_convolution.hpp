@@ -21,10 +21,10 @@
 
 #include "common/c_types_map.hpp"
 #include "compute/compute.hpp"
+#include "ocl/jit_gen12hp_u8s8s32x_1x1_conv_kernel.hpp"
 #include "ocl/ocl_convolution_pd.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
-#include "ocl/jit_gen12hp_u8s8s32x_1x1_conv_kernel.hpp"
 
 extern const char *gen12hp_1x1_conv_fwd_data_u8s8s32x_kernel;
 
@@ -33,18 +33,16 @@ namespace impl {
 namespace ocl {
 
 template <impl::data_type_t dst_type>
-struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t: public primitive_t {
-    struct pd_t: public ocl_convolution_fwd_pd_t {
-        pd_t(engine_t *engine,
-                const convolution_desc_t *adesc,
+struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t : public primitive_t {
+    struct pd_t : public ocl_convolution_fwd_pd_t {
+        pd_t(engine_t *engine, const convolution_desc_t *adesc,
                 const primitive_attr_t *attr,
                 const convolution_fwd_pd_t *hint_fwd_pd)
-            : ocl_convolution_fwd_pd_t(engine, adesc, attr,
-                    hint_fwd_pd), jcp_()
-        {}
+            : ocl_convolution_fwd_pd_t(engine, adesc, attr, hint_fwd_pd)
+            , jcp_() {}
 
-        DECLARE_COMMON_PD_T("ocl:gen12hp",
-            jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t);
+        DECLARE_COMMON_PD_T(
+                "ocl:gen12hp", jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t);
 
         status_t init() {
             using namespace prop_kind;
@@ -52,23 +50,21 @@ struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t: public primitive_t {
             assert(this->engine()->kind() == engine_kind::gpu);
 
             bool ok = true
-                && utils::one_of(this->desc()->prop_kind, forward_training,
-                    forward_inference)
-                && this->desc()->alg_kind == alg_kind::convolution_direct
-                && expect_data_types(u8, s8, f32, dst_type, s32);
-            if (!ok)
-                return status::unimplemented;
+                    && utils::one_of(this->desc()->prop_kind, forward_training,
+                            forward_inference)
+                    && this->desc()->alg_kind == alg_kind::convolution_direct
+                    && expect_data_types(u8, s8, f32, dst_type, s32);
+            if (!ok) return status::unimplemented;
 
             status_t status
-                = jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel::init_conf(jcp_,
-                    *this->desc(), *this->src_md(), *this->weights_md(),
-                    *this->dst_md(), *this->weights_md(1),
-                    *this->attr());
-            if (status != status::success)
-                return status;
+                    = jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel::init_conf(jcp_,
+                            *this->desc(), *this->src_md(), *this->weights_md(),
+                            *this->dst_md(), *this->weights_md(1),
+                            *this->attr());
+            if (status != status::success) return status;
 
             ok = set_default_formats_common(
-                jcp_.src_tag, jcp_.wei_tag, jcp_.dst_tag);
+                    jcp_.src_tag, jcp_.wei_tag, jcp_.dst_tag);
             return ok ? status::success : status::unimplemented;
         }
 
@@ -80,14 +76,13 @@ struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t: public primitive_t {
 
         compute::kernel_ctx_t kernel_ctx;
         auto status = jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel::init_const_def(
-            kernel_ctx, pd()->jcp_);
+                kernel_ctx, pd()->jcp_);
         if (status != status::success) return status;
 
         auto *compute_engine
-            = utils::downcast<compute::compute_engine_t *>(engine());
+                = utils::downcast<compute::compute_engine_t *>(engine());
         compute_engine->create_kernel(&kernel_, kernel_name, kernel_ctx);
-        if (!kernel_)
-            return status::runtime_error;
+        if (!kernel_) return status::runtime_error;
 
         return status::success;
     }
@@ -97,9 +92,7 @@ struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t: public primitive_t {
         ker_ = new jit_gen12hp_u8s8s32x_1x1_conv_fwd_kernel(pd()->jcp_);
     }
 
-    ~jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t() {
-        delete ker_;
-    }
+    ~jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t() { delete ker_; }
 
     typedef typename prec_traits<dst_type>::type dst_data_t;
 
@@ -114,8 +107,8 @@ private:
     compute::kernel_t kernel_;
 };
 
-}
-}
-}
+} // namespace ocl
+} // namespace impl
+} // namespace mkldnn
 
 #endif

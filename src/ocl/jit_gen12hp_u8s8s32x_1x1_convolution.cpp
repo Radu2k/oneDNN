@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "ocl_stream.hpp"
 #include "jit_gen12hp_u8s8s32x_1x1_convolution.hpp"
+#include "ocl_stream.hpp"
 
 namespace mkldnn {
 namespace impl {
@@ -31,7 +31,7 @@ status_t jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<dst_type>::execute_forward(
 
     const auto &jcp = ker_->jcp;
     auto *compute_stream
-        = utils::downcast<compute::compute_stream_t *>(ctx.stream());
+            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, src);
@@ -56,6 +56,6 @@ using namespace data_type;
 template struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<s8>;
 template struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<u8>;
 
-}
-}
-}
+} // namespace ocl
+} // namespace impl
+} // namespace mkldnn

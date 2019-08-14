@@ -51,8 +51,7 @@ struct ocl_cross_engine_reorder_t : public primitive_t {
 
             auto _pd = new pd_t(
                     engine, attr, src_engine, src_md, dst_engine, dst_md);
-            if (_pd == nullptr)
-                return status::out_of_memory;
+            if (_pd == nullptr) return status::out_of_memory;
             if (_pd->init() != status::success) {
                 delete _pd;
                 return status::unimplemented;
@@ -70,11 +69,11 @@ struct ocl_cross_engine_reorder_t : public primitive_t {
                     && utils::one_of(dst_engine_->kind(), engine_kind::gpu,
                             engine_kind::cpu)
                     && (attr()->has_default_values()
-                        || IMPLICATION(post_ops.len_ != 0,
-                            post_ops.len_ == 1
-                            && post_ops.entry_[0].kind == primitive_kind::sum));
-            if (!args_ok)
-                return status::unimplemented;
+                            || IMPLICATION(post_ops.len_ != 0,
+                                    post_ops.len_ == 1
+                                            && post_ops.entry_[0].kind
+                                                    == primitive_kind::sum));
+            if (!args_ok) return status::unimplemented;
 
             auto *compute_engine = utils::downcast<compute::compute_engine_t *>(
                     dst_engine_->kind() == engine_kind::gpu ? dst_engine_
@@ -82,17 +81,16 @@ struct ocl_cross_engine_reorder_t : public primitive_t {
 
             args_ok = args_ok
                     && compute_engine->mayiuse(
-                               compute::device_ext_t::intel_subgroups)
-                    && IMPLICATION(utils::one_of(data_type::f16,
-                                           src_md()->data_type,
-                                           dst_md()->data_type),
-                               true
-                                       && compute_engine->mayiuse(
-                                                  compute::device_ext_t::
-                                                          khr_fp16)
-                                       && compute_engine->mayiuse(
-                                                  compute::device_ext_t::
-                                                          intel_subgroups_short));
+                            compute::device_ext_t::intel_subgroups)
+                    && IMPLICATION(
+                            utils::one_of(data_type::f16, src_md()->data_type,
+                                    dst_md()->data_type),
+                            true
+                                    && compute_engine->mayiuse(
+                                            compute::device_ext_t::khr_fp16)
+                                    && compute_engine->mayiuse(
+                                            compute::device_ext_t::
+                                                    intel_subgroups_short));
 
             jit_simple_reorder_kernel::init_conf(
                     this, jrp_, src_md(), dst_md());
@@ -109,28 +107,24 @@ struct ocl_cross_engine_reorder_t : public primitive_t {
 
         auto status = jit_simple_reorder_kernel::init_const_def(
                 kernel_ctx, pd()->jrp_, pd()->src_md(), pd()->dst_md());
-        if (status != status::success)
-            return status;
+        if (status != status::success) return status;
 
         compute_engine->create_kernel(&kernel_, "any2any_kernel", kernel_ctx);
-        if (!kernel_)
-            return status::runtime_error;
+        if (!kernel_) return status::runtime_error;
 
         if (pd()->jrp_.do_reorder) {
             size_t size = pd()->jrp_.nelems * sizeof(float);
             memory_storage_t *temp_buf_ptr;
             engine()->create_memory_storage(&temp_buf_ptr, size);
             temp_buf.reset(temp_buf_ptr);
-            if (!temp_buf)
-                return status::runtime_error;
+            if (!temp_buf) return status::runtime_error;
         }
         if (pd()->jrp_.scale_quant) {
             size_t size = pd()->attr()->output_scales_.count_ * sizeof(float);
             memory_storage_t *scales_ptr;
             engine()->create_memory_storage(&scales_ptr, size);
             scales.reset(scales_ptr);
-            if (!scales)
-                return status::runtime_error;
+            if (!scales) return status::runtime_error;
         }
 
         return status::success;
