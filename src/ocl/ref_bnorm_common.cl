@@ -25,7 +25,7 @@
 
 #if BNORM_FWD == 1
 
-#    if IC_BLOCK == 16
+#if IC_BLOCK == 16
 
 __attribute__((reqd_work_group_size(1, 1, 16))) // attr:no-format
 __attribute__((intel_reqd_sub_group_size(16))) // attr:no-format
@@ -135,7 +135,7 @@ reduce_variance(__global float *reduce_temp, __global float *variance) {
 #endif
 
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) // attr:no-format
-#    if IC_BLOCK == 16
+#if IC_BLOCK == 16
 __attribute__((intel_reqd_sub_group_size(LWS_1))) // attr:no-format
 #endif
 __kernel void
@@ -143,7 +143,7 @@ ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
         __global float *variance, __global DATA_T *dst,
         __global float *scaleshift, __global int *ws, float eps) {
 
-#    if IC_BLOCK == 16
+#if IC_BLOCK == 16
     const int n = get_global_id(0) * MB_BLOCK;
     const int c = get_group_id(1) * IC_BLOCK;
     const int sp = get_global_id(2);
@@ -294,7 +294,7 @@ ref_bnorm_fwd_kernel(__global DATA_T *src, __global float *mean,
 
 #if BNORM_BWD == 1
 
-#    if IC_BLOCK == 16
+#if IC_BLOCK == 16
 __attribute__((reqd_work_group_size(1, 1, 16))) // attr:no-format
 __attribute__((intel_reqd_sub_group_size(16))) // attr:no-format
 __kernel void
@@ -393,7 +393,7 @@ reduce_stats(__global float *reduce_temp, __global float *diff_scaleshift,
 #endif
 
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) // attr:no-format
-#    if IC_BLOCK == 16
+#if IC_BLOCK == 16
 __attribute__((intel_reqd_sub_group_size(LWS_1))) // attr:no-format
 #endif
 __kernel void
@@ -402,7 +402,7 @@ ref_bnorm_bwd_kernel(__global DATA_T *src, __global float *mean,
         __global float *scaleshift, __global int *ws, __global DATA_T *diff_src,
         __global float *diff_scaleshift, float eps) {
 
-#    if IC_BLOCK == 16
+#if IC_BLOCK == 16
     const int n = get_global_id(0) * MB_BLOCK;
     const int c = get_group_id(1) * IC_BLOCK;
     const int sp = get_global_id(2);

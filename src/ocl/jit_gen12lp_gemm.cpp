@@ -32,22 +32,22 @@ struct jit_gen12lp_gemm_driver_params<data_type::s32, true> {
     //unroll_m = 32, unroll_n = 16
     static constexpr auto block_m = 6 * 32;
     static constexpr auto block_n = 4 * 16;
-    static constexpr auto block_k = (((32768 / ((block_m >= block_n) ? block_m : block_n)) + 0) & ~3);
+    static constexpr auto block_k
+            = (((32768 / ((block_m >= block_n) ? block_m : block_n)) + 0) & ~3);
 };
 
 template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
 status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_x8x8s32(
-        compute::compute_stream_t *compute_stream,
-        const memory_storage_t &a, const memory_storage_t &b,
-        const memory_storage_t &c, int64_t offset_a, int64_t offset_b,
-        int64_t offset_c, int64_t lda, int64_t ldb, int64_t ldc, int64_t m,
-        int64_t n, int64_t k, int64_t beta, ao_t ao, bo_t bo, 
-        const memory_storage_t &co, int64_t offset_co, bool apply_co,
+        compute::compute_stream_t *compute_stream, const memory_storage_t &a,
+        const memory_storage_t &b, const memory_storage_t &c, int64_t offset_a,
+        int64_t offset_b, int64_t offset_c, int64_t lda, int64_t ldb,
+        int64_t ldc, int64_t m, int64_t n, int64_t k, int64_t beta, ao_t ao,
+        bo_t bo, const memory_storage_t &co, int64_t offset_co, bool apply_co,
         bool apply_eltwise, c_t eltwise_alpha, c_t eltwise_beta) const {
 
     auto &kernel = compute_x8x8s32_kernel_;
     assert(kernel);
-    
+
     int unroll_m, unroll_n, block_m, block_n;
     jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type, c_type>::get_unrolls(
             unroll_m, unroll_n);
@@ -58,7 +58,7 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_x8x8s32(
 
     int sizea = ((mm + unroll_m - 1) & ~(unroll_m - 1)) * ((k + 3) & ~3);
     int sizeb = ((nn + unroll_n - 1) & ~(unroll_n - 1)) * ((k + 3) & ~3);
-   
+
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, a);
     arg_list.set(1, b);
@@ -84,37 +84,35 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_x8x8s32(
     arg_list.set(21, eltwise_alpha);
     arg_list.set(22, eltwise_beta);
 
-
     size_t nthreads_x = (m + block_m - 1) / block_m;
     size_t nthreads_y = (n + block_n - 1) / block_n;
 
     int GRX = 8;
-    
-    size_t lthreads0 = GRX;                    //8
-    size_t lthreads1 = block_m / unroll_m;     //6  
-    size_t lthreads2 = block_n / unroll_n;     //4
 
-    size_t gthreads0 = lthreads0;              //8
-    size_t gthreads1 = lthreads1 * nthreads_x;    
-    size_t gthreads2 = lthreads2 * nthreads_y;  
-    
-    size_t gws[3] = { gthreads0, gthreads1, gthreads2 };
-    size_t lws[3] = { lthreads0, lthreads1, lthreads2 };
-    
+    size_t lthreads0 = GRX; //8
+    size_t lthreads1 = block_m / unroll_m; //6
+    size_t lthreads2 = block_n / unroll_n; //4
+
+    size_t gthreads0 = lthreads0; //8
+    size_t gthreads1 = lthreads1 * nthreads_x;
+    size_t gthreads2 = lthreads2 * nthreads_y;
+
+    size_t gws[3] = {gthreads0, gthreads1, gthreads2};
+    size_t lws[3] = {lthreads0, lthreads1, lthreads2};
+
     auto nd_range = compute::nd_range_t(gws, lws);
 
-    return compute_stream -> parallel_for(nd_range, kernel, arg_list);
+    return compute_stream->parallel_for(nd_range, kernel, arg_list);
 }
-
 
 template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
 status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_scale_x8x8s32(
-                 compute::compute_stream_t *compute_stream, const memory_storage_t
-                 &c_temp, const memory_storage_t &c, char offsetc, int64_t
-                 offset_c, int64_t m, int64_t n, int64_t ldc, float alpha,
-                 float beta, const memory_storage_t &co, int64_t offset_co,
-                 bool alpha_is_zero, bool apply_eltwise,
-                 c_t eltwise_alpha, c_t eltwise_beta) const {
+        compute::compute_stream_t *compute_stream,
+        const memory_storage_t &c_temp, const memory_storage_t &c, char offsetc,
+        int64_t offset_c, int64_t m, int64_t n, int64_t ldc, float alpha,
+        float beta, const memory_storage_t &co, int64_t offset_co,
+        bool alpha_is_zero, bool apply_eltwise, c_t eltwise_alpha,
+        c_t eltwise_beta) const {
 
     auto &kernel = scale_x8x8s32_kernel_;
 
@@ -136,7 +134,6 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_scale_x8x8s32(
     arg_list.set(13, eltwise_alpha);
     arg_list.set(14, eltwise_beta);
 
-
     int unroll_m, unroll_n;
 
     jit_gen12lp_gemm_scale_x8x8s32_kernel<a_type, b_type, c_type>::get_unrolls(
@@ -148,8 +145,8 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_scale_x8x8s32(
     size_t lthreads_x = 16;
     size_t lthreads_y = 1;
 
-    size_t gws[3] = { nthreads_x * lthreads_x, nthreads_y, 1 };
-    size_t lws[3] = { lthreads_x, lthreads_y, 1 };
+    size_t gws[3] = {nthreads_x * lthreads_x, nthreads_y, 1};
+    size_t lws[3] = {lthreads_x, lthreads_y, 1};
 
     auto nd_range = compute::nd_range_t(gws, lws);
 
@@ -159,7 +156,7 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_scale_x8x8s32(
 template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
 status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute(
         const exec_ctx_t &ctx) const {
-        return execute_standard(ctx);
+    return execute_standard(ctx);
 }
 
 template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
@@ -182,17 +179,19 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute_standard(
 
     char offsetc_char;
 
-    if (pd()->desc()->offsetc == mkldnn_column) offsetc_char = 'C';
-    else if (pd()->desc()->offsetc == mkldnn_row) offsetc_char = 'R';
-    else offsetc_char = 'F';
-
+    if (pd()->desc()->offsetc == mkldnn_column)
+        offsetc_char = 'C';
+    else if (pd()->desc()->offsetc == mkldnn_row)
+        offsetc_char = 'R';
+    else
+        offsetc_char = 'F';
 
     auto lda = pd()->desc()->lda;
     auto ldb = pd()->desc()->ldb;
     auto ldc = pd()->desc()->ldc;
 
-    a_t ao =  pd()->desc()->ao;
-    b_t bo =  pd()->desc()->bo;
+    a_t ao = pd()->desc()->ao;
+    b_t bo = pd()->desc()->bo;
 
     auto alpha = pd()->desc()->alpha;
     auto beta = pd()->desc()->beta;
@@ -211,22 +210,24 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute_standard(
     size_t offset_co = co.get_offset() / sizeof(c_t) + pd()->dyn_offset_co;
 
     bool do_compute = ((k > 0) && (alpha != 0.0f));
-    bool do_scale = !((k > 0) && (alpha == 1.0f) && ((beta == 0.0f) || (beta == 1.0f)));
-    
+    bool do_scale = !(
+            (k > 0) && (alpha == 1.0f) && ((beta == 0.0f) || (beta == 1.0f)));
+
     status_t status;
 
     int unroll_m, unroll_n;
     int block_m, block_n, block_k;
     int slices;
-    
-    jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type, c_type>::get_unrolls(unroll_m, unroll_n);
+
+    jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type, c_type>::get_unrolls(
+            unroll_m, unroll_n);
 
     block_m = jit_gen12lp_gemm_driver_params<c_type, true>::block_m;
     block_n = jit_gen12lp_gemm_driver_params<c_type, true>::block_n;
     block_k = jit_gen12lp_gemm_driver_params<c_type, true>::block_k;
 
-    slices = eu_count_ / 24; //24EUs per slice 
-    
+    slices = eu_count_ / 24; //24EUs per slice
+
     bool apply_co = true;
     int64_t size_k, size_m, size_n;
 
@@ -238,37 +239,37 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute_standard(
             for (int64_t Bm = 0; Bm < m; Bm += size_m) {
                 size_m = m - Bm;
                 if (size_m > block_m) size_m = block_m;
-                auto off_a_src
-                        = off_a0 + (!transa ? (Bm + Bk * lda) : (Bk + Bm * lda));
+                auto off_a_src = off_a0
+                        + (!transa ? (Bm + Bk * lda) : (Bk + Bm * lda));
                 for (int64_t Bn = 0; Bn < n; Bn += size_n) {
                     size_n = n - Bn;
                     if (size_n > block_n * slices) size_n = block_n * slices;
-                    auto off_b_src = off_b0 + (!transb ? (Bk + Bn * ldb) : (Bn + Bk
-                                * ldb));
+                    auto off_b_src = off_b0
+                            + (!transb ? (Bk + Bn * ldb) : (Bn + Bk * ldb));
                     apply_co = !(do_scale || (Bk > 0));
-                    auto offset_co_src = offset_co +  ((offsetc_char == 'C') ? Bm : 0) + ((offsetc_char == 'R') ? Bn : 0);  
-                    int eff_beta = ((Bk > 0) || (!do_scale && (beta == 1.0f))) ? 1 : 0;
+                    auto offset_co_src = offset_co
+                            + ((offsetc_char == 'C') ? Bm : 0)
+                            + ((offsetc_char == 'R') ? Bn : 0);
+                    int eff_beta = ((Bk > 0) || (!do_scale && (beta == 1.0f)))
+                            ? 1
+                            : 0;
                     if (!do_scale) {
                         auto off_c = off_c0 + Bm + Bn * ldc;
-                        status = launch_x8x8s32(compute_stream, a, b, c, 
-                                off_a_src, off_b_src, off_c, 
-                                lda, ldb, ldc, 
-                                size_m, size_n, size_k, eff_beta,
-                                ao, bo, co, offset_co_src, (int)apply_co, (int)apply_eltwise,
-                                eltwise_alpha, eltwise_beta);
-                        if (status)
-                            return status;
-                    }
-                    else if (do_scale) {
+                        status = launch_x8x8s32(compute_stream, a, b, c,
+                                off_a_src, off_b_src, off_c, lda, ldb, ldc,
+                                size_m, size_n, size_k, eff_beta, ao, bo, co,
+                                offset_co_src, (int)apply_co,
+                                (int)apply_eltwise, eltwise_alpha,
+                                eltwise_beta);
+                        if (status) return status;
+                    } else if (do_scale) {
                         auto off_c = 0 + Bm + Bn * m;
-                        status = launch_x8x8s32(compute_stream, a, b, *temp_buf_, 
-                                off_a_src, off_b_src, off_c, 
-                                lda, ldb, m, 
-                                size_m, size_n, size_k, eff_beta,
-                                ao, bo, co, offset_co_src, apply_co, 0,
+                        status = launch_x8x8s32(compute_stream, a, b,
+                                *temp_buf_, off_a_src, off_b_src, off_c, lda,
+                                ldb, m, size_m, size_n, size_k, eff_beta, ao,
+                                bo, co, offset_co_src, apply_co, 0,
                                 eltwise_alpha, eltwise_beta);
-                        if (status)
-                            return status;
+                        if (status) return status;
                     }
                 }
             }
@@ -276,14 +277,10 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute_standard(
     }
     bool alpha_is_zero = false;
     if (do_scale) {
-        status = launch_scale_x8x8s32(compute_stream, *temp_buf_, c, 
-                                offsetc_char, off_c0, 
-                                m, n, ldc,  
-                                alpha, beta,
-                                co, offset_co, (int)alpha_is_zero, 
-                                1, eltwise_alpha, eltwise_beta);
-        if (status)
-            return status;
+        status = launch_scale_x8x8s32(compute_stream, *temp_buf_, c,
+                offsetc_char, off_c0, m, n, ldc, alpha, beta, co, offset_co,
+                (int)alpha_is_zero, 1, eltwise_alpha, eltwise_beta);
+        if (status) return status;
     }
     return status::success;
 }

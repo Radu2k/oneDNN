@@ -29,17 +29,13 @@ const transpose_t notrans = mkldnn_notrans;
 const transpose_t trans = mkldnn_trans;
 } // namespace transpose
 
-enum offsetc_t {
-    mkldnn_fixed,
-    mkldnn_column,
-    mkldnn_row
-};
+enum offsetc_t { mkldnn_fixed, mkldnn_column, mkldnn_row };
 
 namespace offsetc {
-    const offsetc_t fixed = mkldnn_fixed;
-    const offsetc_t column = mkldnn_column;
-    const offsetc_t row = mkldnn_row;
-}
+const offsetc_t fixed = mkldnn_fixed;
+const offsetc_t column = mkldnn_column;
+const offsetc_t row = mkldnn_row;
+} // namespace offsetc
 
 /** A descriptor for a matrix multiplication (gemm) operation */
 typedef struct {
@@ -69,7 +65,6 @@ typedef struct {
     mkldnn_dim_t ao;
     /** Offset of B. */
     mkldnn_dim_t bo;
-
 
     /** Scaling factor for A*B. */
     float alpha;

@@ -49,16 +49,14 @@ status_t cross_engine_reorder_t::pd_t::init() {
 
     // Do not run 4o8i8o4i-like formats on CPU as they assume GPU-specific
     // permutation.
-    if (src_mdw.matches_one_of_tag(
-                OIdhw4o8i8o4i, OIhw4o8i8o4i, OIw4o8i8o4i, OIw8o16i2o,
-                OIhw8o16i2o, OIdhw8o16i2o, gOIdhw4o8i8o4i, gOIhw4o8i8o4i,
-                gOIw4o8i8o4i, gOIw8o16i2o, gOIhw8o16i2o, gOIdhw8o16i2o,
-                OIhw2o8i8o2i, gOIhw2o8i8o2i)
-            || dst_mdw.matches_one_of_tag(
-                OIdhw4o8i8o4i, OIhw4o8i8o4i, OIw4o8i8o4i, OIw8o16i2o,
-                OIhw8o16i2o, OIdhw8o16i2o, gOIdhw4o8i8o4i, gOIhw4o8i8o4i,
-                gOIw4o8i8o4i, gOIw8o16i2o, gOIhw8o16i2o, gOIdhw8o16i2o,
-                OIhw2o8i8o2i, gOIhw2o8i8o2i)) {
+    if (src_mdw.matches_one_of_tag(OIdhw4o8i8o4i, OIhw4o8i8o4i, OIw4o8i8o4i,
+                OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o, gOIdhw4o8i8o4i,
+                gOIhw4o8i8o4i, gOIw4o8i8o4i, gOIw8o16i2o, gOIhw8o16i2o,
+                gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i)
+            || dst_mdw.matches_one_of_tag(OIdhw4o8i8o4i, OIhw4o8i8o4i,
+                    OIw4o8i8o4i, OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o,
+                    gOIdhw4o8i8o4i, gOIhw4o8i8o4i, gOIw4o8i8o4i, gOIw8o16i2o,
+                    gOIhw8o16i2o, gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i)) {
         reorder_engine_kind_ = engine_kind::gpu;
     }
 

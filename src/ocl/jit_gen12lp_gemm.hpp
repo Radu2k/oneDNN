@@ -39,9 +39,7 @@ struct jit_gen12lp_gemm_t : public primitive_t {
     using ao_t = typename prec_traits<a_type>::type;
     using bo_t = typename prec_traits<b_type>::type;
 
-    enum class type {
-        no_copy
-    };
+    enum class type { no_copy };
 
     struct pd_t : public ocl_gemm_pd_t {
         using hint_class = void;
@@ -57,18 +55,19 @@ struct jit_gen12lp_gemm_t : public primitive_t {
             using namespace data_type;
 
             assert(this->engine()->kind() == engine_kind::gpu);
-            auto *compute_engine 
+            auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine());
-            
+
             bool ok = true && desc()->a_type == a_type
                     && desc()->b_type == b_type && desc()->c_type == c_type
-                    && compute_engine->mayiuse(compute::device_ext_t::intel_subgroups)
+                    && compute_engine->mayiuse(
+                            compute::device_ext_t::intel_subgroups)
                     && IMPLICATION(c_type == s32,
-                               true
-                                       && compute_engine->mayiuse(compute::device_ext_t::
-                                                          intel_subgroups_short));
-            if (!ok)
-                return status::unimplemented;
+                            true
+                                    && compute_engine->mayiuse(
+                                            compute::device_ext_t::
+                                                    intel_subgroups_short));
+            if (!ok) return status::unimplemented;
 
             return status::success;
         }
@@ -108,7 +107,8 @@ struct jit_gen12lp_gemm_t : public primitive_t {
     };
 
     status_t init() override {
-        auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine());
+        auto *compute_engine
+                = utils::downcast<compute::compute_engine_t *>(engine());
 
         eu_count_ = compute_engine->get_eu_count();
         hw_threads_ = compute_engine->get_hw_threads();
@@ -116,7 +116,7 @@ struct jit_gen12lp_gemm_t : public primitive_t {
         gemm_type_ = get_gemm_type();
 
         switch (gemm_type_) {
-        case type::no_copy: return init_nocopy();
+            case type::no_copy: return init_nocopy();
         }
 
         return status::invalid_arguments;
@@ -127,70 +127,69 @@ struct jit_gen12lp_gemm_t : public primitive_t {
 
         //compute kernel
         switch (c_type) {
-        case data_type::s32: kernel_name = "gen12lp_gemm_compute_x8x8s32_kernel"; break;
-        default: return status::unimplemented;
+            case data_type::s32:
+                kernel_name = "gen12lp_gemm_compute_x8x8s32_kernel";
+                break;
+            default: return status::unimplemented;
         }
 
         auto *compute_engine
-            = utils::downcast<compute::compute_engine_t *>(engine());
+                = utils::downcast<compute::compute_engine_t *>(engine());
         compute::kernel_ctx_t kernel_ctx;
-        
+
         memory_storage_t *temp_buf_ptr;
-        this->engine()->create_memory_storage(&temp_buf_ptr, pd()->desc()->m * pd()->desc()->n * sizeof(int)); 
+        this->engine()->create_memory_storage(
+                &temp_buf_ptr, pd()->desc()->m * pd()->desc()->n * sizeof(int));
         temp_buf_.reset(temp_buf_ptr);
-            
+
         bool fixed_c = (pd()->desc()->offsetc == mkldnn_fixed);
         bool column_c = (pd()->desc()->offsetc == mkldnn_column);
         bool row_c = (pd()->desc()->offsetc == mkldnn_row);
 
-        auto status = jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type, c_type>::init_const_def(kernel_ctx, 
-                pd()->desc()->transa, pd()->desc()->transb, fixed_c, column_c, row_c,
+        auto status = jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type,
+                c_type>::init_const_def(kernel_ctx, pd()->desc()->transa,
+                pd()->desc()->transb, fixed_c, column_c, row_c,
                 pd()->with_eltwise(), pd()->eltwise_alg_kind());
-        if (status != status::success)
-            return status;
+        if (status != status::success) return status;
 
-        compute_engine->create_kernel(&compute_x8x8s32_kernel_, kernel_name, kernel_ctx);
-        if (!compute_x8x8s32_kernel_)
-            return status::runtime_error;
+        compute_engine->create_kernel(
+                &compute_x8x8s32_kernel_, kernel_name, kernel_ctx);
+        if (!compute_x8x8s32_kernel_) return status::runtime_error;
 
-        
         //scale kernel
         kernel_name = "gen12lp_gemm_scale_x8x8s32_kernel";
 
-        status = jit_gen12lp_gemm_scale_x8x8s32_kernel<a_type, b_type, c_type>::init_const_def(kernel_ctx, 
-                pd()->with_eltwise(), pd()->eltwise_alg_kind());
-        if (status != status::success)
-            return status;
+        status = jit_gen12lp_gemm_scale_x8x8s32_kernel<a_type, b_type,
+                c_type>::init_const_def(kernel_ctx, pd()->with_eltwise(),
+                pd()->eltwise_alg_kind());
+        if (status != status::success) return status;
 
-        compute_engine->create_kernel(&scale_x8x8s32_kernel_, kernel_name, kernel_ctx);
-        if (!scale_x8x8s32_kernel_)
-            return status::runtime_error;
+        compute_engine->create_kernel(
+                &scale_x8x8s32_kernel_, kernel_name, kernel_ctx);
+        if (!scale_x8x8s32_kernel_) return status::runtime_error;
 
         return status::success;
     }
-
 
     jit_gen12lp_gemm_t(const pd_t *apd) : primitive_t(apd) {}
 
     virtual status_t execute(const exec_ctx_t &ctx) const override;
 
 private:
+    status_t launch_x8x8s32(compute::compute_stream_t *s,
+            const memory_storage_t &a, const memory_storage_t &b,
+            const memory_storage_t &c, int64_t offset_a, int64_t offset_b,
+            int64_t offset_c, int64_t lda, int64_t ldb, int64_t ldc, int64_t m,
+            int64_t n, int64_t k, int64_t beta, ao_t ao, bo_t bo,
+            const memory_storage_t &co, int64_t offset_co, bool apply_co,
+            bool apply_eltwise, c_t eltwise_alpha, c_t eltwise_beta) const;
 
-    status_t launch_x8x8s32(compute::compute_stream_t *s, const memory_storage_t &a,
-            const memory_storage_t &b, const memory_storage_t &c,
-            int64_t offset_a, int64_t offset_b, int64_t offset_c, int64_t lda,
-            int64_t ldb, int64_t ldc, int64_t m, int64_t n, int64_t k, 
-            int64_t beta, ao_t ao, bo_t bo, const memory_storage_t &co, 
-            int64_t offset_co, bool apply_co, bool apply_eltwise, 
+    status_t launch_scale_x8x8s32(compute::compute_stream_t *s,
+            const memory_storage_t &c_temp, const memory_storage_t &c,
+            char offsetc, int64_t offset_c, int64_t m, int64_t n, int64_t ldc,
+            float alpha, float beta, const memory_storage_t &co,
+            int64_t offset_co, bool alpha_is_zero, bool apply_eltwise,
             c_t eltwise_alpha, c_t eltwise_beta) const;
-
-    status_t launch_scale_x8x8s32(compute::compute_stream_t *s, const memory_storage_t &c_temp, 
-            const memory_storage_t &c, char offsetc, int64_t 
-            offset_c, int64_t m, int64_t n, int64_t ldc, float alpha,
-            float beta, const memory_storage_t &co, int64_t offset_co,
-            bool alpha_is_zero, bool apply_eltwise,
-            c_t eltwise_alpha, c_t eltwise_beta) const;
-
 
     virtual status_t execute_standard(const exec_ctx_t &ctx) const;
 
@@ -204,10 +203,8 @@ private:
     int eu_count_ = 0;
 
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd(); }
-    
-    type get_gemm_type() const {
-        return type::no_copy;
-    }
+
+    type get_gemm_type() const { return type::no_copy; }
 };
 
 } // namespace ocl

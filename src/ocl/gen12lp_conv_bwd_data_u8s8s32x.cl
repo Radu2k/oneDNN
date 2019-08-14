@@ -18,7 +18,8 @@
 #include "ocl/ocl_types.h"
 
 #define BLOCK_READ_DST(data, idx) \
-    data = AS_INT8_T(intel_sub_group_block_read8((__global uint *)&current_dst[idx]));
+    data = AS_INT8_T( \
+            intel_sub_group_block_read8((__global uint *)&current_dst[idx]));
 
 #define BLOCK_READ_WHT(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
@@ -28,8 +29,9 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global char *wei,
-        const __global float *bias, __global DATA_T *dst) {
+conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
+        const __global char *wei, const __global float *bias,
+        __global DATA_T *dst) {
 
     const int mb_blocks = 2;
 
@@ -57,8 +59,7 @@ conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global char *we
     const int iw = giw + local_iw;
     const int ih = gih + local_ih;
 
-    if (iw >= IW)
-        return;
+    if (iw >= IW) return;
 
     src += IC_BLOCK * ID * IH * IW * MB_BLOCK * (group_ic + ic);
     src += IC_BLOCK * ID * IH * IW * IC_NCHUNK * G * MB_BLOCK * group_mb;
@@ -74,8 +75,8 @@ conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global char *we
     int8 C00 = 0, C01 = 0, C02 = 0, C03 = 0;
     int8 C10 = 0, C11 = 0, C12 = 0, C13 = 0;
 
-    __attribute__((opencl_unroll_hint))
-    for (int oc_chunk = 0; oc_chunk < OC_NCHUNK; oc_chunk++) {
+    __attribute__((opencl_unroll_hint)) for (int oc_chunk = 0;
+                                             oc_chunk < OC_NCHUNK; oc_chunk++) {
         INT8_T D0, D1;
         int8 W0, W1, W2, W3;
         for (int kd = 0; kd < KD; kd++) {
@@ -98,15 +99,14 @@ conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global char *we
                     wei += IC_BLOCK * OC_BLOCK * KW;
                     continue;
                 }
-                __attribute__((opencl_unroll_hint))
-                for (int kw = 0; kw < KW; kw++) {
+                __attribute__((opencl_unroll_hint)) for (int kw = 0; kw < KW;
+                                                         kw++) {
                     if ((iw + PW - kw * (1 + DW)) % SW == 0) {
                         const int ow = (iw + PW - kw * (1 + DW)) / SW;
                         if (ow >= 0 && ow < OW) {
-                            __global DATA_T * current_dst = dst + OC_BLOCK
-                                                                  * MB_BLOCK
-                                                                  * (OW * OH * od
-                                                                     + OW * oh + ow);
+                            __global DATA_T *current_dst = dst
+                                    + OC_BLOCK * MB_BLOCK
+                                            * (OW * OH * od + OW * oh + ow);
                             BLOCK_READ_DST(D0, 0);
 #if MB > 8
                             BLOCK_READ_DST(D1, 8 * IC_BLOCK);
@@ -136,19 +136,18 @@ conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global char *we
 
 #if WITH_BIAS
 #define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST) \
-    TMP = (float)ACC + BIA;                    \
+    TMP = (float)ACC + BIA; \
     RES = CONVERT_DATA_T(TMP);
 #else // WITH_BIAS
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST) \
-    RES = CONVERT_DATA_T((float)ACC);
+#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST) RES = CONVERT_DATA_T((float)ACC);
 #endif // WITH_BIAS
 
-#define PACK(idx)                                     \
+#define PACK(idx) \
     BIAS_SUM_RELU(D00[0], T00, C00[idx], b0, S00[0]); \
     BIAS_SUM_RELU(D00[1], T01, C01[idx], b1, S00[1]); \
     BIAS_SUM_RELU(D00[2], T02, C02[idx], b2, S00[2]); \
     BIAS_SUM_RELU(D00[3], T03, C03[idx], b3, S00[3]); \
-    T0[idx] = as_uint(D00);                           \
+    T0[idx] = as_uint(D00); \
     BIAS_SUM_RELU(D01[0], T10, C10[idx], b0, S01[0]); \
     BIAS_SUM_RELU(D01[1], T11, C11[idx], b1, S01[1]); \
     BIAS_SUM_RELU(D01[2], T12, C12[idx], b2, S01[2]); \
@@ -156,28 +155,28 @@ conv_bwd_data_u8s8s32x_kernel(const __global uchar *src, const __global char *we
     T1[idx] = as_uint(D01);
 
 #if WITH_BIAS
-        bias += (group_ic + ic) * IC_BLOCK + get_sub_group_local_id() * 4;
-        float b0 = bias[0];
-        float b1 = bias[1];
-        float b2 = bias[2];
-        float b3 = bias[3];
+    bias += (group_ic + ic) * IC_BLOCK + get_sub_group_local_id() * 4;
+    float b0 = bias[0];
+    float b1 = bias[1];
+    float b2 = bias[2];
+    float b3 = bias[3];
 #endif // WITH_BIAS
 
-        uchar4 D00, D01;
-        uint8 T0, T1;
-        float T00, T01, T02, T03;
-        float T10, T11, T12, T13;
-        PACK(0);
-        PACK(1);
-        PACK(2);
-        PACK(3);
-        PACK(4);
-        PACK(5);
-        PACK(6);
-        PACK(7);
+    uchar4 D00, D01;
+    uint8 T0, T1;
+    float T00, T01, T02, T03;
+    float T10, T11, T12, T13;
+    PACK(0);
+    PACK(1);
+    PACK(2);
+    PACK(3);
+    PACK(4);
+    PACK(5);
+    PACK(6);
+    PACK(7);
 
-        intel_sub_group_block_write8((__global uint *)&src[0 * IC_BLOCK], T0);
+    intel_sub_group_block_write8((__global uint *)&src[0 * IC_BLOCK], T0);
 #if MB > 8
-        intel_sub_group_block_write8((__global uint *)&src[8 * IC_BLOCK], T1);
+    intel_sub_group_block_write8((__global uint *)&src[8 * IC_BLOCK], T1);
 #endif // MB > 8
 }

@@ -25,8 +25,8 @@
 #include "common/nstl.hpp"
 #include "common/primitive.hpp"
 #include "common/primitive_desc.hpp"
-#include "ocl/jit_gen9_gemm.hpp"
 #include "ocl/jit_gen12lp_gemm.hpp"
+#include "ocl/jit_gen9_gemm.hpp"
 #include "ocl/ocl_engine.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
@@ -149,13 +149,11 @@ mkldnn_status_t gemm_generic(cl_command_queue queue, const char *transa,
 }
 
 template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
-mkldnn_status_t gemm_x8x8s32(cl_command_queue queue, 
-        const char *transa, const char *transb, const char *offsetc, 
-        dim_t m, dim_t n, dim_t k, 
-        cl_float alpha, 
-        cl_mem a, dim_t offset_a, dim_t lda, typename prec_traits<a_type>::type ao,
-        cl_mem b, dim_t offset_b, dim_t ldb, typename prec_traits<b_type>::type bo,
-        cl_float beta, 
+mkldnn_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
+        const char *transb, const char *offsetc, dim_t m, dim_t n, dim_t k,
+        cl_float alpha, cl_mem a, dim_t offset_a, dim_t lda,
+        typename prec_traits<a_type>::type ao, cl_mem b, dim_t offset_b,
+        dim_t ldb, typename prec_traits<b_type>::type bo, cl_float beta,
         cl_mem c, dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
     status_t status;
@@ -163,8 +161,7 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue,
     // Check inputs
     status = check_gemm_x8x8s32_input(
             *offsetc, *transa, *transb, m, n, k, lda, ldb, ldc, alpha, beta);
-    if (status != mkldnn_success)
-        return status;
+    if (status != mkldnn_success) return status;
 
     // Create engine
     cl_context ocl_ctx;
@@ -178,18 +175,16 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue,
     std::unique_ptr<ocl_gpu_engine_t> engine;
     engine_t *engine_ptr;
 
-    status = ocl_engine_factory_t(engine_kind::gpu).engine_create(
-            &engine_ptr, ocl_dev, ocl_ctx);
-    if (status != status::success)
-        return status;
+    status = ocl_engine_factory_t(engine_kind::gpu)
+                     .engine_create(&engine_ptr, ocl_dev, ocl_ctx);
+    if (status != status::success) return status;
     engine.reset(utils::downcast<ocl_gpu_engine_t *>(engine_ptr));
 
     // Create stream
     std::unique_ptr<stream_t> s;
     stream_t *s_ptr;
     status = engine->create_stream(&s_ptr, queue);
-    if (status != status::success)
-        return status;
+    if (status != status::success) return status;
     s.reset(s_ptr);
 
     // Create primitive descriptor
@@ -201,9 +196,10 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue,
                                                         : transpose::trans;
     op_desc.transb = (*transb == 'n' || *transb == 'N') ? transpose::notrans
                                                         : transpose::trans;
-    op_desc.offsetc = (*offsetc == 'f' || *offsetc == 'F') ? offsetc::fixed
-                    :((*offsetc == 'c' || *offsetc == 'C') ? offsetc::column
-                                                           : offsetc::row);
+    op_desc.offsetc = (*offsetc == 'f' || *offsetc == 'F')
+            ? offsetc::fixed
+            : ((*offsetc == 'c' || *offsetc == 'C') ? offsetc::column
+                                                    : offsetc::row);
     op_desc.m = m;
     op_desc.n = n;
     op_desc.k = k;
@@ -235,8 +231,7 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue,
     status = primitive_desc_t::create<pd_type>(&pd_ptr,
             reinterpret_cast<const op_desc_t *>(&op_desc), &attr, engine.get(),
             nullptr);
-    if (status != status::success)
-        return status;
+    if (status != status::success) return status;
     pd.reset(pd_ptr);
 
     // Create memory objects
@@ -249,8 +244,7 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue,
     std::unique_ptr<memory_t> co_mem(new memory_t(
             engine.get(), &co_desc, memory_flags_t::use_backend_ptr, co));
 
-    if (!a_mem || !b_mem || !c_mem || !co_mem)
-        return status::out_of_memory;
+    if (!a_mem || !b_mem || !c_mem || !co_mem) return status::out_of_memory;
 
     a_mem->memory_storage()->set_offset(offset_a * sizeof(a_type));
     b_mem->memory_storage()->set_offset(offset_b * sizeof(b_type));
@@ -261,25 +255,22 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue,
     std::unique_ptr<primitive_t> gemm_prim;
     primitive_t *gemm_prim_ptr;
     status = pd->create_primitive(&gemm_prim_ptr);
-    if (status != status::success)
-        return status;
+    if (status != status::success) return status;
     gemm_prim.reset(gemm_prim_ptr);
 
     exec_args_t args = {
-        { MKLDNN_ARG_SRC_0, { a_mem.get(), true } },
-        { MKLDNN_ARG_SRC_1, { b_mem.get(), true } },
-        { MKLDNN_ARG_SRC_2, { co_mem.get(), true } },
-        { MKLDNN_ARG_DST, { c_mem.get(), false } },
+            {MKLDNN_ARG_SRC_0, {a_mem.get(), true}},
+            {MKLDNN_ARG_SRC_1, {b_mem.get(), true}},
+            {MKLDNN_ARG_SRC_2, {co_mem.get(), true}},
+            {MKLDNN_ARG_DST, {c_mem.get(), false}},
     };
 
     exec_ctx_t ctx(s.get(), std::move(args));
     status = gemm_prim->execute(ctx);
-    if (status != status::success)
-        return status;
+    if (status != status::success) return status;
 
     return s->wait();
 }
-
 
 const char *c2f_offsetC(const char *offC) {
     if (offC) {
@@ -309,91 +300,62 @@ mkldnn_status_t MKLDNN_API mkldnn_ocl_hgemm(cl_command_queue queue, char transa,
 }
 
 mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_s8s8s32(cl_command_queue queue,
-        char transa, char transb, char offsetc, 
-        dim_t m, dim_t n, dim_t k,
-        cl_float alpha, 
-        cl_mem a, dim_t offset_a, dim_t lda, int8_t ao, 
-        cl_mem b, dim_t offset_b, dim_t ldb, int8_t bo,
-        cl_float beta, 
-        cl_mem c, dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
+        char transa, char transb, char offsetc, dim_t m, dim_t n, dim_t k,
+        cl_float alpha, cl_mem a, dim_t offset_a, dim_t lda, int8_t ao,
+        cl_mem b, dim_t offset_b, dim_t ldb, int8_t bo, cl_float beta, cl_mem c,
+        dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
     if ((ao != 0) || bo != 0)
         return status::unimplemented;
-    else    
-        return gemm_x8x8s32<data_type::s8, data_type::s8, data_type::s32>(queue, 
-            &transb, &transa, c2f_offsetC(&offsetc), 
-            n, m, k, 
-            alpha, 
-            b, offset_b, ldb, bo, 
-            a, offset_a, lda, ao, 
-            beta, 
-            c, offset_c, ldc, co, offset_co);
+    else
+        return gemm_x8x8s32<data_type::s8, data_type::s8, data_type::s32>(queue,
+                &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
+                offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc,
+                co, offset_co);
 }
 
 mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_u8s8s32(cl_command_queue queue,
-        char transa, char transb, char offsetc, 
-        dim_t m, dim_t n, dim_t k,
-        cl_float alpha, 
-        cl_mem a, dim_t offset_a, dim_t lda, uint8_t ao, 
-        cl_mem b, dim_t offset_b, dim_t ldb, int8_t bo,
-        cl_float beta, 
-        cl_mem c, dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
+        char transa, char transb, char offsetc, dim_t m, dim_t n, dim_t k,
+        cl_float alpha, cl_mem a, dim_t offset_a, dim_t lda, uint8_t ao,
+        cl_mem b, dim_t offset_b, dim_t ldb, int8_t bo, cl_float beta, cl_mem c,
+        dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
     if ((ao != 0) || bo != 0)
         return status::unimplemented;
-    else    
-        return gemm_x8x8s32<data_type::s8, data_type::u8, data_type::s32>(queue, 
-            &transb, &transa, c2f_offsetC(&offsetc), 
-            n, m, k, 
-            alpha, 
-            b, offset_b, ldb, bo, 
-            a, offset_a, lda, ao, 
-            beta, 
-            c, offset_c, ldc, co, offset_co);
+    else
+        return gemm_x8x8s32<data_type::s8, data_type::u8, data_type::s32>(queue,
+                &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
+                offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc,
+                co, offset_co);
 }
 
 mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_s8u8s32(cl_command_queue queue,
-        char transa, char transb, char offsetc, 
-        dim_t m, dim_t n, dim_t k,
-        cl_float alpha, 
-        cl_mem a, dim_t offset_a, dim_t lda, int8_t ao, 
-        cl_mem b, dim_t offset_b, dim_t ldb, uint8_t bo,
-        cl_float beta, 
+        char transa, char transb, char offsetc, dim_t m, dim_t n, dim_t k,
+        cl_float alpha, cl_mem a, dim_t offset_a, dim_t lda, int8_t ao,
+        cl_mem b, dim_t offset_b, dim_t ldb, uint8_t bo, cl_float beta,
         cl_mem c, dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
     if ((ao != 0) || bo != 0)
         return status::unimplemented;
-    else    
-        return gemm_x8x8s32<data_type::u8, data_type::s8, data_type::s32>(queue, 
-            &transb, &transa, c2f_offsetC(&offsetc), 
-            n, m, k, 
-            alpha, 
-            b, offset_b, ldb, bo, 
-            a, offset_a, lda, ao, 
-            beta, 
-            c, offset_c, ldc, co, offset_co);
+    else
+        return gemm_x8x8s32<data_type::u8, data_type::s8, data_type::s32>(queue,
+                &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
+                offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc,
+                co, offset_co);
 }
 
 mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_u8u8s32(cl_command_queue queue,
-        char transa, char transb, char offsetc, 
-        dim_t m, dim_t n, dim_t k,
-        cl_float alpha, 
-        cl_mem a, dim_t offset_a, dim_t lda, uint8_t ao, 
-        cl_mem b, dim_t offset_b, dim_t ldb, uint8_t bo,
-        cl_float beta, 
+        char transa, char transb, char offsetc, dim_t m, dim_t n, dim_t k,
+        cl_float alpha, cl_mem a, dim_t offset_a, dim_t lda, uint8_t ao,
+        cl_mem b, dim_t offset_b, dim_t ldb, uint8_t bo, cl_float beta,
         cl_mem c, dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
     if ((ao != 0) || bo != 0)
         return status::unimplemented;
-    else    
-        return gemm_x8x8s32<data_type::u8, data_type::u8, data_type::s32>(queue, 
-            &transb, &transa, c2f_offsetC(&offsetc), 
-            n, m, k, 
-            alpha, 
-            b, offset_b, ldb, bo, 
-            a, offset_a, lda, ao, 
-            beta, 
-            c, offset_c, ldc, co, offset_co);
+    else
+        return gemm_x8x8s32<data_type::u8, data_type::u8, data_type::s32>(queue,
+                &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
+                offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc,
+                co, offset_co);
 }
-
 }

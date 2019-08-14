@@ -26,12 +26,12 @@ namespace impl {
 namespace ocl {
 
 struct jit_gen12lp_gemm_kernel {
-    template <impl::data_type_t a_type, impl::data_type_t b_type, impl::data_type_t c_type>
+    template <impl::data_type_t a_type, impl::data_type_t b_type,
+            impl::data_type_t c_type>
     static status_t init_cl_options(compute::kernel_ctx_t &kernel_ctx) {
         using namespace data_type;
 
-        if (c_type != s32)
-            return status::unimplemented;
+        if (c_type != s32) return status::unimplemented;
 
         kernel_ctx.define_int("DT_S32", c_type == s32);
 
@@ -52,51 +52,56 @@ struct jit_gen12lp_gemm_kernel {
     };
 };
 
-template <impl::data_type_t a_type, impl::data_type_t b_type, impl::data_type_t c_type>
+template <impl::data_type_t a_type, impl::data_type_t b_type,
+        impl::data_type_t c_type>
 struct jit_gen12lp_gemm_x8x8s32_kernel : public jit_gen12lp_gemm_kernel {
-    static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx, bool trans_a, bool trans_b, 
-    bool fixed_c, bool column_c, bool row_c, bool with_eltwise, alg_kind_t alg) {
+    static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx,
+            bool trans_a, bool trans_b, bool fixed_c, bool column_c, bool row_c,
+            bool with_eltwise, alg_kind_t alg) {
 
         auto status = init_cl_options<a_type, b_type, c_type>(kernel_ctx);
-        if (status)
-            return status;
-       
+        if (status) return status;
+
         using ao_type = typename prec_traits<a_type>::type;
         using bo_type = typename prec_traits<b_type>::type;
 
-
-        if ((std::is_same<ao_type, int8_t>::value) && (std::is_same<bo_type, int8_t>::value)) {
+        if ((std::is_same<ao_type, int8_t>::value)
+                && (std::is_same<bo_type, int8_t>::value)) {
             kernel_ctx.add_option("-DS8S8");
-        }
-        else if ((std::is_same<ao_type, uint8_t>::value) && (std::is_same<bo_type, int8_t>::value)) {
+        } else if ((std::is_same<ao_type, uint8_t>::value)
+                && (std::is_same<bo_type, int8_t>::value)) {
             kernel_ctx.add_option("-DU8S8");
-        }
-        else if ((std::is_same<ao_type, int8_t>::value) && (std::is_same<bo_type, uint8_t>::value)) {
+        } else if ((std::is_same<ao_type, int8_t>::value)
+                && (std::is_same<bo_type, uint8_t>::value)) {
             kernel_ctx.add_option("-DS8U8");
-        }
-        else {
+        } else {
             kernel_ctx.add_option("-DU8U8");
         }
- 
-        if (!trans_a && !trans_b)    kernel_ctx.add_option("-DNN");
-        else if (trans_a && !trans_b)    kernel_ctx.add_option("-DTN");
-        else if (!trans_a && trans_b)    kernel_ctx.add_option("-DNT");
-        else kernel_ctx.add_option("-DTT");
- 
-        if (fixed_c)    kernel_ctx.add_option("-DFF");
-        else if (column_c)    kernel_ctx.add_option("-DCC");
-        else if (row_c)    kernel_ctx.add_option("-DRR");
+
+        if (!trans_a && !trans_b)
+            kernel_ctx.add_option("-DNN");
+        else if (trans_a && !trans_b)
+            kernel_ctx.add_option("-DTN");
+        else if (!trans_a && trans_b)
+            kernel_ctx.add_option("-DNT");
         else
-           return status::unimplemented;
+            kernel_ctx.add_option("-DTT");
+
+        if (fixed_c)
+            kernel_ctx.add_option("-DFF");
+        else if (column_c)
+            kernel_ctx.add_option("-DCC");
+        else if (row_c)
+            kernel_ctx.add_option("-DRR");
+        else
+            return status::unimplemented;
 
         kernel_ctx.define_int("UNROLL_M", copy_params::unroll_m);
         kernel_ctx.define_int("UNROLL_N", copy_params::unroll_n);
         kernel_ctx.define_int("UNROLL_K", copy_params::unroll_k);
 
-
         kernel_ctx.define_int("WITH_ELTWISE", with_eltwise);
-        if (with_eltwise)
-            def_postops(kernel_ctx, alg);
+        if (with_eltwise) def_postops(kernel_ctx, alg);
 
         kernel_ctx.print_options();
         return status::success;
@@ -108,21 +113,21 @@ struct jit_gen12lp_gemm_x8x8s32_kernel : public jit_gen12lp_gemm_kernel {
     }
 };
 
-template <impl::data_type_t a_type, impl::data_type_t b_type, impl::data_type_t c_type>
+template <impl::data_type_t a_type, impl::data_type_t b_type,
+        impl::data_type_t c_type>
 struct jit_gen12lp_gemm_scale_x8x8s32_kernel : public jit_gen12lp_gemm_kernel {
-    static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx, bool with_eltwise, alg_kind_t alg) {
+    static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx,
+            bool with_eltwise, alg_kind_t alg) {
 
         auto status = init_cl_options<a_type, b_type, c_type>(kernel_ctx);
-        if (status)
-            return status;
+        if (status) return status;
 
         kernel_ctx.define_int("UNROLL_M", copy_params::unroll_m);
         kernel_ctx.define_int("UNROLL_N", copy_params::unroll_n);
         kernel_ctx.define_int("UNROLL_K", copy_params::unroll_k);
 
         kernel_ctx.define_int("WITH_ELTWISE", with_eltwise);
-        if (with_eltwise)
-            def_postops(kernel_ctx, alg);
+        if (with_eltwise) def_postops(kernel_ctx, alg);
 
         kernel_ctx.print_options();
         return status::success;
