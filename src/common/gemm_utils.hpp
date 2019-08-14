@@ -45,6 +45,7 @@ static inline status_t check_gemm_input(char transa, char transb, int m, int n,
 }
 
 static inline status_t check_gemm_x8x8s32_input(char offsetc, char transa, char transb, int m, int n, int k, int lda, int ldb, int ldc, float alpha, float beta) {
+    using namespace status;
     if (!utils::one_of(offsetc, 'F', 'f', 'C', 'c', 'R', 'r'))
         return invalid_arguments;
     return check_gemm_input(transa, transb, m, n, k, lda, ldb, ldc, alpha, beta);
