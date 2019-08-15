@@ -108,7 +108,7 @@ struct jit_gen12hp_u8s8s32x_convolution_bwd_data_t : public primitive_t {
             , jcp_() {}
 
         DECLARE_COMMON_PD_T(
-                "ocl:ncsp:any", jit_gen12hp_u8s8s32x_convolution_bwd_data_t);
+                "ocl:gen12hp", jit_gen12hp_u8s8s32x_convolution_bwd_data_t);
 
         status_t init() {
             using namespace prop_kind;
