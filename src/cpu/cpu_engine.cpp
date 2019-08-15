@@ -66,10 +66,12 @@
 #include "cpu/ref_deconvolution.hpp"
 #include "cpu/ref_eltwise.hpp"
 #include "cpu/ref_inner_product.hpp"
+#include "cpu/ref_layer_normalization.hpp"
 #include "cpu/ref_lrn.hpp"
 #include "cpu/ref_pooling.hpp"
 #include "cpu/ref_shuffle.hpp"
 #include "cpu/ref_softmax.hpp"
+#include "cpu/simple_layer_normalization.hpp"
 
 namespace mkldnn {
 namespace impl {
@@ -338,6 +340,13 @@ static const pd_create_f cpu_impl_list[] = {
         INSTANCE(ref_inner_product_fwd_t<u8, s8, s8, s32>),
         INSTANCE(ref_inner_product_fwd_t<u8, s8, s32, s32>),
         INSTANCE(ref_inner_product_fwd_t<u8, s8, f32, s32>),
+        /* layer normalization */
+        INSTANCE(simple_layer_normalization_fwd_t),
+        INSTANCE(simple_layer_normalization_bwd_t),
+        INSTANCE(ref_layer_normalization_fwd_t<f32>),
+        INSTANCE(ref_layer_normalization_bwd_t<f32>),
+        INSTANCE(ref_layer_normalization_fwd_t<bf16>),
+        INSTANCE(ref_layer_normalization_bwd_t<bf16>),
         /* eol */
         nullptr,
 };

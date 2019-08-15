@@ -32,6 +32,7 @@
 #include "eltwise_pd.hpp"
 #include "gemm_pd.hpp"
 #include "inner_product_pd.hpp"
+#include "layer_normalization_pd.hpp"
 #include "lrn_pd.hpp"
 #include "pooling_pd.hpp"
 #include "reorder_pd.hpp"
@@ -40,27 +41,21 @@
 #include "softmax_pd.hpp"
 #include "sum_pd.hpp"
 
-/* MKL-DNN CPU ISA info */
-#define ISA_ANY "No instruction set specific optimizations"
-#define SSE41 "Intel(R) Streaming SIMD Extensions 4.1 (Intel(R) SSE4.1)"
-#define AVX "Intel(R) Advanced Vector Extensions (Intel(R) AVX)"
-#define AVX2 "Intel(R) Advanced Vector Extensions 2 (Intel(R) AVX2)"
-#define AVX512_COMMON \
-    "Intel(R) Advanced Vector Extensions 512 (Intel(R) " \
-    "AVX-512)"
+/* Intel MKL-DNN CPU ISA info */
+#define ISA_ANY "Intel 64"
+#define SSE41 "Intel SSE4.1"
+#define AVX "Intel AVX"
+#define AVX2 "Intel AVX2"
+#define AVX512_COMMON "Intel AVX-512"
 #define AVX512_CORE \
-    "Intel(R) Advanced Vector Extensions 512 (Intel(R) " \
-    "AVX-512) with AVX512BW, AVX512VL, and AVX512DQ extensions"
-#define AVX512_CORE_VNNI \
-    "Intel(R) Advanced Vector Instructions (Intel(R) " \
-    "AVX512) and Intel Deep Learning Boost (Intel(R) " \
-    "DL Boost)"
+    "Intel AVX-512 with AVX512BW, AVX512VL, and AVX512DQ extensions"
+#define AVX512_CORE_VNNI "Intel AVX-512 with Intel DL Boost"
 #define AVX512_MIC \
-    "Intel(R) Advanced Vector Extensions 512 (Intel(R) " \
-    "AVX-512) with AVX512CD, AVX512ER, and AVX512PF extensions"
+    "Intel AVX-512 with AVX512CD, AVX512ER, and AVX512PF extensions"
 #define AVX512_MIC_4OPS \
-    "Intel(R) Advanced Vector Extensions 512 (Intel(R) " \
-    "AVX-512) with AVX512_4FMAPS and AVX512_4VNNIW extensions"
+    "Intel AVX-512 with AVX512_4FMAPS and AVX512_4VNNIW extensions"
+#define AVX512_CORE_BF16 \
+    "Intel AVX-512 with Intel DL Boost and bfloat16 support"
 
 namespace mkldnn {
 namespace impl {
@@ -78,11 +73,10 @@ const verbose_t *mkldnn_verbose() {
         initialized = true;
     }
     if (!version_printed && verbose.level > 0) {
-        printf("mkldnn_verbose,info,"
-               "Intel(R) MKL-DNN v%d.%d.%d (Git Hash %s),%s\n",
+        printf("mkldnn_verbose,info,Intel MKL-DNN v%d.%d.%d (commit %s)\n",
                 mkldnn_version()->major, mkldnn_version()->minor,
-                mkldnn_version()->patch, mkldnn_version()->hash,
-                get_isa_info());
+                mkldnn_version()->patch, mkldnn_version()->hash);
+        printf("mkldnn_verbose,info,Detected ISA is %s\n", get_isa_info());
         version_printed = true;
     }
 #else
@@ -107,6 +101,7 @@ double get_msec() {
 
 const char *get_isa_info() {
     using namespace mkldnn::impl::cpu;
+    if (mayiuse(avx512_core_bf16)) return AVX512_CORE_BF16;
     if (mayiuse(avx512_mic_4ops)) return AVX512_MIC_4OPS;
     if (mayiuse(avx512_mic)) return AVX512_MIC;
     if (mayiuse(avx512_core_vnni)) return AVX512_CORE_VNNI;
@@ -755,6 +750,9 @@ DEFINE_STUB(shuffle);
 } // namespace
 
 void init_info(batch_normalization_pd_t *s, char *b) {
+    init_info_bnorm(s, b);
+}
+void init_info(layer_normalization_pd_t *s, char *b) {
     init_info_bnorm(s, b);
 }
 void init_info(concat_pd_t *s, char *b) {

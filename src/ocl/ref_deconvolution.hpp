@@ -27,7 +27,7 @@
 #include "ocl/ocl_deconvolution_pd.hpp"
 #include "ocl/ocl_stream.hpp"
 
-extern const char *ref_deconv_backward_bias_kernel;
+extern const char *ref_deconv_backward_bias_kernel[];
 
 namespace mkldnn {
 namespace impl {

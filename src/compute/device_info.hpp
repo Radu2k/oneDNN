@@ -37,7 +37,7 @@ enum class device_ext_t : int64_t {
     last
 };
 
-static const char *ext2cl_str(compute::device_ext_t ext) {
+static inline const char *ext2cl_str(compute::device_ext_t ext) {
 #define CASE(x) \
     case compute::device_ext_t::x: return STRINGIFY(CONCAT2(cl_, x));
     switch (ext) {
@@ -112,6 +112,8 @@ struct runtime_version_t {
 
 struct device_info_t {
 public:
+    virtual ~device_info_t() = default;
+
     virtual status_t init() = 0;
     virtual bool has(device_ext_t ext) const = 0;
 

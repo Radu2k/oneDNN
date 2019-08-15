@@ -13,6 +13,15 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 *******************************************************************************/
+#include "ocl/ocl_types.h"
+#if WITH_ELTWISE
+#include "ocl/ocl_post_ops.h"
+#endif
+
+#include "ocl/ocl_types.h"
+#if WITH_ELTWISE
+#include "ocl/ocl_post_ops.h"
+#endif
 
 #include "ocl/ocl_types.h"
 #if WITH_ELTWISE

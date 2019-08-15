@@ -24,9 +24,9 @@
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
-extern const char *gen12lp_conv_fwd_data_u8s8s32x_kernel;
-extern const char *gen12lp_conv_bwd_data_u8s8s32x_kernel;
-extern const char *gen12lp_conv_dw_fwd_data_u8s8s32x_kernel;
+extern const char *gen12lp_conv_fwd_data_u8s8s32x_kernel[];
+extern const char *gen12lp_conv_bwd_data_u8s8s32x_kernel[];
+extern const char *gen12lp_conv_dw_fwd_data_u8s8s32x_kernel[];
 
 namespace mkldnn {
 namespace impl {
@@ -120,7 +120,7 @@ struct jit_gen12lp_u8s8s32x_convolution_bwd_data_t : public primitive_t {
             , jcp_() {}
 
         DECLARE_COMMON_PD_T(
-                "ocl:ncsp:any", jit_gen12lp_u8s8s32x_convolution_bwd_data_t);
+                "ocl:gen12lp", jit_gen12lp_u8s8s32x_convolution_bwd_data_t);
 
         status_t init() {
             using namespace prop_kind;

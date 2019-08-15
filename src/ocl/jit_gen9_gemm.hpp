@@ -331,6 +331,7 @@ private:
                 = utils::downcast<compute::compute_engine_t *>(engine());
         auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
                 compute_engine->device_info());
+
         compute::runtime_version_t min_version = {19, 11, 12599};
 
         if (dev_info->runtime_version() < min_version) return false;

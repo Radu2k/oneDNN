@@ -27,7 +27,6 @@
 #include "compute/compute.hpp"
 
 #include "ocl/jit_gen9_gemm.hpp"
-#include "ocl/ocl_engine.hpp"
 #include "ocl/ocl_memory_storage.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
@@ -42,7 +41,7 @@
 #define EMULATED_SCRATCHPAD 1
 #define WS_NAN_FILLING 0
 
-extern const char *ref_rnn_kernel;
+extern const char *ref_rnn_kernel[];
 
 namespace mkldnn {
 namespace impl {
@@ -98,8 +97,9 @@ struct _ref_rnn_common_t : public primitive_t {
             using namespace format_tag;
 
             assert(this->engine()->kind() == engine_kind::gpu);
-            auto *ocl_engine
-                    = utils::downcast<const ocl_gpu_engine_t *>(this->engine());
+            auto *compute_engine
+                    = utils::downcast<const compute::compute_engine_t *>(
+                            this->engine());
 
             const alg_kind_t cell_kind = this->desc()->cell_kind;
 
@@ -123,13 +123,13 @@ struct _ref_rnn_common_t : public primitive_t {
                     && this->set_default_params() == status::success
                     && IMPLICATION(src_type == data_type::f16,
                             this->desc()->prop_kind == forward_inference)
-                    && ocl_engine->mayiuse(
+                    && compute_engine->mayiuse(
                             compute::device_ext_t::intel_subgroups)
                     && IMPLICATION(src_type == data_type::f16,
                             true
-                                    && ocl_engine->mayiuse(
+                                    && compute_engine->mayiuse(
                                             compute::device_ext_t::khr_fp16)
-                                    && ocl_engine->mayiuse(
+                                    && compute_engine->mayiuse(
                                             compute::device_ext_t::
                                                     intel_subgroups_short));
             if (!ok) { return status::unimplemented; }
@@ -287,7 +287,7 @@ struct _ref_rnn_common_t : public primitive_t {
                                             rnn_conf_.states_ws_ld,
                                             weights_type, src_type, src_type,
                                             false, 0.0f),
-                                    create_gemm_pd(&gemm_layer_pd_, sic, batch,
+                                    create_gemm_pd(&gemm_layer_pd_, slc, batch,
                                             n_gates * dic,
                                             rnn_conf_.weights_layer_ld,
                                             rnn_conf_.gates_ws_ld,

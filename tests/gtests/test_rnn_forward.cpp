@@ -119,10 +119,12 @@ protected:
         auto t = dims.t, mb = dims.mb, l = dims.l, d = dims.d;
         auto slc = dims.slc, sic = dims.sic, dlc = dims.dlc, dic = dims.dic;
         memory::dim g = getNGates();
+        memory::dim bias_extra_gate
+                = std::is_same<T, lbr_gru_forward>::value ? 1 : 0;
 
         auto weights_layer_dims = {l, d, slc, g, dic};
         auto weights_iter_dims = {l, d, sic, g, dic};
-        auto bias_dims = {l, d, g, dic};
+        auto bias_dims = {l, d, g + bias_extra_gate, dic};
         auto src_layer_dims = {t, mb, slc};
         auto src_iter_dims = {l, d, mb, sic};
         auto src_iter_c_dims = {l, d, mb, dic};
@@ -442,4 +444,40 @@ CPU_INSTANTIATE_TEST_SUITE_P(TestLSTM, lstm_forward_test_f32,
                 {fmt::tnc, fmt::ldnc, fmt::ldigo, fmt::ldigo, fmt::ldgo,
                         fmt::tnc, fmt::ldnc},
                 test_rnn_sizes_t(1, 1, 10, 16, 100, 100, 100, 100)}));
+
+CPU_INSTANTIATE_TEST_SUITE_P(TestLSTM_failure, lstm_forward_test_f32,
+        ::testing::Values(cfg_f32 {NOT_RNN, prop_kind::forward_inference,
+                dir::unidirectional_left2right,
+                {fmt::tnc, fmt::ldnc, fmt::ldigo, fmt::ldigo, fmt::ldgo,
+                        fmt::tnc, fmt::ldnc},
+                //               L  D  T  MB  SLC  SIC  DLC  DIC
+                test_rnn_sizes_t(1, 1, 1, 1, 10, 5, 5, 5)}));
+
+TEST_P(gru_forward_test_f32, TestsGRU_failure) {}
+CPU_INSTANTIATE_TEST_SUITE_P(TestGRU_failure, gru_forward_test_f32,
+        ::testing::Values(cfg_f32 {NOT_RNN, prop_kind::forward_inference,
+                dir::unidirectional_left2right,
+                {fmt::tnc, fmt::ldnc, fmt::ldigo, fmt::ldigo, fmt::ldgo,
+                        fmt::tnc, fmt::ldnc},
+                //               L  D  T  MB  SLC  SIC  DLC  DIC
+                test_rnn_sizes_t(1, 1, 1, 1, 10, 5, 5, 5)}));
+
+TEST_P(lbr_gru_forward_test_f32, TestsGRUlbr_failure) {}
+CPU_INSTANTIATE_TEST_SUITE_P(TestGRUlbr_failure, lbr_gru_forward_test_f32,
+        ::testing::Values(cfg_f32 {NOT_RNN, prop_kind::forward_inference,
+                dir::unidirectional_left2right,
+                {fmt::tnc, fmt::ldnc, fmt::ldigo, fmt::ldigo, fmt::ldgo,
+                        fmt::tnc, fmt::ldnc},
+                //               L  D  T  MB  SLC  SIC  DLC  DIC
+                test_rnn_sizes_t(1, 1, 1, 1, 10, 5, 5, 5)}));
+
+TEST_P(rnn_forward_test_f32, TestsRNN_failure) {}
+CPU_INSTANTIATE_TEST_SUITE_P(TestRNN_failure, rnn_forward_test_f32,
+        ::testing::Values(cfg_f32 {PLAIN_RNN(alg::eltwise_logistic),
+                prop_kind::forward_inference, dir::unidirectional_left2right,
+                {fmt::tnc, fmt::ldnc, fmt::ldigo, fmt::ldigo, fmt::ldgo,
+                        fmt::tnc, fmt::ldnc},
+                //               L  D  T  MB  SLC  SIC  DLC  DIC
+                test_rnn_sizes_t(1, 1, 1, 1, 10, 5, 5, 5)}));
+
 } // namespace mkldnn

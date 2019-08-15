@@ -141,7 +141,109 @@ constexpr test_igemm_params fix_no_offsets = {'F', false, false, false};
 constexpr test_igemm_params col_no_offsets = {'C', false, false, false};
 constexpr test_igemm_params row_no_offsets = {'R', false, false, false};
 
-CPU_INST_TEST_CASE(TestGEMM_expected_failures,
+INST_TEST_CASE(TestGEMM_general_cases_fix_offset,
+        test_params {'N', 'n', 30, 20, 10, 2.0, 1.0, 60, 50, 80, fix_use_oc},
+        test_params {'n', 'T', 30, 20, 10, 2.0, 1.0, 60, 50, 80, fix_use_oc},
+        test_params {'T', 'N', 30, 20, 10, 2.0, 1.0, 60, 50, 80, fix_use_oc},
+        test_params {'t', 't', 30, 20, 10, 2.0, 1.0, 60, 50, 80, fix_use_oc},
+        test_params {
+                'n', 'n', 100, 100, 2, 1.0, 2.0, 100, 100, 100, fix_use_oc},
+        test_params {
+                'n', 't', 100, 2, 100, 1.0, 2.0, 100, 100, 100, fix_use_oc},
+        test_params {
+                't', 'n', 2, 100, 100, 1.0, 2.0, 100, 100, 100, fix_use_oc},
+        test_params {
+                't', 't', 2, 100, 100, 1.0, 2.0, 100, 100, 100, fix_use_oc},
+        test_params {'n', 'n', 2, 2, 10000, 1.0, 2.0, 10000, 2, 2, fix_use_oc},
+
+        test_params {
+                'N', 'n', 30, 20, 10, 2.0, 1.0, 60, 50, 80, fix_no_offsets},
+        test_params {
+                'n', 'T', 30, 20, 10, 2.0, 1.0, 60, 50, 80, fix_no_offsets},
+        test_params {
+                'T', 'N', 30, 20, 10, 2.0, 1.0, 60, 50, 80, fix_no_offsets},
+        test_params {
+                't', 't', 30, 20, 10, 2.0, 1.0, 60, 50, 80, fix_no_offsets},
+        test_params {
+                'n', 'n', 100, 100, 2, 1.0, 2.0, 100, 100, 100, fix_no_offsets},
+        test_params {
+                'n', 't', 100, 2, 100, 1.0, 2.0, 100, 100, 100, fix_no_offsets},
+        test_params {
+                't', 'n', 2, 100, 100, 1.0, 2.0, 100, 100, 100, fix_no_offsets},
+        test_params {
+                't', 't', 2, 100, 100, 1.0, 2.0, 100, 100, 100, fix_no_offsets},
+        test_params {
+                'n', 'n', 2, 2, 10000, 1.0, 2.0, 10000, 2, 2, fix_no_offsets});
+
+INST_TEST_CASE(TestGEMM_general_cases_col_offset,
+        test_params {'N', 'n', 30, 20, 10, 2.0, 1.0, 60, 50, 80, col_use_oc},
+        test_params {'n', 'T', 30, 20, 10, 2.0, 1.0, 60, 50, 80, col_use_oc},
+        test_params {'T', 'N', 30, 20, 10, 2.0, 1.0, 60, 50, 80, col_use_oc},
+        test_params {'t', 't', 30, 20, 10, 2.0, 1.0, 60, 50, 80, col_use_oc},
+        test_params {
+                'n', 'n', 100, 100, 2, 1.0, 2.0, 100, 100, 100, col_use_oc},
+        test_params {
+                'n', 't', 100, 2, 100, 1.0, 2.0, 100, 100, 100, col_use_oc},
+        test_params {
+                't', 'n', 2, 100, 100, 1.0, 2.0, 100, 100, 100, col_use_oc},
+        test_params {
+                't', 't', 2, 100, 100, 1.0, 2.0, 100, 100, 100, col_use_oc},
+        test_params {'n', 'n', 2, 2, 10000, 1.0, 2.0, 10000, 2, 2, col_use_oc},
+
+        test_params {
+                'N', 'n', 30, 20, 10, 2.0, 1.0, 60, 50, 80, col_no_offsets},
+        test_params {
+                'n', 'T', 30, 20, 10, 2.0, 1.0, 60, 50, 80, col_no_offsets},
+        test_params {
+                'T', 'N', 30, 20, 10, 2.0, 1.0, 60, 50, 80, col_no_offsets},
+        test_params {
+                't', 't', 30, 20, 10, 2.0, 1.0, 60, 50, 80, col_no_offsets},
+        test_params {
+                'n', 'n', 100, 100, 2, 1.0, 2.0, 100, 100, 100, col_no_offsets},
+        test_params {
+                'n', 't', 100, 2, 100, 1.0, 2.0, 100, 100, 100, col_no_offsets},
+        test_params {
+                't', 'n', 2, 100, 100, 1.0, 2.0, 100, 100, 100, col_no_offsets},
+        test_params {
+                't', 't', 2, 100, 100, 1.0, 2.0, 100, 100, 100, col_no_offsets},
+        test_params {
+                'n', 'n', 2, 2, 10000, 1.0, 2.0, 10000, 2, 2, col_no_offsets});
+
+INST_TEST_CASE(TestGEMM_general_cases_row_offset,
+        test_params {'N', 'n', 30, 20, 10, 2.0, 1.0, 60, 50, 80, row_use_oc},
+        test_params {'n', 'T', 30, 20, 10, 2.0, 1.0, 60, 50, 80, row_use_oc},
+        test_params {'T', 'N', 30, 20, 10, 2.0, 1.0, 60, 50, 80, row_use_oc},
+        test_params {'t', 't', 30, 20, 10, 2.0, 1.0, 60, 50, 80, row_use_oc},
+        test_params {
+                'n', 'n', 100, 100, 2, 1.0, 2.0, 100, 100, 100, row_use_oc},
+        test_params {
+                'n', 't', 100, 2, 100, 1.0, 2.0, 100, 100, 100, row_use_oc},
+        test_params {
+                't', 'n', 2, 100, 100, 1.0, 2.0, 100, 100, 100, row_use_oc},
+        test_params {
+                't', 't', 2, 100, 100, 1.0, 2.0, 100, 100, 100, row_use_oc},
+        test_params {'n', 'n', 2, 2, 10000, 1.0, 2.0, 10000, 2, 2, row_use_oc},
+
+        test_params {
+                'N', 'n', 30, 20, 10, 2.0, 1.0, 60, 50, 80, row_no_offsets},
+        test_params {
+                'n', 'T', 30, 20, 10, 2.0, 1.0, 60, 50, 80, row_no_offsets},
+        test_params {
+                'T', 'N', 30, 20, 10, 2.0, 1.0, 60, 50, 80, row_no_offsets},
+        test_params {
+                't', 't', 30, 20, 10, 2.0, 1.0, 60, 50, 80, row_no_offsets},
+        test_params {
+                'n', 'n', 100, 100, 2, 1.0, 2.0, 100, 100, 100, row_no_offsets},
+        test_params {
+                'n', 't', 100, 2, 100, 1.0, 2.0, 100, 100, 100, row_no_offsets},
+        test_params {
+                't', 'n', 2, 100, 100, 1.0, 2.0, 100, 100, 100, row_no_offsets},
+        test_params {
+                't', 't', 2, 100, 100, 1.0, 2.0, 100, 100, 100, row_no_offsets},
+        test_params {
+                'n', 'n', 2, 2, 10000, 1.0, 2.0, 10000, 2, 2, row_no_offsets});
+
+INST_TEST_CASE(TestGEMM_expected_failures,
         test_params {'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, {}, {}, true,
                 mkldnn_invalid_arguments},
         test_params {'n', 'n', 3, 2, 2, 1.0, 0.0, 1, 5, 8, {}, {}, true,

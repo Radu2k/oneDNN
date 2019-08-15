@@ -33,6 +33,7 @@
 #include "conv/deconv.hpp"
 #include "eltwise/eltwise.hpp"
 #include "ip/ip.hpp"
+#include "lnorm/lnorm.hpp"
 #include "lrn/lrn.hpp"
 #include "pool/pool.hpp"
 #include "reorder/reorder.hpp"
@@ -74,6 +75,8 @@ int main(int argc, char **argv) {
             prim = REORDER;
         else if (!strcmp("--bnorm", argv[0]))
             prim = BNORM;
+        else if (!strcmp("--lnorm", argv[0]))
+            prim = LNORM;
         else if (!strcmp("--rnn", argv[0]))
             prim = RNN;
         else if (!strcmp("--softmax", argv[0]))
@@ -103,6 +106,7 @@ int main(int argc, char **argv) {
         case SHUFFLE: shuffle::bench(argc, argv); break;
         case REORDER: reorder::bench(argc, argv); break;
         case BNORM: bnorm::bench(argc, argv); break;
+        case LNORM: lnorm::bench(argc, argv); break;
         case RNN: rnn::bench(argc, argv); break;
         case SOFTMAX: softmax::bench(argc, argv); break;
         case POOL: pool::bench(argc, argv); break;

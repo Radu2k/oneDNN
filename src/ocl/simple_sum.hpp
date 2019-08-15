@@ -27,7 +27,7 @@
 #include "ocl/ocl_sum_pd.hpp"
 #include "ocl/ocl_utils.hpp"
 
-extern const char *simple_sum_kernel;
+extern const char *simple_sum_kernel[];
 
 namespace mkldnn {
 namespace impl {

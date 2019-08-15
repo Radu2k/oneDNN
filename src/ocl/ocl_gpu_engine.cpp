@@ -21,6 +21,7 @@
 #include "ocl/gemm_inner_product.hpp"
 #include "ocl/jit_gen12hp_u8s8s32x_1x1_convolution.hpp"
 #include "ocl/jit_gen12hp_u8s8s32x_convolution.hpp"
+#include "ocl/jit_gen12lp_gemm.hpp"
 #include "ocl/jit_gen12lp_u8s8s32u8_1x1_convolution.hpp"
 #include "ocl/jit_gen12lp_u8s8s32x_convolution.hpp"
 #include "ocl/jit_gen9_common_convolution.hpp"
@@ -34,6 +35,7 @@
 #include "ocl/ref_deconvolution.hpp"
 #include "ocl/ref_eltwise.hpp"
 #include "ocl/ref_inner_product.hpp"
+#include "ocl/ref_layer_normalization.hpp"
 #include "ocl/ref_lrn.hpp"
 #include "ocl/ref_pooling.hpp"
 #include "ocl/ref_shuffle.hpp"
@@ -86,6 +88,16 @@ status_t ocl_gpu_engine_t::create_stream(
     return ocl_stream_t::create_stream(stream, this, queue);
 }
 
+cl_uint count_lines(const char *code[]) {
+    cl_uint i = 0;
+    const char *code_line = code[i];
+    while (strcmp("END_OF_KERNEL", code_line)) {
+        ++i;
+        code_line = code[i];
+    }
+    return i;
+}
+
 status_t ocl_gpu_engine_t::create_kernels(
         std::vector<compute::kernel_t> *kernels,
         const std::vector<const char *> &kernel_names,
@@ -98,10 +110,10 @@ status_t ocl_gpu_engine_t::create_kernels(
             = utils::downcast<const ocl_gpu_device_info_t *>(device_info());
     options += " " + dev_info->get_cl_ext_options();
 
-    std::vector<const char *> code_strings;
+    std::vector<const char **> code_strings;
     code_strings.reserve(kernel_names.size());
     for (auto *kernel_name : kernel_names) {
-        const char *code = get_ocl_kernel_source(kernel_name);
+        const char **code = get_ocl_kernel_source(kernel_name);
         code_strings.push_back(code);
     }
 
@@ -109,11 +121,12 @@ status_t ocl_gpu_engine_t::create_kernels(
     for (size_t i = 0; i < kernel_names.size(); ++i) {
         if (!kernel_names[i] || (*kernels)[i]) continue;
 
-        const char *code = code_strings[i];
+        const char **code = code_strings[i];
 
+        cl_uint count = count_lines(code);
         cl_int err;
-        cl_program program
-                = clCreateProgramWithSource(context(), 1, &code, nullptr, &err);
+        cl_program program = clCreateProgramWithSource(
+                context(), count, code, nullptr, &err);
         OCL_CHECK(err);
 
         cl_device_id dev = device();
@@ -167,10 +180,6 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(ref_deconvolution_bwd_data_t),
         INSTANCE(ref_deconvolution_bwd_weights_t),
         /*conv*/
-        INSTANCE(jit_gen9_common_convolution_fwd_t),
-        INSTANCE(jit_gen9_common_convolution_bwd_data_t),
-        INSTANCE(jit_gen9_common_convolution_bwd_weights_t),
-        /* conv (int) */
         INSTANCE(jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<u8>),
         INSTANCE(jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<s8>),
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_fwd_t<u8>),
@@ -178,11 +187,14 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t<u8>),
         INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<u8>),
         INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<s8>),
-        INSTANCE(ref_convolution_fwd_t),
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_bwd_data_t<u8>),
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_bwd_data_t<s8>),
-        INSTANCE(jit_gen12lp_u8s8s32x_convolution_bwd_data_t<u8>),
-        INSTANCE(jit_gen12lp_u8s8s32x_convolution_bwd_data_t<s8>),
+        //        INSTANCE(jit_gen12lp_u8s8s32x_convolution_bwd_data_t<u8>),
+        //        INSTANCE(jit_gen12lp_u8s8s32x_convolution_bwd_data_t<s8>),
+        INSTANCE(jit_gen9_common_convolution_fwd_t),
+        INSTANCE(jit_gen9_common_convolution_bwd_data_t),
+        INSTANCE(jit_gen9_common_convolution_bwd_weights_t),
+        INSTANCE(ref_convolution_fwd_t),
         INSTANCE(ref_convolution_bwd_data_t),
         INSTANCE(ref_convolution_bwd_weights_t),
         /*bnorm*/
@@ -207,12 +219,19 @@ static const pd_create_f ocl_impl_list[] = {
         /* gemm */
         INSTANCE(jit_gen9_gemm_t<f16>),
         INSTANCE(jit_gen9_gemm_t<f32>),
+        INSTANCE(jit_gen12lp_gemm_t<s8, s8, s32>),
+        INSTANCE(jit_gen12lp_gemm_t<s8, u8, s32>),
+        INSTANCE(jit_gen12lp_gemm_t<u8, s8, s32>),
+        INSTANCE(jit_gen12lp_gemm_t<u8, u8, s32>),
         /*rnn*/
         INSTANCE(ref_rnn_fwd_f16_t),
         INSTANCE(ref_rnn_fwd_f32_t),
         INSTANCE(ref_rnn_bwd_f32_t),
         /* shuffle */
         INSTANCE(ref_shuffle_t),
+        /*layer normalization */
+        INSTANCE(ref_layer_normalization_fwd_t),
+        INSTANCE(ref_layer_normalization_bwd_t),
         nullptr,
 };
 
