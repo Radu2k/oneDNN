@@ -29,7 +29,7 @@ namespace impl {
 namespace ocl {
 
 template <impl::data_type_t dst_type>
-struct jit_gen12hp_u8s8s32x_convolution_fwd_t : public primitive_t {
+struct jit_gen12hp_u8s8s32x_convolution_fwd_t : public primitive_impl_t {
     struct pd_t : public ocl_convolution_fwd_pd_t {
         pd_t(engine_t *engine, const convolution_desc_t *adesc,
                 const primitive_attr_t *attr,
@@ -81,7 +81,7 @@ struct jit_gen12hp_u8s8s32x_convolution_fwd_t : public primitive_t {
         return status::success;
     }
 
-    jit_gen12hp_u8s8s32x_convolution_fwd_t(const pd_t *apd) : primitive_t(apd) {
+    jit_gen12hp_u8s8s32x_convolution_fwd_t(const pd_t *apd) : primitive_impl_t(apd) {
         ker_ = new jit_gen12hp_u8s8s32x_conv_fwd_kernel(pd()->jcp_);
     }
 
@@ -93,13 +93,13 @@ struct jit_gen12hp_u8s8s32x_convolution_fwd_t : public primitive_t {
 
 private:
     status_t execute_forward(const exec_ctx_t &ctx) const;
-    const pd_t *pd() const { return (const pd_t *)primitive_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
     jit_gen12hp_u8s8s32x_conv_fwd_kernel *ker_;
     compute::kernel_t kernel_;
 };
 
 template <impl::data_type_t dst_type>
-struct jit_gen12hp_u8s8s32x_convolution_bwd_data_t : public primitive_t {
+struct jit_gen12hp_u8s8s32x_convolution_bwd_data_t : public primitive_impl_t {
     struct pd_t : public ocl_convolution_bwd_data_pd_t {
         pd_t(engine_t *engine, const convolution_desc_t *adesc,
                 const primitive_attr_t *attr,
@@ -159,7 +159,7 @@ struct jit_gen12hp_u8s8s32x_convolution_bwd_data_t : public primitive_t {
     }
 
     jit_gen12hp_u8s8s32x_convolution_bwd_data_t(const pd_t *apd)
-        : primitive_t(apd) {
+        : primitive_impl_t(apd) {
         ker_ = new jit_gen12hp_u8s8s32x_conv_bwd_data_kernel(pd()->jcp_);
     }
 
@@ -171,7 +171,7 @@ struct jit_gen12hp_u8s8s32x_convolution_bwd_data_t : public primitive_t {
 
 private:
     status_t execute_backward_data(const exec_ctx_t &ctx) const;
-    const pd_t *pd() const { return (const pd_t *)primitive_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
     jit_gen12hp_u8s8s32x_conv_bwd_data_kernel *ker_;
     compute::kernel_t kernel_;
 };
