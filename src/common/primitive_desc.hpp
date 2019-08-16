@@ -17,6 +17,8 @@
 #ifndef PRIMITIVE_DESC_HPP
 #define PRIMITIVE_DESC_HPP
 
+#include <typeindex>
+
 #include "mkldnn.h"
 
 #include "c_types_map.hpp"
@@ -100,6 +102,11 @@ struct mkldnn_primitive_desc : public mkldnn::impl::c_compatible {
                 mkldnn::impl::data_type::u8, mkldnn_x);
     }
 
+    virtual std::type_index impl_id() const {
+        assert(!"mkldnn_primitive_desc doesn't have impl_id");
+        return typeid(mkldnn_primitive_desc);
+    }
+
     /** returns the scratchpad size for the given scratchpad mode. */
     mkldnn::impl::dim_t scratchpad_size(
             mkldnn::impl::scratchpad_mode_t mode) const {
@@ -168,23 +175,25 @@ protected:
     }
 };
 
-#define DECLARE_COMMON_PD_t(impl_name, ...) \
+#define DECLARE_COMMON_PD_t(impl_name, impl_type, use_global_scratchpad) \
     virtual pd_t *clone() const override { return new pd_t(*this); } \
     virtual status_t create_primitive(primitive_t **p) const override { \
-        double ms = get_msec(); \
-        auto ret = safe_ptr_assign<primitive_t>(*p, new (__VA_ARGS__)(this)); \
-        status_t status = (*p)->init(); \
-        if (status != status::success) return status; \
-        ms = get_msec() - ms; \
-        if (mkldnn_verbose()->level >= 2) { \
-            printf("mkldnn_verbose,create,%s,%g\n", this->info(), ms); \
-            fflush(0); \
-        } \
-        return ret; \
+        auto status = this->engine()->get_primitive( \
+                p, this, [=] { return std::make_shared<impl_type>(this); }, \
+                use_global_scratchpad); \
+        return status; \
     } \
-    virtual const char *name() const override { return impl_name; }
-#define DECLARE_COMMON_PD_T(impl_name, ...) \
-    DECLARE_COMMON_PD_t(impl_name, __VA_ARGS__)
+    virtual const char *name() const override { return impl_name; } \
+    virtual std::type_index impl_id() const override { return typeid(pd_t); }
+
+#define DECLARE_COMMON_PD_T_USE_GLOBAL_SCRATCHPAD(impl_name, impl_type) \
+    DECLARE_COMMON_PD_t(impl_name, impl_type, true)
+
+#define DECLARE_COMMON_PD_T_(impl_name, impl_type) \
+    DECLARE_COMMON_PD_t(impl_name, impl_type, false)
+
+#define DECLARE_COMMON_PD_T(impl_name, impl_type, ...) \
+    DECLARE_COMMON_PD_T_##__VA_ARGS__(impl_name, impl_type)
 
 #endif
 

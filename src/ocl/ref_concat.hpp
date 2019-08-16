@@ -26,7 +26,7 @@ namespace mkldnn {
 namespace impl {
 namespace ocl {
 
-struct ref_concat_t : public primitive_t {
+struct ref_concat_t : public primitive_impl_t {
     struct pd_t : public ocl_concat_pd_t {
         using ocl_concat_pd_t::ocl_concat_pd_t;
 
@@ -56,7 +56,6 @@ struct ref_concat_t : public primitive_t {
                     if ((*r)(&r_pd, engine_, &attr, engine_, src_md(i), engine_,
                                 src_image_md(i))
                             == status::success) {
-                        r_pd->init_info();
                         reorder_pds_.push_back(r_pd);
                         break;
                     }
@@ -78,10 +77,10 @@ struct ref_concat_t : public primitive_t {
                 delete rpd;
         }
 
-        nstl::vector<const reorder_pd_t *> reorder_pds_;
+        std::vector<const reorder_pd_t *> reorder_pds_;
     };
 
-    ref_concat_t(const pd_t *apd) : primitive_t(apd) {
+    ref_concat_t(const pd_t *apd) : primitive_impl_t(apd) {
         const int n = pd()->n_inputs();
         reorders_.resize(n);
         for (int i = 0; i < n; ++i)
@@ -106,8 +105,8 @@ struct ref_concat_t : public primitive_t {
     }
 
 private:
-    const pd_t *pd() const { return (const pd_t *)primitive_t::pd(); }
-    nstl::vector<primitive_t *> reorders_;
+    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
+    std::vector<primitive_t *> reorders_;
 };
 
 } // namespace ocl

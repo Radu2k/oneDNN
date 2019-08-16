@@ -21,14 +21,13 @@
 #include "memory_tracking.hpp"
 #include "reorder_pd.hpp"
 
-#include "cpu_primitive.hpp"
 #include "cpu_sum_pd.hpp"
 
 namespace mkldnn {
 namespace impl {
 namespace cpu {
 
-struct ref_sum_t : public cpu_primitive_t {
+struct ref_sum_t : public primitive_impl_t {
     struct pd_t : public cpu_sum_pd_t {
         using cpu_sum_pd_t::cpu_sum_pd_t;
 
@@ -61,7 +60,6 @@ struct ref_sum_t : public cpu_primitive_t {
                     if ((*r)(&r_pd, engine_, &attr, engine_, src_md(i), engine_,
                                 dst_acc_md())
                             == status::success) {
-                        r_pd->init_info();
                         reorder_pds_.push_back(r_pd);
                         break;
                     }
@@ -71,12 +69,10 @@ struct ref_sum_t : public cpu_primitive_t {
             if (need_output_reorder()) {
                 for (auto r = r_impls; *r; ++r) {
                     primitive_attr_t attr;
-
                     reorder_pd_t *r_pd;
                     if ((*r)(&r_pd, engine_, &attr, engine_, dst_acc_md(),
                                 engine_, dst_md())
                             == status::success) {
-                        r_pd->init_info();
                         reorder_pds_.push_back(r_pd);
                         break;
                     }
@@ -102,7 +98,7 @@ struct ref_sum_t : public cpu_primitive_t {
                 delete rpd;
         }
 
-        nstl::vector<const reorder_pd_t *> reorder_pds_;
+        std::vector<const reorder_pd_t *> reorder_pds_;
 
     private:
         void init_scratchpad() {
@@ -113,7 +109,7 @@ struct ref_sum_t : public cpu_primitive_t {
         };
     };
 
-    ref_sum_t(const pd_t *apd) : cpu_primitive_t(apd) {
+    ref_sum_t(const pd_t *apd) : primitive_impl_t(apd) {
         const int n = pd()->n_inputs() + pd()->need_output_reorder();
         reorders_.resize(n);
         for (int i = 0; i < n; ++i)
@@ -130,7 +126,7 @@ struct ref_sum_t : public cpu_primitive_t {
         const auto n = pd()->n_inputs();
         exec_args_t r_args;
         auto *sum_reduce = pd()->need_output_reorder()
-                ? this->scratchpad(ctx).get<float>(key_sum_reduction)
+                ? ctx.get_scratchpad_grantor().get<float>(key_sum_reduction)
                 : nullptr;
         auto dst = ctx.args().at(MKLDNN_ARG_DST);
         memory_t acc(dst.mem->engine(), pd()->dst_acc_md(),
@@ -157,8 +153,8 @@ struct ref_sum_t : public cpu_primitive_t {
     }
 
 private:
-    const pd_t *pd() const { return (const pd_t *)primitive_t::pd(); }
-    nstl::vector<primitive_t *> reorders_;
+    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
+    std::vector<primitive_t *> reorders_;
 };
 
 } // namespace cpu

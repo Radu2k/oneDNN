@@ -30,7 +30,7 @@ namespace mkldnn {
 namespace impl {
 namespace ocl {
 
-struct ref_eltwise_fwd_t : public primitive_t {
+struct ref_eltwise_fwd_t : public primitive_impl_t {
     struct pd_t : public ocl_eltwise_fwd_pd_t {
         using ocl_eltwise_fwd_pd_t::ocl_eltwise_fwd_pd_t;
 
@@ -86,7 +86,7 @@ struct ref_eltwise_fwd_t : public primitive_t {
         return status::success;
     }
 
-    ref_eltwise_fwd_t(const pd_t *apd) : primitive_t(apd) {}
+    ref_eltwise_fwd_t(const pd_t *apd) : primitive_impl_t(apd) {}
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
         return execute_forward_dense(ctx);
@@ -94,11 +94,11 @@ struct ref_eltwise_fwd_t : public primitive_t {
 
 private:
     status_t execute_forward_dense(const exec_ctx_t &ctx) const;
-    const pd_t *pd() const { return (const pd_t *)primitive_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
     compute::kernel_t kernel_;
 };
 
-struct ref_eltwise_bwd_t : public primitive_t {
+struct ref_eltwise_bwd_t : public primitive_impl_t {
     struct pd_t : public ocl_eltwise_bwd_pd_t {
         pd_t(engine_t *engine, const eltwise_desc_t *adesc,
                 const primitive_attr_t *attr,
@@ -153,7 +153,7 @@ struct ref_eltwise_bwd_t : public primitive_t {
         return status::success;
     }
 
-    ref_eltwise_bwd_t(const pd_t *apd) : primitive_t(apd) {}
+    ref_eltwise_bwd_t(const pd_t *apd) : primitive_impl_t(apd) {}
 
     ~ref_eltwise_bwd_t() {}
 
@@ -163,7 +163,7 @@ struct ref_eltwise_bwd_t : public primitive_t {
 
 private:
     status_t execute_backward_dense(const exec_ctx_t &ctx) const;
-    const pd_t *pd() const { return (const pd_t *)primitive_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
     compute::kernel_t kernel_;
 };
 
