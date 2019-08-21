@@ -15,13 +15,13 @@
 *******************************************************************************/
 
 #include "common/c_types_map.hpp"
-#include "common/mkldnn_thread.hpp"
-#include "common/mkldnn_traits.hpp"
+#include "common/dnnl_thread.hpp"
+#include "common/dnnl_traits.hpp"
 #include "common/type_helpers.hpp"
 
 #include "ocl/jit_gen12lp_u8s8s32x_convolution.hpp"
 
-namespace mkldnn {
+namespace dnnl {
 namespace impl {
 namespace ocl {
 
@@ -31,10 +31,10 @@ status_t jit_gen12lp_u8s8s32x_convolution_fwd_t<dst_type>::execute_forward(
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
-    auto &src = CTX_IN_STORAGE(MKLDNN_ARG_SRC);
-    auto &weights = CTX_IN_STORAGE(MKLDNN_ARG_WEIGHTS);
-    auto &bias = CTX_IN_STORAGE(MKLDNN_ARG_BIAS);
-    auto &dst = CTX_OUT_STORAGE(MKLDNN_ARG_DST);
+    auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
+    auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
+    auto &bias = CTX_IN_STORAGE(DNNL_ARG_BIAS);
+    auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     const auto &jcp = ker_->jcp;
 
@@ -61,10 +61,10 @@ status_t jit_gen12lp_u8s8s32x_convolution_bwd_data_t<
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
-    auto &diff_dst = CTX_IN_STORAGE(MKLDNN_ARG_DIFF_DST);
-    auto &weights = CTX_IN_STORAGE(MKLDNN_ARG_WEIGHTS);
-    auto &bias = CTX_IN_STORAGE(MKLDNN_ARG_BIAS);
-    auto &diff_src = CTX_OUT_STORAGE(MKLDNN_ARG_DIFF_SRC);
+    auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
+    auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
+    auto &bias = CTX_IN_STORAGE(DNNL_ARG_BIAS);
+    auto &diff_src = CTX_OUT_STORAGE(DNNL_ARG_DIFF_SRC);
 
     const auto &jcp = ker_->jcp;
 
@@ -89,4 +89,4 @@ template struct jit_gen12lp_u8s8s32x_convolution_bwd_data_t<s8>;
 
 } // namespace ocl
 } // namespace impl
-} // namespace mkldnn
+} // namespace dnnl

@@ -17,8 +17,8 @@
 #include <assert.h>
 
 #include "c_types_map.hpp"
+#include "dnnl_debug.h"
 #include "memory_desc_wrapper.hpp"
-#include "mkldnn_debug.h"
 #include "nstl.hpp"
 #include "type_helpers.hpp"
 
@@ -45,9 +45,9 @@
 #endif
 
 using namespace Xbyak;
-using namespace mkldnn::impl::types;
+using namespace dnnl::impl::types;
 
-namespace mkldnn {
+namespace dnnl {
 namespace impl {
 namespace cpu {
 
@@ -792,16 +792,14 @@ static void prb_block_for_cache(tr::prb_t &prb) {
     /* If strides for 0th and 1st nodes are cache friendly
      * then one can altogether do away with blocking ! */
     const bool cache_blocking_needed = false
-        || (prb.nodes[0].is % 64 == 0 && prb.nodes[0].n > 16)
-        || (prb.ndims > 1 && prb.nodes[1].is % 64 == 0
-                && prb.nodes[1].n > 16);
-    if (!cache_blocking_needed)
-        return;
+            || (prb.nodes[0].is % 64 == 0 && prb.nodes[0].n > 16)
+            || (prb.ndims > 1 && prb.nodes[1].is % 64 == 0
+                    && prb.nodes[1].n > 16);
+    if (!cache_blocking_needed) return;
 
     int unit_input_stride_idx = -1;
     for (auto idx = 0; idx < prb.ndims; ++idx) {
-        if (prb.nodes[idx].is == 1)
-            unit_input_stride_idx = idx;
+        if (prb.nodes[idx].is == 1) unit_input_stride_idx = idx;
     }
 
     /* Re-prioritize the sequential read over sequential write:
@@ -814,8 +812,7 @@ static void prb_block_for_cache(tr::prb_t &prb) {
 
         const bool split_needed = (num_elems > 16) && (num_elems % 16 == 0);
         const int move_location = (output_stride % 4 != 0) ? 0 : 1;
-        if (split_needed)
-            prb_node_split(prb, unit_input_stride_idx, 16);
+        if (split_needed) prb_node_split(prb, unit_input_stride_idx, 16);
 
         /* Because of cache-unfriendly nature of unit-output stride node, let
          * us move unit-input stride node on or near front! */
@@ -829,10 +826,8 @@ static void prb_block_for_cache(tr::prb_t &prb) {
         const auto input_stride = prb.nodes[0].is;
         const auto num_elems = prb.nodes[0].n;
 
-        const bool split_needed = true
-                && (num_elems > 16)
-                && (num_elems % 16 == 0)
-                && (input_stride >= 256)
+        const bool split_needed = true && (num_elems > 16)
+                && (num_elems % 16 == 0) && (input_stride >= 256)
                 && (input_stride % 64 == 0);
         if (split_needed) {
             prb_node_split(prb, 0, 16);
@@ -852,7 +847,7 @@ static void prb_thread_kernel_balance(tr::prb_t &prb, int &ndims_ker_max) {
     /* sz_drv_min is the minimal size for the parallel
      * driver required for good parallelization */
     const size_t sz_drv_min = nstl::min<size_t>(
-            16 * mkldnn_get_max_threads(), utils::div_up(sz_total, 1024));
+            16 * dnnl_get_max_threads(), utils::div_up(sz_total, 1024));
 
     /* kdims -- # of dimensions processed by a kernel
      * sz_ker_cur -- product of the dimension processed by a kernel
@@ -1114,8 +1109,8 @@ struct jit_uni_reorder_t : public primitive_impl_t {
     }
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
-        auto in = CTX_IN_MEM(const char *, MKLDNN_ARG_FROM);
-        auto out = CTX_OUT_MEM(char *, MKLDNN_ARG_TO);
+        auto in = CTX_IN_MEM(const char *, DNNL_ARG_FROM);
+        auto out = CTX_OUT_MEM(char *, DNNL_ARG_TO);
 
         omp_driver(in, out, pd()->attr()->output_scales_.scales_);
 
@@ -1139,4 +1134,4 @@ status_t jit_uni_reorder_create(reorder_pd_t **reorder_pd, engine_t *engine,
 
 } // namespace cpu
 } // namespace impl
-} // namespace mkldnn
+} // namespace dnnl

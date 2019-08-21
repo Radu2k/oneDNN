@@ -31,9 +31,9 @@
 // when the memory object was set as a kernel argument using clSetKernelArg.
 static std::unordered_map<cl_mem, int> sim_mem_ids;
 
-extern "C" int MKLDNN_API mkldnn_memory_get_sim_id(
-        const mkldnn::impl::memory_t *mem) {
-    using namespace mkldnn::impl;
+extern "C" int DNNL_API dnnl_memory_get_sim_id(
+        const dnnl::impl::memory_t *mem) {
+    using namespace dnnl::impl;
 
     auto *ocl_mem_storage = utils::downcast<ocl::ocl_memory_storage_t *>(
             mem->memory_storage());
@@ -43,8 +43,7 @@ extern "C" int MKLDNN_API mkldnn_memory_get_sim_id(
 
 static void sim_register_ocl_mem_object(cl_mem ocl_mem) {
     // Do not track simulation IDs unless running GPU simulation
-    static bool is_gpu_sim
-            = (bool)mkldnn::impl::getenv_int("MKLDNN_GPU_SIM", 0);
+    static bool is_gpu_sim = (bool)dnnl::impl::getenv_int("DNNL_GPU_SIM", 0);
     if (!is_gpu_sim) return;
 
     if (sim_mem_ids.count(ocl_mem) != 0) return;
@@ -53,7 +52,7 @@ static void sim_register_ocl_mem_object(cl_mem ocl_mem) {
     sim_mem_ids[ocl_mem] = sim_mem_counter++;
 }
 
-namespace mkldnn {
+namespace dnnl {
 namespace impl {
 namespace ocl {
 
@@ -88,7 +87,7 @@ status_t ocl_gpu_kernel_t::parallel_for(stream_t &stream,
         } else {
             set_err = clSetKernelArg(ocl_kernel_, i, arg.size(), arg.value());
         }
-        status_t status = ocl_utils::convert_to_mkldnn(set_err);
+        status_t status = ocl_utils::convert_to_dnnl(set_err);
         if (status != status::success) return status;
     }
 
@@ -96,10 +95,10 @@ status_t ocl_gpu_kernel_t::parallel_for(stream_t &stream,
     if (range.is_zero()) { return status::success; }
     cl_int err = clEnqueueNDRangeKernel(queue, ocl_kernel_, ndims, nullptr,
             range.global_range(), range.local_range(), 0, nullptr, nullptr);
-    status_t status = ocl_utils::convert_to_mkldnn(err);
+    status_t status = ocl_utils::convert_to_dnnl(err);
     return status;
 }
 
 } // namespace ocl
 } // namespace impl
-} // namespace mkldnn
+} // namespace dnnl

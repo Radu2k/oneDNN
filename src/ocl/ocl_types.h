@@ -206,6 +206,7 @@
 #define AS_BLOCK_DATA8_T as_uchar8
 #elif DT_S32 == 1
 #define DATA_T int
+#define DATA_TO_REF convert_int
 #define CONVERT_DATA_T convert_int_sat_rte
 #define POST_OP_DATA_T float
 #elif !defined(DT_UNDEF)
