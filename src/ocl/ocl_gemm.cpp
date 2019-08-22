@@ -304,13 +304,10 @@ dnnl_status_t DNNL_API dnnl_ocl_gemm_s8s8s32(cl_command_queue queue,
         cl_mem b, dim_t offset_b, dim_t ldb, int8_t bo, cl_float beta, cl_mem c,
         dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
-    if ((ao != 0) || bo != 0)
-        return status::unimplemented;
-    else
-        return gemm_x8x8s32<data_type::s8, data_type::s8, data_type::s32>(queue,
-                &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
-                offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc,
-                co, offset_co);
+    return gemm_x8x8s32<data_type::s8, data_type::s8, data_type::s32>(queue,
+            &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
+            offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc, co,
+            offset_co);
 }
 
 dnnl_status_t DNNL_API dnnl_ocl_gemm_u8s8s32(cl_command_queue queue,
@@ -319,13 +316,10 @@ dnnl_status_t DNNL_API dnnl_ocl_gemm_u8s8s32(cl_command_queue queue,
         cl_mem b, dim_t offset_b, dim_t ldb, int8_t bo, cl_float beta, cl_mem c,
         dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
-    if ((ao != 0) || bo != 0)
-        return status::unimplemented;
-    else
-        return gemm_x8x8s32<data_type::s8, data_type::u8, data_type::s32>(queue,
-                &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
-                offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc,
-                co, offset_co);
+    return gemm_x8x8s32<data_type::s8, data_type::u8, data_type::s32>(queue,
+            &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
+            offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc, co,
+            offset_co);
 }
 
 dnnl_status_t DNNL_API dnnl_ocl_gemm_s8u8s32(cl_command_queue queue,
@@ -334,13 +328,10 @@ dnnl_status_t DNNL_API dnnl_ocl_gemm_s8u8s32(cl_command_queue queue,
         cl_mem b, dim_t offset_b, dim_t ldb, uint8_t bo, cl_float beta,
         cl_mem c, dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
-    if ((ao != 0) || bo != 0)
-        return status::unimplemented;
-    else
-        return gemm_x8x8s32<data_type::u8, data_type::s8, data_type::s32>(queue,
-                &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
-                offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc,
-                co, offset_co);
+    return gemm_x8x8s32<data_type::u8, data_type::s8, data_type::s32>(queue,
+            &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
+            offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc, co,
+            offset_co);
 }
 
 dnnl_status_t DNNL_API dnnl_ocl_gemm_u8u8s32(cl_command_queue queue,
@@ -349,12 +340,9 @@ dnnl_status_t DNNL_API dnnl_ocl_gemm_u8u8s32(cl_command_queue queue,
         cl_mem b, dim_t offset_b, dim_t ldb, uint8_t bo, cl_float beta,
         cl_mem c, dim_t offset_c, dim_t ldc, cl_mem co, dim_t offset_co) {
 
-    if ((ao != 0) || bo != 0)
-        return status::unimplemented;
-    else
-        return gemm_x8x8s32<data_type::u8, data_type::u8, data_type::s32>(queue,
-                &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
-                offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc,
-                co, offset_co);
+    return gemm_x8x8s32<data_type::u8, data_type::u8, data_type::s32>(queue,
+            &transb, &transa, c2f_offsetC(&offsetc), n, m, k, alpha, b,
+            offset_b, ldb, bo, a, offset_a, lda, ao, beta, c, offset_c, ldc, co,
+            offset_co);
 }
 }

@@ -112,16 +112,17 @@
         if (n > X + OFF) { \
             if (m > 0) \
                 c[0] = ((!beta) ? 0 : c[0]) + sc[X / 4 + 0].s##OFF \
-                        + ((!apply_co) ? 0 : co[0]); \
+                        + ((!apply_co) ? 0 : co[0]) + xa[0] + xb[0]; \
             if (m > 1) \
                 c[1] = ((!beta) ? 0 : c[1]) + sc[X / 4 + 4].s##OFF \
-                        + ((!apply_co) ? 0 : co[0]); \
+                        + ((!apply_co) ? 0 : co[0]) + xa[1] + xb[0] ; \
             if (m > 2) \
                 c[2] = ((!beta) ? 0 : c[2]) + sc[X / 4 + 8].s##OFF \
-                        + ((!apply_co) ? 0 : co[0]); \
+                        + ((!apply_co) ? 0 : co[0]) + xa[2] + xb[0]; \
             if (m > 3) \
                 c[3] = ((!beta) ? 0 : c[3]) + sc[X / 4 + 12].s##OFF \
-                        + ((!apply_co) ? 0 : co[0]); \
+                        + ((!apply_co) ? 0 : co[0]) + xa[3] + xb[0]; \
+            xb ++; \
             c += ldc; \
         } \
     } while (0)
@@ -131,16 +132,17 @@
         if (n > X + OFF) { \
             if (m > 0) \
                 c[0] = ((!beta) ? 0 : c[0]) + sc[X / 4 + 0].s##OFF \
-                        + ((!apply_co) ? 0 : co[0]); \
+                        + ((!apply_co) ? 0 : co[0]) + xa[0] + xb[0]; \
             if (m > 1) \
                 c[1] = ((!beta) ? 0 : c[1]) + sc[X / 4 + 4].s##OFF \
-                        + ((!apply_co) ? 0 : co[1]); \
+                        + ((!apply_co) ? 0 : co[1]) + xa[1] + xb[0]; \
             if (m > 2) \
                 c[2] = ((!beta) ? 0 : c[2]) + sc[X / 4 + 8].s##OFF \
-                        + ((!apply_co) ? 0 : co[2]); \
+                        + ((!apply_co) ? 0 : co[2]) + xa[2] + xb[0]; \
             if (m > 3) \
                 c[3] = ((!beta) ? 0 : c[3]) + sc[X / 4 + 12].s##OFF \
-                        + ((!apply_co) ? 0 : co[3]); \
+                        + ((!apply_co) ? 0 : co[3]) + xa[3] + xb[0]; \
+            xb ++; \    
             c += ldc; \
         } \
     } while (0)
@@ -150,16 +152,17 @@
         if (n > X + OFF) { \
             if (m > 0) \
                 c[0] = ((!beta) ? 0 : c[0]) + sc[X / 4 + 0].s##OFF \
-                        + ((!apply_co) ? 0 : co[0]); \
+                        + ((!apply_co) ? 0 : co[0]) + xa[0] + xb[0]; \
             if (m > 1) \
                 c[1] = ((!beta) ? 0 : c[1]) + sc[X / 4 + 4].s##OFF \
-                        + ((!apply_co) ? 0 : co[0]); \
+                        + ((!apply_co) ? 0 : co[0]) + xa[1] + xb[0]; \
             if (m > 2) \
                 c[2] = ((!beta) ? 0 : c[2]) + sc[X / 4 + 8].s##OFF \
-                        + ((!apply_co) ? 0 : co[0]); \
+                        + ((!apply_co) ? 0 : co[0]) + xa[2] + xb[0]; \
             if (m > 3) \
                 c[3] = ((!beta) ? 0 : c[3]) + sc[X / 4 + 12].s##OFF \
-                        + ((!apply_co) ? 0 : co[0]); \
+                        + ((!apply_co) ? 0 : co[0]) + xa[3] + xb[0]; \
+            xb ++; \
             c += ldc; \
             co++; \
         } \
@@ -212,6 +215,17 @@ gen12lp_gemm_compute_x8x8s32_kernel(global FLOATA *a, global FLOATB *b,
     long noffset = ((cid * nwidth) & ~(UNROLL_N - 1)) * kk
             + ((cid * nwidth) & (UNROLL_N - 1)) * UNROLL_K;
 
+
+     // Accumulation array for A and B
+    __local FLOATC *xa = (__local FLOATC *)sa; 
+    sa += UNROLL_M * get_local_size(1) * sizeof(FLOATC);
+
+     __local FLOATC *xb = (__local FLOATC *)sb; 
+    sb += UNROLL_N * get_local_size(2) * sizeof(FLOATC);
+
+    FLOATC sumA = 0, sumB = (FLOATC)bo * k;
+
+
 #if defined(NN) || defined(NT)
     a += offsetA + (mwidth * cid + GROUPSIZE_M * gdx);
 #else
@@ -221,14 +235,19 @@ gen12lp_gemm_compute_x8x8s32_kernel(global FLOATA *a, global FLOATB *b,
     for (l = 0; l < kk; l += UNROLL_K) {
         for (ll = 0; ll < UNROLL_K; ll++) {
             sa[moffset + l * UNROLL_M + ll]
-                    = (((cid < m) && (l + ll < k)) ? *a - ao : 0);
+                    = (((cid < m) && (l + ll < k)) ? *a : 0);
+            sumA -= (FLOATC)sa[moffset + l * UNROLL_M + ll];
 #if defined(NN) || defined(NT)
             a += lda;
 #else
-            a++;
+            a ++;
 #endif
         }
     }
+
+    if (mwidth * cid < UNROLL_M * get_local_size(1)) 
+        xa[mwidth * cid] = (FLOATC)bo * sumA;
+
 
 #if defined(NN) || defined(TN)
     b += offsetB + (nwidth * cid + GROUPSIZE_N * gdy) * ldb;
@@ -239,14 +258,19 @@ gen12lp_gemm_compute_x8x8s32_kernel(global FLOATA *a, global FLOATB *b,
     for (l = 0; l < kk; l += UNROLL_K) {
         for (ll = 0; ll < UNROLL_K; ll++) {
             sb[noffset + l * UNROLL_N + ll]
-                    = (((cid < n) && (l + ll < k)) ? *b - bo : 0);
+                    = (((cid < n) && (l + ll < k)) ? *b : 0);
+            sumB -= (FLOATC)sb[noffset + l * UNROLL_N + ll];
+
 #if defined(NN) || defined(TN)
-            b++;
+            b ++;
 #else
             b += ldb;
 #endif
         }
     }
+
+    if (nwidth * cid < UNROLL_N * get_local_size(2)) 
+        xb[nwidth * cid] = (FLOATC)ao * sumB;
 
     m -= GROUPSIZE_M * gdx + UNROLL_M * idx;
     if (m > UNROLL_M) m = UNROLL_M;
@@ -268,6 +292,7 @@ gen12lp_gemm_compute_x8x8s32_kernel(global FLOATA *a, global FLOATB *b,
 #endif
     }
 
+
     barrier(CLK_LOCAL_MEM_FENCE);
 
     if ((m <= 0) || (n <= 0)) return;
@@ -275,6 +300,9 @@ gen12lp_gemm_compute_x8x8s32_kernel(global FLOATA *a, global FLOATB *b,
 
     sa += UNROLL_M * kk * idx + UNROLL_M * UNROLL_K * lid / GRX;
     sb += UNROLL_N * kk * idy + UNROLL_K * lid;
+
+    xa  += UNROLL_M * idx + UNROLL_M * lid / GRX;
+    xb  += UNROLL_N * idy;
 
     FLOATC4 sc[UNROLL_M * UNROLL_N / GRX / 4] = {0};
 
