@@ -20,11 +20,11 @@
 #include "common/c_types_map.hpp"
 #include "ocl/jit_primitive_conf.hpp"
 
-namespace mkldnn {
+namespace dnnl {
 namespace impl {
 namespace ocl {
 
-using namespace mkldnn::impl::format_tag;
+using namespace dnnl::impl::format_tag;
 
 struct jit_gen12hp_u8s8s32x_conv_fwd_kernel {
     jit_gen12hp_u8s8s32x_conv_fwd_kernel(jit_conv_conf_t ajcp) : jcp(ajcp) {};
@@ -280,6 +280,6 @@ struct jit_gen12hp_u8s8s32x_conv_bwd_data_kernel {
 
 } // namespace ocl
 } // namespace impl
-} // namespace mkldnn
+} // namespace dnnl
 
 #endif

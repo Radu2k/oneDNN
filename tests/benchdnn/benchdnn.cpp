@@ -20,11 +20,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "mkldnn.h"
+#include "dnnl.h"
 
 #include "common.hpp"
-#include "mkldnn_common.hpp"
-#include "mkldnn_memory.hpp"
+#include "dnnl_common.hpp"
+#include "dnnl_memory.hpp"
 #include "parser.hpp"
 
 #include "bnorm/bnorm.hpp"
@@ -122,10 +122,10 @@ int main(int argc, char **argv) {
 
     printf("tests:%d passed:%d "
            "skipped:%d mistrusted:%d unimplemented:%d "
-           "failed:%d\n",
+           "failed:%d listed:%d\n",
             benchdnn_stat.tests, benchdnn_stat.passed, benchdnn_stat.skipped,
             benchdnn_stat.mistrusted, benchdnn_stat.unimplemented,
-            benchdnn_stat.failed);
+            benchdnn_stat.failed, benchdnn_stat.listed);
     if (bench_mode & PERF) {
         printf("total perf: min(ms):%g avg(ms):%g\n",
                 benchdnn_stat.ms[benchdnn_timer_t::min],

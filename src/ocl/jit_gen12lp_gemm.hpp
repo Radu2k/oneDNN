@@ -28,7 +28,7 @@
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
-namespace mkldnn {
+namespace dnnl {
 namespace impl {
 namespace ocl {
 
@@ -97,7 +97,7 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
                     = attr()->post_ops_.find(primitive_kind::eltwise);
             return with_eltwise()
                     ? attr()->post_ops_.entry_[eltwise_idx].eltwise.alg
-                    : mkldnn_alg_kind_undef;
+                    : dnnl_alg_kind_undef;
         }
 
         size_t dyn_offset_a = 0;
@@ -144,9 +144,9 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
                 &temp_buf_ptr, pd()->desc()->m * pd()->desc()->n * sizeof(int));
         temp_buf_.reset(temp_buf_ptr);
 
-        bool fixed_c = (pd()->desc()->offsetc == mkldnn_fixed);
-        bool column_c = (pd()->desc()->offsetc == mkldnn_column);
-        bool row_c = (pd()->desc()->offsetc == mkldnn_row);
+        bool fixed_c = (pd()->desc()->offsetc == dnnl_fixed);
+        bool column_c = (pd()->desc()->offsetc == dnnl_column);
+        bool row_c = (pd()->desc()->offsetc == dnnl_row);
 
         auto status = jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type,
                 c_type>::init_const_def(kernel_ctx, pd()->desc()->transa,
@@ -211,7 +211,7 @@ private:
 
 } // namespace ocl
 } // namespace impl
-} // namespace mkldnn
+} // namespace dnnl
 #endif
 
 // vim: et ts=4 sw=4 cindent cino^=l0,\:0,N-s

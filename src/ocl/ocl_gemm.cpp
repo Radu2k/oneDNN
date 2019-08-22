@@ -17,11 +17,11 @@
 #include <memory>
 #include <CL/cl.h>
 
-#include "mkldnn.h"
+#include "dnnl.h"
 
+#include "common/dnnl_traits.hpp"
 #include "common/gemm_utils.hpp"
 #include "common/memory_storage.hpp"
-#include "common/mkldnn_traits.hpp"
 #include "common/nstl.hpp"
 #include "common/primitive_desc.hpp"
 #include "ocl/jit_gen12lp_gemm.hpp"
@@ -30,14 +30,14 @@
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
-using namespace mkldnn;
-using namespace mkldnn::impl;
-using namespace mkldnn::impl::ocl;
+using namespace dnnl;
+using namespace dnnl::impl;
+using namespace dnnl::impl::ocl;
 
 namespace {
 
 template <data_type_t data_type>
-mkldnn_status_t gemm_generic(cl_command_queue queue, const char *transa,
+dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
         const char *transb, dim_t m, dim_t n, dim_t k, cl_float alpha, cl_mem a,
         dim_t offset_a, dim_t lda, cl_mem b, dim_t offset_b, dim_t ldb,
         cl_float beta, cl_mem c, dim_t offset_c, dim_t ldc) {
@@ -49,7 +49,7 @@ mkldnn_status_t gemm_generic(cl_command_queue queue, const char *transa,
     // Check inputs
     status = check_gemm_input(
             *transa, *transb, m, n, k, lda, ldb, ldc, alpha, beta);
-    if (status != mkldnn_success) return status;
+    if (status != dnnl_success) return status;
 
     // Create engine
     cl_context ocl_ctx;
@@ -79,7 +79,7 @@ mkldnn_status_t gemm_generic(cl_command_queue queue, const char *transa,
     using pd_type = typename jit_gen9_gemm_t<data_type>::pd_t;
 
     gemm_desc_t op_desc;
-    op_desc.primitive_kind = mkldnn_gemm;
+    op_desc.primitive_kind = dnnl_gemm;
     op_desc.transa = (*transa == 'n' || *transa == 'N') ? transpose::notrans
                                                         : transpose::trans;
     op_desc.transb = (*transb == 'n' || *transb == 'N') ? transpose::notrans
@@ -96,7 +96,7 @@ mkldnn_status_t gemm_generic(cl_command_queue queue, const char *transa,
     op_desc.b_type = data_type;
     op_desc.c_type = data_type;
 
-    mkldnn_memory_desc_t a_desc, b_desc, c_desc;
+    dnnl_memory_desc_t a_desc, b_desc, c_desc;
 
     status = create_gemm_memory_desc(&a_desc, &op_desc, 0, data_type);
     if (status != status::success) return status;
@@ -135,9 +135,9 @@ mkldnn_status_t gemm_generic(cl_command_queue queue, const char *transa,
     gemm_prim.reset(gemm_prim_ptr);
 
     exec_args_t args = {
-            {MKLDNN_ARG_SRC_0, {a_mem.get(), true}},
-            {MKLDNN_ARG_SRC_1, {b_mem.get(), true}},
-            {MKLDNN_ARG_DST, {c_mem.get(), false}},
+            {DNNL_ARG_SRC_0, {a_mem.get(), true}},
+            {DNNL_ARG_SRC_1, {b_mem.get(), true}},
+            {DNNL_ARG_DST, {c_mem.get(), false}},
     };
 
     exec_ctx_t ctx(s.get(), std::move(args));
@@ -148,7 +148,7 @@ mkldnn_status_t gemm_generic(cl_command_queue queue, const char *transa,
 }
 
 template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
-mkldnn_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
+dnnl_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
         const char *transb, const char *offsetc, dim_t m, dim_t n, dim_t k,
         cl_float alpha, cl_mem a, dim_t offset_a, dim_t lda,
         typename prec_traits<a_type>::type ao, cl_mem b, dim_t offset_b,
@@ -160,7 +160,7 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
     // Check inputs
     status = check_gemm_x8x8s32_input(
             *offsetc, *transa, *transb, m, n, k, lda, ldb, ldc, alpha, beta);
-    if (status != mkldnn_success) return status;
+    if (status != dnnl_success) return status;
 
     // Create engine
     cl_context ocl_ctx;
@@ -190,7 +190,7 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
     using pd_type = typename jit_gen12lp_gemm_t<a_type, b_type, c_type>::pd_t;
 
     gemm_desc_t op_desc;
-    op_desc.primitive_kind = mkldnn_gemm;
+    op_desc.primitive_kind = dnnl_gemm;
     op_desc.transa = (*transa == 'n' || *transa == 'N') ? transpose::notrans
                                                         : transpose::trans;
     op_desc.transb = (*transb == 'n' || *transb == 'N') ? transpose::notrans
@@ -213,7 +213,7 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
     op_desc.b_type = b_type;
     op_desc.c_type = c_type;
 
-    mkldnn_memory_desc_t a_desc, b_desc, c_desc, co_desc;
+    dnnl_memory_desc_t a_desc, b_desc, c_desc, co_desc;
 
     status = create_gemm_memory_desc(&a_desc, &op_desc, 0, a_type);
     if (status != status::success) return status;
@@ -258,10 +258,10 @@ mkldnn_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
     gemm_prim.reset(gemm_prim_ptr);
 
     exec_args_t args = {
-            {MKLDNN_ARG_SRC_0, {a_mem.get(), true}},
-            {MKLDNN_ARG_SRC_1, {b_mem.get(), true}},
-            {MKLDNN_ARG_SRC_2, {co_mem.get(), true}},
-            {MKLDNN_ARG_DST, {c_mem.get(), false}},
+            {DNNL_ARG_SRC_0, {a_mem.get(), true}},
+            {DNNL_ARG_SRC_1, {b_mem.get(), true}},
+            {DNNL_ARG_SRC_2, {co_mem.get(), true}},
+            {DNNL_ARG_DST, {c_mem.get(), false}},
     };
 
     exec_ctx_t ctx(s.get(), std::move(args));
@@ -282,7 +282,7 @@ const char *c2f_offsetC(const char *offC) {
 } // namespace
 
 extern "C" {
-mkldnn_status_t MKLDNN_API mkldnn_ocl_sgemm(cl_command_queue queue, char transa,
+dnnl_status_t DNNL_API dnnl_ocl_sgemm(cl_command_queue queue, char transa,
         char transb, dim_t m, dim_t n, dim_t k, cl_float alpha, cl_mem a,
         dim_t offset_a, dim_t lda, cl_mem b, dim_t offset_b, dim_t ldb,
         cl_float beta, cl_mem c, dim_t offset_c, dim_t ldc) {
@@ -290,7 +290,7 @@ mkldnn_status_t MKLDNN_API mkldnn_ocl_sgemm(cl_command_queue queue, char transa,
             b, offset_b, ldb, a, offset_a, lda, beta, c, offset_c, ldc);
 }
 
-mkldnn_status_t MKLDNN_API mkldnn_ocl_hgemm(cl_command_queue queue, char transa,
+dnnl_status_t DNNL_API dnnl_ocl_hgemm(cl_command_queue queue, char transa,
         char transb, dim_t m, dim_t n, dim_t k, cl_float alpha, cl_mem a,
         dim_t offset_a, dim_t lda, cl_mem b, dim_t offset_b, dim_t ldb,
         cl_float beta, cl_mem c, dim_t offset_c, dim_t ldc) {
@@ -298,7 +298,7 @@ mkldnn_status_t MKLDNN_API mkldnn_ocl_hgemm(cl_command_queue queue, char transa,
             b, offset_b, ldb, a, offset_a, lda, beta, c, offset_c, ldc);
 }
 
-mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_s8s8s32(cl_command_queue queue,
+dnnl_status_t DNNL_API dnnl_ocl_gemm_s8s8s32(cl_command_queue queue,
         char transa, char transb, char offsetc, dim_t m, dim_t n, dim_t k,
         cl_float alpha, cl_mem a, dim_t offset_a, dim_t lda, int8_t ao,
         cl_mem b, dim_t offset_b, dim_t ldb, int8_t bo, cl_float beta, cl_mem c,
@@ -313,7 +313,7 @@ mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_s8s8s32(cl_command_queue queue,
                 co, offset_co);
 }
 
-mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_u8s8s32(cl_command_queue queue,
+dnnl_status_t DNNL_API dnnl_ocl_gemm_u8s8s32(cl_command_queue queue,
         char transa, char transb, char offsetc, dim_t m, dim_t n, dim_t k,
         cl_float alpha, cl_mem a, dim_t offset_a, dim_t lda, uint8_t ao,
         cl_mem b, dim_t offset_b, dim_t ldb, int8_t bo, cl_float beta, cl_mem c,
@@ -328,7 +328,7 @@ mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_u8s8s32(cl_command_queue queue,
                 co, offset_co);
 }
 
-mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_s8u8s32(cl_command_queue queue,
+dnnl_status_t DNNL_API dnnl_ocl_gemm_s8u8s32(cl_command_queue queue,
         char transa, char transb, char offsetc, dim_t m, dim_t n, dim_t k,
         cl_float alpha, cl_mem a, dim_t offset_a, dim_t lda, int8_t ao,
         cl_mem b, dim_t offset_b, dim_t ldb, uint8_t bo, cl_float beta,
@@ -343,7 +343,7 @@ mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_s8u8s32(cl_command_queue queue,
                 co, offset_co);
 }
 
-mkldnn_status_t MKLDNN_API mkldnn_ocl_gemm_u8u8s32(cl_command_queue queue,
+dnnl_status_t DNNL_API dnnl_ocl_gemm_u8u8s32(cl_command_queue queue,
         char transa, char transb, char offsetc, dim_t m, dim_t n, dim_t k,
         cl_float alpha, cl_mem a, dim_t offset_a, dim_t lda, uint8_t ao,
         cl_mem b, dim_t offset_b, dim_t ldb, uint8_t bo, cl_float beta,

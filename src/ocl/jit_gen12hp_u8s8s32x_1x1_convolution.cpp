@@ -17,17 +17,17 @@
 #include "jit_gen12hp_u8s8s32x_1x1_convolution.hpp"
 #include "ocl_stream.hpp"
 
-namespace mkldnn {
+namespace dnnl {
 namespace impl {
 namespace ocl {
 
 template <data_type_t dst_type>
 status_t jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<dst_type>::execute_forward(
         const exec_ctx_t &ctx) const {
-    auto &src = CTX_IN_STORAGE(MKLDNN_ARG_SRC);
-    auto &weights = CTX_IN_STORAGE(MKLDNN_ARG_WEIGHTS);
-    auto &bias = CTX_IN_STORAGE(MKLDNN_ARG_BIAS);
-    auto &dst = CTX_OUT_STORAGE(MKLDNN_ARG_DST);
+    auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
+    auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
+    auto &bias = CTX_IN_STORAGE(DNNL_ARG_BIAS);
+    auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     const auto &jcp = ker_->jcp;
     auto *compute_stream
@@ -58,4 +58,4 @@ template struct jit_gen12hp_u8s8s32x_1x1_convolution_fwd_t<u8>;
 
 } // namespace ocl
 } // namespace impl
-} // namespace mkldnn
+} // namespace dnnl

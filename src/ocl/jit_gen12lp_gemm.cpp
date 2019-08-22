@@ -15,12 +15,12 @@
 *******************************************************************************/
 
 #include "common/c_types_map.hpp"
-#include "common/mkldnn_traits.hpp"
+#include "common/dnnl_traits.hpp"
 #include "common/type_helpers.hpp"
 
 #include "ocl/jit_gen12lp_gemm.hpp"
 
-namespace mkldnn {
+namespace dnnl {
 namespace impl {
 namespace ocl {
 
@@ -174,14 +174,14 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute_standard(
     auto n = pd()->desc()->n;
     auto k = pd()->desc()->k;
 
-    bool transa = (pd()->desc()->transa == mkldnn_trans);
-    bool transb = (pd()->desc()->transb == mkldnn_trans);
+    bool transa = (pd()->desc()->transa == dnnl_trans);
+    bool transb = (pd()->desc()->transb == dnnl_trans);
 
     char offsetc_char;
 
-    if (pd()->desc()->offsetc == mkldnn_column)
+    if (pd()->desc()->offsetc == dnnl_column)
         offsetc_char = 'C';
-    else if (pd()->desc()->offsetc == mkldnn_row)
+    else if (pd()->desc()->offsetc == dnnl_row)
         offsetc_char = 'R';
     else
         offsetc_char = 'F';
@@ -199,10 +199,10 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute_standard(
     auto eltwise_alpha = pd()->eltwise_alpha();
     auto eltwise_beta = pd()->eltwise_beta();
 
-    auto &a = CTX_IN_STORAGE(MKLDNN_ARG_SRC_0);
-    auto &b = CTX_IN_STORAGE(MKLDNN_ARG_SRC_1);
-    auto &co = CTX_IN_STORAGE(MKLDNN_ARG_SRC_2);
-    auto &c = CTX_OUT_STORAGE(MKLDNN_ARG_DST);
+    auto &a = CTX_IN_STORAGE(DNNL_ARG_SRC_0);
+    auto &b = CTX_IN_STORAGE(DNNL_ARG_SRC_1);
+    auto &co = CTX_IN_STORAGE(DNNL_ARG_SRC_2);
+    auto &c = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     size_t off_a0 = a.get_offset() / sizeof(a_t) + pd()->dyn_offset_a;
     size_t off_b0 = b.get_offset() / sizeof(b_t) + pd()->dyn_offset_b;
@@ -294,6 +294,6 @@ template struct jit_gen12lp_gemm_t<u8, u8, s32>;
 
 } // namespace ocl
 } // namespace impl
-} // namespace mkldnn
+} // namespace dnnl
 
 // vim: et ts=4 sw=4 cindent cino^=l0,\:0,N-s

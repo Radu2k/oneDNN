@@ -28,7 +28,7 @@
 
 extern const char *gen12hp_1x1_conv_fwd_data_u8s8s32x_kernel;
 
-namespace mkldnn {
+namespace dnnl {
 namespace impl {
 namespace ocl {
 
@@ -109,6 +109,6 @@ private:
 
 } // namespace ocl
 } // namespace impl
-} // namespace mkldnn
+} // namespace dnnl
 
 #endif

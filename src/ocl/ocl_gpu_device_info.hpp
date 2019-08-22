@@ -25,7 +25,7 @@
 #include "compute/device_info.hpp"
 #include "ocl/ocl_utils.hpp"
 
-namespace mkldnn {
+namespace dnnl {
 namespace impl {
 namespace ocl {
 
@@ -173,7 +173,7 @@ private:
 
         gpu_arch_t env_gpu_arch = gpu_arch_t::unknown;
         char gpu_arch_str[32];
-        if (getenv("MKLDNN_GPU_ARCH", gpu_arch_str, sizeof(gpu_arch_str)) > 0) {
+        if (getenv("DNNL_GPU_ARCH", gpu_arch_str, sizeof(gpu_arch_str)) > 0) {
             env_gpu_arch = str2gpu_arch(gpu_arch_str);
         }
 
@@ -273,6 +273,6 @@ private:
 
 } // namespace ocl
 } // namespace impl
-} // namespace mkldnn
+} // namespace dnnl
 
 #endif // OCL_GPU_DEVICE_INFO_HPP
