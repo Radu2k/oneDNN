@@ -18,8 +18,8 @@
 
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
-#include "ocl/gemm_x8s8s32x_inner_product.hpp"
 #include "ocl/gemm_inner_product.hpp"
+#include "ocl/gemm_x8s8s32x_inner_product.hpp"
 #include "ocl/jit_gen12lp_gemm.hpp"
 #include "ocl/jit_gen12lp_u8s8s32u8_1x1_convolution.hpp"
 #include "ocl/jit_gen12lp_u8s8s32x_convolution.hpp"

@@ -16,7 +16,7 @@
 
 #include "ocl/gemm_x8s8s32x_inner_product.hpp"
 
-namespace mkldnn {
+namespace dnnl {
 namespace impl {
 namespace ocl {
 
@@ -24,19 +24,18 @@ status_t gemm_x8s8s32x_inner_product_fwd_t::execute_forward(
         const exec_ctx_t &ctx) const {
 
     exec_args_t gemm_args;
-    gemm_args[MKLDNN_ARG_SRC_0] = ctx.args().at(MKLDNN_ARG_WEIGHTS);
-    gemm_args[MKLDNN_ARG_SRC_1] = ctx.args().at(MKLDNN_ARG_SRC);
-    gemm_args[MKLDNN_ARG_DST] = ctx.args().at(MKLDNN_ARG_DST);
+    gemm_args[DNNL_ARG_SRC_0] = ctx.args().at(DNNL_ARG_WEIGHTS);
+    gemm_args[DNNL_ARG_SRC_1] = ctx.args().at(DNNL_ARG_SRC);
+    gemm_args[DNNL_ARG_DST] = ctx.args().at(DNNL_ARG_DST);
 
     exec_ctx_t gemm_ctx(ctx.stream(), std::move(gemm_args));
     status_t gemm_exec_status = gemm_->execute(gemm_ctx);
-    if (gemm_exec_status != status::success)
-        return gemm_exec_status;
+    if (gemm_exec_status != status::success) return gemm_exec_status;
 
     // TODO: post proccess kernel should be here.
     return status::success;
 }
 
-}
-}
-}
+} // namespace ocl
+} // namespace impl
+} // namespace dnnl
