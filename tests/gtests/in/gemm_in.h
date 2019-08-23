@@ -141,7 +141,6 @@ constexpr test_igemm_params fix_no_offsets = {'F', false, false, false};
 constexpr test_igemm_params col_no_offsets = {'C', false, false, false};
 constexpr test_igemm_params row_no_offsets = {'R', false, false, false};
 
-
 INST_TEST_CASE(TestGEMM_expected_failures,
         test_params {'t', 'n', 3, 2, 1, 1.0, 0.0, 2, 5, 8, {}, {}, true,
                 dnnl_invalid_arguments},
