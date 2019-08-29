@@ -47,6 +47,7 @@ struct jit_gen12hp_1x1_conv_fwd_kernel {
 
         status_t status = status::success;
 
+        bool is_bf16 = src_mdw.data_type() == data_type::bf16;
         bool is_fp16 = src_mdw.data_type() == data_type::f16;
         bool is_int8 = src_mdw.data_type() == data_type::u8;
 
@@ -89,7 +90,7 @@ struct jit_gen12hp_1x1_conv_fwd_kernel {
                     ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i)
                     : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i);
 
-        } else if (is_fp16) {
+        } else if (is_fp16 || is_bf16) {
             if (jcp.oc % 16 != 0 || jcp.ic % 16 != 0)
                 return status::unimplemented;
 

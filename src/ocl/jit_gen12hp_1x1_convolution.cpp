@@ -53,6 +53,7 @@ status_t jit_gen12hp_1x1_convolution_fwd_t<dst_type>::execute_forward(
 
 using namespace data_type;
 
+template struct jit_gen12hp_1x1_convolution_fwd_t<bf16>;
 template struct jit_gen12hp_1x1_convolution_fwd_t<f16>;
 template struct jit_gen12hp_1x1_convolution_fwd_t<s8>;
 template struct jit_gen12hp_1x1_convolution_fwd_t<u8>;

@@ -27,6 +27,7 @@
 #include "ocl/ocl_utils.hpp"
 
 extern const char *gen12hp_1x1_conv_fwd_data_u8s8s32x_kernel;
+extern const char *gen12hp_1x1_conv_fwd_data_bf16_kernel;
 extern const char *gen12hp_1x1_conv_fwd_data_f16_kernel;
 
 namespace dnnl {
@@ -55,6 +56,7 @@ struct jit_gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
                     && this->desc()->alg_kind == alg_kind::convolution_direct
                     && utils::one_of(true,
                             expect_data_types(u8, s8, f32, dst_type, s32),
+                            expect_data_types(bf16, bf16, bf16, dst_type, f32),
                             expect_data_types(f16, f16, f16, dst_type, f16));
             if (!ok) return status::unimplemented;
 
@@ -75,6 +77,8 @@ struct jit_gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
         const char *kernel_name = nullptr;
         if (pd()->desc()->src_desc.data_type == data_type::f16)
             kernel_name = "gen12hp_1x1_conv_fwd_kernel_f16";
+        else if (pd()->desc()->src_desc.data_type == data_type::bf16)
+            kernel_name = "gen12hp_1x1_conv_fwd_kernel_bf16";
         else if (pd()->desc()->src_desc.data_type == data_type::u8)
             kernel_name = "gen12hp_1x1_conv_fwd_kernel_u8s8s32x";
         else
