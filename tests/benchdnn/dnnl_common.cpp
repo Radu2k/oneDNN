@@ -16,6 +16,7 @@
 
 #include <assert.h>
 #include "dnnl.h"
+#include <unordered_set>
 
 #include "dnnl_common.hpp"
 #include "dnnl_memory.hpp"
@@ -63,6 +64,24 @@ static bool is_gpu_perf_sim() {
     static const char *sim_perf_env = getenv("DNNL_GPU_PERF_SIM");
     static bool _is_perf_sim = sim_perf_env && atoi(sim_perf_env) == 1;
     return _is_perf_sim;
+}
+
+static std::unordered_set<dnn_mem_t *> dnn_mem_objects;
+
+void register_dnn_mem_object(dnn_mem_t *mem) {
+    dnn_mem_objects.insert(mem);
+}
+
+void unregister_dnn_mem_object(dnn_mem_t *mem) {
+    dnn_mem_objects.erase(mem);
+}
+void destroy_dnn_mem_objects() {
+    std::vector<dnn_mem_t *> to_destroy;
+    for (auto *mem : dnn_mem_objects)
+        to_destroy.push_back(mem);
+
+    for (auto *mem : to_destroy)
+        mem->~dnn_mem_t();
 }
 #endif
 
@@ -116,14 +135,7 @@ dnnl_status_t execute_and_wait(
 
                 DNN_SAFE_V(dnnl_primitive_destroy(prim));
 
-                // Do not destroy object twice
-                std::set<dnnl_memory_t> uniq_mems;
-                for (int i = 0; i < nargs; ++i) {
-                    auto ret = uniq_mems.insert(dnnl_args[i].memory);
-                    if (ret.second) {
-                        dnnl_memory_destroy(dnnl_args[i].memory);
-                    }
-                }
+                destroy_dnn_mem_objects();
 
                 DNN_SAFE_V(dnnl_engine_destroy(engine_tgt));
                 DNN_SAFE_V(dnnl_stream_destroy(stream_tgt));

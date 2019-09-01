@@ -20,7 +20,10 @@
 #include "dnnl_common.hpp"
 
 struct dnn_mem_t {
-    dnn_mem_t() { map(); }
+    dnn_mem_t() {
+        register_dnn_mem_object(this);
+        map();
+    }
 
     dnn_mem_t(const dnnl_memory_desc_t &md, dnnl_engine_t engine) {
         active_ = (initialize(md, engine) == OK);
@@ -201,6 +204,9 @@ private:
     int initialize(const dnnl_memory_desc_t &md, dnnl_data_type_t dt,
             dnnl_format_tag_t tag, dnnl_engine_t engine,
             void *handle = DNNL_MEMORY_ALLOCATE) {
+
+        register_dnn_mem_object(this);
+
         is_mapped_ = false;
 
         if (tag == dnnl_format_tag_undef) {
@@ -284,8 +290,10 @@ private:
     }
 
     int cleanup() {
+        unregister_dnn_mem_object(this);
+
         if (!active_) return OK;
-        unmap();
+        if (is_mapped_) unmap();
         DNN_SAFE(dnnl_memory_destroy(m_), CRIT);
         if (is_data_owner_) zfree(data_);
         return OK;

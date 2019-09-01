@@ -180,8 +180,18 @@ extern dnnl_engine_kind_t engine_tgt_kind;
 extern dnnl_engine_t engine_tgt;
 extern dnnl_stream_t stream_tgt;
 
+struct dnn_mem_t;
+
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
 extern "C" int dnnl_memory_get_sim_id(dnnl_memory_t mem);
+#endif
+
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+void register_dnn_mem_object(dnn_mem_t *mem);
+void unregister_dnn_mem_object(dnn_mem_t *mem);
+#else
+inline void register_dnn_mem_object(dnn_mem_t *mem) {}
+inline void unregister_dnn_mem_object(dnn_mem_t *mem) {}
 #endif
 
 inline int init() {
