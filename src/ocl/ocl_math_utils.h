@@ -54,10 +54,11 @@ inline int8 __dpas(uint8 a, int8 b, int8 acc) __attribute__((overloadable)) {
     return __builtin_IB_sub_group_idpas_u8_s8_8_8(acc, a, b);
 }
 
-inline float8 __dpas(int8 a, int8 b, float8 acc) __attribute__((overloadable)) {
+inline float8 __dpas(uint8 a, int8 b, float8 acc)
+        __attribute__((overloadable)) {
     float8 __builtin_IB_sub_group_fdpas_hf_hf_8_8(float8 acc, int8 a, int8 b)
             __attribute__((const));
-    return __builtin_IB_sub_group_fdpas_hf_hf_8_8(acc, a, b);
+    return __builtin_IB_sub_group_fdpas_hf_hf_8_8(acc, as_int8(a), b);
 }
 
 inline uint8 intel_sub_group_local_block_read_uint8(const __local uint *p)
