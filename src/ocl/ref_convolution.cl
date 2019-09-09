@@ -58,7 +58,7 @@ __kernel void ref_convolution_fwd_kernel(
     POST_OP_DATA_T tmp = d;
 
 #if WITH_BIAS
-    tmp += (POST_OP_DATA_T)BIA_TO_REF(bias[g * OC + oc]);
+    tmp += BIA_TO_REF(bias[g * OC + oc]);
 #endif
 
 #if SRC_DT_S8 == 1 || SRC_DT_U8 == 1
@@ -71,9 +71,9 @@ __kernel void ref_convolution_fwd_kernel(
 
 #if WITH_SUM == 1
 #if SUM_SCALE == 1
-    tmp += (POST_OP_DATA_T)dst[DST_OFF(n, g * OC + oc, od, oh, ow)];
+    tmp += DATA_TO_REF(dst[DST_OFF(n, g * OC + oc, od, oh, ow)]);
 #else
-    tmp += sum_scale * (POST_OP_DATA_T)dst[DST_OFF(n, g * OC + oc, od, oh, ow)];
+    tmp += sum_scale * DATA_TO_REF(dst[DST_OFF(n, g * OC + oc, od, oh, ow)]);
 #endif
 #endif
 
