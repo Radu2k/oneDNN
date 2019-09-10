@@ -32,6 +32,7 @@ namespace ocl {
 enum class gpu_arch_t {
     unknown,
     gen9,
+    gen12lp,
 };
 
 inline gpu_arch_t str2gpu_arch(const char *str) {
@@ -39,6 +40,7 @@ inline gpu_arch_t str2gpu_arch(const char *str) {
     if (!strcmp(STRINGIFY(_case), str)) return gpu_arch_t::_case
 
     CASE(gen9);
+    CASE(gen12lp);
     return gpu_arch_t::unknown;
 #undef CASE
 }
@@ -49,10 +51,27 @@ inline const char *gpu_arch2str(gpu_arch_t arch) {
 
     switch (arch) {
         CASE(gen9);
+        CASE(gen12lp);
         CASE(unknown);
     }
     return "unknown";
 #undef CASE
+}
+
+static compute::device_ext_t get_extensions(gpu_arch_t gpu_arch) {
+    uint64_t extensions = 0;
+    switch (gpu_arch) {
+        case gpu_arch_t::gen12lp:
+            extensions |= (uint64_t)compute::device_ext_t::intel_dot_accumulate;
+        case gpu_arch_t::gen9:
+            extensions |= (uint64_t)compute::device_ext_t::khr_fp16;
+            extensions |= (uint64_t)compute::device_ext_t::intel_subgroups;
+            extensions
+                    |= (uint64_t)compute::device_ext_t::intel_subgroups_short;
+            break;
+        case gpu_arch_t::unknown: break;
+    }
+    return (compute::device_ext_t)extensions;
 }
 
 class ocl_gpu_device_info_t : public compute::device_info_t {
@@ -90,6 +109,25 @@ public:
         return has(extensions_, ext);
     }
 
+    std::string get_cl_ext_options() const {
+        using namespace compute;
+
+        std::string opts;
+        for (uint64_t i_ext = 1; i_ext < (uint64_t)device_ext_t::last;
+                i_ext <<= 1) {
+            auto ext = (device_ext_t)i_ext;
+            // Use real GPU extensions
+            if (!has(real_extensions_, ext)) continue;
+
+            // These extensions are not handled properly by the OpenCL runtime.
+            // Pass macros for them manually.
+            if (utils::one_of(ext, device_ext_t::intel_dot_accumulate))
+                opts += std::string("-D") + ext2cl_str(ext) + " ";
+        }
+        if (!opts.empty()) { opts[opts.size() - 1] = '\0'; }
+        return opts;
+    }
+
     gpu_arch_t gpu_arch() const { return gpu_arch_; }
 
     int eu_count() const { return eu_count_; }
@@ -114,9 +152,33 @@ private:
         OCL_CHECK(err);
 
         if (dev_name.find("Gen9") != std::string::npos)
-            gpu_arch_ = gpu_arch_t::gen9;
+            real_gpu_arch_ = gpu_arch_t::gen9;
+        else if (dev_name.find("Gen12LP") != std::string::npos)
+            real_gpu_arch_ = gpu_arch_t::gen12lp;
         else
-            gpu_arch_ = gpu_arch_t::unknown;
+            real_gpu_arch_ = gpu_arch_t::unknown;
+
+        gpu_arch_t env_gpu_arch = gpu_arch_t::unknown;
+        char gpu_arch_str[32];
+        if (getenv("DNNL_GPU_ARCH", gpu_arch_str, sizeof(gpu_arch_str)) > 0) {
+            env_gpu_arch = str2gpu_arch(gpu_arch_str);
+        }
+
+        // GPU architecture is not overriden from environment, set and return.
+        if (env_gpu_arch == gpu_arch_t::unknown) {
+            gpu_arch_ = real_gpu_arch_;
+            return status::success;
+        }
+
+        // Environment GPU architecture is different from the detected one, use
+        // emulation.
+
+        // Do not allow emulating older architectures
+        if ((int)env_gpu_arch < (int)real_gpu_arch_) {
+            assert(!"not expected");
+            return status::runtime_error;
+        }
+        gpu_arch_ = env_gpu_arch;
 
         return status::success;
     }
@@ -140,8 +202,13 @@ private:
             const char *s_ext = ext2cl_str((compute::device_ext_t)i_ext);
             if (s_ext != nullptr && dev_ext.find(s_ext) != std::string::npos) {
                 extensions_ |= i_ext;
+                real_extensions_ |= i_ext;
             }
         }
+
+        // Handle future extensions, not yet supported by the OpenCL API
+        extensions_ |= (uint64_t)get_extensions(gpu_arch_);
+        real_extensions_ |= (uint64_t)get_extensions(real_gpu_arch_);
 
         return status::success;
     }
@@ -152,11 +219,12 @@ private:
                 sizeof(cl_uint), &eu_count, nullptr);
         eu_count_ = (err == CL_SUCCESS) ? eu_count : 0;
 
-        // Assume 7 threads by for Gen9
+        // Assume 7 threads by default
         int32_t threads_per_eu = 7;
 
         switch (gpu_arch_) {
             case gpu_arch_t::gen9: threads_per_eu = 7; break;
+            case gpu_arch_t::gen12lp: threads_per_eu = 7; break;
             default: break;
         }
 
@@ -173,10 +241,13 @@ private:
     int32_t eu_count_ = 0;
     int32_t hw_threads_ = 0;
 
-    // extensions_ and gpu_arch_ describe effective extensions and GPU
-    // architecture.
+    // extensions_ and gpu_arch_ describe effective extensions and GPU architecutre.
+    // real_extensions_ and real_gpu_arch_ describe real extensions and GPU architecutre.
     uint64_t extensions_ = 0;
+    uint64_t real_extensions_ = 0;
+
     gpu_arch_t gpu_arch_ = gpu_arch_t::unknown;
+    gpu_arch_t real_gpu_arch_ = gpu_arch_t::unknown;
 
     compute::runtime_version_t runtime_version_;
 };

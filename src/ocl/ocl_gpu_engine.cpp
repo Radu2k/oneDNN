@@ -103,7 +103,13 @@ status_t ocl_gpu_engine_t::create_kernels(
         std::vector<compute::kernel_t> *kernels,
         const std::vector<const char *> &kernel_names,
         const compute::kernel_ctx_t &kernel_ctx) const {
-    const std::string &options = kernel_ctx.options();
+    std::string options = kernel_ctx.options();
+
+    // XXX: Update options by adding macros for OpenCL extensions that are not
+    // handled properly by the OpenCL runtime
+    auto *dev_info
+            = utils::downcast<const ocl_gpu_device_info_t *>(device_info());
+    options += " " + dev_info->get_cl_ext_options();
 
     std::vector<const char **> code_strings;
     code_strings.reserve(kernel_names.size());

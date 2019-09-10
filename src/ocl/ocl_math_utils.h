@@ -30,7 +30,7 @@ float convert_bf16_to_f32(ushort b) {
     return f;
 }
 
-#if IMAD_SUPPORTED == 1
+#ifdef cl_intel_dot_accumulate
 inline int __imad(char4 a, char4 b, int c) __attribute__((overloadable)) {
     int __builtin_IB_dp4a_ss(int c, int a, int b) __attribute__((const));
     return __builtin_IB_dp4a_ss(c, as_int(a), as_int(b));

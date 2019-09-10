@@ -42,6 +42,7 @@ static inline const char *ext2cl_str(compute::device_ext_t ext) {
         CASE(khr_fp16);
         CASE(intel_subgroups);
         CASE(intel_subgroups_short);
+        CASE(intel_dot_accumulate);
         default: return nullptr;
     }
 #undef CASE
