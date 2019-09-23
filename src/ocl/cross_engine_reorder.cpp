@@ -52,11 +52,15 @@ status_t cross_engine_reorder_t::pd_t::init() {
     if (src_mdw.matches_one_of_tag(OIdhw4o8i8o4i, OIhw4o8i8o4i, OIw4o8i8o4i,
                 OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o, gOIdhw4o8i8o4i,
                 gOIhw4o8i8o4i, gOIw4o8i8o4i, gOIw8o16i2o, gOIhw8o16i2o,
-                gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i)
+                gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i, IOw4i8o8i4o,
+                IOhw4i8o8i4o, IOdhw4i8o8i4o, gIOw4i8o8i4o, gIOhw4i8o8i4o,
+                gIOdhw4i8o8i4o)
             || dst_mdw.matches_one_of_tag(OIdhw4o8i8o4i, OIhw4o8i8o4i,
                     OIw4o8i8o4i, OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o,
                     gOIdhw4o8i8o4i, gOIhw4o8i8o4i, gOIw4o8i8o4i, gOIw8o16i2o,
-                    gOIhw8o16i2o, gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i)) {
+                    gOIhw8o16i2o, gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i,
+                    IOw4i8o8i4o, IOhw4i8o8i4o, IOdhw4i8o8i4o, gIOw4i8o8i4o,
+                    gIOhw4i8o8i4o, gIOdhw4i8o8i4o)) {
         reorder_engine_kind_ = engine_kind::gpu;
     }
 
