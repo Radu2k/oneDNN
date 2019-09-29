@@ -687,6 +687,8 @@ typedef enum {
     dnnl_rnn,
     /// A matrix multiplication primitive.
     dnnl_gemm,
+    /// A binary primitive.
+    dnnl_binary,
 } dnnl_primitive_kind_t;
 
 /// Kinds of algorithms.
@@ -756,6 +758,10 @@ typedef enum {
     /// Primitive expects 4 biases on input:
     /// \f$[b_{u}, b_{r}, b_{c_x}, b_{c_h}]\f$
     dnnl_lbr_gru = 0x4fff,
+    /// Binary add
+    dnnl_binary_add = 0x1fff0,
+    /// Binary mul
+    dnnl_binary_mul = 0x1fff1,
 } dnnl_alg_kind_t;
 
 /// Flags for batch normalization primitive.
@@ -788,9 +794,13 @@ typedef enum {
 
     /// Fuse with ReLU
     ///
+    /// The flag implies negative slope being 0. On training this is the only
+    /// configuration supported. For inference, to use non-zero negative slope
+    /// consider using @ref dev_guide_attributes_post_ops.
+    ///
     /// If specified:
     ///  - on inference this option behaves the same as if the primitive were
-    ///    fused with ReLU via post ops API
+    ///    fused with ReLU using post ops API with zero negative slope.
     ///  - on training primitive requires workspace (required to be able to
     ///    perform backward pass)
     dnnl_fuse_norm_relu = 0x4U,
@@ -893,6 +903,7 @@ typedef enum {
     ///  -128 * SUM(ic : 0,IC; kh : 0,KH; kw : 0,KW){ weights(oc, ic, kh, kw) }
     dnnl_memory_extra_flag_compensation_conv_s8s8 = 0x1U,
     dnnl_memory_extra_flag_scale_adjust = 0x2U,
+    dnnl_memory_extra_flag_gpu_rnn_u8s8_compensation = 0x4U,
 } dnnl_memory_extra_flags_t;
 
 /// Description of extra information stored in memory
@@ -1329,6 +1340,20 @@ typedef struct {
 
 } dnnl_rnn_desc_t;
 
+/// A descriptor of a binary operation.
+typedef struct {
+    /// The kind of primitive. Used for self-identifying the primitive
+    /// descriptor. Must be #dnnl_binary.
+    dnnl_primitive_kind_t primitive_kind;
+    /// The kind of the binary algorithm. Possible values:
+    /// #dnnl_binary_add and #dnnl_binary_mul.
+    dnnl_alg_kind_t alg_kind;
+    /// Source memory descriptors.
+    dnnl_memory_desc_t src_desc[2];
+    /// Destination memory descriptor.
+    dnnl_memory_desc_t dst_desc;
+} dnnl_binary_desc_t;
+
 /// @}
 
 /// @addtogroup c_api_engine_types Engine
@@ -1550,14 +1575,14 @@ typedef struct {
 /// agree with the queried argument. The correspondence table:
 ///      Query                           | type of result
 ///      --------------------------------------------------------------
-///      #dnnl_query_engine            | dnnl_engine_t *
-///      #dnnl_query_scratchpad_engine | dnnl_engine_t *
-///      #dnnl_query_primitive_kind    | dnnl_primitive_kind_t *
+///      #dnnl_query_engine              | dnnl_engine_t *
+///      #dnnl_query_scratchpad_engine   | dnnl_engine_t *
+///      #dnnl_query_primitive_kind      | dnnl_primitive_kind_t *
 ///      *_s32                           | int *
 ///      *_s64                           | dnnl_dim_t * (same as int64_t *)
 ///      *_f64                           | double *
 ///      *_str                           | const char **
-///      #dnnl_query_op_d              | const_dnnl_op_desc_t *
+///      #dnnl_query_op_d                | const_dnnl_op_desc_t *
 ///      *_md                            | const dnnl_memory_desc_t **
 ///      *_${op}_d                       | const dnnl_${op}_desc_t **
 ///      *_pd                            | const_dnnl_primitive_desc_t *
@@ -1592,6 +1617,11 @@ typedef enum {
 
     dnnl_query_impl_info_str, ///< implementation name
 
+    dnnl_query_reorder_src_engine, ///< source engine
+    dnnl_query_reorder_dst_engine, ///< destination engine
+
+    dnnl_query_prop_kind, ///< propagation kind
+
     // memory and op descriptor section
     dnnl_query_some_d = 64, ///< stub
     dnnl_query_op_d, ///< op descriptor
@@ -1607,6 +1637,7 @@ typedef enum {
     dnnl_query_inner_product_d, ///< inner product descriptor
     dnnl_query_rnn_d, ///< rnn descriptor
     dnnl_query_gemm_d, ///< GEMM descriptor
+    dnnl_query_binary_d, ///< binary descriptor
 
     // memory descriptor section
     dnnl_query_some_md = 128, ///< stub

@@ -102,7 +102,7 @@ protected:
         concat_test_params p
                 = ::testing::TestWithParam<decltype(p)>::GetParam();
         catch_expected_failures(
-                [=]() { Test(); }, p.expect_to_fail, p.expected_status);
+                [=]() { Test(); }, p.expect_to_fail, p.expected_status, false);
     }
 
     virtual void Test() {
@@ -143,6 +143,8 @@ protected:
         auto dst_desc = memory::desc(p.dst_cds, data_type, p.dst_format);
         auto concat_pd = concat::primitive_desc(
                 dst_desc, static_cast<int>(p.concat_dimension), srcs_md, eng);
+        // test construction from a C pd
+        concat_pd = concat::primitive_desc(concat_pd.get());
         auto dst = memory(concat_pd.dst_desc(), eng);
         fill_data<data_t>(dst.get_desc().get_size() / sizeof(data_t), dst);
         check_zero_tail<data_t>(1, dst);
@@ -236,8 +238,9 @@ CPU_INSTANTIATE_TEST_SUITE_P(TestConcat_EF_bf16, concat_test_bf16, cases_EF());
 static auto cases_padded = []() {
     return ::testing::Values(
             concat_test_params {1, {fmt::nChw16c, fmt::nChw16c}, fmt::nChw16c,
-                    {{4, 25, 5, 5}, {4, 45, 5, 5}}, {4, 70, 5, 5}, true,
-                    dnnl_unimplemented},
+                    {{1, 12, 28, 28}, {1, 12, 28, 28}}, {1, 24, 28, 28}},
+            concat_test_params {1, {fmt::nChw16c, fmt::nChw16c}, fmt::nChw16c,
+                    {{4, 25, 5, 5}, {4, 45, 5, 5}}, {4, 70, 5, 5}},
             concat_test_params {1, {fmt::nChw16c, fmt::nChw16c}, fmt::nchw,
                     {{4, 25, 5, 5}, {4, 45, 5, 5}}, {4, 70, 5, 5}},
             concat_test_params {1, {fmt::nChw8c, fmt::nChw8c}, fmt::nchw,
@@ -247,13 +250,11 @@ static auto cases_padded = []() {
             concat_test_params {1, {fmt::nChw8c, fmt::nChw16c}, fmt::nchw,
                     {{4, 25, 5, 5}, {4, 45, 5, 5}}, {4, 70, 5, 5}},
             concat_test_params {1, {fmt::nChw16c, fmt::nChw16c}, fmt::nChw16c,
-                    {{4, 4, 5, 5}, {4, 6, 5, 5}}, {4, 10, 5, 5}, true,
-                    dnnl_unimplemented},
+                    {{4, 4, 5, 5}, {4, 6, 5, 5}}, {4, 10, 5, 5}},
             concat_test_params {1, {fmt::nChw16c, fmt::nChw16c}, fmt::nchw,
                     {{4, 4, 5, 5}, {4, 6, 5, 5}}, {4, 10, 5, 5}},
             concat_test_params {1, {fmt::nchw, fmt::nChw16c}, fmt::nChw16c,
-                    {{4, 25, 5, 5}, {4, 45, 5, 5}}, {4, 70, 5, 5}, true,
-                    dnnl_unimplemented},
+                    {{4, 25, 5, 5}, {4, 45, 5, 5}}, {4, 70, 5, 5}},
             concat_test_params {1, {fmt::nchw, fmt::nChw16c}, fmt::nchw,
                     {{4, 25, 5, 5}, {4, 45, 5, 5}}, {4, 70, 5, 5}},
             // right border

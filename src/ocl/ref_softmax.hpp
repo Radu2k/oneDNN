@@ -82,7 +82,7 @@ struct ref_softmax_fwd_t : public primitive_impl_t {
                 "SOFTMAX_AXIS", desc->data_desc.dims[desc->softmax_axis]);
         kernel_ctx.set_data_type(desc->data_desc.data_type);
 
-        set_offsets(kernel_ctx, desc->data_desc, "DATA");
+        set_offsets(kernel_ctx, pd()->dst_md(), "DATA");
 
         compute_engine->create_kernel(
                 &kernel_, "ref_softmax_fwd_generic", kernel_ctx);
@@ -113,7 +113,9 @@ struct ref_softmax_bwd_t : public primitive_impl_t {
 
         status_t init() {
             bool ok = true && desc()->prop_kind == prop_kind::backward_data
-                    && desc()->data_desc.data_type == data_type::f32
+                    && utils::one_of(desc()->data_desc.data_type,
+                            data_type::f32, data_type::bf16)
+                    && set_default_formats_common()
                     && attr()->has_default_values();
             if (!ok) return status::unimplemented;
 
@@ -143,7 +145,7 @@ struct ref_softmax_bwd_t : public primitive_impl_t {
                 "SOFTMAX_AXIS", desc->data_desc.dims[desc->softmax_axis]);
         kernel_ctx.set_data_type(desc->data_desc.data_type);
 
-        set_offsets(kernel_ctx, desc->data_desc, "DATA");
+        set_offsets(kernel_ctx, *pd()->diff_src_md(), "DATA");
 
         compute_engine->create_kernel(
                 &kernel_, "ref_softmax_bwd_generic", kernel_ctx);

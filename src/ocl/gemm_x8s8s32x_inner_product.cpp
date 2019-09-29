@@ -31,7 +31,7 @@ status_t gemm_x8s8s32x_inner_product_fwd_t::execute_forward(
     std::shared_ptr<memory_t> scratchpad_mem;
     if (pd()->use_scratchpad()) {
         scratchpad_mem.reset(new memory_t(engine(), pd()->ip_scratchpad_md(),
-                memory_flags_t::use_backend_ptr, nullptr));
+                memory_flags_t::use_runtime_ptr, nullptr));
         void *mem_storage_scratchpad = nullptr;
         scratchpad_->get_data_handle(&mem_storage_scratchpad);
         scratchpad_mem->set_data_handle(mem_storage_scratchpad);

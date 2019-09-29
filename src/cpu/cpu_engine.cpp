@@ -17,7 +17,6 @@
 #include <assert.h>
 
 #include "type_helpers.hpp"
-#include "verbose.hpp"
 
 #include "cpu_engine.hpp"
 #include "cpu_memory_storage.hpp"
@@ -51,17 +50,21 @@
 #include "cpu/jit_sse41_convolution.hpp"
 #include "cpu/jit_uni_batch_normalization.hpp"
 #include "cpu/jit_uni_batch_normalization_s8.hpp"
+#include "cpu/jit_uni_binary.hpp"
 #include "cpu/jit_uni_dw_convolution.hpp"
 #include "cpu/jit_uni_eltwise.hpp"
 #include "cpu/jit_uni_i8i8_pooling.hpp"
+#include "cpu/jit_uni_layer_normalization.hpp"
 #include "cpu/jit_uni_lrn.hpp"
 #include "cpu/jit_uni_pooling.hpp"
 #include "cpu/jit_uni_softmax.hpp"
+#include "cpu/jit_uni_tbb_batch_normalization.hpp"
 #include "cpu/nchw_pooling.hpp"
 #include "cpu/ncsp_batch_normalization.hpp"
 #include "cpu/nhwc_pooling.hpp"
 #include "cpu/nspc_batch_normalization.hpp"
 #include "cpu/ref_batch_normalization.hpp"
+#include "cpu/ref_binary.hpp"
 #include "cpu/ref_convolution.hpp"
 #include "cpu/ref_deconvolution.hpp"
 #include "cpu/ref_eltwise.hpp"
@@ -71,7 +74,6 @@
 #include "cpu/ref_pooling.hpp"
 #include "cpu/ref_shuffle.hpp"
 #include "cpu/ref_softmax.hpp"
-#include "cpu/simple_layer_normalization.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -96,8 +98,10 @@ using namespace dnnl::impl::data_type;
 static const pd_create_f cpu_impl_list[] = {
         /* RNN */
         INSTANCE(ref_rnn_fwd_f32_t),
+        INSTANCE(ref_rnn_fwd_bf16_t),
         INSTANCE(ref_rnn_fwd_u8s8_t),
         INSTANCE(ref_rnn_bwd_f32_t),
+        INSTANCE(ref_rnn_bwd_bf16_t),
         /* conv */
         INSTANCE(jit_avx512_common_dw_convolution_fwd_t),
         INSTANCE(jit_avx512_common_dw_convolution_bwd_data_t),
@@ -303,6 +307,12 @@ static const pd_create_f cpu_impl_list[] = {
         INSTANCE(jit_uni_batch_normalization_bwd_t<avx2>),
         INSTANCE(jit_uni_batch_normalization_fwd_t<sse41>),
         INSTANCE(jit_uni_batch_normalization_bwd_t<sse41>),
+        INSTANCE(jit_uni_tbb_batch_normalization_fwd_t<avx512_common>),
+        INSTANCE(jit_uni_tbb_batch_normalization_bwd_t<avx512_common>),
+        INSTANCE(jit_uni_tbb_batch_normalization_fwd_t<avx2>),
+        INSTANCE(jit_uni_tbb_batch_normalization_bwd_t<avx2>),
+        INSTANCE(jit_uni_tbb_batch_normalization_fwd_t<sse41>),
+        INSTANCE(jit_uni_tbb_batch_normalization_bwd_t<sse41>),
         INSTANCE(ncsp_batch_normalization_fwd_t<f32>),
         INSTANCE(ncsp_batch_normalization_bwd_t<f32>),
         INSTANCE(ncsp_batch_normalization_fwd_t<bf16>),
@@ -347,12 +357,17 @@ static const pd_create_f cpu_impl_list[] = {
         INSTANCE(ref_inner_product_fwd_t<u8, s8, s32, s32>),
         INSTANCE(ref_inner_product_fwd_t<u8, s8, f32, s32>),
         /* layer normalization */
-        INSTANCE(simple_layer_normalization_fwd_t),
-        INSTANCE(simple_layer_normalization_bwd_t),
+        INSTANCE(jit_uni_layer_normalization_fwd_t),
+        INSTANCE(jit_uni_layer_normalization_bwd_t),
         INSTANCE(ref_layer_normalization_fwd_t<f32>),
         INSTANCE(ref_layer_normalization_bwd_t<f32>),
         INSTANCE(ref_layer_normalization_fwd_t<bf16>),
         INSTANCE(ref_layer_normalization_bwd_t<bf16>),
+        /* binary op */
+        INSTANCE(jit_uni_binary_t<avx512_common>),
+        INSTANCE(jit_uni_binary_t<avx2>),
+        INSTANCE(ref_binary_t<f32>),
+        INSTANCE(ref_binary_t<bf16>),
         /* eol */
         nullptr,
 };

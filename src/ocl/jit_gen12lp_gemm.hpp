@@ -109,9 +109,11 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
     status_t init() override {
         auto *compute_engine
                 = utils::downcast<compute::compute_engine_t *>(engine());
+        auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
+                compute_engine->device_info());
 
-        eu_count_ = compute_engine->get_eu_count();
-        hw_threads_ = compute_engine->get_hw_threads();
+        eu_count_ = dev_info->eu_count();
+        hw_threads_ = dev_info->hw_threads();
 
         gemm_type_ = get_gemm_type();
 

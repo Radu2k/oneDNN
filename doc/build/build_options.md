@@ -3,19 +3,28 @@ Build Options {#dev_guide_build_options}
 
 DNNL supports the following build-time options.
 
-| Option                      | Supported values (defaults in bold)  | Description
-| :---                        | :---                                 | :---
-| DNNL_LIBRARY_TYPE         | **SHARED**, STATIC                   | Defines the resulting library type
-| DNNL_CPU_RUNTIME          | **OMP**, TBB                         | Defines the threading runtime for CPU engines
-| DNNL_GPU_RUNTIME          | **NONE**, OCL                        | Defines the offload runtime for GPU engines
-| DNNL_BUILD_EXAMPLES       | **ON**, OFF                          | Controls building the examples
-| DNNL_BUILD_TESTS          | **ON**, OFF                          | Controls building the tests
-| DNNL_ARCH_OPT_FLAGS       | *compiler flags*                     | Specifies compiler optimization flags (see warning note below)
-| DNNL_ENABLE_JIT_PROFILING | **ON**, OFF                          | Enables integration with Intel(R) VTune(TM) Amplifier
+| Option                       | Supported values (defaults in bold)  | Description
+| :---                         | :---                                 | :---
+| DNNL_LIBRARY_TYPE            | **SHARED**, STATIC                   | Defines the resulting library type
+| DNNL_CPU_RUNTIME             | **OMP**, TBB                         | Defines the threading runtime for CPU engines
+| DNNL_GPU_RUNTIME             | **NONE**, OCL                        | Defines the offload runtime for GPU engines
+| DNNL_BUILD_EXAMPLES          | **ON**, OFF                          | Controls building the examples
+| DNNL_BUILD_TESTS             | **ON**, OFF                          | Controls building the tests
+| DNNL_ARCH_OPT_FLAGS          | *compiler flags*                     | Specifies compiler optimization flags (see warning note below)
+| DNNL_ENABLE_JIT_PROFILING    | **ON**, OFF                          | Enables integration with Intel(R) VTune(TM) Amplifier
+| DNNL_ENABLE_PRIMITIVE_CACHE  | ON, **OFF**                          | Enables primitive cache
 
 All other building options that can be found in CMake files are dedicated for
 the development/debug purposes and are subject to change without any notice.
 Please avoid using them.
+
+## Common options
+
+### Primitive cache
+Primitive cache is disabled in the default build configuration.
+
+To enable the primitive cache you can use `DNNL_ENABLE_PRIMITIVE_CACHE` CMake option.
+The default value is `"OFF"`.
 
 ## CPU Options
 Intel Architecture Processors and compatible devices are supported by
@@ -29,13 +38,12 @@ some DNNL functionality will still benefit from targeting a specific
 processor architecture at build time. You can use `DNNL_ARCH_OPT_FLAGS` CMake
 option for this.
 
-For Intel(R) C++ Compilers, the default option is `-xHOST`, which instructs
-the compiler to generate the code for the architecture of the processor where
-the build is occurring.  This option would not allow you to run the library on
+For Intel(R) C++ Compilers, the default option is `-xSSE4.1`, which instructs
+the compiler to generate the code for the processors that support SSE4.1
+instructions. This option would not allow you to run the library on
 older processor architectures.
 
-For GNU\* Compiler 5.0 and newer, the default options are `-march=native
--mtune=native`.
+For GNU\* Compilers and Clang, the default option is `-msse4.1`.
 
 @warning
 While use of `DNNL_ARCH_OPT_FLAGS` option gives better performance, the
@@ -46,8 +54,8 @@ portable.
 
 ### Runtimes
 CPU engine can use OpenMP or TBB threading runtime. OpenMP threading
-is the default build mode and is recommended for the best performance. 
-This behavior is controlled by the `DNNL_CPU_RUNTIME` CMake option.
+is the default build mode. This behavior is controlled by the `DNNL_CPU_RUNTIME`
+CMake option.
 
 #### OpenMP
 DNNL uses OpenMP runtime library provided by the compiler.
@@ -74,14 +82,6 @@ limitations if built with Intel TBB.
 
 Functional limitations:
 * Winograd convolution algorithm is not supported.
-
-The following primitives have lower performance compared to OpenMP (mostly due
-to limited parallelism):
-* Batch normalization,
-* Convolution backward by weights,
-* Inner product,
-* Layer normalization,
-* `dnnl_*gemm()`.
 
 ## GPU Options
 Intel Processor Graphics is supported by DNNLs GPU engine. GPU engine

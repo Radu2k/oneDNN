@@ -32,6 +32,7 @@ add_definitions(-D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS)
 
 set(CMAKE_CCXX_FLAGS)
 set(CMAKE_CCXX_NOWARN_FLAGS)
+set(CMAKE_CCXX_NOEXCEPT_FLAGS)
 set(DEF_ARCH_OPT_FLAGS)
 
 # Compatibility with MKL-DNN
@@ -61,7 +62,9 @@ if(MSVC)
     endif()
     if(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
         append(CMAKE_CCXX_FLAGS "/MP")
-        set(DEF_ARCH_OPT_FLAGS "-QxHOST")
+        set(DEF_ARCH_OPT_FLAGS "-QxSSE4.1")
+        # disable: loop was not vectorized with "simd"
+        append(CMAKE_CCXX_NOWARN_FLAGS "-Qdiag-disable:13379")
         # disable: loop was not vectorized with "simd"
         append(CMAKE_CCXX_NOWARN_FLAGS "-Qdiag-disable:15552")
         # disable: unknown pragma
@@ -72,6 +75,7 @@ if(MSVC)
         append(CMAKE_CCXX_NOWARN_FLAGS "-Qdiag-disable:11031")
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        append(CMAKE_CCXX_NOEXCEPT_FLAGS "-fno-exceptions")
         # Clang cannot vectorize some loops with #pragma omp simd and gets
         # very upset. Tell it that it's okay and that we love it
         # unconditionally.
@@ -82,14 +86,16 @@ elseif(UNIX OR MINGW)
     append_if(DNNL_WERROR CMAKE_CCXX_FLAGS "-Werror")
     append(CMAKE_CCXX_FLAGS "-fvisibility=internal")
     append(CMAKE_CXX_FLAGS "-fvisibility-inlines-hidden")
+    append(CMAKE_CCXX_NOEXCEPT_FLAGS "-fno-exceptions")
     # compiler specific settings
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set(DEF_ARCH_OPT_FLAGS "-msse4.1")
         # Clang cannot vectorize some loops with #pragma omp simd and gets
         # very upset. Tell it that it's okay and that we love it
         # unconditionally.
         append(CMAKE_CCXX_NOWARN_FLAGS "-Wno-pass-failed")
         if(DNNL_USE_CLANG_SANITIZER MATCHES "Memory(WithOrigin)?")
-            if(NOT DNNL_CPU_RUNTIME STREQUAL "SEQ")
+            if(NOT DNNL_CPU_THREADING_RUNTIME STREQUAL "SEQ")
                 message(WARNING "Clang OpenMP is not compatible with MSan! "
                     "Expect a lot of false positives!")
             endif()
@@ -127,18 +133,14 @@ elseif(UNIX OR MINGW)
             append(CMAKE_CCXX_SANITIZER_FLAGS "-g -fno-omit-frame-pointer")
         endif()
     elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-        if(NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5.0)
-            set(DEF_ARCH_OPT_FLAGS "-march=native -mtune=native")
-        endif()
+        set(DEF_ARCH_OPT_FLAGS "-msse4.1")
         # suppress warning on assumptions made regarding overflow (#146)
         append(CMAKE_CCXX_NOWARN_FLAGS "-Wno-strict-overflow")
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
-        set(DEF_ARCH_OPT_FLAGS "-xHOST")
-        # workaround for Intel Compiler 16.0 that produces error caused
+        set(DEF_ARCH_OPT_FLAGS "-xSSE4.1")
+        # workaround for Intel Compiler that produces error caused
         # by pragma omp simd collapse(..)
-        if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "17.0")
-            append(CMAKE_CCXX_NOWARN_FLAGS "-diag-disable:13379")
-        endif()
+        append(CMAKE_CCXX_NOWARN_FLAGS "-diag-disable:13379")
         append(CMAKE_CCXX_NOWARN_FLAGS "-diag-disable:15552")
         # disable `was not vectorized: vectorization seems inefficient` remark
         append(CMAKE_CCXX_NOWARN_FLAGS "-diag-disable:15335")

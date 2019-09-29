@@ -40,18 +40,18 @@ void lstm_fwd_postgemm_template(T1 func1, T2 func2, const prb_t &p,
     const int64_t oho = 3;
 
     auto maybe_deq_w = [&](float g, int64_t oc) {
-        if (p.cfg == conf_f32 || p.cfg == conf_f16) return g;
+        if (!is_cfg_u8(p.cfg)) return g;
         float scale = 1.;
-        if (p.scale_policy == PER_OC)
+        if (p.scale_policy == policy_t::PER_OC)
             scale = p.wei_oc_scales[oc];
-        else if (p.scale_policy == COMMON)
+        else if (p.scale_policy == policy_t::COMMON)
             scale = p.wei_scale;
         scale *= p.data_scale;
         return g / scale;
     };
 
     auto maybe_q_d = [&](float h) {
-        if (p.cfg == conf_f32 || p.cfg == conf_f16) return h;
+        if (!is_cfg_u8(p.cfg)) return h;
         float fp = p.data_scale * h;
         fp = mxcsr_round(fp);
         if (fp + p.data_shift > p.cfg[input].max)

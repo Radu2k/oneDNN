@@ -26,6 +26,7 @@
 #include "ocl/jit_gen12lp_u8s8s32x_convolution.hpp"
 #include "ocl/jit_gen9_common_convolution.hpp"
 #include "ocl/jit_gen9_gemm.hpp"
+#include "ocl/jit_gen9_gemm_x8x8s32.hpp"
 #include "ocl/ocl_kernel_list.hpp"
 #include "ocl/ocl_memory_storage.hpp"
 #include "ocl/ocl_stream.hpp"
@@ -212,9 +213,14 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(jit_gen12lp_gemm_t<s8, u8, s32>),
         INSTANCE(jit_gen12lp_gemm_t<u8, s8, s32>),
         INSTANCE(jit_gen12lp_gemm_t<u8, u8, s32>),
+        INSTANCE(jit_gen9_gemm_x8x8s32_t<s8, s8, s32>),
+        INSTANCE(jit_gen9_gemm_x8x8s32_t<s8, u8, s32>),
+        INSTANCE(jit_gen9_gemm_x8x8s32_t<u8, s8, s32>),
+        INSTANCE(jit_gen9_gemm_x8x8s32_t<u8, u8, s32>),
         INSTANCE(jit_gen9_gemm_t<f16>),
         INSTANCE(jit_gen9_gemm_t<f32>),
         /*rnn*/
+        INSTANCE(ref_rnn_fwd_u8s8_t),
         INSTANCE(ref_rnn_fwd_f16_t),
         INSTANCE(ref_rnn_fwd_f32_t),
         INSTANCE(ref_rnn_bwd_f32_t),

@@ -19,6 +19,7 @@
 
 #include "cpu_layer_normalization_pd.hpp"
 #include "dnnl_thread.hpp"
+#include "jit_uni_layer_normalization_kernels.hpp"
 #include "memory_tracking.hpp"
 #include "reorder_pd.hpp"
 #include "utils.hpp"
@@ -49,7 +50,7 @@ static status_t create_reorder_pd(engine_t *engine,
     return status;
 }
 
-struct simple_layer_normalization_fwd_t : public primitive_impl_t {
+struct jit_uni_layer_normalization_fwd_t : public primitive_impl_t {
     struct pd_t : public cpu_layer_normalization_fwd_pd_t {
         pd_t(engine_t *engine, const layer_normalization_desc_t *adesc,
                 const primitive_attr_t *attr,
@@ -70,8 +71,8 @@ struct simple_layer_normalization_fwd_t : public primitive_impl_t {
         }
         ~pd_t() { clear(); }
 
-        DECLARE_COMMON_PD_T("simple_layer_normalization:any",
-                simple_layer_normalization_fwd_t);
+        DECLARE_COMMON_PD_T("jit_uni_layer_normalization:any",
+                jit_uni_layer_normalization_fwd_t);
 
         status_t init() {
             using namespace data_type;
@@ -128,12 +129,18 @@ struct simple_layer_normalization_fwd_t : public primitive_impl_t {
         }
     };
 
-    simple_layer_normalization_fwd_t(const pd_t *apd)
+    jit_uni_layer_normalization_fwd_t(const pd_t *apd)
         : primitive_impl_t(apd), reorder_(nullptr) {
         if (pd()->reorder_pd_) pd()->reorder_pd_->create_primitive(&reorder_);
+        stat_kernel_ = new statistics_kernel_t(pd());
+        data_kernel_ = new data_kernel_t(pd());
     }
 
-    ~simple_layer_normalization_fwd_t() { delete reorder_; }
+    ~jit_uni_layer_normalization_fwd_t() {
+        delete reorder_;
+        delete stat_kernel_;
+        delete data_kernel_;
+    }
 
     void reorder_stat(const exec_ctx_t &ctx, const memory_arg_t &in,
             const memory_arg_t &out) const {
@@ -154,9 +161,9 @@ struct simple_layer_normalization_fwd_t : public primitive_impl_t {
         auto mean_handle = scratchpad.template get<void>(key_lnorm_tmp_mean);
         auto variance_handle = scratchpad.template get<void>(key_lnorm_tmp_var);
         memory_t mean(pd()->engine(), &(pd()->reordered_stat_md_),
-                memory_flags_t::use_backend_ptr, mean_handle);
+                memory_flags_t::use_runtime_ptr, mean_handle);
         memory_t variance(pd()->engine(), &(pd()->reordered_stat_md_),
-                memory_flags_t::use_backend_ptr, variance_handle);
+                memory_flags_t::use_runtime_ptr, variance_handle);
 
         // reorder input stats
         if (pd()->stats_are_src() && reorder_) {
@@ -178,10 +185,13 @@ struct simple_layer_normalization_fwd_t : public primitive_impl_t {
 private:
     void execute_forward(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
+
+    statistics_kernel_t *stat_kernel_;
+    data_kernel_t *data_kernel_;
     primitive_t *reorder_;
 };
 
-struct simple_layer_normalization_bwd_t : public primitive_impl_t {
+struct jit_uni_layer_normalization_bwd_t : public primitive_impl_t {
     struct pd_t : public cpu_layer_normalization_bwd_pd_t {
         pd_t(engine_t *engine, const layer_normalization_desc_t *adesc,
                 const primitive_attr_t *attr,
@@ -202,8 +212,8 @@ struct simple_layer_normalization_bwd_t : public primitive_impl_t {
         }
         ~pd_t() { clear(); }
 
-        DECLARE_COMMON_PD_T("simple_layer_normalization:any",
-                simple_layer_normalization_bwd_t);
+        DECLARE_COMMON_PD_T("jit_uni_layer_normalization:any",
+                jit_uni_layer_normalization_bwd_t);
 
         status_t init() {
             using namespace data_type;
@@ -211,6 +221,7 @@ struct simple_layer_normalization_bwd_t : public primitive_impl_t {
             const memory_desc_wrapper stat_d(stat_md());
 
             bool ok = true && is_bwd() && !has_zero_dim_memory()
+                    && set_default_formats_common()
                     && utils::everyone_is(f32, src_md()->data_type,
                             diff_src_md()->data_type, stat_md()->data_type)
                     && IMPLICATION(use_scaleshift(),
@@ -263,12 +274,18 @@ struct simple_layer_normalization_bwd_t : public primitive_impl_t {
         }
     };
 
-    simple_layer_normalization_bwd_t(const pd_t *apd)
+    jit_uni_layer_normalization_bwd_t(const pd_t *apd)
         : primitive_impl_t(apd), reorder_(nullptr) {
         if (pd()->reorder_pd_) pd()->reorder_pd_->create_primitive(&reorder_);
+        diff_ss_kernel_ = new diff_ss_kernel_t(pd());
+        diff_data_kernel_ = new diff_data_kernel_t(pd());
     }
 
-    ~simple_layer_normalization_bwd_t() { delete reorder_; }
+    ~jit_uni_layer_normalization_bwd_t() {
+        delete reorder_;
+        delete diff_ss_kernel_;
+        delete diff_data_kernel_;
+    }
 
     void reorder_stat(const exec_ctx_t &ctx, const memory_arg_t &in,
             const memory_arg_t &out) const {
@@ -293,9 +310,9 @@ struct simple_layer_normalization_bwd_t : public primitive_impl_t {
             auto variance_handle
                     = scratchpad.template get<void>(key_lnorm_tmp_var);
             memory_t mean(pd()->engine(), &(pd()->reordered_stat_md_),
-                    memory_flags_t::use_backend_ptr, mean_handle);
+                    memory_flags_t::use_runtime_ptr, mean_handle);
             memory_t variance(pd()->engine(), &(pd()->reordered_stat_md_),
-                    memory_flags_t::use_backend_ptr, variance_handle);
+                    memory_flags_t::use_runtime_ptr, variance_handle);
             reorder_stat(ctx, ctx.args().at(DNNL_ARG_MEAN), {&mean, false});
             reorder_stat(
                     ctx, ctx.args().at(DNNL_ARG_VARIANCE), {&variance, false});
@@ -309,6 +326,8 @@ private:
     void execute_backward(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
     primitive_t *reorder_;
+    diff_ss_kernel_t *diff_ss_kernel_;
+    diff_data_kernel_t *diff_data_kernel_;
 };
 
 } // namespace cpu

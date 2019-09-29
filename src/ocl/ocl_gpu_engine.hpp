@@ -24,7 +24,7 @@
 #include "common/stream.hpp"
 #include "common/utils.hpp"
 #include "compute/compute.hpp"
-#include "ocl/ocl_device_info.hpp"
+#include "ocl/ocl_gpu_device_info.hpp"
 #include "ocl/ocl_gpu_kernel.hpp"
 #include "ocl/ocl_utils.hpp"
 
@@ -48,14 +48,14 @@ public:
     static status_t get_ocl_devices(std::vector<cl_device_id> *devices);
 
     ocl_gpu_engine_t(cl_device_id adevice)
-        : compute::compute_engine_t(engine_kind::gpu, backend_kind::ocl,
-                new ocl_device_info_t(adevice))
+        : compute::compute_engine_t(engine_kind::gpu, runtime_kind::ocl,
+                new ocl_gpu_device_info_t(adevice))
         , device_(adevice)
         , context_(nullptr)
         , is_user_context_(false) {}
     ocl_gpu_engine_t(cl_device_id adevice, cl_context acontext)
-        : compute::compute_engine_t(engine_kind::gpu, backend_kind::ocl,
-                new ocl_device_info_t(adevice))
+        : compute::compute_engine_t(engine_kind::gpu, runtime_kind::ocl,
+                new ocl_gpu_device_info_t(adevice))
         , device_(adevice)
         , context_(acontext)
         , is_user_context_(true) {}

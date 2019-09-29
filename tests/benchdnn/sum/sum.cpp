@@ -68,8 +68,10 @@ static int compare(const prb_t *p, const dnnl_data_type_t dst_data_type,
     const auto nelems = dt_mem.nelems();
     r->errors = 0;
     r->total = nelems;
-    const float trh
-            = ((dst_data_type == dnnl_f16) ? 1e-3 : 1e-7) * p->n_inputs();
+
+    float trh = 1e-7 * p->n_inputs(); // relative error for fp32
+    if (dst_data_type == dnnl_f16) trh = 1e-3 * p->n_inputs();
+    if (dst_data_type == dnnl_bf16) trh = 8e-3 * p->n_inputs();
 
     for (int64_t i = 0; i < nelems; i++) {
         const float dt = dt_mem.get_elem(i);
@@ -143,11 +145,11 @@ int doit(const prb_t *p, res_t *r) {
 
     auto dst_dt_d = q(dnnl_query_dst_md);
     auto dst_data_type = dst_dt_d.data_type; // needed for deduced dst
-    dnn_mem_t dst_fp(dst_dt_d, fp, tag, engine_ref),
+    dnn_mem_t dst_fp(dst_dt_d, fp, tag, engine_tgt),
             dst_dt(dst_dt_d, engine_tgt);
 
     args_t args;
-    args.set(DNNL_ARG_DST, dst_dt.m_);
+    args.set(DNNL_ARG_DST, dst_dt);
 
     std::vector<dnn_mem_t> src_fp, src_dt;
     src_fp.reserve(p->n_inputs());
@@ -155,19 +157,19 @@ int doit(const prb_t *p, res_t *r) {
 
     for (int i_input = 0; i_input < p->n_inputs(); ++i_input) {
         auto src_dt_d = q(dnnl_query_src_md, i_input);
-        src_fp.emplace_back(src_dt_d, fp, tag, engine_ref);
+        src_fp.emplace_back(src_dt_d, fp, tag, engine_tgt);
         src_dt.emplace_back(src_dt_d, engine_tgt);
 
         SAFE(fill_src(p, i_input, src_dt[i_input], src_fp[i_input]), WARN);
 
-        args.set(DNNL_ARG_MULTIPLE_SRC + i_input, src_dt[i_input].m_);
+        args.set(DNNL_ARG_MULTIPLE_SRC + i_input, src_dt[i_input]);
     }
 
-    DNN_SAFE(execute_and_wait(s, stream_tgt, args.size(), args), WARN);
+    DNN_SAFE(execute_and_wait(s, stream_tgt, args), WARN);
 
     if (bench_mode & CORR) {
         compute_ref(p, src_fp, dst_fp);
-        dnn_mem_t dst(dst_dt, fp, tag, engine_ref);
+        dnn_mem_t dst(dst_dt, fp, tag, engine_tgt);
         SAFE(compare(p, dst_data_type, dst_fp, dst, r), WARN);
     }
 

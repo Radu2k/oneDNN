@@ -19,52 +19,22 @@
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
-static dnnl_engine_kind_t cross_engine_reorder_engine_kind = dnnl_gpu;
-
-extern "C" dnnl_status_t DNNL_API dnnl_impl_gpu_reorder_set_engine_kind(
-        dnnl_engine_kind_t engine_kind) {
-    cross_engine_reorder_engine_kind = engine_kind;
-    return dnnl_success;
-}
-
 namespace dnnl {
 namespace impl {
 namespace ocl {
 
 status_t cross_engine_reorder_t::pd_t::init() {
     using namespace format_tag;
-    bool args_ok = true
-            && utils::one_of(engine_kind::cpu, src_engine()->kind(),
-                    dst_engine()->kind())
+    bool args_ok = src_engine() != dst_engine()
             && utils::one_of(engine_kind::gpu, src_engine()->kind(),
-                    dst_engine()->kind())
-            && (dst_engine()->kind() != src_engine()->kind());
+                    dst_engine()->kind());
 
     if (!args_ok) return status::unimplemented;
-
-    reorder_engine_kind_ = cross_engine_reorder_engine_kind;
 
     memory_desc_wrapper src_mdw(src_md());
     memory_desc_wrapper dst_mdw(dst_md());
 
-    // Do not run 4o8i8o4i-like formats on CPU as they assume GPU-specific
-    // permutation.
-    if (src_mdw.matches_one_of_tag(OIdhw4o8i8o4i, OIhw4o8i8o4i, OIw4o8i8o4i,
-                OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o, gOIdhw4o8i8o4i,
-                gOIhw4o8i8o4i, gOIw4o8i8o4i, gOIw8o16i2o, gOIhw8o16i2o,
-                gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i, IOw4i8o8i4o,
-                IOhw4i8o8i4o, IOdhw4i8o8i4o, gIOw4i8o8i4o, gIOhw4i8o8i4o,
-                gIOdhw4i8o8i4o)
-            || dst_mdw.matches_one_of_tag(OIdhw4o8i8o4i, OIhw4o8i8o4i,
-                    OIw4o8i8o4i, OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o,
-                    gOIdhw4o8i8o4i, gOIhw4o8i8o4i, gOIw4o8i8o4i, gOIw8o16i2o,
-                    gOIhw8o16i2o, gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i,
-                    IOw4i8o8i4o, IOhw4i8o8i4o, IOdhw4i8o8i4o, gIOw4i8o8i4o,
-                    gIOhw4i8o8i4o, gIOdhw4i8o8i4o)) {
-        reorder_engine_kind_ = engine_kind::gpu;
-    }
-
-    engine_t *reorder_engine = src_engine()->kind() == reorder_engine_kind_
+    engine_t *reorder_engine = src_engine()->kind() == engine_kind::gpu
             ? src_engine()
             : dst_engine();
 
@@ -104,7 +74,8 @@ status_t cross_engine_reorder_t::execute(const exec_ctx_t &ctx) const {
     };
 
     status_t status = status::success;
-    if (pd()->src_engine()->kind() == pd()->reorder_engine_kind_) {
+    if (pd()->src_engine()->kind() == engine_kind::gpu) {
+        // GPU -> CPU or GPU -> GPU
         if (do_reorder_) {
             status = exec_reorder(ctx.input(DNNL_ARG_FROM), temp_buf.get());
         }
@@ -115,6 +86,7 @@ status_t cross_engine_reorder_t::execute(const exec_ctx_t &ctx) const {
                     dst_mdw.size());
         }
     } else {
+        // CPU -> GPU
         memory_desc_wrapper src_mdw(pd()->src_md());
         status = compute_stream->copy(src,
                 do_reorder_ ? *temp_buf->memory_storage() : dst,

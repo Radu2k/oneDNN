@@ -49,7 +49,7 @@ each memory object represents.
 
 ## Levels of Abstraction
 
-DNNL has multiple levels abstractions for primitives and memory objects
+DNNL has multiple levels of abstractions for primitives and memory objects
 in order to expose maximum flexibility to its users.
 
 On the *logical* level, the library provides the following abstractions:
@@ -59,9 +59,9 @@ On the *logical* level, the library provides the following abstractions:
   the data is laid out in memory. A memory descriptor can be created with a
   placeholder format tag (@ref dnnl::memory::format_tag::any), which is used
   to indicate that the actual format will be defined later (see
-  @ref cpu_memory_format_propagation_cpp).
+  @ref memory_format_propagation_cpp).
 
-* *Operation descriptors* (one for each for each supported primitive) serve a
+* *Operation descriptors* (one for each supported primitive) serve a
   purpose similar to the memory descriptor: they provide a way to describe an
   operation's most basic properties without specifying, for example, which
   engine will be used to compute them.

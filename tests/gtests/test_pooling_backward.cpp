@@ -318,6 +318,8 @@ protected:
                 p.aalgorithm, *src_desc, *dst_desc, strides, ker, pad_l, pad_r);
         auto pool_bwd_prim_desc = pooling_backward::primitive_desc(
                 pool_bwd_desc, eng, pool_prim_desc);
+        pool_bwd_prim_desc = pooling_backward::primitive_desc(
+                pool_bwd_prim_desc.get()); // test construction from a C pd
 
         memory diff_src(*src_desc, eng);
         memory diff_dst(*dst_desc, eng);
@@ -472,6 +474,11 @@ CPU_INSTANTIATE_TEST_SUITE_P(TestPooling3D_nCdhw16c, pooling_bwd_test_float,
                                   memory::format_tag::nCdhw16c,
                                   EXPAND_SIZES_3D(2, 32, 60, 60, 60, 31, 30, 30,
                                           2, 3, 4, 1, 1, 1, 2, 2, 2)},
+                pool_bwd_test_params_float {algorithm::pooling_max,
+                        memory::format_tag::nCdhw16c,
+                        memory::format_tag::nCdhw16c,
+                        EXPAND_SIZES_3D(2, 32, 23, 23, 23, 11, 11, 11, 2, 2, 2,
+                                0, 0, 0, 2, 2, 2)},
                 pool_bwd_test_params_float {
                         algorithm::pooling_avg_exclude_padding,
                         memory::format_tag::nCdhw16c,

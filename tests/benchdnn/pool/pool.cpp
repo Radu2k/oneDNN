@@ -31,14 +31,6 @@
 
 namespace pool {
 
-inline bool is_3d(const prb_t *p) {
-    return p->id > 1 || p->od > 1 || p->kd > 1;
-}
-
-inline bool is_1d(const prb_t *p) {
-    return !is_3d(p) && p->ih == 1 && p->oh == 1 && p->kh == 1;
-}
-
 inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
         dnn_mem_t &mem_fp, res_t *r) {
     const auto nelems = mem_dt.nelems();
@@ -143,9 +135,8 @@ int fill_ws(const prb_t *p, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *r) {
     return OK;
 }
 
-int init_pd(const prb_t *p, dir_t dir, dnnl_pooling_desc_t &pd,
-        dnnl_primitive_desc_t &ppd, const_dnnl_primitive_desc_t hint,
-        res_t *r) {
+int init_pd(const prb_t *p, dir_t dir, dnnl_primitive_desc_t &ppd,
+        const_dnnl_primitive_desc_t hint, res_t *r) {
     dnnl_memory_desc_t src_d, dst_d;
 
     const int ndims = is_3d(p) ? 5 : is_1d(p) ? 3 : 4;
@@ -162,12 +153,15 @@ int init_pd(const prb_t *p, dir_t dir, dnnl_pooling_desc_t &pd,
     dnnl_dim_t *dst_dims
             = is_3d(p) ? dst_3d_dims : is_1d(p) ? dst_1d_dims : dst_2d_dims;
 
+    dnnl_format_tag_t tag_src = (dir & FLAG_FWD) ? p->tag : dnnl_format_tag_any;
+    dnnl_format_tag_t tag_dst = dnnl_format_tag_any;
+
     DNN_SAFE(dnnl_memory_desc_init_by_tag(
-                     &src_d, ndims, src_dims, p->cfg[SRC].dt, p->tag),
+                     &src_d, ndims, src_dims, p->cfg[SRC].dt, tag_src),
             WARN);
 
     DNN_SAFE(dnnl_memory_desc_init_by_tag(
-                     &dst_d, ndims, dst_dims, p->cfg[DST].dt, p->tag),
+                     &dst_d, ndims, dst_dims, p->cfg[DST].dt, tag_dst),
             WARN);
 
     dnnl_dim_t strides_nd[] = {p->sd, p->sh, p->sw};
@@ -187,6 +181,8 @@ int init_pd(const prb_t *p, dir_t dir, dnnl_pooling_desc_t &pd,
     dnnl_dim_t *padding_r = padding_r_nd + (5 - ndims);
 
     dnnl_alg_kind_t alg = alg2alg_kind(p->alg);
+    dnnl_pooling_desc_t pd;
+
     if (dir & FLAG_FWD) {
         auto prop_kind = p->dir & FLAG_INF ? dnnl_forward_inference
                                            : dnnl_forward_training;
@@ -216,56 +212,47 @@ int init_pd(const prb_t *p, dir_t dir, dnnl_pooling_desc_t &pd,
         print(5, "dnnl implementation: %s\n", impl_str);
     }
 
-    const auto q = [=](dnnl_query_t query, int index = 0) {
-        return *dnnl_primitive_desc_query_md(ppd, query, index);
-    };
-
-    if (dir & FLAG_FWD) {
-        pd.src_desc = q(dnnl_query_src_md);
-        pd.dst_desc = q(dnnl_query_dst_md);
-    } else {
-        pd.diff_src_desc = q(dnnl_query_diff_src_md);
-        pd.diff_dst_desc = q(dnnl_query_diff_dst_md);
-    }
-
     return OK;
 }
 
-int init_pd_fwd(const prb_t *p, dnnl_pooling_desc_t &pd,
-        dnnl_primitive_desc_t &ppd, res_t *r) {
-    return init_pd(p, FLAG_FWD, pd, ppd, nullptr, r);
+int init_pd_fwd(const prb_t *p, dnnl_primitive_desc_t &ppd, res_t *r) {
+    return init_pd(p, FLAG_FWD, ppd, nullptr, r);
 }
 
-int init_pd_bwd(const prb_t *p, dnnl_pooling_desc_t &pd,
-        dnnl_primitive_desc_t &ppd, const_dnnl_primitive_desc_t hint,
-        res_t *r) {
-    return init_pd(p, FLAG_BWD, pd, ppd, hint, r);
+int init_pd_bwd(const prb_t *p, dnnl_primitive_desc_t &ppd,
+        const_dnnl_primitive_desc_t hint, res_t *r) {
+    return init_pd(p, FLAG_BWD, ppd, hint, r);
 }
 
 int doit(const prb_t *p, res_t *r) {
     if (bench_mode == LIST) return r->state = LISTED, OK;
 
-    dnnl_pooling_desc_t pfd, pbd;
     dnnl_primitive_desc_t pfpd, pbpd;
     dnnl_primitive_t pf, pb;
 
-    SAFE(init_pd_fwd(p, pfd, pfpd, r), WARN);
+    SAFE(init_pd_fwd(p, pfpd, r), WARN);
     if (r->state == SKIPPED || r->state == UNIMPLEMENTED) { return OK; }
 
     DNN_SAFE(dnnl_primitive_create(&pf, pfpd), WARN);
 
+    auto q_md = [](const_dnnl_primitive_desc_t pd, dnnl_query_t what) {
+        const dnnl_memory_desc_t *md
+                = dnnl_primitive_desc_query_md(pd, what, 0);
+        SAFE_V(md != nullptr ? OK : FAIL);
+        return md;
+    };
+
     dnn_mem_t ws_dt, ws_fp;
     if (p->alg == MAX && !(p->dir & FLAG_INF)) {
-        const auto &ws_d = *dnnl_primitive_desc_query_md(
-                pfpd, dnnl_query_workspace_md, 0);
+        const auto &ws_d = *q_md(pfpd, dnnl_query_workspace_md);
         ws_dt = dnn_mem_t(ws_d, engine_tgt);
-        ws_fp = dnn_mem_t(ws_d, engine_ref);
+        ws_fp = dnn_mem_t(ws_d, engine_tgt);
         // to catch usage of uninitialized values in the library
         SAFE(fill_ws(p, ws_dt, ws_fp, r), WARN);
     }
 
-    const auto &src_desc = pfd.src_desc;
-    const auto &dst_desc = pfd.dst_desc;
+    const auto &src_desc = *q_md(pfpd, dnnl_query_src_md);
+    const auto &dst_desc = *q_md(pfpd, dnnl_query_dst_md);
     dnn_mem_t src_dt(src_desc, p->cfg[SRC].dt, engine_tgt);
     dnn_mem_t dst_dt(dst_desc, p->cfg[DST].dt, engine_tgt);
     dnn_mem_t d_src_dt, d_dst_dt;
@@ -273,60 +260,63 @@ int doit(const prb_t *p, res_t *r) {
     const auto tag = get_default_tag(src_dt.md_.ndims);
     const auto fp = dnnl_f32;
 
-    dnn_mem_t src_fp(src_desc, fp, tag, engine_ref);
-    dnn_mem_t dst_fp(dst_desc, fp, tag, engine_ref);
+    dnn_mem_t src_fp(src_desc, fp, tag, engine_tgt);
+    dnn_mem_t dst_fp(dst_desc, fp, tag, engine_tgt);
     dnn_mem_t d_dst_fp, d_src_fp;
 
     SAFE(fill_src(p, src_dt, src_fp, r), WARN);
 
     args_t args_fwd, args_bwd;
-    args_fwd.set(DNNL_ARG_SRC, src_dt.m_);
-    args_fwd.set(DNNL_ARG_DST, dst_dt.m_);
+    args_fwd.set(DNNL_ARG_SRC, src_dt);
+    args_fwd.set(DNNL_ARG_DST, dst_dt);
     if (p->alg == MAX && !(p->dir & FLAG_INF))
-        args_fwd.set(DNNL_ARG_WORKSPACE, ws_dt.m_);
+        args_fwd.set(DNNL_ARG_WORKSPACE, ws_dt);
 
     args_t &args = args_fwd;
     dnnl_primitive_t pl = pf;
 
-    DNN_SAFE(execute_and_wait(pl, stream_tgt, args.size(), args), WARN);
+    DNN_SAFE(execute_and_wait(pl, stream_tgt, args), WARN);
 
     if (bench_mode & CORR) {
         compute_ref_fwd(p, src_fp, dst_fp, ws_fp);
         if (p->dir & FLAG_FWD) {
-            dnn_mem_t dst(dst_dt, fp, tag, engine_ref);
+            dnn_mem_t dst(dst_dt, fp, tag, engine_tgt);
             SAFE(compare_dst(p, dst, dst_fp, r), WARN);
         }
     }
 
     if (p->dir & FLAG_BWD) {
-        SAFE(init_pd_bwd(p, pbd, pbpd, pfpd, r), WARN);
+        SAFE(init_pd_bwd(p, pbpd, pfpd, r), WARN);
         if (r->state == SKIPPED || r->state == UNIMPLEMENTED) return OK;
 
         DNN_SAFE(dnnl_primitive_create(&pb, pbpd), WARN);
         DNN_SAFE(dnnl_primitive_desc_destroy(pbpd), CRIT);
 
-        const auto &d_src_desc = pbd.diff_src_desc;
-        const auto &d_dst_desc = pbd.diff_dst_desc;
+        const_dnnl_primitive_desc_t const_pbpd;
+        DNN_SAFE(dnnl_primitive_get_primitive_desc(pb, &const_pbpd), CRIT);
+
+        const auto &d_src_desc = *q_md(const_pbpd, dnnl_query_diff_src_md);
+        const auto &d_dst_desc = *q_md(const_pbpd, dnnl_query_diff_dst_md);
         d_dst_dt = dnn_mem_t(d_dst_desc, p->cfg[DST].dt, engine_tgt);
         d_src_dt = dnn_mem_t(d_src_desc, p->cfg[SRC].dt, engine_tgt);
 
-        d_dst_fp = dnn_mem_t(d_dst_desc, fp, tag, engine_ref);
-        d_src_fp = dnn_mem_t(d_src_desc, fp, tag, engine_ref);
+        d_dst_fp = dnn_mem_t(d_dst_desc, fp, tag, engine_tgt);
+        d_src_fp = dnn_mem_t(d_src_desc, fp, tag, engine_tgt);
 
         SAFE(fill_dst(p, d_dst_dt, d_dst_fp, r), WARN);
 
-        args_bwd.set(DNNL_ARG_DIFF_DST, d_dst_dt.m_);
-        args_bwd.set(DNNL_ARG_DIFF_SRC, d_src_dt.m_);
-        if (p->alg == MAX) args_bwd.set(DNNL_ARG_WORKSPACE, ws_dt.m_);
+        args_bwd.set(DNNL_ARG_DIFF_DST, d_dst_dt);
+        args_bwd.set(DNNL_ARG_DIFF_SRC, d_src_dt);
+        if (p->alg == MAX) args_bwd.set(DNNL_ARG_WORKSPACE, ws_dt);
 
         args = args_bwd;
         pl = pb;
 
-        DNN_SAFE(execute_and_wait(pl, stream_tgt, args.size(), args), WARN);
+        DNN_SAFE(execute_and_wait(pl, stream_tgt, args), WARN);
 
         if (bench_mode & CORR) {
             compute_ref_bwd(p, d_src_fp, d_dst_fp, ws_fp);
-            dnn_mem_t diff_src(d_src_dt, fp, tag, engine_ref);
+            dnn_mem_t diff_src(d_src_dt, fp, tag, engine_tgt);
             SAFE(compare_src(p, diff_src, d_src_fp, r), WARN);
         }
     }

@@ -52,6 +52,7 @@ inline status_t create_gemm_x8s8s32x_pd(primitive_desc_t **gemm_pd,
     gemm_desc.a_type = a_dt;
     gemm_desc.b_type = b_dt;
     gemm_desc.c_type = c_dt;
+    gemm_desc.acc_type = c_dt;
     gemm_desc.ao = 0;
     gemm_desc.bo = 0;
 
@@ -66,6 +67,7 @@ struct gemm_x8s8s32x_inner_product_fwd_t : public primitive_impl_t {
                 const primitive_attr_t *attr,
                 const inner_product_fwd_pd_t *hint_fwd_pd)
             : ocl_inner_product_fwd_pd_t(engine, adesc, attr, hint_fwd_pd) {}
+
         pd_t(const pd_t &rhs) : ocl_inner_product_fwd_pd_t(rhs) {
             if (rhs.gemm_pd_) gemm_pd_ = rhs.gemm_pd_->clone();
             ip_scratchpad_md_ = rhs.ip_scratchpad_md_;
@@ -94,6 +96,9 @@ struct gemm_x8s8s32x_inner_product_fwd_t : public primitive_impl_t {
 
             assert(this->engine()->kind() == engine_kind::gpu);
 
+            primitive_attr_t::skip_mask_t attr_skip_mask
+                    = primitive_attr_t::skip_mask_t::oscale
+                    | primitive_attr_t::skip_mask_t::post_ops;
             bool ok = true && set_default_params() == success && is_fwd()
                     && one_of(src_md()->data_type, s8, u8)
                     && weights_md()->data_type == s8
@@ -103,6 +108,7 @@ struct gemm_x8s8s32x_inner_product_fwd_t : public primitive_impl_t {
                     && dense_consitency_check(src_md(), weights_md(), dst_md())
                     && dense_gemm_consitency_check(
                             src_md(), weights_md(), dst_md())
+                    && attr()->has_default_values(attr_skip_mask)
                     && IMPLICATION(!attr()->output_scales_.has_default_values(),
                             attr()->scratchpad_mode_ == scratchpad_mode::library
                                     && one_of(attr()->output_scales_.mask_, 0,
