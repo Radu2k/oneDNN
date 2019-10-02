@@ -33,7 +33,9 @@ struct jit_gen12lp_gemm_driver_params<data_type::s32, true> {
     static constexpr auto block_m = 6 * 32;
     static constexpr auto block_n = 4 * 16;
     static constexpr auto block_k
-            = (((32768 / ((block_m >= block_n) ? block_m : block_n)) + 0) & ~3);
+            = ((32768 / ((block_m >= block_n) ? block_m : block_n)
+                       - sizeof(int))
+                    & ~3);
 };
 
 template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
@@ -53,11 +55,10 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_x8x8s32(
             unroll_m, unroll_n);
     block_m = jit_gen12lp_gemm_driver_params<c_type, true>::block_m;
     block_n = jit_gen12lp_gemm_driver_params<c_type, true>::block_n;
-    int mm = ((m >= block_m) ? block_m : m);
-    int nn = ((n >= block_n) ? block_n : n);
+    int kk = ((k + 3) & ~3);
 
-    int sizea = ((mm + unroll_m - 1) & ~(unroll_m - 1)) * ((k + 3) & ~3);
-    int sizeb = ((nn + unroll_n - 1) & ~(unroll_n - 1)) * ((k + 3) & ~3);
+    int sizea = block_m * (kk + sizeof(int));
+    int sizeb = block_n * (kk + sizeof(int));
 
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, a);

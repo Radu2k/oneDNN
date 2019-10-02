@@ -20,7 +20,7 @@
 #include "utils.hpp"
 #include "z_magic.hpp"
 
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_SEQ
+#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_SEQ
 #define DNNL_THR_SYNC 1
 inline int dnnl_get_max_threads() {
     return 1;
@@ -38,7 +38,7 @@ inline void dnnl_thr_barrier() {}
 
 #define PRAGMA_OMP(...)
 
-#elif DNNL_CPU_RUNTIME == DNNL_RUNTIME_OMP
+#elif DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_OMP
 #include <omp.h>
 #define DNNL_THR_SYNC 1
 
@@ -60,7 +60,7 @@ inline void dnnl_thr_barrier() {
 
 #define PRAGMA_OMP(...) PRAGMA_MACRO(CHAIN2(omp, __VA_ARGS__))
 
-#elif DNNL_CPU_RUNTIME == DNNL_RUNTIME_TBB
+#elif DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_TBB
 #include "tbb/parallel_for.h"
 #include "tbb/task_arena.h"
 #define DNNL_THR_SYNC 0
@@ -88,13 +88,25 @@ inline tbb::static_partitioner dnnl_tbb_partitioner() {
 
 #endif
 
-/* MSVC still supports omp 2.0 only */
+// MSVC still supports omp 2.0 only
 #if defined(_MSC_VER) && !defined(__clang__) && !defined(__INTEL_COMPILER)
 #define collapse(x)
 #define PRAGMA_OMP_SIMD(...)
 #else
 #define PRAGMA_OMP_SIMD(...) PRAGMA_MACRO(CHAIN2(omp, simd __VA_ARGS__))
-#endif // defined(_MSC_VER) && !defined(__INTEL_COMPILER)
+#endif // defined(_MSC_VER) && !defined(__clang__) && !defined(__INTEL_COMPILER)
+
+// process simdlen; it is supported for Clang >= 3.9; ICC >= 17.0; GCC >= 6.1
+// No support on Windows.
+#if (defined(__clang_major__) \
+        && (__clang_major__ < 3 \
+                || (__clang_major__ == 3 && __clang_minor__ < 9))) \
+        || (defined(__INTEL_COMPILER) && __INTEL_COMPILER < 1700) \
+        || (!defined(__INTEL_COMPILER) && !defined(__clang__) \
+                && (defined(_MSC_VER) || __GNUC__ < 6 \
+                        || (__GNUC__ == 6 && __GNUC_MINOR__ < 1)))
+#define simdlen(x)
+#endif // long simdlen if
 
 namespace dnnl {
 namespace impl {

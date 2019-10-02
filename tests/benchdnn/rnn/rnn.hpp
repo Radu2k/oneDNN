@@ -115,6 +115,7 @@ enum rnn_data_kind_t {
     dst_last_iteration,
     dst_c_last_iteration,
     dst_last_layer,
+
     dst_diff_input,
     dst_diff_states,
     dst_diff_c_states,
@@ -131,12 +132,23 @@ inline const char *rnn_data_kind2str(rnn_data_kind_t kind) {
     switch (kind) {
         case input: return "INPUT";
         case states: return "STATES";
+        case c_states: return "STATES";
         case weights_input: return "WEIGHTS_INPUT";
         case weights_states: return "WEIGHTS_STATES";
         case bias: return "BIAS";
         case dst_last_layer: return "DST_LAST_LAYER";
         case dst_last_iteration: return "DST_LAST_ITERATION";
         case dst_c_last_iteration: return "DST_C_LAST_ITERATION";
+
+        case dst_diff_input: return "DST_DIFF_INPUT";
+        case dst_diff_states: return "DST_DIFF_STATES";
+        case dst_diff_c_states: return "DST_DIFF_C_STATES";
+        case dst_diff_weights_input: return "DST_DIFF_WEIGHTS_INPUT";
+        case dst_diff_weights_states: return "DST_DIFF_WEIGHTS_STATES";
+        case dst_diff_bias: return "DST_DIFF_BIAS";
+        case diff_last_layer: return "DIFF_LAST_LAYER";
+        case diff_last_iteration: return "DIFF_LAST_ITERATION";
+        case diff_c_last_iteration: return "DIFF_C_LAST_ITERATION";
         default:
             assert(!"incorrect rnn data kind");
             return "incorrect rnn data kind";
@@ -167,6 +179,7 @@ typedef struct dt_conf_t {
 } _dt_conf_t[data_kind_total];
 
 extern const _dt_conf_t conf_f32;
+extern const _dt_conf_t conf_bf16;
 extern const _dt_conf_t conf_f16;
 extern const _dt_conf_t conf_u8u8u8u8;
 extern const _dt_conf_t conf_u8u8u8f32;
@@ -176,9 +189,10 @@ extern const _dt_conf_t conf_f32u8f32u8;
 const dt_conf_t *str2cfg(const char *str);
 const char *cfg2str(const dt_conf_t *cfg);
 
-enum policy_t { NONE = 0, COMMON, PER_OC };
-policy_t str2policy(const char *str);
-const char *policy2str(attr_t::scale_t::policy_t policy);
+inline bool is_cfg_u8(const dt_conf_t *cfg) {
+    return cfg == conf_u8u8u8u8 || cfg == conf_u8u8u8f32
+            || cfg == conf_f32u8f32f32 || cfg == conf_f32u8f32u8;
+}
 
 struct prb_t : public desc_t {
     prb_t(const desc_t &desc, const dt_conf_t *cfg, dnnl_prop_kind_t prop,
@@ -199,10 +213,11 @@ struct prb_t : public desc_t {
         , ops(0.0)
         , skip_nonlinear(skip_nonlinear)
         , linear_cscale(0.0f) {
+
+        if (mb) this->mb = mb;
         count_ops();
         wc = MAX2(sic, MAX2(slc, dic));
 
-        if (mb) this->mb = mb;
         wei_oc_scales = nullptr;
         linear_scales = nullptr;
 
@@ -212,7 +227,7 @@ struct prb_t : public desc_t {
         // Here we use the range of INPUT to set the scales
         set_tparams(cfg[input].f_min, cfg[input].f_max);
 
-        if (scale_policy == PER_OC)
+        if (scale_policy == policy_t::PER_OC)
             wei_oc_scales
                     = (float *)zmalloc(sizeof(float) * dic * n_gates(), 64);
         set_qparams(-1., 1.);
@@ -417,8 +432,8 @@ inline size_t ldgo_off_f(
 
 inline void inv_ldgo_off_f(const prb_t &p, size_t off, int64_t &l, int64_t &d,
         int64_t &b, int64_t &c) {
-    c = off % p.sic;
-    off /= p.sic;
+    c = off % p.dic;
+    off /= p.dic;
     b = off % p.n_bias();
     off /= p.n_bias();
     d = off % p.n_dir();

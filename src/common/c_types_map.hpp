@@ -86,6 +86,8 @@ const alg_kind_t vanilla_rnn = dnnl_vanilla_rnn;
 const alg_kind_t vanilla_lstm = dnnl_vanilla_lstm;
 const alg_kind_t vanilla_gru = dnnl_vanilla_gru;
 const alg_kind_t lbr_gru = dnnl_lbr_gru;
+const alg_kind_t binary_add = dnnl_binary_add;
+const alg_kind_t binary_mul = dnnl_binary_mul;
 } // namespace alg_kind
 
 using data_type_t = dnnl_data_type_t;
@@ -149,6 +151,7 @@ const format_tag_t decab = dnnl_decab;
 const format_tag_t Abc16a = dnnl_Abc16a;
 const format_tag_t ABc16a16b = dnnl_ABc16a16b;
 const format_tag_t aBc16b = dnnl_aBc16b;
+const format_tag_t aBc32b = dnnl_aBc32b;
 const format_tag_t ABc16b16a = dnnl_ABc16b16a;
 const format_tag_t Abc4a = dnnl_Abc4a;
 const format_tag_t aBc4b = dnnl_aBc4b;
@@ -164,6 +167,7 @@ const format_tag_t Abcd16a = dnnl_Abcd16a;
 const format_tag_t Abcd32a = dnnl_Abcd32a;
 const format_tag_t ABcd16a16b = dnnl_ABcd16a16b;
 const format_tag_t aBcd16b = dnnl_aBcd16b;
+const format_tag_t aBcd32b = dnnl_aBcd32b;
 const format_tag_t ABcd16b16a = dnnl_ABcd16b16a;
 const format_tag_t aBCd16b16c = dnnl_aBCd16b16c;
 const format_tag_t aBCd16c16b = dnnl_aBCd16c16b;
@@ -188,6 +192,7 @@ const format_tag_t Abcde16a = dnnl_Abcde16a;
 const format_tag_t Abcde32a = dnnl_Abcde32a;
 const format_tag_t ABcde16a16b = dnnl_ABcde16a16b;
 const format_tag_t aBcde16b = dnnl_aBcde16b;
+const format_tag_t aBcde32b = dnnl_aBcde32b;
 const format_tag_t ABcde16b16a = dnnl_ABcde16b16a;
 const format_tag_t aBCde16b16c = dnnl_aBCde16b16c;
 const format_tag_t aBCde16c16b = dnnl_aBCde16c16b;
@@ -310,12 +315,15 @@ const format_tag_t ldnc = dnnl_ldnc;
 const format_tag_t ldigo = dnnl_ldigo;
 const format_tag_t ldgoi = dnnl_ldgoi;
 const format_tag_t ldgo = dnnl_ldgo;
+const format_tag_t nCdhw32c = dnnl_nCdhw32c;
 const format_tag_t nCdhw16c = dnnl_nCdhw16c;
 const format_tag_t nCdhw4c = dnnl_nCdhw4c;
 const format_tag_t nCdhw8c = dnnl_nCdhw8c;
+const format_tag_t nChw32c = dnnl_nChw32c;
 const format_tag_t nChw16c = dnnl_nChw16c;
 const format_tag_t nChw4c = dnnl_nChw4c;
 const format_tag_t nChw8c = dnnl_nChw8c;
+const format_tag_t nCw32c = dnnl_nCw32c;
 const format_tag_t nCw16c = dnnl_nCw16c;
 const format_tag_t nCw4c = dnnl_nCw4c;
 const format_tag_t nCw8c = dnnl_nCw8c;
@@ -453,6 +461,8 @@ const memory_extra_flags_t none = dnnl_memory_extra_flag_none;
 const memory_extra_flags_t compensation_conv_s8s8
         = dnnl_memory_extra_flag_compensation_conv_s8s8;
 const memory_extra_flags_t scale_adjust = dnnl_memory_extra_flag_scale_adjust;
+const memory_extra_flags_t gpu_rnn_u8s8_compensation
+        = dnnl_memory_extra_flag_gpu_rnn_u8s8_compensation;
 } // namespace memory_extra_flags
 
 using engine_kind_t = dnnl_engine_kind_t;
@@ -462,15 +472,21 @@ const engine_kind_t cpu = dnnl_cpu;
 const engine_kind_t gpu = dnnl_gpu;
 } // namespace engine_kind
 
-enum backend_kind_t {
-    dnnl_backend_native,
-    dnnl_backend_ocl,
+enum runtime_kind_t {
+    dnnl_runtime_none,
+    dnnl_runtime_seq,
+    dnnl_runtime_omp,
+    dnnl_runtime_tbb,
+    dnnl_runtime_ocl,
 };
 
-namespace backend_kind {
-const backend_kind_t native = dnnl_backend_native;
-const backend_kind_t ocl = dnnl_backend_ocl;
-} // namespace backend_kind
+namespace runtime_kind {
+const runtime_kind_t none = dnnl_runtime_none;
+const runtime_kind_t seq = dnnl_runtime_seq;
+const runtime_kind_t omp = dnnl_runtime_omp;
+const runtime_kind_t tbb = dnnl_runtime_tbb;
+const runtime_kind_t ocl = dnnl_runtime_ocl;
+} // namespace runtime_kind
 
 using primitive_kind_t = dnnl_primitive_kind_t;
 namespace primitive_kind {
@@ -490,6 +506,7 @@ const primitive_kind_t layer_normalization = dnnl_layer_normalization;
 const primitive_kind_t inner_product = dnnl_inner_product;
 const primitive_kind_t rnn = dnnl_rnn;
 const primitive_kind_t gemm = dnnl_gemm;
+const primitive_kind_t binary = dnnl_binary;
 } // namespace primitive_kind
 
 using query_t = dnnl_query_t;
@@ -509,6 +526,11 @@ const query_t scratchpad_engine = dnnl_query_scratchpad_engine;
 
 const query_t impl_info_str = dnnl_query_impl_info_str;
 
+const query_t reorder_src_engine = dnnl_query_reorder_src_engine;
+const query_t reorder_dst_engine = dnnl_query_reorder_dst_engine;
+
+const query_t prop_kind = dnnl_query_prop_kind;
+
 const query_t some_d = dnnl_query_some_d;
 const query_t op_d = dnnl_query_op_d;
 const query_t convolution_d = dnnl_query_convolution_d;
@@ -523,6 +545,7 @@ const query_t layer_normalization_d = dnnl_query_layer_normalization_d;
 const query_t inner_product_d = dnnl_query_inner_product_d;
 const query_t rnn_d = dnnl_query_rnn_d;
 const query_t gemm_d = dnnl_query_gemm_d;
+const query_t binary_d = dnnl_query_binary_d;
 
 const query_t some_md = dnnl_query_some_md;
 const query_t src_md = dnnl_query_src_md;
@@ -551,6 +574,7 @@ using lrn_desc_t = dnnl_lrn_desc_t;
 using batch_normalization_desc_t = dnnl_batch_normalization_desc_t;
 using layer_normalization_desc_t = dnnl_layer_normalization_desc_t;
 using inner_product_desc_t = dnnl_inner_product_desc_t;
+using binary_desc_t = dnnl_binary_desc_t;
 
 using rnn_direction_t = dnnl_rnn_direction_t;
 using rnn_desc_t = dnnl_rnn_desc_t;
@@ -590,6 +614,7 @@ struct op_desc_t {
         concat_desc_t concat;
         reorder_desc_t reorder;
         sum_desc_t sum;
+        binary_desc_t binary;
     };
 
 #define DECL_CTOR_AND_CONVERTERS(c_type, name) \
@@ -615,6 +640,7 @@ struct op_desc_t {
     DECL_CTOR_AND_CONVERTERS(concat_desc_t, concat);
     DECL_CTOR_AND_CONVERTERS(reorder_desc_t, reorder);
     DECL_CTOR_AND_CONVERTERS(sum_desc_t, sum);
+    DECL_CTOR_AND_CONVERTERS(binary_desc_t, binary);
 
     // concat_desc_t and sum_desc_t have data members which have non-trivial
     // special member functions hence the default destructor is implicitly
@@ -646,9 +672,7 @@ using stream_t = dnnl_stream;
 struct batch_normalization_bwd_pd_t;
 struct batch_normalization_fwd_pd_t;
 struct batch_normalization_pd_t;
-struct layer_normalization_bwd_pd_t;
-struct layer_normalization_fwd_pd_t;
-struct layer_normalization_pd_t;
+struct binary_pd_t;
 struct concat_pd_t;
 struct convolution_bwd_data_pd_t;
 struct convolution_bwd_weights_pd_t;
@@ -666,6 +690,9 @@ struct inner_product_bwd_data_pd_t;
 struct inner_product_bwd_weights_pd_t;
 struct inner_product_fwd_pd_t;
 struct inner_product_pd_t;
+struct layer_normalization_bwd_pd_t;
+struct layer_normalization_fwd_pd_t;
+struct layer_normalization_pd_t;
 struct lrn_bwd_pd_t;
 struct lrn_fwd_pd_t;
 struct lrn_pd_t;

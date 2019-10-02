@@ -33,25 +33,6 @@ alg_t str2alg(const char *str) {
     return VANILLA_RNN;
 }
 
-policy_t str2policy(const char *str) {
-#define CASE(_plc) \
-    if (!strcasecmp(STRINGIFY(_plc), str)) return _plc
-    CASE(NONE);
-    CASE(COMMON);
-    CASE(PER_OC);
-#undef CASE
-    assert(!"unknown policy");
-    return NONE;
-}
-
-const char *policy2str(policy_t policy) {
-    if (policy == NONE) return "none";
-    if (policy == COMMON) return "common";
-    if (policy == PER_OC) return "per_oc";
-    assert(!"unknown policy");
-    return "unknown policy";
-}
-
 const char *alg2str(alg_t alg) {
     if (alg == VANILLA_RNN) return "VANILLA_RNN";
     if (alg == VANILLA_LSTM) return "VANILLA_LSTM";
@@ -125,11 +106,19 @@ const char *direction2str(dnnl_rnn_direction_t direction) {
 }
 
 void check_case_validity(const dt_conf_t *cfg, policy_t policy) {
-    if (cfg != conf_f32 && cfg != conf_f16 && policy == NONE) {
+    if (is_cfg_u8(cfg)
+            && (policy != policy_t::COMMON && policy != policy_t::PER_OC)) {
         fprintf(stderr,
                 "%s driver: configuration `%s` requires scale policy "
-                "to be COMMON or PER_OC, exiting...\n",
+                "to be policy_t::COMMON or policy_t::PER_OC, exiting...\n",
                 driver_name, cfg2str(cfg));
+        exit(2);
+    }
+    if (!(policy == policy_t::NONE || policy == policy_t::COMMON
+                || policy == policy_t::PER_OC)) {
+        fprintf(stderr,
+                "rnn driver: scale_policy `%s` is not supported, exiting...\n",
+                attr_t::scale_t::policy2str(policy));
         exit(2);
     }
 }
@@ -208,7 +197,7 @@ std::ostream &operator<<(std::ostream &s, const prb_t &p) {
 
     s << " --direction=" << direction2str(p.direction)
       << " --cfg=" << cfg2str(p.cfg)
-      << " --scaling=" << policy2str(p.scale_policy);
+      << " --scaling=" << attr_t::scale_t::policy2str(p.scale_policy);
 
     s << " "
       << "l" << p.n_layer << "t" << p.n_iter << "mb" << p.mb << "sic" << p.sic
@@ -424,6 +413,7 @@ int compare_dat(const prb_t &p, rnn_data_kind_t kind, dnn_mem_t &mem_dt,
                             oc = 0, b = 0;
                     switch (kind) {
                         case input:
+                        case dst_diff_input:
                             inv_ntc_off_f(p, i, n, t, c);
                             print(0,
                                     "%4ld, %s, [%s][" IFMT "," IFMT "," IFMT
@@ -433,6 +423,7 @@ int compare_dat(const prb_t &p, rnn_data_kind_t kind, dnn_mem_t &mem_dt,
                                     skind, n, t, c, fp, dt, diff, rel_diff);
                             break;
                         case states:
+                        case dst_diff_states:
                             inv_ldnc_off_f(p, i, l, d, n, c);
                             print(0,
                                     "%4ld, %s, [%s][" IFMT "," IFMT "," IFMT
@@ -443,6 +434,7 @@ int compare_dat(const prb_t &p, rnn_data_kind_t kind, dnn_mem_t &mem_dt,
                                     skind, l, d, n, c, fp, dt, diff, rel_diff);
                             break;
                         case weights_input:
+                        case dst_diff_weights_input:
                             inv_ldigo_off_f(p, i, l, d, w, ic, oc);
                             print(0,
                                     "%4ld, %s, [%s][" IFMT "," IFMT "," IFMT
@@ -454,6 +446,7 @@ int compare_dat(const prb_t &p, rnn_data_kind_t kind, dnn_mem_t &mem_dt,
                                     rel_diff);
                             break;
                         case weights_states:
+                        case dst_diff_weights_states:
                             inv_ldigo_off_f(p, i, l, d, w, ic, oc);
                             print(0,
                                     "%4ld, %s, [%s][" IFMT "," IFMT "," IFMT
@@ -465,6 +458,7 @@ int compare_dat(const prb_t &p, rnn_data_kind_t kind, dnn_mem_t &mem_dt,
                                     rel_diff);
                             break;
                         case bias:
+                        case dst_diff_bias:
                             inv_ldgo_off_f(p, i, l, d, b, c);
                             print(0,
                                     "%4ld, %s, [%s][" IFMT "," IFMT "," IFMT
@@ -475,6 +469,7 @@ int compare_dat(const prb_t &p, rnn_data_kind_t kind, dnn_mem_t &mem_dt,
                                     skind, l, d, b, c, fp, dt, diff, rel_diff);
                             break;
                         case dst_last_layer:
+                        case diff_last_layer:
                             inv_tnc_off_f(p, i, t, n, c);
                             print(0,
                                     "%4ld, %s, [%s][" IFMT "," IFMT "," IFMT
@@ -485,6 +480,8 @@ int compare_dat(const prb_t &p, rnn_data_kind_t kind, dnn_mem_t &mem_dt,
                             break;
                         case dst_last_iteration:
                         case dst_c_last_iteration:
+                        case diff_last_iteration:
+                        case diff_c_last_iteration:
                             inv_ldnc_off_f(p, i, l, d, n, c);
                             print(0,
                                     "%4ld, %s, [%s][" IFMT "," IFMT "," IFMT
@@ -642,7 +639,7 @@ int compare_dst_c_last_iteration(const prb_t &p, dnn_mem_t &mem_dt,
 }
 
 void prb_t::set_qparams(float fp_min, float fp_max) {
-    if (cfg == conf_f32 || cfg == conf_f16) {
+    if (!is_cfg_u8(cfg)) {
         data_shift = 0.;
         data_scale = 1.;
         wei_scale = 1.;
@@ -658,9 +655,9 @@ void prb_t::set_qparams(float fp_min, float fp_max) {
     data_shift = cfg[input].f_mean;
     data_scale = int8_src_range / fp_range;
 
-    if (scale_policy == COMMON) {
+    if (scale_policy == policy_t::COMMON) {
         wei_scale = int8_wei_range / fp_range;
-    } else if (scale_policy == PER_OC) {
+    } else if (scale_policy == policy_t::PER_OC) {
         float K = int8_wei_range / fp_range;
         const auto nelems = dic * n_gates();
         for (int64_t i = 0; i < nelems; i++) {

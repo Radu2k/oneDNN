@@ -527,7 +527,8 @@ status_t jit_avx512_core_bf16_fwd_kernel::init_conf(jit_conv_conf_t &jcp,
     int ndims = src_d.ndims();
 
     jcp = zero<decltype(jcp)>();
-    jcp.isa = mayiuse(avx512_core_bf16) ? avx512_core_bf16 : avx512_core;
+    jcp.isa = mayiuse(avx512_core_bf16) ? avx512_core_bf16
+                                        : bf16_emulation_t::get_isa();
     jcp.ver = ver_vnni;
     jcp.ndims = ndims;
     jcp.prop_kind = cd.prop_kind;
@@ -890,9 +891,8 @@ void jit_avx512_core_bf16_bwd_data_kernel::generate() {
     int l_overflow = nstl::max(0, ((kw - 1) * dilate_w - jcp.l_pad) / stride_w);
     int r_overflow = nstl::max(
             0, ((kw - 1) * dilate_w - nstl::max(0, jcp.r_pad)) / stride_w);
-    int r_overflow1 = nstl::max(0,
-            ((kw - 1) * dilate_w - nstl::max(0, jcp.r_pad) - ur_w_tail)
-                    / stride_w);
+    int r_overflow1 = nstl::max(
+            0, ((kw - 1) * dilate_w - jcp.r_pad - ur_w_tail) / stride_w);
 
     int n_oi = iw / ur_w;
     if (r_overflow1 > 0) n_oi--;
@@ -945,7 +945,8 @@ status_t jit_avx512_core_bf16_bwd_data_kernel::init_conf(jit_conv_conf_t &jcp,
     const bool with_groups = weights_d.ndims() == diff_src_d.ndims() + 1;
     int ndims = diff_src_d.ndims();
 
-    jcp.isa = mayiuse(avx512_core_bf16) ? avx512_core_bf16 : avx512_core;
+    jcp.isa = mayiuse(avx512_core_bf16) ? avx512_core_bf16
+                                        : bf16_emulation_t::get_isa();
     jcp.ver = ver_vnni;
     jcp.ndims = ndims;
     jcp.prop_kind = cd.prop_kind;
@@ -1038,8 +1039,7 @@ status_t jit_avx512_core_bf16_bwd_data_kernel::init_conf(jit_conv_conf_t &jcp,
     int l_overflow = nstl::max(
             0, ((jcp.kw - 1) * (jcp.dilate_w + 1) - jcp.l_pad) / jcp.stride_w);
     int r_overflow1 = nstl::max(0,
-            ((jcp.kw - 1) * (jcp.dilate_w + 1) - nstl::max(0, jcp.r_pad)
-                    - jcp.iw % jcp.ur_w)
+            ((jcp.kw - 1) * (jcp.dilate_w + 1) - jcp.r_pad - jcp.iw % jcp.ur_w)
                     / jcp.stride_w);
     int n_oi = jcp.iw / jcp.ur_w;
     if (r_overflow1 > 0) n_oi--;
@@ -1091,13 +1091,16 @@ status_t jit_avx512_core_bf16_bwd_data_kernel::init_conf(jit_conv_conf_t &jcp,
 
     if (l_overflow * jcp.stride_w > jcp.ur_w) return status::unimplemented;
     int r_overflow_no_tail = nstl::max(0,
-            ((jcp.kw - 1) * (jcp.dilate_w + 1) - nstl::max(0, jcp.r_pad)
-                    - jcp.ur_w_tail)
+            ((jcp.kw - 1) * (jcp.dilate_w + 1) - jcp.r_pad - jcp.ur_w_tail)
                     / jcp.stride_w);
-    if (r_overflow_no_tail * jcp.stride_w > jcp.ur_w)
-        return status::unimplemented;
-    if ((jcp.iw > jcp.ur_w) && (jcp.ur_w % jcp.stride_w != 0))
-        return status::unimplemented;
+    bool tails_not_ok = false
+            /* maximum 1 ur_w block with r_overflow so far */
+            || r_overflow_no_tail * jcp.stride_w > jcp.ur_w
+            /* ur_w must be a multiple of stride */
+            || ((jcp.iw > jcp.ur_w) && (jcp.ur_w % jcp.stride_w != 0))
+            /* r_pad must not extend beyond ur_w_tail */
+            || ((jcp.iw > jcp.ur_w) && (jcp.r_pad + jcp.ur_w_tail < 0));
+    if (tails_not_ok) return status::unimplemented;
 
     pick_loop_order(jcp);
 
@@ -1652,8 +1655,7 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32 ::
     int ow = jcp.tr_ow;
     Label oh_label, oh_label_end, oh_tpad_label, oh_tpad_tail_label,
             oh_bpad_label, oh_bpad_label_end, oh_dilate_label_shift,
-            oh_dilate_label_noshift, oh_dilate_label_end,
-            skip_neg_overlap_label, skip_fpad_label, skip_input_label;
+            oh_dilate_label_noshift, oh_dilate_label_end;
 
     mov(reg_kh, jcp.kh);
     xor_(reg_ih_count, reg_ih_count);
@@ -1680,6 +1682,9 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32 ::
             }
             L(oh_tpad_label);
             {
+                cmp(reg_oj, jcp.oh);
+                jge(oh_label_end, T_NEAR);
+
                 compute_oh_step_disp();
                 add(reg_output, jcp.typesize_in * ow * jcp.oc_block);
                 if (is_dilated) {
@@ -1722,6 +1727,9 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32 ::
             mov(reg_kh, jcp.ih);
             L(oh_tpad_tail_label);
             {
+                cmp(reg_oj, jcp.oh);
+                jge(oh_label_end, T_NEAR);
+
                 compute_oh_step_disp();
                 add(reg_output, jcp.typesize_in * ow * jcp.oc_block);
                 sub(reg_kernel,
@@ -1760,7 +1768,7 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32 ::
     cmp(reg_ih_count, jcp.ihp - b_pad - (jcp.kh - 1) * dilate_h);
     jge(oh_label_end, T_NEAR);
     cmp(reg_oj, jcp.oh);
-    jge(oh_label, T_NEAR);
+    jge(oh_label_end, T_NEAR);
 
     /* Compute middle block(s) */
     mov(reg_kh, jcp.kh);
@@ -1887,7 +1895,7 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32 ::
         /* Final number of kernel elements that overlap with input */
         const int inp_ker_overlap = nstl::min(jcp.kd, jcp.id);
         cmp(reg_kd_count, inp_ker_overlap);
-        jl(common_block_label, T_NEAR);
+        jle(common_block_label, T_NEAR);
 
         /* Correct any excess shifts to kernel and input */
         if (jcp.f_pad <= jcp.od * jcp.stride_d) {
@@ -1903,7 +1911,7 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32 ::
         }
 
         /* Apply correction */
-        mov(reg_kd_count, jcp.kd);
+        mov(reg_kd_count, inp_ker_overlap);
         jmp(common_block_label);
 
         L(fpad_end_label);
@@ -1997,7 +2005,8 @@ status_t jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_conf(
     int ndims = src_d.ndims();
 
     jcp = zero<decltype(jcp)>();
-    jcp.isa = mayiuse(avx512_core_bf16) ? avx512_core_bf16 : avx512_core;
+    jcp.isa = mayiuse(avx512_core_bf16) ? avx512_core_bf16
+                                        : bf16_emulation_t::get_isa();
     jcp.ver = ver_vnni;
     jcp.ndims = ndims;
     jcp.prop_kind = cd.prop_kind;

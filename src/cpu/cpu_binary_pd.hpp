@@ -14,23 +14,26 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GEMV_HPP
-#define GEMV_HPP
+#ifndef CPU_BINARY_PD_HPP
+#define CPU_BINARY_PD_HPP
 
-#include <cstdint>
-
-#include "../gemm_info.hpp"
+#include "binary_pd.hpp"
+#include "c_types_map.hpp"
+#include "cpu_engine.hpp"
+#include "type_helpers.hpp"
+#include "utils.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace cpu {
 
-template <typename T>
-int gemm_s8u8s32_jump_to_gemv_s8u8s32(T *arg);
-int gemv_threading_driver(gemm_info_t<int8_t, uint8_t, int32_t> *arg);
-
+struct cpu_binary_pd_t : public binary_pd_t {
+    using binary_pd_t::binary_pd_t;
+};
 } // namespace cpu
 } // namespace impl
 } // namespace dnnl
 
-#endif // GEMV_HPP
+#endif
+
+// vim: et ts=4 sw=4 cindent cino^=l0,\:0,N-s

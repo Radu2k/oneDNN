@@ -85,6 +85,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_ABc16a16b) return "ABc16a16b";
     if (v == dnnl_ABc32a32b) return "ABc32a32b";
     if (v == dnnl_aBc16b) return "aBc16b";
+    if (v == dnnl_aBc32b) return "aBc32b";
     if (v == dnnl_ABc16b16a) return "ABc16b16a";
     if (v == dnnl_Abc4a) return "Abc4a";
     if (v == dnnl_aBc4b) return "aBc4b";
@@ -101,6 +102,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_Abcd32a) return "Abcd32a";
     if (v == dnnl_ABcd32a32b) return "ABcd32a32b";
     if (v == dnnl_aBcd16b) return "aBcd16b";
+    if (v == dnnl_aBcd32b) return "aBcd32b";
     if (v == dnnl_ABcd16b16a) return "ABcd16b16a";
     if (v == dnnl_aBCd16b16c) return "aBCd16b16c";
     if (v == dnnl_aBCd16c16b) return "aBCd16c16b";
@@ -127,6 +129,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_ABcde16a16b) return "ABcde16a16b";
     if (v == dnnl_BAcde8a16b2a) return "BAcde8a16b2a";
     if (v == dnnl_aBcde16b) return "aBcde16b";
+    if (v == dnnl_aBcde32b) return "aBcde32b";
     if (v == dnnl_ABcde16b16a) return "ABcde16b16a";
     if (v == dnnl_aBCde16b16c) return "aBCde16b16c";
     if (v == dnnl_aBCde16c16b) return "aBCde16c16b";
@@ -410,6 +413,7 @@ const char *dnnl_prim_kind2str(dnnl_primitive_kind_t v) {
     if (v == dnnl_inner_product) return "inner_product";
     if (v == dnnl_rnn) return "rnn";
     if (v == dnnl_gemm) return "gemm";
+    if (v == dnnl_binary) return "binary";
     assert(!"unknown prim_kind");
     return "unknown prim_kind";
 }
@@ -444,16 +448,10 @@ const char *dnnl_alg_kind2str(dnnl_alg_kind_t v) {
     if (v == dnnl_vanilla_lstm) return "vanilla_lstm";
     if (v == dnnl_vanilla_gru) return "vanilla_gru";
     if (v == dnnl_lbr_gru) return "lbr_gru";
+    if (v == dnnl_binary_add) return "binary_add";
+    if (v == dnnl_binary_mul) return "binary_mul";
     assert(!"unknown alg_kind");
     return "unknown alg_kind";
-}
-
-const char *dnnl_normalization_flags2str(dnnl_normalization_flags_t v) {
-    if (v == dnnl_use_global_stats) return "use_global_stats";
-    if (v == dnnl_use_scaleshift) return "use_scaleshift";
-    if (v == dnnl_fuse_norm_relu) return "fuse_norm_relu";
-    assert(!"unknown normalization_flags");
-    return "unknown normalization_flags";
 }
 
 const char *dnnl_rnn_flags2str(dnnl_rnn_flags_t v) {

@@ -573,7 +573,8 @@ status_t jit_avx512_core_bf16_1x1_conv_kernel::init_conf(
     /*TODO: Add 3D support */
     if (ndims > 4) return status::unimplemented;
 
-    jcp.isa = mayiuse(avx512_core_bf16) ? avx512_core_bf16 : avx512_core;
+    jcp.isa = mayiuse(avx512_core_bf16) ? avx512_core_bf16
+                                        : bf16_emulation_t::get_isa();
     jcp.prop_kind = cd.prop_kind;
 
     jcp.ngroups = with_groups ? weights_d.dims()[0] : 1;
@@ -651,7 +652,8 @@ status_t jit_avx512_core_bf16_1x1_conv_kernel::init_conf(
 
     args_ok = true && jcp.oc % simd_w == 0 && jcp.ic % simd_w == 0
             && jcp.t_pad == 0 && jcp.l_pad == 0 && jcp.stride_w == 1
-            && jcp.stride_h == 1 && jcp.kh == 1 && jcp.kw == 1;
+            && jcp.stride_h == 1 && jcp.kh == 1 && jcp.kw == 1
+            && jcp.ow == jcp.iw && jcp.oh == jcp.ih; // enforce rpad=0
     if (!args_ok) return status::unimplemented;
 
     jcp.ic_block = jcp.oc_block = simd_w;

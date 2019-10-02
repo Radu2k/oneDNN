@@ -44,7 +44,7 @@ endif()
 
 set(PROJECT_NAME "DNNL")
 set(PROJECT_FULL_NAME "Deep Neural Network Library (DNNL)")
-set(PROJECT_VERSION "1.0.0")
+set(PROJECT_VERSION "1.1.0")
 
 set(LIB_NAME dnnl)
 
@@ -87,6 +87,13 @@ include("cmake/SDL.cmake")
 include("cmake/MKL.cmake")
 include("cmake/Doxygen.cmake")
 include("cmake/version.cmake")
+
+# Handle cases when OpenMP runtime is requested but not found: override CPU
+# runtime to be sequential
+if(DNNL_CPU_RUNTIME STREQUAL "OMP" AND
+   DNNL_CPU_THREADING_RUNTIME STREQUAL "SEQ")
+    set(DNNL_CPU_RUNTIME "SEQ" CACHE STRING "" FORCE)
+endif()
 
 enable_testing()
 

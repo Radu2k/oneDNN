@@ -37,6 +37,11 @@ option(DNNL_ENABLE_CONCURRENT_EXEC
     CAUTION: enabling this option increases memory consumption"
     OFF) # disabled by default
 
+option(DNNL_ENABLE_PRIMITIVE_CACHE "enables primitive cache.
+    WARNING: the primitive cache is an experimental feature and might be
+    changed without prior notification in future releases" OFF)
+    # disabled by default
+
 # =============================
 # Building properties and scope
 # =============================
@@ -63,14 +68,13 @@ set(DNNL_ARCH_OPT_FLAGS "HostOpts" CACHE STRING
     If empty default optimization level would be applied which depends on the
     compiler being used.
 
-    - For Intel(R) C++ Compilers the default option is `-xHOST` which instructs
-      the compiler to generate the code for the architecture where building is
-      happening. This option would not allow to run the library on older
+    - For Intel(R) C++ Compilers the default option is `-xSSE4.1` which instructs
+      the compiler to generate the code for the processors that support SSE4.1
+      instructions. This option would not allow to run the library on older
       architectures.
 
-    - For GNU* Compiler Collection version 5 and newer the default options are
-      `-march=native -mtune=native` which behaves similarly to the description
-      above.
+    - For GNU* Compiler Collection and Clang, the default option is `-msse4.1` which
+      behaves similarly to the description above.
 
     - For all other cases there are no special optimizations flags.
 
@@ -100,6 +104,9 @@ set(DNNL_CPU_RUNTIME "OMP" CACHE STRING
     To use Intel(R) Threading Building Blocks (Intel(R) TBB) one should also
     set TBBROOT (either environment variable or CMake option) to the library
     location.")
+if(NOT ${DNNL_CPU_RUNTIME} MATCHES "^(OMP|TBB|SEQ)$")
+    message(FATAL_ERROR "Unsupported CPU runtime: ${DNNL_CPU_RUNTIME}")
+endif()
 
 set(TBBROOT "" CACHE STRING
     "path to Intel(R) Thread Building Blocks (Intel(R) TBB).
@@ -111,6 +118,9 @@ set(DNNL_GPU_RUNTIME "NONE" CACHE STRING
 
     Using OpenCL for GPU requires setting OPENCLROOT if the libraries are
     installed in a non-standard location.")
+if(NOT ${DNNL_GPU_RUNTIME} MATCHES "^(OCL|NONE)$")
+    message(FATAL_ERROR "Unsupported GPU runtime: ${DNNL_GPU_RUNTIME}")
+endif()
 
 set(OPENCLROOT "" CACHE STRING
     "path to Intel(R) SDK for OpenCL(TM).

@@ -31,9 +31,9 @@ namespace cpu {
 
 struct ref_eltwise_scalar_fwd_t {
 public:
-    ref_eltwise_scalar_fwd_t(alg_kind_t alg, float alpha, float beta);
+    ref_eltwise_scalar_fwd_t(
+            alg_kind_t alg, float alpha, float beta, float scale);
 
-    // note that eltwise.scale is ignored
     ref_eltwise_scalar_fwd_t(const post_ops_t::entry_t::eltwise_t &eltwise);
 
     float compute_scalar(float s);
@@ -41,6 +41,7 @@ public:
     const alg_kind_t alg_;
     const float alpha_;
     const float beta_;
+    const float scale_;
 };
 
 template <impl::data_type_t data_type>
@@ -121,6 +122,7 @@ struct ref_eltwise_bwd_t : public primitive_impl_t {
                     && IMPLICATION(
                             desc()->data_desc.data_type == data_type::bf16,
                             mayiuse(avx512_core))
+                    && set_default_formats_common()
                     && attr()->has_default_values();
             if (!ok) return status::unimplemented;
 
