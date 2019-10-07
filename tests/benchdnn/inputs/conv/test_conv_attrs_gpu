@@ -18,9 +18,19 @@
 --attr=post_ops='relu:0.5;sum'
 --cfg=u8s8s8 --batch=conv_resnet_50
 
+# f16
+--reset --cfg=f16
+--mb=2,32
+
+--dir=FWD_B
+--attr=post_ops='sum' --batch=conv_resnet_50
+--attr=post_ops='relu' --batch=conv_resnet_50
+--attr=post_ops='sum;relu' --batch=conv_resnet_50
+--attr=post_ops='sum:2.5;relu:0.5' --batch=conv_gpu
+--attr=post_ops='sum;linear:0.5:1.5' --batch=conv_resnet_50
 
 # f32
---reset --cfg=f32,f16
+--reset --cfg=f32
 --mb=2,16
 
 --dir=FWD_B

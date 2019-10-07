@@ -83,11 +83,13 @@ struct jit_simple_reorder_kernel {
         if (src_md.matches_one_of_tag(gOIw8o16i2o, gOIhw8o16i2o, gOIw8i16o2i,
                     gOIhw8i16o2i, gOIdhw8i16o2i, gOIw4o8i8o4i, gOIhw4o8i8o4i,
                     gOIhw2o8i8o2i, gOIdhw4o8i8o4i, gIOw4i8o8i4o, gIOhw4i8o8i4o,
-                    gIOdhw4i8o8i4o)
+                    gIOdhw4i8o8i4o, gOIdhw2o2o8i8o2i, gOIhw2o2o8i8o2i,
+                    gOIw2o2o8i8o2i)
                 || dst_md.matches_one_of_tag(gOIw8o16i2o, gOIhw8o16i2o,
                         gOIw8i16o2i, gOIhw8i16o2i, gOIdhw8i16o2i, gOIw4o8i8o4i,
                         gOIhw4o8i8o4i, gOIhw2o8i8o2i, gOIdhw4o8i8o4i,
-                        gIOw4i8o8i4o, gIOhw4i8o8i4o, gIOdhw4i8o8i4o))
+                        gIOw4i8o8i4o, gIOhw4i8o8i4o, gIOdhw4i8o8i4o,
+                        gOIdhw2o2o8i8o2i, gOIhw2o2o8i8o2i, gOIw2o2o8i8o2i))
             jrp.with_group = 1;
 
         if (jrp.has_padding || jrp.scale_quant) return status;

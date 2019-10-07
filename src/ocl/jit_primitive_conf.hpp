@@ -33,8 +33,8 @@ namespace ocl {
 #define MAX_NDIMS 6
 
 struct jit_memory_desc_info_t {
-    // Max 2 levels of blocking
-    static const int nlevels = 2;
+    // Max levels of blocking
+    static const int max_nlevels = 3;
 
     int ndims;
     data_type_t data_type;
@@ -42,12 +42,23 @@ struct jit_memory_desc_info_t {
     int offset0;
     int dims[MAX_NDIMS];
     int padded_dims[MAX_NDIMS];
-    int blocks[MAX_NDIMS][nlevels + 1];
-    int strides[MAX_NDIMS][nlevels + 1];
+
+    int nlevels;
+    int blocks[MAX_NDIMS][max_nlevels + 1];
+    int strides[MAX_NDIMS][max_nlevels + 1];
 
     static jit_memory_desc_info_t create(const memory_desc_wrapper &mdw) {
         using namespace format_tag;
         jit_memory_desc_info_t jit_md_info {};
+
+        jit_md_info.nlevels = 2;
+
+        // XXX: use 3 levels when required
+        if (mdw.matches_one_of_tag(OIdhw2o2o8i8o2i, OIhw2o2o8i8o2i,
+                    OIw2o2o8i8o2i, gOIdhw2o2o8i8o2i, gOIhw2o2o8i8o2i,
+                    gOIw2o2o8i8o2i)) {
+            jit_md_info.nlevels = 3;
+        }
 
         jit_md_info.ndims = mdw.ndims();
         jit_md_info.data_type = mdw.data_type();
@@ -58,8 +69,9 @@ struct jit_memory_desc_info_t {
                 = utils::array_product(blk.inner_blks, blk.inner_nblks);
 
         for (int d = 0; d < mdw.ndims(); ++d) {
-            utils::array_set(jit_md_info.blocks[d], 1, nlevels + 1);
-            utils::array_set(jit_md_info.strides[d], 0, nlevels + 1);
+            utils::array_set(jit_md_info.blocks[d], 1, jit_md_info.nlevels + 1);
+            utils::array_set(
+                    jit_md_info.strides[d], 0, jit_md_info.nlevels + 1);
         }
 
         for (int d = 0; d < mdw.ndims(); ++d) {
@@ -86,16 +98,22 @@ struct jit_memory_desc_info_t {
         if (mdw.matches_one_of_tag(OIdhw4o8i8o4i, OIhw4o8i8o4i, OIw4o8i8o4i,
                     OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o, gOIdhw4o8i8o4i,
                     gOIhw4o8i8o4i, gOIw4o8i8o4i, gOIw8o16i2o, gOIhw8o16i2o,
-                    gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i)) {
-            int d = (levels[0] == 2) ? 0 : 1;
-            nstl::swap(jit_md_info.blocks[d][2], jit_md_info.blocks[d][1]);
-            nstl::swap(jit_md_info.strides[d][2], jit_md_info.strides[d][1]);
+                    gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i, OIdhw2o2o8i8o2i,
+                    OIhw2o2o8i8o2i, OIw2o2o8i8o2i, gOIdhw2o2o8i8o2i,
+                    gOIhw2o2o8i8o2i, gOIw2o2o8i8o2i)) {
+            int d = (levels[0] == jit_md_info.nlevels) ? 0 : 1;
+            nstl::swap(jit_md_info.blocks[d][jit_md_info.nlevels],
+                    jit_md_info.blocks[d][jit_md_info.nlevels - 1]);
+            nstl::swap(jit_md_info.strides[d][jit_md_info.nlevels],
+                    jit_md_info.strides[d][jit_md_info.nlevels - 1]);
         } else if (mdw.matches_one_of_tag(IOw4i8o8i4o, IOhw4i8o8i4o,
                            IOdhw4i8o8i4o, gIOw4i8o8i4o, gIOhw4i8o8i4o,
                            gIOdhw4i8o8i4o)) {
-            int d = (levels[0] == 2) ? 1 : 2;
-            nstl::swap(jit_md_info.blocks[d][2], jit_md_info.blocks[d][1]);
-            nstl::swap(jit_md_info.strides[d][2], jit_md_info.strides[d][1]);
+            int d = (levels[0] == jit_md_info.nlevels) ? 1 : 2;
+            nstl::swap(jit_md_info.blocks[d][jit_md_info.nlevels],
+                    jit_md_info.blocks[d][jit_md_info.nlevels - 1]);
+            nstl::swap(jit_md_info.strides[d][jit_md_info.nlevels],
+                    jit_md_info.strides[d][jit_md_info.nlevels - 1]);
         }
         return jit_md_info;
     }
@@ -602,6 +620,9 @@ inline void def_memory_desc_info(compute::kernel_ctx_t &kernel_ctx,
 
     snprintf(temp, sizeof(temp), "%s_NDIMS", prefix);
     kernel_ctx.define_int(temp, jit_md_info.ndims);
+
+    snprintf(temp, sizeof(temp), "%s_NLEVELS", prefix);
+    kernel_ctx.define_int(temp, jit_md_info.nlevels);
 
     for (int d = 0; d < 6; ++d) {
         int dim = (d < jit_md_info.ndims) ? jit_md_info.dims[d] : 0;
