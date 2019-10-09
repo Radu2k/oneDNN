@@ -174,7 +174,10 @@ struct jit_conv_conf_t {
     int oc_block, ic_block, nchunk;
     int ocb;
     int oh_chunk, mb_chunk, mb_block, slm_ic;
-    size_t wht_slm_size, src_slm_size;
+    int mb_blk_unroll;
+    int oc_blk_unroll, ic_blk_unroll;
+    int k_unroll, k_blocks;
+    size_t wht_slm_size, src_slm_size, dst_slm_size;
     int sub_group_size;
     size_t gws_d[3], lws_d[3];
 
@@ -445,6 +448,8 @@ inline void set_default_conf(jit_conv_conf_t &jcp, const convolution_desc_t &cd,
     jcp.dilate_h = (ndims == 3) ? 0 : cd.dilates[ndims - 4];
     jcp.dilate_w = cd.dilates[ndims - 3];
 
+    jcp.src_data_type = src_mdw.data_type();
+    jcp.weights_data_type = weights_mdw.data_type();
     jcp.dst_data_type = dst_mdw.data_type();
 
     const auto &p = attr.post_ops_;

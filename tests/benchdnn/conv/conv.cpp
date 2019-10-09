@@ -398,7 +398,7 @@ int fill_dst(const prb_t *p, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *r) {
     dnnl::impl::parallel_nd(p->mb, p->oc, p->od, p->oh, p->ow,
             [&](int mb, int oc, int od, int oh, int ow) {
                 const int gen
-                        = 7 * od + 19 * oh + 17 * ow + 13 * mb + 13 * oc + 223;
+                        = 7 * od + 13 * oh + 17 * ow + 13 * mb + 19 * oc + 223;
                 const bool non_base = flip_coin(gen, c.f_sparsity);
                 const float value = non_base ? c.f_min + gen * c.f_step % range
                                              : c.f_base;

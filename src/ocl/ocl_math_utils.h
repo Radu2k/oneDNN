@@ -118,7 +118,7 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v)
 
 #define mmad8x8(_O, _I, _W) __dpas(_O, _I, _W)
 
-#else
+#else // cl_intel_dot_accumulate
 
 #define IMAD(_O, _I, _W) mmad_4(_O, _I, _W)
 #define READ_LOCAL_8(_P) subgroup_block_read_uint8(_P)
