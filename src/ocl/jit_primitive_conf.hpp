@@ -503,7 +503,7 @@ inline void set_offsets(compute::kernel_ctx_t &kernel_ctx,
     kernel_ctx.define_int(tempstr, md.md_->offset0);
 }
 
-inline void set_offsets(const memory_desc_wrapper &md, int offs[3][MAX_NDIMS]) {
+inline void set_offsets(const memory_desc_wrapper &md, int offs[4][MAX_NDIMS]) {
     dim_t block_dims[DNNL_MAX_NDIMS];
     dim_t strides_compat[2][DNNL_MAX_NDIMS];
 
