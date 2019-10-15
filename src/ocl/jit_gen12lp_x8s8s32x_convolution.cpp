@@ -19,14 +19,15 @@
 #include "common/dnnl_traits.hpp"
 #include "common/type_helpers.hpp"
 
-#include "ocl/jit_gen12lp_u8s8s32x_convolution.hpp"
+#include "ocl/jit_gen12lp_x8s8s32x_convolution.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace ocl {
 
-template <data_type_t dst_type>
-status_t jit_gen12lp_u8s8s32x_convolution_fwd_t<dst_type>::execute_forward(
+template <data_type_t src_type, data_type_t dst_type>
+status_t
+jit_gen12lp_x8s8s32x_convolution_fwd_t<src_type, dst_type>::execute_forward(
         const exec_ctx_t &ctx) const {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
@@ -55,8 +56,8 @@ status_t jit_gen12lp_u8s8s32x_convolution_fwd_t<dst_type>::execute_forward(
     return status;
 }
 
-template <data_type_t diff_dst_type>
-status_t jit_gen12lp_u8s8s32x_convolution_bwd_data_t<
+template <data_type_t diff_src_type, data_type_t diff_dst_type>
+status_t jit_gen12lp_x8s8s32x_convolution_bwd_data_t<diff_src_type,
         diff_dst_type>::execute_backward_data(const exec_ctx_t &ctx) const {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
@@ -82,10 +83,14 @@ status_t jit_gen12lp_u8s8s32x_convolution_bwd_data_t<
 
 using namespace data_type;
 
-template struct jit_gen12lp_u8s8s32x_convolution_fwd_t<u8>;
-template struct jit_gen12lp_u8s8s32x_convolution_fwd_t<s8>;
-template struct jit_gen12lp_u8s8s32x_convolution_bwd_data_t<u8>;
-template struct jit_gen12lp_u8s8s32x_convolution_bwd_data_t<s8>;
+template struct jit_gen12lp_x8s8s32x_convolution_fwd_t<s8, s8>;
+template struct jit_gen12lp_x8s8s32x_convolution_fwd_t<s8, u8>;
+template struct jit_gen12lp_x8s8s32x_convolution_fwd_t<u8, s8>;
+template struct jit_gen12lp_x8s8s32x_convolution_fwd_t<u8, u8>;
+template struct jit_gen12lp_x8s8s32x_convolution_bwd_data_t<s8, s8>;
+template struct jit_gen12lp_x8s8s32x_convolution_bwd_data_t<s8, u8>;
+template struct jit_gen12lp_x8s8s32x_convolution_bwd_data_t<u8, s8>;
+template struct jit_gen12lp_x8s8s32x_convolution_bwd_data_t<u8, u8>;
 
 } // namespace ocl
 } // namespace impl

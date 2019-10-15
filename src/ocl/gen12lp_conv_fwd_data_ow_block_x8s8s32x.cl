@@ -22,14 +22,16 @@
 
 #if OW_BLOCK == 4
 #define ACC_DATA_BLOCK int4
-#define DATA_BLOCK uint4
+#define SRC_DATA_BLOCK_T MMAD_DATA4_T
+#define DST_DATA_BLOCK_T uint4
 #define READ_BLOCK intel_sub_group_block_read4
 #define WRITE_LOCAL WRITE_LOCAL_4
 #define WRITE_BLOCK intel_sub_group_block_write4
 #define MMAD mmad8x4
 #else
 #define ACC_DATA_BLOCK int8
-#define DATA_BLOCK uint8
+#define SRC_DATA_BLOCK_T MMAD_DATA8_T
+#define DST_DATA_BLOCK_T uint8
 #define READ_BLOCK intel_sub_group_block_read8
 #define WRITE_LOCAL WRITE_LOCAL_8
 #define WRITE_BLOCK intel_sub_group_block_write8
@@ -43,7 +45,7 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-conv_fwd_ow_block_u8s8s32x_kernel(const __global uchar *src,
+conv_fwd_ow_block_x8s8s32x_kernel(const __global SRC_DATA_T *src,
         const __global char *wei, const __global float *bias,
         __global DATA_T *dst, float alpha, float beta, float sum_scale,
         float scales) {
@@ -121,7 +123,7 @@ conv_fwd_ow_block_u8s8s32x_kernel(const __global uchar *src,
     __attribute__((opencl_unroll_hint(1))) for (int ic_chunk = 0;
                                                 ic_chunk < IC_NCHUNK;
                                                 ic_chunk++) {
-        DATA_BLOCK S0;
+        SRC_DATA_BLOCK_T S0;
 
         int8 W0, W1, W2, W3;
         __attribute__((opencl_unroll_hint(1))) for (int kd = 0; kd < KD; kd++) {
@@ -235,8 +237,8 @@ conv_fwd_ow_block_u8s8s32x_kernel(const __global uchar *src,
     if (ow < OW) {
         float4 tmp;
 
-        DATA_BLOCK dst_pack;
-        DATA_BLOCK D0, D1, D2, D3;
+        DST_DATA_BLOCK_T dst_pack;
+        DST_DATA_BLOCK_T D0, D1, D2, D3;
 
 #if WITH_BIAS
         bias += (group_oc + oc) * OC_BLOCK + get_sub_group_local_id() * 4;

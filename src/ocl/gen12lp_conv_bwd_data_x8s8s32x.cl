@@ -24,12 +24,9 @@
 #define BLOCK_READ_WHT(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
 
-#undef CONVERT_DATA_T
-#define CONVERT_DATA_T convert_uchar_sat
-
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
+conv_bwd_data_x8s8s32x_kernel(const __global uchar *src,
         const __global char *wei, const __global float *bias,
         __global DATA_T *dst) {
 
@@ -137,9 +134,9 @@ conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
 #if WITH_BIAS
 #define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST) \
     TMP = (float)ACC + BIA; \
-    RES = CONVERT_DATA_T(TMP);
+    RES = TO_SRC(TMP);
 #else // WITH_BIAS
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST) RES = CONVERT_DATA_T((float)ACC);
+#define BIAS_SUM_RELU(RES, TMP, ACC, BIA, DST) RES = TO_SRC((float)ACC);
 #endif // WITH_BIAS
 
 #define PACK(idx) \

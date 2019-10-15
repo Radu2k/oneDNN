@@ -29,7 +29,7 @@ intel_sub_group_block_write_uc16(__global uchar *p, uchar16 data);
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-conv_dw_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char *wei,
+conv_dw_fwd_x8s8s32x_kernel(const __global uchar *src, const __global char *wei,
         const __global float *bias, __global DATA_T *dst, float alpha,
         float beta, float sum_scale, float scales) {
 
@@ -98,22 +98,38 @@ conv_dw_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char *wei,
                 intel_sub_group_block_read_uc8((const __global uchar *)(wei)));
         char4 W1 = W.s0246;
         char4 W2 = W.s1357;
-        S00.s0 = IMAD((uchar4)(A00.s0, A10.s0, A20.s0, A30.s0), W1, S00.s0);
-        S00.s1 = IMAD((uchar4)(A00.s1, A10.s1, A20.s1, A30.s1), W2, S00.s1);
-        S00.s2 = IMAD((uchar4)(A00.s2, A10.s2, A20.s2, A30.s2), W1, S00.s2);
-        S00.s3 = IMAD((uchar4)(A00.s3, A10.s3, A20.s3, A30.s3), W2, S00.s3);
-        S00.s4 = IMAD((uchar4)(A00.s4, A10.s4, A20.s4, A30.s4), W1, S00.s4);
-        S00.s5 = IMAD((uchar4)(A00.s5, A10.s5, A20.s5, A30.s5), W2, S00.s5);
-        S00.s6 = IMAD((uchar4)(A00.s6, A10.s6, A20.s6, A30.s6), W1, S00.s6);
-        S00.s7 = IMAD((uchar4)(A00.s7, A10.s7, A20.s7, A30.s7), W2, S00.s7);
-        S01.s0 = IMAD((uchar4)(A00.s8, A10.s8, A20.s8, A30.s8), W1, S01.s0);
-        S01.s1 = IMAD((uchar4)(A00.s9, A10.s9, A20.s9, A30.s9), W2, S01.s1);
-        S01.s2 = IMAD((uchar4)(A00.sa, A10.sa, A20.sa, A30.sa), W1, S01.s2);
-        S01.s3 = IMAD((uchar4)(A00.sb, A10.sb, A20.sb, A30.sb), W2, S01.s3);
-        S01.s4 = IMAD((uchar4)(A00.sc, A10.sc, A20.sc, A30.sc), W1, S01.s4);
-        S01.s5 = IMAD((uchar4)(A00.sd, A10.sd, A20.sd, A30.sd), W2, S01.s5);
-        S01.s6 = IMAD((uchar4)(A00.se, A10.se, A20.se, A30.se), W1, S01.s6);
-        S01.s7 = IMAD((uchar4)(A00.sf, A10.sf, A20.sf, A30.sf), W2, S01.s7);
+        S00.s0 = IMAD(
+                (SRC_DATA4_T)(A00.s0, A10.s0, A20.s0, A30.s0), W1, S00.s0);
+        S00.s1 = IMAD(
+                (SRC_DATA4_T)(A00.s1, A10.s1, A20.s1, A30.s1), W2, S00.s1);
+        S00.s2 = IMAD(
+                (SRC_DATA4_T)(A00.s2, A10.s2, A20.s2, A30.s2), W1, S00.s2);
+        S00.s3 = IMAD(
+                (SRC_DATA4_T)(A00.s3, A10.s3, A20.s3, A30.s3), W2, S00.s3);
+        S00.s4 = IMAD(
+                (SRC_DATA4_T)(A00.s4, A10.s4, A20.s4, A30.s4), W1, S00.s4);
+        S00.s5 = IMAD(
+                (SRC_DATA4_T)(A00.s5, A10.s5, A20.s5, A30.s5), W2, S00.s5);
+        S00.s6 = IMAD(
+                (SRC_DATA4_T)(A00.s6, A10.s6, A20.s6, A30.s6), W1, S00.s6);
+        S00.s7 = IMAD(
+                (SRC_DATA4_T)(A00.s7, A10.s7, A20.s7, A30.s7), W2, S00.s7);
+        S01.s0 = IMAD(
+                (SRC_DATA4_T)(A00.s8, A10.s8, A20.s8, A30.s8), W1, S01.s0);
+        S01.s1 = IMAD(
+                (SRC_DATA4_T)(A00.s9, A10.s9, A20.s9, A30.s9), W2, S01.s1);
+        S01.s2 = IMAD(
+                (SRC_DATA4_T)(A00.sa, A10.sa, A20.sa, A30.sa), W1, S01.s2);
+        S01.s3 = IMAD(
+                (SRC_DATA4_T)(A00.sb, A10.sb, A20.sb, A30.sb), W2, S01.s3);
+        S01.s4 = IMAD(
+                (SRC_DATA4_T)(A00.sc, A10.sc, A20.sc, A30.sc), W1, S01.s4);
+        S01.s5 = IMAD(
+                (SRC_DATA4_T)(A00.sd, A10.sd, A20.sd, A30.sd), W2, S01.s5);
+        S01.s6 = IMAD(
+                (SRC_DATA4_T)(A00.se, A10.se, A20.se, A30.se), W1, S01.s6);
+        S01.s7 = IMAD(
+                (SRC_DATA4_T)(A00.sf, A10.sf, A20.sf, A30.sf), W2, S01.s7);
         wei += 4 * OC_BLOCK;
     }
 
@@ -138,22 +154,22 @@ conv_dw_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char *wei,
                 intel_sub_group_block_read_uc2((const __global uchar *)(wei)));
         const char W1 = W.s0;
         const char W2 = W.s1;
-        S00.s0 += A00.s0 * W1;
-        S00.s1 += A00.s1 * W2;
-        S00.s2 += A00.s2 * W1;
-        S00.s3 += A00.s3 * W2;
-        S00.s4 += A00.s4 * W1;
-        S00.s5 += A00.s5 * W2;
-        S00.s6 += A00.s6 * W1;
-        S00.s7 += A00.s7 * W2;
-        S01.s0 += A00.s8 * W1;
-        S01.s1 += A00.s9 * W2;
-        S01.s2 += A00.sa * W1;
-        S01.s3 += A00.sb * W2;
-        S01.s4 += A00.sc * W1;
-        S01.s5 += A00.sd * W2;
-        S01.s6 += A00.se * W1;
-        S01.s7 += A00.sf * W2;
+        S00.s0 += ((SRC_DATA_T)A00.s0) * W1;
+        S00.s1 += ((SRC_DATA_T)A00.s1) * W2;
+        S00.s2 += ((SRC_DATA_T)A00.s2) * W1;
+        S00.s3 += ((SRC_DATA_T)A00.s3) * W2;
+        S00.s4 += ((SRC_DATA_T)A00.s4) * W1;
+        S00.s5 += ((SRC_DATA_T)A00.s5) * W2;
+        S00.s6 += ((SRC_DATA_T)A00.s6) * W1;
+        S00.s7 += ((SRC_DATA_T)A00.s7) * W2;
+        S01.s0 += ((SRC_DATA_T)A00.s8) * W1;
+        S01.s1 += ((SRC_DATA_T)A00.s9) * W2;
+        S01.s2 += ((SRC_DATA_T)A00.sa) * W1;
+        S01.s3 += ((SRC_DATA_T)A00.sb) * W2;
+        S01.s4 += ((SRC_DATA_T)A00.sc) * W1;
+        S01.s5 += ((SRC_DATA_T)A00.sd) * W2;
+        S01.s6 += ((SRC_DATA_T)A00.se) * W1;
+        S01.s7 += ((SRC_DATA_T)A00.sf) * W2;
 
         wei += OC_BLOCK;
     }

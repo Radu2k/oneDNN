@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef JIT_GEN12LP_U8S8S32X_CONV_KERNEL_HPP
-#define JIT_GEN12LP_U8S8S32X_CONV_KERNEL_HPP
+#ifndef JIT_GEN12LP_X8S8S32X_CONV_KERNEL_HPP
+#define JIT_GEN12LP_X8S8S32X_CONV_KERNEL_HPP
 
 #include "common/c_types_map.hpp"
 #include "ocl/jit_primitive_conf.hpp"
@@ -26,11 +26,11 @@ namespace ocl {
 
 using namespace dnnl::impl::format_tag;
 
-struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
-    jit_gen12lp_u8s8s32x_conv_fwd_kernel(const jit_conv_conf_t &ajcp)
+struct jit_gen12lp_x8s8s32x_conv_fwd_kernel {
+    jit_gen12lp_x8s8s32x_conv_fwd_kernel(const jit_conv_conf_t &ajcp)
         : jcp(ajcp) {}
 
-    ~jit_gen12lp_u8s8s32x_conv_fwd_kernel() {}
+    ~jit_gen12lp_x8s8s32x_conv_fwd_kernel() {}
 
     static status_t init_conf(jit_conv_conf_t &jcp,
             const convolution_desc_t &cd, const memory_desc_t &src_md,
@@ -50,6 +50,7 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
             return status::unimplemented;
 
         jcp.dst_data_type = dst_mdw.data_type();
+        jcp.src_data_type = src_mdw.data_type();
 
         jcp.oc_block = 32;
         if (jcp.is_depthwise) {
@@ -229,7 +230,7 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
         kernel_ctx.define_int("LWS_2", jcp.lws_d[2]);
 
         kernel_ctx.set_data_type(jcp.dst_data_type);
-
+        def_data_type(kernel_ctx, jcp.src_data_type, "SRC");
         kernel_ctx.add_option("-Dcl_intel_subgroups_char");
         return status::success;
     }
@@ -237,11 +238,11 @@ struct jit_gen12lp_u8s8s32x_conv_fwd_kernel {
     jit_conv_conf_t jcp;
 };
 
-struct jit_gen12lp_u8s8s32x_conv_bwd_data_kernel {
-    jit_gen12lp_u8s8s32x_conv_bwd_data_kernel(const jit_conv_conf_t &ajcp)
+struct jit_gen12lp_x8s8s32x_conv_bwd_data_kernel {
+    jit_gen12lp_x8s8s32x_conv_bwd_data_kernel(const jit_conv_conf_t &ajcp)
         : jcp(ajcp) {}
 
-    ~jit_gen12lp_u8s8s32x_conv_bwd_data_kernel() {}
+    ~jit_gen12lp_x8s8s32x_conv_bwd_data_kernel() {}
 
     static status_t init_conf(jit_conv_conf_t &jcp,
             const convolution_desc_t &cd, const memory_desc_t &src_md,
@@ -264,6 +265,7 @@ struct jit_gen12lp_u8s8s32x_conv_bwd_data_kernel {
             return status::unimplemented;
 
         jcp.dst_data_type = dst_mdw.data_type();
+        jcp.src_data_type = src_mdw.data_type();
 
         jcp.sub_group_size = 8;
         jcp.mb_block = 32;
@@ -348,6 +350,7 @@ struct jit_gen12lp_u8s8s32x_conv_bwd_data_kernel {
         kernel_ctx.define_int("LWS_2", jcp.lws_d[2]);
 
         kernel_ctx.set_data_type(jcp.dst_data_type);
+        def_data_type(kernel_ctx, jcp.src_data_type, "SRC");
 
         return status::success;
     }

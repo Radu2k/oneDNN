@@ -20,17 +20,19 @@
 #include "ocl/ocl_post_ops.h"
 #endif
 
-#undef MB_FULL_BLOCK
+#define SRC_DATA_BLOCK_T MMAD_DATA8_T
+#define AS_SRC_DATA_BLOCK_T AS_MMAD_DATA8_T
 
 #define BLOCK_READ_SRC(data, idx) \
-    data = intel_sub_group_block_read8((__global uint *)&src[idx]);
+    data = AS_SRC_DATA_BLOCK_T( \
+            intel_sub_group_block_read8((__global uint *)&src[idx]));
 
 #define BLOCK_READ_WHT(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-conv_fwd_mb_block_u8s8s32x_kernel(const __global uchar *src,
+conv_fwd_mb_block_x8s8s32x_kernel(const __global uchar *src,
         const __global char *wei, const __global float *bias,
         __global DATA_T *dst, float alpha, float beta, float sum_scale,
         float scales) {
@@ -96,7 +98,7 @@ conv_fwd_mb_block_u8s8s32x_kernel(const __global uchar *src,
 
     __attribute__((opencl_unroll_hint)) for (int ic_chunk = 0;
                                              ic_chunk < IC_NCHUNK; ic_chunk++) {
-        uint8 S0, S1, S2, S3;
+        SRC_DATA_BLOCK_T S0, S1, S2, S3;
         int8 W0, W1, W2, W3;
         for (int kd = 0; kd < KD; kd++) {
             if (kd * (1 + DD) + id < 0 || kd * (1 + DD) + id >= ID) {
