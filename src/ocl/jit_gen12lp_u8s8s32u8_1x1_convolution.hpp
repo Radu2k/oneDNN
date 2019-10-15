@@ -42,7 +42,7 @@ struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
             , jcp_() {}
 
         DECLARE_COMMON_PD_T(
-                "ocl:gen12lp", jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t);
+                "ocl:gen12lp:1x1", jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t);
 
         status_t init() {
             using namespace prop_kind;

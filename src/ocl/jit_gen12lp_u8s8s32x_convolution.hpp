@@ -82,11 +82,14 @@ struct jit_gen12lp_u8s8s32x_convolution_fwd_t : public primitive_impl_t {
 
     status_t init() override {
         const char *kernel_name = nullptr;
-        if (pd()->jcp_.is_depthwise)
+        if (pd()->jcp_.is_depthwise) {
             kernel_name = "conv_dw_fwd_u8s8s32x_kernel";
-        else
-            kernel_name = "conv_fwd_u8s8s32x_kernel";
-
+        } else {
+            if (pd()->jcp_.mb_block == 32)
+                kernel_name = "conv_fwd_mb_block_u8s8s32x_kernel";
+            else
+                kernel_name = "conv_fwd_ow_block_u8s8s32x_kernel";
+        }
         compute::kernel_ctx_t kernel_ctx;
         auto status = jit_gen12lp_u8s8s32x_conv_fwd_kernel::init_const_def(
                 kernel_ctx, pd()->jcp_);

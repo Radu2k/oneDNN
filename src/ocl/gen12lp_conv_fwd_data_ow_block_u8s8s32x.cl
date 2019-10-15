@@ -72,8 +72,7 @@ conv_fwd_ow_block_u8s8s32x_kernel(const __global uchar *src,
     const int iw = giw + local_iw - PW;
     const int ih = gih - PH;
 
-    __local uint S_slice[IC_BLOCK / 4
-            * (LWS_1 * SW * OW_BLOCK + (KW - 1) * (1 + DW))];
+    __local uint S_slice[SRC_SLM_SIZE];
     __local uint *S_part = S_slice + IC_BLOCK / 4 * (sp * SW * OW_BLOCK + PW);
     __local uint *S_work = S_slice + IC_BLOCK / 4 * (sp * SW * OW_BLOCK);
 
@@ -108,7 +107,7 @@ conv_fwd_ow_block_u8s8s32x_kernel(const __global uchar *src,
             WRITE_LOCAL_1(S_part + i * 8, 0);
         }
     }
-#if SLM_WORKING_GROUPS < OW_GROUP
+#if SLM_WORKING_GROUPS < OW_NCHUNK
     if (empty) {
         for (int i = 0; i < SW * OW_BLOCK + (KW - 1) * (1 + DW) - PW; i++) {
             WRITE_LOCAL_1(S_part + i * 8, 0);
@@ -140,10 +139,10 @@ conv_fwd_ow_block_u8s8s32x_kernel(const __global uchar *src,
                 }
 
                 barrier(CLK_LOCAL_MEM_FENCE);
-#if SLM_WORKING_GROUPS < OW_GROUP
+#if SLM_WORKING_GROUPS < OW_NCHUNK
                 if (iw + PW < IW) {
 #endif
-#if OW_GROUP > LWS_1
+#if OW_NCHUNK > LWS_1
                     /* Copy tails in case of multigroups */
                     if (ow < OW) {
 #if PW > 0
@@ -198,10 +197,10 @@ conv_fwd_ow_block_u8s8s32x_kernel(const __global uchar *src,
                         }
 #endif
 
-#if OW_GROUP > LWS_1
+#if OW_NCHUNK > LWS_1
                     }
 #endif
-#if SLM_WORKING_GROUPS < OW_GROUP
+#if SLM_WORKING_GROUPS < OW_NCHUNK
                 }
 #endif
                 barrier(CLK_LOCAL_MEM_FENCE);

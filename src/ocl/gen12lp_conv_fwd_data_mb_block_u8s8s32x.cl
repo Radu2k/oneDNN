@@ -30,9 +30,10 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-conv_fwd_u8s8s32x_kernel(const __global uchar *src, const __global char *wei,
-        const __global float *bias, __global DATA_T *dst, float alpha,
-        float beta, float sum_scale, float scales) {
+conv_fwd_mb_block_u8s8s32x_kernel(const __global uchar *src,
+        const __global char *wei, const __global float *bias,
+        __global DATA_T *dst, float alpha, float beta, float sum_scale,
+        float scales) {
 
 #ifdef MB_FULL_BLOCK
     const int mb_blocks = 1;
