@@ -30,6 +30,14 @@ float convert_bf16_to_f32(ushort b) {
     return f;
 }
 
+#ifdef cl_intel_subgroups_char
+void __attribute__((overloadable))
+intel_sub_group_block_write_uc16(__global uchar *p, uchar16 data);
+
+uchar16 __attribute__((overloadable))
+intel_sub_group_block_read_uc16(__global uchar *p);
+#endif
+
 #ifdef cl_intel_dot_accumulate
 inline int __imad(char4 a, char4 b, int c) __attribute__((overloadable)) {
     int __builtin_IB_dp4a_ss(int c, int a, int b) __attribute__((const));
@@ -71,6 +79,12 @@ inline uint subgroup_block_read_uint(const __local uint *p)
     return __builtin_IB_simd_block_read_1_local(p);
 }
 
+void subgroup_block_write_ushort(__local ushort *p, uint v)
+        __attribute__((overloadable)) {
+    void __builtin_IB_simd_block_write_1_local_h(__local ushort * p, ushort v);
+    __builtin_IB_simd_block_write_1_local_h(p, v);
+}
+
 void subgroup_block_write_uint(__local uint *p, uint v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_1_local(__local uint * p, uint v);
@@ -101,6 +115,7 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v)
 #define WRITE_LOCAL_4(_P, _V) subgroup_block_write_uint4(_P, _V)
 #define WRITE_LOCAL_2(_P, _V) subgroup_block_write_uint2(_P, _V)
 #define WRITE_LOCAL_1(_P, _V) subgroup_block_write_uint(_P, _V)
+#define WRITE_LOCAL_SHORT_1(_P, _V) subgroup_block_write_ushort(_P, _V)
 
 #else
 
@@ -110,6 +125,7 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v)
 #define WRITE_LOCAL_4(_P, _V) subgroup_block_write_uint4(_P, _V)
 #define WRITE_LOCAL_2(_P, _V) subgroup_block_write_uint2(_P, _V)
 #define WRITE_LOCAL_1(_P, _V) subgroup_block_write_uint(_P, _V)
+#define WRITE_LOCAL_SHORT_1(_P, _V) subgroup_block_write_ushort(_P, _V)
 
 uint subgroup_block_read_uint(const __local uint *p) {
     uint ret;
@@ -137,6 +153,11 @@ uint8 subgroup_block_read_uint8(const __local uint *p) {
     idx += get_max_sub_group_size();
     ret.s7 = p[idx];
     return ret;
+}
+
+void subgroup_block_write_ushort(__local ushort *p, ushort v) {
+    uint idx = get_sub_group_local_id();
+    p[idx] = v;
 }
 
 void subgroup_block_write_uint(__local uint *p, uint v) {

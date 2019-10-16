@@ -68,39 +68,48 @@ struct jit_gen12lp_x8s8s32x_conv_fwd_kernel {
             jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block / 4);
         } else {
             jcp.sub_group_size = 8;
-            int ow_group;
-            if (jcp.mb == 8 || jcp.mb == 16 || jcp.mb % 32 == 0)
-                jcp.ver = ver_mb_block;
-            else
-                jcp.ver = ver_ow_block;
+            int ow_group = 1;
+            int ow_nchunk;
 
-            jcp.ic_block = 32;
+            if (jcp.mb == 8 || jcp.mb == 16 || jcp.mb % 32 == 0) {
+                jcp.ver = ver_mb_block;
+                jcp.mb_block = 32;
+            } else {
+                jcp.ver = ver_ow_block;
+                jcp.mb_block = 1;
+            }
+            if (jcp.ic <= 4) jcp.ver = ver_1stconv;
 
             jcp.nchunk = utils::div_up(jcp.oc * jcp.ngroups, jcp.oc_block);
 
             int max_oc = 4;
             int oc_group = utils::max_div(
                     utils::div_up(jcp.oc, jcp.oc_block), max_oc);
-
+            int max_subgroups = 32;
+            int max_ow_group = max_subgroups / oc_group;
             switch (jcp.ver) {
                 case ver_mb_block:
-                    jcp.mb_block = 32;
+                    jcp.ic_block = 32;
                     jcp.ow_block = 1;
                     ow_group = 8;
                     break;
                 case ver_ow_block:
-                    jcp.mb_block = 1;
+                    jcp.ic_block = 32;
                     jcp.ow_block
                             = (jcp.mb * jcp.oc * jcp.oh * jcp.ow < 49 * 1024)
                             ? 4
                             : 8;
-
-                    int max_subgroups = 32;
-                    int max_ow_group = max_subgroups / oc_group;
-
-                    int ow_nchunk = utils::div_up(jcp.ow, jcp.ow_block);
-
-                    ow_group = ow_nchunk;
+                    ow_nchunk = utils::div_up(jcp.ow, jcp.ow_block);
+                    ow_group = utils::max_div(ow_nchunk, max_ow_group);
+                    if (ow_group == 1)
+                        utils::max_div(ow_nchunk + 1, max_ow_group);
+                    break;
+                case ver_1stconv:
+                    jcp.ic_block = 4;
+                    jcp.ow_block = (jcp.kw * jcp.kh <= 49 && jcp.ow % 16 < 8)
+                            ? 16
+                            : 12;
+                    ow_nchunk = utils::div_up(jcp.ow, jcp.ow_block);
                     ow_group = utils::max_div(ow_nchunk, max_ow_group);
                     if (ow_group == 1)
                         utils::max_div(ow_nchunk + 1, max_ow_group);
@@ -121,6 +130,15 @@ struct jit_gen12lp_x8s8s32x_conv_fwd_kernel {
                             utils::div_up(jcp.ow, jcp.ow_block), jcp.lws_d[1]);
             jcp.gws_d[2]
                     = utils::div_up(jcp.mb, utils::div_up(jcp.mb_block, 2));
+            if (jcp.ver == ver_1stconv) {
+                jcp.gws_d[2] = jcp.mb;
+                // Save opportunity to use this implementation with nchw formats,
+                // which will result in worse performance, but prevent us using reorder.
+                // That can be efficient in some cases.
+                jcp.is_nchw = src_mdw.matches_one_of_tag(ncw, nchw, ncdhw);
+                // decrease src ic_block in case of input nchw
+                if (jcp.is_nchw) jcp.ic_block = 1;
+            }
         }
 
         jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
@@ -136,13 +154,26 @@ struct jit_gen12lp_x8s8s32x_conv_fwd_kernel {
             dst_tag = utils::pick(jcp.ndims - 3, nCw32c, nChw32c, nCdhw32c);
         }
 
+        if (!jcp.is_depthwise && jcp.ver == ver_1stconv) {
+            src_tag = (jcp.is_nchw)
+                    ? utils::pick(jcp.ndims - 3, ncw, nchw, ncdhw)
+                    : utils::pick(jcp.ndims - 3, nCw4c, nChw4c, nCdhw4c);
+        }
         if (jcp.is_depthwise) {
             wei_tag = utils::pick(jcp.ndims - 3, Goiw32g, Goihw32g, Goidhw32g);
         } else {
-            wei_tag = jcp.with_groups ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i,
-                              gOIhw4o8i8o4i, gOIdhw4o8i8o4i)
-                                      : utils::pick(jcp.ndims - 3, OIw4o8i8o4i,
-                                              OIhw4o8i8o4i, OIdhw4o8i8o4i);
+            if (jcp.ver == ver_1stconv) {
+                wei_tag = jcp.with_groups ? utils::pick(jcp.ndims - 3, gOIw8o4i,
+                                  gOIhw8o4i, gOIdhw8o4i)
+                                          : utils::pick(jcp.ndims - 3, OIw8o4i,
+                                                  OIhw8o4i, OIdhw8o4i);
+            } else {
+                wei_tag = jcp.with_groups
+                        ? utils::pick(jcp.ndims - 3, gOIw4o8i8o4i,
+                                gOIhw4o8i8o4i, gOIdhw4o8i8o4i)
+                        : utils::pick(jcp.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i,
+                                OIdhw4o8i8o4i);
+            }
         }
         jcp.src_tag = src_tag;
         jcp.wei_tag = wei_tag;
@@ -153,6 +184,7 @@ struct jit_gen12lp_x8s8s32x_conv_fwd_kernel {
 
     static status_t init_const_def(
             compute::kernel_ctx_t &kernel_ctx, const jit_conv_conf_t &jcp) {
+        kernel_ctx.define_int("NCHW", jcp.is_nchw);
         kernel_ctx.define_int("G", jcp.ngroups);
         kernel_ctx.define_int("MB", jcp.mb);
         kernel_ctx.define_int("IC", jcp.ic);
