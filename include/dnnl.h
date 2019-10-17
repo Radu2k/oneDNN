@@ -593,11 +593,12 @@ dnnl_status_t DNNL_API dnnl_reorder_primitive_desc_create(
 /// @sa @ref cpp_api_concat in @ref cpp_api
 /// @{
 
-/// Creates out-of-place @p concat_primitive_desc for concatenation of @p n
-/// inputs by @p concat_dimension with resulting @p output_desc memory
-/// descriptor. @p output_desc can be NULL or specified with the
-/// #dnnl_format_kind_any format kind -- in this case, the appropriate memory
-/// format would be chosen automatically.
+/// Creates an out-of-place @p concat_primitive_desc on @p engine for
+/// concatenation of @p n sources in the @p concat_dimension. The source
+/// memory objects are described by @p src_mds memory descriptors, and the
+/// destination by @p dst_md memory descriptor. The @p dst_desc can be NULL or
+/// have the #dnnl_format_kind_any format kind; in this case, the appropriate
+/// memory format would be chosen automatically.
 ///
 /// Inputs:
 ///  - input 0 (#dnnl_query_src_md, 0)
@@ -622,11 +623,12 @@ dnnl_status_t DNNL_API dnnl_concat_primitive_desc_create(
 /// @sa @ref cpp_api_sum in @ref cpp_api
 /// @{
 
-/// Creates out-of-place @p sum_primitive_desc for sum of @p n
-/// inputs multiplied by scale with resulting @p output_desc memory
-/// descriptor. @p output_desc can be NULL or specified with the
-/// #dnnl_format_kind_any format kind -- in this case, the appropriate memory
-/// format would be chosen automatically.
+/// Creates an out-of-place @p sum_primitive_desc on @p engine for sum of @p n
+/// sources multiplied by respective elements of the @p scales array. The
+/// source memory objects are described by @p src_mds memory descriptors, and
+/// the destination by @p dst_md memory descriptor. The @p dst_desc can be
+/// NULL or specified with the #dnnl_format_kind_any format kind; in this
+/// case, the appropriate memory format would be chosen automatically.
 ///
 /// Inputs:
 ///  - src 0 (#dnnl_query_src_md, 0)
@@ -1994,6 +1996,39 @@ dnnl_status_t DNNL_API dnnl_set_jit_dump(int enable);
 ///  - patch -- patch release number
 ///  - hash -- git commit hash
 const dnnl_version_t DNNL_API *dnnl_version();
+
+/// Sets library profiling flags. The flags define which profilers are
+/// supported. The flags can contain the following bits:
+///
+///  - @ref DNNL_JIT_PROFILE_VTUNE -- integration with VTune (on by default)
+///
+///  - @ref DNNL_JIT_PROFILE_LINUX_JITDUMP -- produce Linux-specific
+///    jit-pid.dump output (off by default). The location of the output is
+///    controlled via JITDUMPDIR environment variable or via
+///    dnnl_set_jit_profiling_jitdumpdir() function.
+///
+///  - @ref DNNL_JIT_PROFILE_LINUX_PERFMAP -- produce Linux-specific
+///    perf-pid.map output (off by default). The output is always placed into
+///    /tmp.
+///
+/// Passing @ref DNNL_JIT_PROFILE_NONE disables profiling completely.
+///
+/// See also @ref dev_guide_profilers
+dnnl_status_t DNNL_API dnnl_set_jit_profiling_flags(unsigned flags);
+
+/// Sets jit dump output path to @p dir. Only applicable to Linux and is only
+/// used when profiling flags have DNNL_JIT_PROFILE_LINUX_PERF bit set.
+///
+/// This function takes precedence over the environment variable $JITDUMPDIR.
+/// If $JITDUMPDIR is not set, and this function is never called, the path
+/// defaults to $HOME. Passing NULL reverts the value to default.
+///
+/// After the first jit kernel is generated, the jitdump output will be placed
+/// into temporary directory created using the mkdtemp template
+/// 'dir/.debug/jit/dnnl.XXXXXX'.
+///
+/// See also @ref dev_guide_profilers
+dnnl_status_t DNNL_API dnnl_set_jit_profiling_jitdumpdir(const char *dir);
 
 /// @}
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2018 Intel Corporation
+* Copyright 2018-2019 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ struct verbose_t {
     int level;
 };
 
-const verbose_t *dnnl_verbose();
+int get_verbose();
 double get_msec();
 const char *get_isa_info();
 

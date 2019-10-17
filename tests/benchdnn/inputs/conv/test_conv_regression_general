@@ -130,3 +130,22 @@ mb1_g16ic16oc16_ih5oh2kh2sh3ph0
 
 # AVX JIT incorrectly calculates output when 'nb_oc_block' results in a prime number
 --reset --dir=FWD_I mb1ic3ih320oc51oh160kh7sh2ph3n"regression_oc-channel"
+
+# Dilated convolution with ih<=dh when there is _no_ compute work.
+--reset --cfg=u8s8u8 mb1ic16ih1iw1oc16oh2ow1kh3kw1dh1ph1n"regression_dh_equals_ih"
+
+# Dilated BWD_W corner case with dilated kernel size less than padding
+--reset --allow-unimpl=true --cfg=f32,bf16bf16bf16 --dir=BWD_W
+mb1_ic1oc16_iw1_ow29_kw14_pw28_dw1_n"dilated_kernel_size_lt_padding"
+
+# Depthwise s8s8 tests to detect padding issues
+--reset --allow-unimpl=true --cfg=s8s8s32
+mb1_g960ic960oc960_ih7oh7kh5ph2_iw7ow7kw5pw2n"s8s8_padding:dw1"
+mb1_g16ic16oc16_ih1oh1kh1ph0_iw1ow1kw3pw1n"s8s8_padding:dw2"
+mb1_g16ic16oc16_ih1oh1kh1ph0_iw1ow1kw2pw1n"s8s8_padding:dw3"
+mb1_g16ic16oc16_ih1oh1kh1ph0_iw3ow3kw2pw1n"s8s8_padding:dw4"
+mb1_g16ic16oc16_ih1oh1kh2ph0_iw1ow1kw3pw1n"s8s8_padding:dw5"
+
+# Depthwise s8s8 tail processing
+--reset --allow-unimpl=true --cfg=s8s8s32
+mb1_g184ic184oc184_ih3oh3kh3sh1dh0ph1_iw3ow3kw3sw1dw0pw1

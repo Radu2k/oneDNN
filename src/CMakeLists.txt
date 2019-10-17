@@ -1,5 +1,5 @@
 #===============================================================================
-# Copyright 2016-2018 Intel Corporation
+# Copyright 2016-2019 Intel Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -150,8 +150,8 @@ else()
     endif()
     foreach(ver "" ${vers})
         add_custom_target(compat_libs${ver} ALL
-            ${CMAKE_COMMAND} -E create_symlink
-            libdnnl.${ext}${ver} libmkldnn.${ext}${ver}
+            ${CMAKE_COMMAND} -E remove -f libmkldnn.${ext}${ver} # to make the next command work fine
+            COMMAND ${CMAKE_COMMAND} -E create_symlink libdnnl.${ext}${ver} libmkldnn.${ext}${ver}
             DEPENDS ${LIB_NAME})
         install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libmkldnn.${ext}${ver}
             DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})

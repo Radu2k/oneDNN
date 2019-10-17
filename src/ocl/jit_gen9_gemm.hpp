@@ -59,10 +59,13 @@ struct jit_gen9_gemm_t : public primitive_impl_t {
         status_t init() {
             using namespace prop_kind;
             using namespace data_type;
+            using namespace primitive_kind;
 
             assert(this->engine()->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine());
+
+            const auto attr_skip_mask = primitive_attr_t::skip_mask_t::post_ops;
 
             bool ok = true && desc()->a_type == a_type
                     && desc()->b_type == b_type && desc()->c_type == c_type
@@ -75,7 +78,11 @@ struct jit_gen9_gemm_t : public primitive_impl_t {
                                             compute::device_ext_t::khr_fp16)
                                     && compute_engine->mayiuse(
                                             compute::device_ext_t::
-                                                    intel_subgroups_short));
+                                                    intel_subgroups_short))
+                    && attr()->has_default_values(attr_skip_mask)
+                    && attr()->post_ops_.len_ <= 1
+                    && IMPLICATION(attr()->post_ops_.len_ == 1,
+                            attr()->post_ops_.find(eltwise) != -1);
             if (!ok) return status::unimplemented;
 
             return status::success;
@@ -153,7 +160,8 @@ struct jit_gen9_gemm_t : public primitive_impl_t {
             compute::kernel_ctx_t kernel_ctx;
 
             auto status = jit_gen9_gemm_compute_kernel<acc_type,
-                    c_type>::init_const_def(kernel_ctx, beta0);
+                    c_type>::init_const_def(kernel_ctx, beta0,
+                    pd()->with_eltwise(), pd()->eltwise_alg_kind());
             if (status != status::success) return status;
 
             compute_engine->create_kernel(&compute_kernel_[beta0],
@@ -251,6 +259,13 @@ struct jit_gen9_gemm_t : public primitive_impl_t {
 
     virtual status_t execute(const exec_ctx_t &ctx) const override;
 
+protected:
+#ifdef _WIN32
+    bool disable_nocopy = true;
+#else
+    bool disable_nocopy = false;
+#endif
+
 private:
     status_t launch_beta(compute::compute_stream_t *s, int64_t m, int64_t n,
             acc_t alpha, const memory_storage_t &a, int64_t offseta,
@@ -264,7 +279,8 @@ private:
     status_t launch_compute(compute::compute_stream_t *s, int64_t m, int64_t n,
             int64_t k, const memory_storage_t &base, int32_t offset_a,
             int32_t offset_b, const memory_storage_t &c, int64_t offset_c,
-            int64_t ldc, bool beta0) const;
+            int64_t ldc, int last_k_block, c_t eltwise_alpha, c_t eltwise_beta,
+            bool beta0) const;
 
     status_t launch_nocopy(compute::compute_stream_t *s,
             const memory_storage_t &a, const memory_storage_t &b,
@@ -301,6 +317,8 @@ private:
     const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
 
     bool use_nocopy() const {
+        if (disable_nocopy) return false;
+
         bool transa = (pd()->desc()->transa == dnnl_trans);
         bool transb = (pd()->desc()->transb == dnnl_trans);
 
