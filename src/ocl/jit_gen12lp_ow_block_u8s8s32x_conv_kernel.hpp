@@ -126,9 +126,12 @@ struct jit_gen12lp_ow_block_u8s8s32x_conv_fwd_kernel {
         kernel_ctx.define_int("OW_TAIL", jcp.ow % jcp.ow_block);
         kernel_ctx.define_int("OW_SLM_TAIL",
                 jcp.iw
-                        - jcp.stride_w
-                                * (utils::rnd_up(jcp.ow, jcp.ow_block)
-                                        - jcp.ow_block));
+                        - jcp.stride_w * jcp.ow_block
+                                * (nstl::min(
+                                           utils::div_up(jcp.ow, jcp.ow_block),
+                                           utils::div_up(jcp.iw,
+                                                   jcp.ow_block * jcp.stride_w))
+                                        - 1));
         kernel_ctx.define_int("ZERO_TAIL",
                 utils::rnd_up(jcp.ow, jcp.ow_block) * jcp.stride_w - jcp.iw
                         + (jcp.kw - 1) * (1 + jcp.dilate_w) - jcp.l_pad);
@@ -140,7 +143,9 @@ struct jit_gen12lp_ow_block_u8s8s32x_conv_fwd_kernel {
 
         kernel_ctx.define_int("OC_NCHUNK", utils::div_up(jcp.oc, jcp.oc_block));
         kernel_ctx.define_int("IC_NCHUNK", utils::div_up(jcp.ic, jcp.ic_block));
-
+        kernel_ctx.define_int("SLM_WORKING_GROUPS",
+                nstl::min(utils::div_up(jcp.ow, jcp.ow_block),
+                        utils::div_up(jcp.iw, jcp.ow_block * jcp.stride_w)));
         kernel_ctx.define_int("WITH_BIAS", jcp.with_bias);
         kernel_ctx.define_int("WITH_ELTWISE", jcp.with_eltwise);
         kernel_ctx.define_int("WITH_SUM", jcp.with_sum);

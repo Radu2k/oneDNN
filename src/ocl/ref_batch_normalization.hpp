@@ -50,6 +50,8 @@ struct ref_batch_normalization_fwd_t : public primitive_impl_t {
             auto src_data_t = src_md()->data_type;
             auto dst_data_t = dst_md()->data_type;
 
+            const auto attr_skip_mask = primitive_attr_t::skip_mask_t::post_ops;
+
             bool ok = true && is_fwd()
                     && (utils::everyone_is(f16, src_data_t, dst_data_t)
                             || utils::everyone_is(f32, src_data_t, dst_data_t)
@@ -57,7 +59,9 @@ struct ref_batch_normalization_fwd_t : public primitive_impl_t {
                             || utils::everyone_is(s8, src_data_t, dst_data_t))
                     && IMPLICATION(utils::one_of(src_data_t, f16, s8),
                             !is_training() && stats_is_src())
-                    && (attr()->has_default_values() || with_relu_post_op())
+                    && attr()->has_default_values(attr_skip_mask)
+                    && IMPLICATION(!attr()->has_default_values(),
+                            attr()->post_ops_.len_ == 1 && with_relu_post_op())
                     && compute_engine->mayiuse(
                             compute::device_ext_t::intel_subgroups);
             if (!ok) return status::unimplemented;

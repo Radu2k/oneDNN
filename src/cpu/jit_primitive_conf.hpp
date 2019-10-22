@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2018 Intel Corporation
+* Copyright 2016-2019 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -169,6 +169,25 @@ struct jit_conv_conf_t {
     // bf16 bwdw conv
     int tr_ow;
 };
+
+// calculates filter size taking into account dilation
+inline int calculate_extended_filter_size(int filter_size, int dilation) {
+    return (filter_size - 1) * (dilation + 1) + 1;
+}
+
+inline int calculate_end_padding(int start_padding, int dst_size, int src_size,
+        int spatial_stride, int dilated_filter_size) {
+    return (dst_size - 1) * spatial_stride + dilated_filter_size
+            - (src_size + start_padding);
+}
+
+inline status_t init_tag(format_tag_t &tag, const memory_desc_wrapper &mdw,
+        const format_tag_t &tag_value) {
+    if (mdw.format_kind() == format_kind::any) return status::unimplemented;
+
+    tag = mdw.matches_one_of_tag(tag_value);
+    return tag == tag_value ? status::success : status::unimplemented;
+}
 
 struct jit_conv_conf_2x3_wino_t {
     conv_version_t ver;

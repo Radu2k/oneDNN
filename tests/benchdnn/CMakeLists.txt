@@ -1,5 +1,5 @@
 #===============================================================================
-# Copyright 2017-2018 Intel Corporation
+# Copyright 2017-2019 Intel Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -194,4 +194,6 @@ if(NOT DNNL_GPU_RUNTIME STREQUAL "NONE")
         gpu "-v1 --concat --batch=inputs/concat/test_concat_gpu")
     register_benchdnn_test(test_benchdnn_lrn
         gpu "-v1 --lrn --batch=inputs/lrn/test_lrn_gpu")
+    register_benchdnn_test(test_benchdnn_binary
+        gpu "-v1 --binary --batch=inputs/binary/test_binary_gpu")
 endif()

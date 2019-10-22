@@ -51,6 +51,9 @@ struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine());
 
+            const auto attr_skip_mask = primitive_attr_t::skip_mask_t::oscale
+                    | primitive_attr_t::skip_mask_t::post_ops;
+
             bool ok = true
                     && utils::one_of(this->desc()->prop_kind, forward_training,
                             forward_inference)
@@ -62,7 +65,11 @@ struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
                     && IMPLICATION(this->with_bias(),
                             true && this->desc()->bias_desc.data_type == f32)
                     && compute_engine->mayiuse(
-                            compute::device_ext_t::intel_subgroups);
+                            compute::device_ext_t::intel_subgroups)
+                    && attr()->has_default_values(attr_skip_mask)
+                    && post_ops_ok(attr())
+                    && IMPLICATION(!attr()->output_scales_.has_default_values(),
+                            attr()->output_scales_.mask_ == 0);
 
             if (!ok) return status::unimplemented;
 
