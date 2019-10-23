@@ -194,6 +194,24 @@ inline int mmad_4(char4 input, char4 weight, int acc)
     return acc;
 }
 
+inline int mmad_4(char4 input, uchar4 weight, int acc)
+        __attribute__((overloadable)) {
+    acc += (input[0] * weight[0]);
+    acc += (input[1] * weight[1]);
+    acc += (input[2] * weight[2]);
+    acc += (input[3] * weight[3]);
+    return acc;
+}
+
+inline int mmad_4(uchar4 input, uchar4 weight, int acc)
+        __attribute__((overloadable)) {
+    acc += (input[0] * weight[0]);
+    acc += (input[1] * weight[1]);
+    acc += (input[2] * weight[2]);
+    acc += (input[3] * weight[3]);
+    return acc;
+}
+
 inline int mmad8(int8 A_scalars, int8 B_vectors, int acc)
         __attribute__((overloadable)) {
     acc = IMAD(as_char4(A_scalars[0]), as_char4(B_vectors[0]), acc);
