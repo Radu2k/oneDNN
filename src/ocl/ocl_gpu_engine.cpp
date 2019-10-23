@@ -193,6 +193,7 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(ref_deconvolution_bwd_data_t),
         INSTANCE(ref_deconvolution_bwd_weights_t),
         /*conv*/
+        INSTANCE(jit_gen12hp_1x1_convolution_fwd_t<f32>),
         INSTANCE(jit_gen12hp_1x1_convolution_fwd_t<bf16>),
         INSTANCE(jit_gen12hp_1x1_convolution_fwd_t<f16>),
         INSTANCE(jit_gen12hp_x16_convolution_fwd_t<bf16>),

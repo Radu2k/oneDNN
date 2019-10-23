@@ -68,12 +68,14 @@
 #define DATA_T half
 #define DATA2_T half2
 #define DATA8_T half8
+#define DATA16_T half16
 #define AS_DATA2_T as_half2
 #define DATA_MAX HALF_MAX
 #define DATA_MIN -DATA_MAX
 #define DATA_ZERO 0.0h
 #define DATA_ONE 1.0h
 #define DEF_ACC_DATA_T half
+#define DEF_ACC_DATA2_T half2
 #define DEF_ACC_DATA8_T half8
 #define POST_OP_DATA_T half
 #define TO_DATA_T(v) (half)(v)
@@ -105,12 +107,15 @@
 #define DATA_T ushort
 #define DATA2_T ushort2
 #define POST_OP_DATA_T float
+#define DATA2_T ushort2
 #define DATA8_T ushort8
+#define DATA16_T ushort16
 #define DATA_MAX as_float(0x7f7f0000)
 #define DATA_MIN (-DATA_MAX)
 #define DATA_ZERO 0.0f
 #define DATA_ONE 1.0f
 #define DEF_ACC_DATA_T float
+#define DEF_ACC_DATA2_T float2
 #define DEF_ACC_DATA8_T float8
 #define TO_DATA_T(v) convert_f32_to_bf16(v)
 #define TO_DEF_ACC_DATA_T(v) convert_bf16_to_f32(v)
@@ -318,6 +323,7 @@
 #endif
 
 #ifdef BIA_DATA_T
+#define BIA_DATA2_T CONCAT2(BIA_DATA_T, 2)
 #if BIA_DT_BF16
 #define BIA_TO_REF(x) convert_bf16_to_f32(x)
 #define REF_TO_BIA(x) convert_f32_to_bf16(x)

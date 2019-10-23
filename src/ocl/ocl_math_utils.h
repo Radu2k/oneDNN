@@ -53,6 +53,7 @@ float2 convert_bf16_to_f32_vec2(ushort2 b) {
     }
     return f;
 }
+
 #ifdef cl_intel_subgroups_char
 void __attribute__((overloadable))
 intel_sub_group_block_write_uc16(__global uchar *p, uchar16 data);
@@ -162,8 +163,22 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v)
     __builtin_IB_simd_block_write_8_local(p, v);
 }
 
+inline ushort8 subgroup_block_read_ushort8(const __local ushort *p)
+        __attribute__((overloadable)) {
+    ushort8 __builtin_IB_simd_block_read_8_local_h(const __local ushort *p);
+    return __builtin_IB_simd_block_read_8_local_h(p);
+}
+
+void subgroup_block_write_ushort8(__local ushort *p, ushort8 v)
+        __attribute__((overloadable)) {
+    void __builtin_IB_simd_block_write_8_local_h(__local ushort * p, ushort8);
+    __builtin_IB_simd_block_write_8_local_h(p, v);
+}
+
+#define READ_LOCAL_US_8(_P) subgroup_block_read_ushort8(_P)
 #define READ_LOCAL_8(_P) subgroup_block_read_uint8(_P)
 #define READ_LOCAL_1(_P) subgroup_block_read_uint(_P)
+#define WRITE_LOCAL_US_8(_P, _V) subgroup_block_write_ushort8(_P, _V)
 #define WRITE_LOCAL_8(_P, _V) subgroup_block_write_uint8(_P, _V)
 #define WRITE_LOCAL_4(_P, _V) subgroup_block_write_uint4(_P, _V)
 #define WRITE_LOCAL_2(_P, _V) subgroup_block_write_uint2(_P, _V)
@@ -172,13 +187,55 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v)
 
 #else // cl_intel_subgroup_local_block_io
 
+#define READ_LOCAL_US_8(_P) subgroup_block_read_ushort8(_P)
 #define READ_LOCAL_8(_P) subgroup_block_read_uint8(_P)
 #define READ_LOCAL_1(_P) subgroup_block_read_uint(_P)
+#define WRITE_LOCAL_US_8(_P, _V) subgroup_block_write_ushort8(_P, _V)
 #define WRITE_LOCAL_8(_P, _V) subgroup_block_write_uint8(_P, _V)
 #define WRITE_LOCAL_4(_P, _V) subgroup_block_write_uint4(_P, _V)
 #define WRITE_LOCAL_2(_P, _V) subgroup_block_write_uint2(_P, _V)
 #define WRITE_LOCAL_1(_P, _V) subgroup_block_write_uint(_P, _V)
 #define WRITE_LOCAL_SHORT_1(_P, _V) subgroup_block_write_ushort(_P, _V)
+
+ushort8 subgroup_block_read_ushort8(const __local ushort *p) {
+    ushort8 ret;
+    uint idx = get_sub_group_local_id();
+    ret.s0 = p[idx];
+    idx += get_max_sub_group_size();
+    ret.s1 = p[idx];
+    idx += get_max_sub_group_size();
+    ret.s2 = p[idx];
+    idx += get_max_sub_group_size();
+    ret.s3 = p[idx];
+    idx += get_max_sub_group_size();
+    ret.s4 = p[idx];
+    idx += get_max_sub_group_size();
+    ret.s5 = p[idx];
+    idx += get_max_sub_group_size();
+    ret.s6 = p[idx];
+    idx += get_max_sub_group_size();
+    ret.s7 = p[idx];
+    return ret;
+}
+
+void subgroup_block_write_ushort8(__local ushort *p, ushort8 v) {
+    uint idx = get_sub_group_local_id();
+    p[idx] = v.s0;
+    p += get_max_sub_group_size();
+    p[idx] = v.s1;
+    p += get_max_sub_group_size();
+    p[idx] = v.s2;
+    p += get_max_sub_group_size();
+    p[idx] = v.s3;
+    p += get_max_sub_group_size();
+    p[idx] = v.s4;
+    p += get_max_sub_group_size();
+    p[idx] = v.s5;
+    p += get_max_sub_group_size();
+    p[idx] = v.s6;
+    p += get_max_sub_group_size();
+    p[idx] = v.s7;
+}
 
 uint subgroup_block_read_uint(const __local uint *p) {
     uint ret;

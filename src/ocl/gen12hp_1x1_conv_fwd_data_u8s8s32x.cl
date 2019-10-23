@@ -84,9 +84,9 @@ gen12hp_1x1_conv_fwd_kernel_u8s8s32x(const __global uchar *src,
     // Weights
     wei += oc_group_id * KERNEL_BLOCK_OFFSET * IC_NCHUNK;
 
-#ifdef SLM_WEI
+#ifdef INT8_SLM
     __local char wei_slm[OC_BLOCK * IC_BLOCK];
-#endif // SLM_WEI
+#endif // INT8_SLM
 
     // Output accumulators:
     // 8 MB (0-7) x 4 Kernels  (32 8bit ints)
@@ -104,7 +104,7 @@ gen12hp_1x1_conv_fwd_kernel_u8s8s32x(const __global uchar *src,
     __attribute__((opencl_unroll_hint)) for (uint ic_block_id = 0;
                                              ic_block_id < IC_NCHUNK;
                                              ++ic_block_id) {
-#ifdef SLM_WEI
+#ifdef INT8_SLM
         barrier(CLK_LOCAL_MEM_FENCE);
         if (sp_local_id == 0) {
             WRITE_LOCAL_8((__local uint *)&wei_slm[0],
@@ -127,7 +127,7 @@ gen12hp_1x1_conv_fwd_kernel_u8s8s32x(const __global uchar *src,
         BLOCK_READ_SRC(S2, 16 * IC_BLOCK);
         BLOCK_READ_SRC(S3, 24 * IC_BLOCK);
 
-#ifdef SLM_WEI
+#ifdef INT8_SLM
         BLOCK_READ_WHT_FROM_SLM(W0, 0);
         BLOCK_READ_WHT_FROM_SLM(W1, 8 * IC_BLOCK);
         BLOCK_READ_WHT_FROM_SLM(W2, 16 * IC_BLOCK);

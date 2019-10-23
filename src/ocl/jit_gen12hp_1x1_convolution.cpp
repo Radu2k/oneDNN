@@ -42,8 +42,10 @@ status_t jit_gen12hp_1x1_convolution_fwd_t<dst_type>::execute_forward(
     arg_list.set(5, jcp.eltwise.beta);
     arg_list.set(6, jcp.sum_scale);
 
-    float scales = pd()->attr()->output_scales_.scales_[0];
-    arg_list.set(7, scales);
+    if (jcp.src_data_type == data_type::u8) {
+        float scales = pd()->attr()->output_scales_.scales_[0];
+        arg_list.set(7, scales);
+    }
 
     auto nd_range = compute::nd_range_t(jcp.gws_d, jcp.lws_d);
     status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
@@ -53,6 +55,7 @@ status_t jit_gen12hp_1x1_convolution_fwd_t<dst_type>::execute_forward(
 
 using namespace data_type;
 
+template struct jit_gen12hp_1x1_convolution_fwd_t<f32>;
 template struct jit_gen12hp_1x1_convolution_fwd_t<bf16>;
 template struct jit_gen12hp_1x1_convolution_fwd_t<f16>;
 template struct jit_gen12hp_1x1_convolution_fwd_t<s8>;
