@@ -13,7 +13,6 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 *******************************************************************************/
-//#define IMAD_SUPPORTED
 #include "ocl/ocl_math_utils.h"
 
 #include "ocl/ocl_types.h"
@@ -22,63 +21,60 @@
 #endif
 
 #if defined(S8S8)
-#define CHARA char
-#define CHARA2 char2
-#define CHARA4 char4
-#define CHARB char
-#define CHARB4 char4
-#define AS_CHARA as_char
-#define AS_CHARA2 as_char2
-#define AS_CHARA4 as_char4
-#define AS_CHARB as_char
-#define AS_CHARB2 as_char2
-#define AS_CHARB4 as_char4
+#define A_TYPE char
+#define A_TYPE2 char2
+#define A_TYPE4 char4
+#define B_TYPE char
+#define B_TYPE4 char4
+#define AS_A_TYPE as_char
+#define AS_A_TYPE2 as_char2
+#define AS_A_TYPE4 as_char4
+#define AS_B_TYPE as_char
+#define AS_B_TYPE2 as_char2
+#define AS_B_TYPE4 as_char4
 #endif
 
 #if defined(U8S8)
-#define CHARA uchar
-#define CHARA2 uchar2
-#define CHARA4 uchar4
-#define CHARB char
-#define CHARB4 char4
-#define AS_CHARA as_uchar
-#define AS_CHARA2 as_uchar2
-#define AS_CHARA4 as_uchar4
-#define AS_CHARB as_char
-#define AS_CHARB2 as_char2
-#define AS_CHARB4 as_char4
+#define A_TYPE uchar
+#define A_TYPE2 uchar2
+#define A_TYPE4 uchar4
+#define B_TYPE char
+#define B_TYPE4 char4
+#define AS_A_TYPE as_uchar
+#define AS_A_TYPE2 as_uchar2
+#define AS_A_TYPE4 as_uchar4
+#define AS_B_TYPE as_char
+#define AS_B_TYPE2 as_char2
+#define AS_B_TYPE4 as_char4
 #endif
 
 #if defined(S8U8)
-#define CHARA char
-#define CHARA2 char2
-#define CHARA4 char4
-#define CHARB uchar
-#define CHARB4 uchar4
-#define AS_CHARA as_char
-#define AS_CHARA2 as_char2
-#define AS_CHARA4 as_char4
-#define AS_CHARB as_uchar
-#define AS_CHARB2 as_uchar2
-#define AS_CHARB4 as_uchar4
+#define A_TYPE char
+#define A_TYPE2 char2
+#define A_TYPE4 char4
+#define B_TYPE uchar
+#define B_TYPE4 uchar4
+#define AS_A_TYPE as_char
+#define AS_A_TYPE2 as_char2
+#define AS_A_TYPE4 as_char4
+#define AS_B_TYPE as_uchar
+#define AS_B_TYPE2 as_uchar2
+#define AS_B_TYPE4 as_uchar4
 #endif
 
 #if defined(U8U8)
-#define CHARA uchar
-#define CHARA2 uchar2
-#define CHARA4 uchar4
-#define CHARB uchar
-#define CHARB4 uchar4
-#define AS_CHARA as_uchar
-#define AS_CHARA2 as_uchar2
-#define AS_CHARA4 as_uchar4
-#define AS_CHARB as_uchar
-#define AS_CHARB2 as_uchar2
-#define AS_CHARB4 as_uchar4
+#define A_TYPE uchar
+#define A_TYPE2 uchar2
+#define A_TYPE4 uchar4
+#define B_TYPE uchar
+#define B_TYPE4 uchar4
+#define AS_A_TYPE as_uchar
+#define AS_A_TYPE2 as_uchar2
+#define AS_A_TYPE4 as_uchar4
+#define AS_B_TYPE as_uchar
+#define AS_B_TYPE2 as_uchar2
+#define AS_B_TYPE4 as_uchar4
 #endif
-
-#define INTC int
-#define INTC4 int4
 
 #if defined(TN)
 #define DO_FMA DO_FMA_TN
@@ -93,34 +89,34 @@
 #define DO_FMA DO_FMA_TT
 #endif
 
-#define ADDAROW(z) \
+#define ADD_ROW_A(z) \
     do { \
         sumRowA[z] = ai[z].s0 + ai[z].s1 + ai[z].s2 + ai[z].s3; \
     } while (0)
 
-#define ADDAROWT() \
+#define ADD_ROW_AT() \
     do { \
         sumRowA[0] = ai[0].s0 + ai[1].s0 + ai[2].s0 + ai[3].s0; \
         sumRowA[1] = ai[0].s1 + ai[1].s1 + ai[2].s1 + ai[3].s1; \
     } while (0)
 
-#define ADDBCOL() \
+#define ADD_COL_B() \
     do { \
         sumColB = bi.s0 + bi.s1 + bi.s2 + bi.s3; \
     } while (0)
 
-#define ADDBCOLT() \
+#define ADD_COL_BT() \
     do { \
         sumColB = bi[0] + bi[1] + bi[2] + bi[3]; \
     } while (0)
 
 #ifdef ALIGNED
-#define VLOADA4(z, p) \
+#define VLOAD4_A(z, p) \
     do { \
-        ai[z] = *((global CHARA4 *)p); \
+        ai[z] = *((global A_TYPE4 *)p); \
     } while (0)
 #else
-#define VLOADA4(z, p) \
+#define VLOAD4_A(z, p) \
     do { \
         ai[z].s0 = *(p + 0); \
         ai[z].s1 = *(p + 1); \
@@ -130,13 +126,13 @@
 #endif
 
 #ifdef ALIGNED
-#define BLOCKREADA(h, hh) \
+#define BLOCK_READ_A(h, hh) \
     do { \
-        ai[hh] = AS_CHARA2(intel_sub_group_block_read_uc2( \
+        ai[hh] = AS_A_TYPE2(intel_sub_group_block_read_uc2( \
                 (global uchar *)(a_ptrs[hh] + h * lda))); \
     } while (0)
 #else
-#define BLOCKREADA(h, hh) \
+#define BLOCK_READ_A(h, hh) \
     do { \
         ai[hh].s0 = *((a_ptrs[hh] + h * lda) + 0); \
         ai[hh].s1 = *((a_ptrs[hh] + h * lda) + 16); \
@@ -144,25 +140,25 @@
 #endif
 
 #ifdef ALIGNED
-#define BLOCKREADB(h, hh) \
+#define BLOCK_READ_B(h, hh) \
     do { \
-        bi[hh] = AS_CHARB(intel_sub_group_block_read_uc( \
+        bi[hh] = AS_B_TYPE(intel_sub_group_block_read_uc( \
                 (global uchar *)(b_ptrs[hh] + h * ldb))); \
     } while (0)
 #else
-#define BLOCKREADB(h, hh) \
+#define BLOCK_READ_B(h, hh) \
     do { \
         bi[hh] = *(b_ptrs[hh] + h * ldb); \
     } while (0)
 #endif
 
 #ifdef ALIGNED
-#define VLOADB4(p) \
+#define VLOAD4_B(p) \
     do { \
-        bi = *((global CHARB4 *)p); \
+        bi = *((global B_TYPE4 *)p); \
     } while (0)
 #else
-#define VLOADB4(p) \
+#define VLOAD4_B(p) \
     do { \
         bi.s0 = *(p + 0); \
         bi.s1 = *(p + 1); \
@@ -225,34 +221,34 @@
 
 #define DO_FMA_TN(h, i) \
     do { \
-        ci[0][i] = IMAD(AS_CHARB4(sub_group_broadcast(as_int(bi), i)), \
-                AS_CHARA4(ai[0]), ci[0][i]); \
-        ci[1][i] = IMAD(AS_CHARB4(sub_group_broadcast(as_int(bi), i)), \
-                AS_CHARA4(ai[1]), ci[1][i]); \
+        ci[0][i] = IMAD(AS_B_TYPE4(sub_group_broadcast(as_int(bi), i)), \
+                AS_A_TYPE4(ai[0]), ci[0][i]); \
+        ci[1][i] = IMAD(AS_B_TYPE4(sub_group_broadcast(as_int(bi), i)), \
+                AS_A_TYPE4(ai[1]), ci[1][i]); \
     } while (0)
 
 #define DO_FMA_NN(h, i) \
     do { \
-        ci[0][i] = IMAD(AS_CHARB4(sub_group_broadcast(as_int(bi), i)), \
-                AS_CHARA4(ait[0]), ci[0][i]); \
-        ci[1][i] = IMAD(AS_CHARB4(sub_group_broadcast(as_int(bi), i)), \
-                AS_CHARA4(ait[1]), ci[1][i]); \
+        ci[0][i] = IMAD(AS_B_TYPE4(sub_group_broadcast(as_int(bi), i)), \
+                AS_A_TYPE4(ait[0]), ci[0][i]); \
+        ci[1][i] = IMAD(AS_B_TYPE4(sub_group_broadcast(as_int(bi), i)), \
+                AS_A_TYPE4(ait[1]), ci[1][i]); \
     } while (0)
 
 #define DO_FMA_NT(h, i) \
     do { \
-        ci[0][i] = IMAD(AS_CHARB4(sub_group_broadcast(as_int(biit), i)), \
-                AS_CHARA4(ait[0]), ci[0][i]); \
-        ci[1][i] = IMAD(AS_CHARB4(sub_group_broadcast(as_int(biit), i)), \
-                AS_CHARA4(ait[1]), ci[1][i]); \
+        ci[0][i] = IMAD(AS_B_TYPE4(sub_group_broadcast(as_int(biit), i)), \
+                AS_A_TYPE4(ait[0]), ci[0][i]); \
+        ci[1][i] = IMAD(AS_B_TYPE4(sub_group_broadcast(as_int(biit), i)), \
+                AS_A_TYPE4(ait[1]), ci[1][i]); \
     } while (0)
 
 #define DO_FMA_TT(h, i) \
     do { \
-        ci[0][i] = IMAD(AS_CHARB4(sub_group_broadcast(as_int(biit), i)), \
-                AS_CHARA4(ai[0]), ci[0][i]); \
-        ci[1][i] = IMAD(AS_CHARB4(sub_group_broadcast(as_int(biit), i)), \
-                AS_CHARA4(ai[1]), ci[1][i]); \
+        ci[0][i] = IMAD(AS_B_TYPE4(sub_group_broadcast(as_int(biit), i)), \
+                AS_A_TYPE4(ai[0]), ci[0][i]); \
+        ci[1][i] = IMAD(AS_B_TYPE4(sub_group_broadcast(as_int(biit), i)), \
+                AS_A_TYPE4(ai[1]), ci[1][i]); \
     } while (0)
 
 #if WITH_ELTWISE == 1
@@ -287,8 +283,8 @@
 
 #define ADD_BOFF(i) \
     do { \
-        ci[0][i] -= (INTC)bo * sumRowA[0]; \
-        ci[1][i] -= (INTC)bo * sumRowA[1]; \
+        ci[0][i] -= (int)bo * sumRowA[0]; \
+        ci[1][i] -= (int)bo * sumRowA[1]; \
     } while (0)
 
 #define ADD_BOFF_LOOP() \
@@ -313,10 +309,10 @@
 
 #define ADD_AOFF(h, i) \
     do { \
-        ci[0][i] -= ((INTC)ao * sub_group_broadcast(as_int(sumColB), i)) \
-                - (h * (INTC)ao * (INTC)bo); \
-        ci[1][i] -= ((INTC)ao * sub_group_broadcast(as_int(sumColB), i)) \
-                - (h * (INTC)ao * (INTC)bo); \
+        ci[0][i] -= ((int)ao * sub_group_broadcast(as_int(sumColB), i)) \
+                - (h * (int)ao * (int)bo); \
+        ci[1][i] -= ((int)ao * sub_group_broadcast(as_int(sumColB), i)) \
+                - (h * (int)ao * (int)bo); \
     } while (0)
 
 #define ADD_AOFF_LOOP(h) \
@@ -344,43 +340,43 @@
         if (jrem > i) { \
             if (irem > 0) { \
                 if (c_offset_type == 0) { \
-                    INTC val = ((betaZero) ? 0 : *c) \
+                    int val = ((betaZero) ? 0 : *c) \
                             + ((!apply_co) ? 0 : co[0]) + ci[0][i]; \
                     POST_OP(val); \
                     *c = val; \
                 } \
                 \  
                 if (c_offset_type == 1) { \
-                    INTC val = ((betaZero) ? 0 : *c) \
+                    int val = ((betaZero) ? 0 : *c) \
                             + ((!apply_co) ? 0 : co[0]) + ci[0][i]; \
                     POST_OP(val); \
                     *c = val; \
                 } \
                 \  
                 if (c_offset_type == 2) { \
-                    INTC val = ((betaZero) ? 0 : *c) \
+                    int val = ((betaZero) ? 0 : *c) \
                             + ((!apply_co) ? 0 : co[i]) + ci[0][i]; \
                     POST_OP(val); \
                     *c = val; \
                 } \
                 \  
-             \
+               \
             } \
             if (irem > 16) { \
                 if (c_offset_type == 0) { \
-                    INTC val = ((betaZero) ? 0 : *c2) \
+                    int val = ((betaZero) ? 0 : *c2) \
                             + ((!apply_co) ? 0 : co[0]) + ci[1][i]; \
                     POST_OP(val); \
                     *c2 = val; \
                 } \
                 if (c_offset_type == 1) { \
-                    INTC val = ((betaZero) ? 0 : *c2) \
+                    int val = ((betaZero) ? 0 : *c2) \
                             + ((!apply_co) ? 0 : co[16]) + ci[1][i]; \
                     POST_OP(val); \
                     *c2 = val; \
                 } \
                 if (c_offset_type == 2) { \
-                    INTC val = ((betaZero) ? 0 : *c2) \
+                    int val = ((betaZero) ? 0 : *c2) \
                             + ((!apply_co) ? 0 : co[i]) + ci[1][i]; \
                     POST_OP(val); \
                     *c2 = val; \
@@ -413,34 +409,38 @@
 
 #ifdef TN
 __attribute__((intel_reqd_sub_group_size(16))) kernel void
-gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
-        global INTC *c, int offsetA, int offsetB, int offsetC, int lda, int ldb,
-        int ldc, int m, int n, int k, int beta, CHARA ao, CHARB bo,
-        global INTC *co, int offsetCO, int apply_co, local CHARA *sa,
-        local CHARB *sb, int apply_eltwise, float eltwise_alpha,
+gen12lp_gemm_compute_x8x8s32_kernel(global A_TYPE *a, global B_TYPE *b,
+        global int *c, int offsetA, int offsetB, int offsetC, int lda, int ldb,
+        int ldc, int m, int n, int k, int beta, A_TYPE ao, B_TYPE bo,
+        global int *co, int offsetCO, int apply_co, local A_TYPE *sa,
+        local B_TYPE *sb, int apply_eltwise, float eltwise_alpha,
         float eltwise_beta) {
 
-    // unroll_m = 32, unroll_n = 16, subgroupsize = 16
-    CHARA4 ai[2]; // 32x4 block of A, 2x 16x4 scattered access
-    CHARB4 bi; // 4x16 block of B, 1x 4x16 scattered access
-    INTC ci[2][16]; // 32x16 block of C, 16x1 x 2x16 scattered access
+    // clang-format off
+    A_TYPE4 ai[2];  // 32x4 block of A, 2x 16x4 scattered access
+    B_TYPE4 bi;     // 4x16 block of B, 1x 4x16 scattered access
+    int ci[2][16]; // 32x16 block of C, 16x1 x 2x16 scattered access
+    // clang-format on
 
-    INTC sumRowA[2] = {0, 0};
-    INTC sumColB = 0;
+    int sumRowA[2] = {0, 0};
+    int sumColB = 0;
 
     int idM = get_group_id(0);
     int idN = get_group_id(1);
     int idlM = get_local_id(0);
     int idlN = get_local_id(1);
     int lid = get_sub_group_local_id();
-    int lsm = 32; //get_local_size(0)
-    int lsn = 8; //get_local_size(1)
+    int lsm = 32;
+    int lsn = 8;
 
     int i0 = (idM * lsm / 16) * 32 + (get_local_id(0) / 16) * 32;
     int j0 = idlN * 16 + (idN * lsn * 16);
 
     int irem = m - i0 - lid;
     int jrem = n - j0;
+
+    int irem2 = m - i0;
+    int jrem2 = n - j0;
 
     if (irem < 0) irem = 0;
     if (jrem < 0) jrem = 0;
@@ -449,7 +449,7 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
     b += offsetB + (j0 * ldb) + (lid * ldb);
     c += offsetC + (i0) + (j0 * ldc) + lid;
 
-    int c_offset_type = 0; //0:Fixed, 1:Column, 2:Row
+    int c_offset_type = 0;
 
 #ifdef FF
     co += offsetCO;
@@ -464,71 +464,134 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
     c_offset_type = 2;
 #endif
 
-    global CHARA *a_ptrs[2] = {a, a + 16 * lda};
-    global CHARB *b_ptrs = {b};
+    global A_TYPE *a_ptrs[2] = {a, a + 16 * lda};
+    global B_TYPE *b_ptrs = {b};
 
     for (int y = 0; y < 16; y++) {
         for (int z = 0; z < 2; z++) {
             ci[z][y] = 0;
         }
     }
-
     int k_align = k & ~3;
-    for (int h = 0; h < k_align; h += 4) {
 
-        // Load A
-        for (int z = 0; z < 2; z++) {
-            VLOADA4(z, (a_ptrs[z] + h));
+#ifndef ALLOW_READ_OVERRUNS
+    if (irem2 >= 32 && jrem2 >= 16) {
+#endif
+        for (int h = 0; h < k_align; h += 4) {
+            // Load A
+            for (int z = 0; z < 2; z++) {
+                VLOAD4_A(z, (a_ptrs[z] + h));
 #ifdef BOFFNONZERO
-            ADDAROW(z);
+                ADD_ROW_A(z);
+#endif
+            }
+            // Load B
+            VLOAD4_B((b_ptrs + h));
+#ifdef AOFFNONZERO
+            ADD_COL_B();
+#endif
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(4);
 #endif
         }
-        // Load B
-        VLOADB4((b_ptrs + h));
-#ifdef AOFFNONZERO
-        ADDBCOL();
-#endif
-        // Compute
-        FMA_I_LOOP(0);
-
+        // Remainder Loop
+        int krem = k & 3;
+        if (krem > 0) {
+            ai[0] = 0;
+            ai[1] = 0;
+            bi = 0;
+            // Load A
+            for (int z = 0; z < 2; z++) {
+                LOADA_REM(z, (a_ptrs[z] + k_align));
 #ifdef BOFFNONZERO
-        ADD_BOFF_LOOP();
+                ADD_ROW_A(z);
+#endif
+            }
+            // Load B
+            LOADB_REM((b_ptrs + k_align));
+#ifdef AOFFNONZERO
+            ADD_COL_B();
+#endif
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
 #endif
 #ifdef AOFFNONZERO
-        ADD_AOFF_LOOP(4);
-#endif
-    }
-
-    // Remainder Loop
-    int krem = k & 3;
-    if (krem > 0) {
-        ai[0] = 0;
-        ai[1] = 0;
-        bi = 0;
-        // Load A
-        for (int z = 0; z < 2; z++) {
-            LOADA_REM(z, (a_ptrs[z] + k_align));
-#ifdef BOFFNONZERO
-            ADDAROW(z);
+            ADD_AOFF_LOOP(krem);
 #endif
         }
-        // Load B
-        LOADB_REM((b_ptrs + k_align));
-#ifdef AOFFNONZERO
-        ADDBCOL();
-#endif
-        // Compute
-        FMA_I_LOOP(0);
+
+#ifndef ALLOW_READ_OVERRUNS
+    } else {
+        for (int h = 0; h < k_align; h += 4) {
+            // Load A
+            for (int z = 0; z < 2; z++) {
+                if (irem > z * 16) {
+                    VLOAD4_A(z, (a_ptrs[z] + h));
 #ifdef BOFFNONZERO
-        ADD_BOFF_LOOP();
+                    ADD_ROW_A(z);
+#endif
+                }
+            }
+            // Load B
+            if (jrem > lid) {
+                VLOAD4_B((b_ptrs + h));
+#ifdef AOFFNONZERO
+                ADD_COL_B();
+#endif
+            }
+            // Compute
+            FMA_I_LOOP(0);
+
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
 #endif
 #ifdef AOFFNONZERO
-        ADD_AOFF_LOOP(krem);
+            ADD_AOFF_LOOP(4);
 #endif
+        }
+        // Remainder Loop
+        int krem = k & 3;
+        if (krem > 0) {
+            ai[0] = 0;
+            ai[1] = 0;
+            bi = 0;
+            // Load A
+            for (int z = 0; z < 2; z++) {
+                if (irem > z * 16) {
+                    LOADA_REM(z, (a_ptrs[z] + k_align));
+#ifdef BOFFNONZERO
+                    ADD_ROW_A(z);
+#endif
+                }
+            }
+            // Load B
+            if (jrem > lid) {
+                LOADB_REM((b_ptrs + k_align));
+#ifdef AOFFNONZERO
+                ADD_COL_B();
+#endif
+            }
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(krem);
+#endif
+        }
     }
+#endif /* ALLOW_READ_OVERHEAD */
 
     // Store C
-    global INTC *c2 = c + 16;
+    global int *c2 = c + 16;
 
     // Update C
     if (beta == 0)
@@ -540,39 +603,43 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
 
 #ifdef NN
 __attribute__((intel_reqd_sub_group_size(16))) kernel void
-gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
-        global INTC *c, int offsetA, int offsetB, int offsetC, int lda, int ldb,
-        int ldc, int m, int n, int k, int beta, CHARA ao, CHARB bo,
-        global INTC *co, int offsetCO, int apply_co, local CHARA *sa,
-        local CHARB *sb, int apply_eltwise, float eltwise_alpha,
+gen12lp_gemm_compute_x8x8s32_kernel(global A_TYPE *a, global B_TYPE *b,
+        global int *c, int offsetA, int offsetB, int offsetC, int lda, int ldb,
+        int ldc, int m, int n, int k, int beta, A_TYPE ao, B_TYPE bo,
+        global int *co, int offsetCO, int apply_co, local A_TYPE *sa,
+        local B_TYPE *sb, int apply_eltwise, float eltwise_alpha,
         float eltwise_beta) {
 
-    // unroll_m = 32, unroll_n = 16, subgroupsize = 16
-    CHARA2 ai[4]; // 32x4 block of A, 4x 32x1 block access
-    CHARB4 bi; // 4x16 block of B, 1x 4x16 scattered access
-    INTC ci[2][16]; // 32x16 block of C, 16x1 x 2x16 scattered access
+    // clang-format off
+    A_TYPE2 ai[4];  // 32x4 block of A, 4x 32x1 block access
+    B_TYPE4 bi;     // 4x16 block of B, 1x 4x16 scattered access
+    int ci[2][16]; // 32x16 block of C, 16x1 x 2x16 scattered access
+    // clang-format on
 
-    INTC sumRowA[2] = {0, 0};
-    INTC sumColB = 0;
+    int sumRowA[2] = {0, 0};
+    int sumColB = 0;
 
-    CHARA4 ait[2];
+    A_TYPE4 ait[2];
 
     int idM = get_group_id(0);
     int idN = get_group_id(1);
     int idlM = get_local_id(0);
     int idlN = get_local_id(1);
     int lid = get_sub_group_local_id();
-    int lsm = 32; //get_local_size(0)
-    int lsn = 8; //get_local_size(1)
+    int lsm = 32;
+    int lsn = 8;
 
     int i0 = (idM * lsm / 16) * 32 + (get_local_id(0) / 16) * 32;
     int j0 = idlN * 16 + (idN * lsn * 16);
 
     int irem = m - i0 - lid;
     int jrem = n - j0;
+    int irem2 = m - i0;
+    int jrem2 = n - j0;
 
     if (irem < 0) irem = 0;
     if (jrem < 0) jrem = 0;
+
 #ifdef ALIGNED
     a += offsetA + i0;
 #else
@@ -582,7 +649,7 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
     b += offsetB + (j0 * ldb) + (lid * ldb);
     c += offsetC + (i0) + (j0 * ldc) + lid;
 
-    int c_offset_type = 0; //0:Fixed, 1:Column, 2:Row
+    int c_offset_type = 0;
 
 #ifdef FF
     co += offsetCO;
@@ -597,79 +664,157 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
     c_offset_type = 2;
 #endif
 
-    global CHARA *a_ptrs[4] = {a, a + 1 * lda, a + 2 * lda, a + 3 * lda};
-    global CHARB *b_ptrs = {b};
+    global A_TYPE *a_ptrs[4] = {a, a + 1 * lda, a + 2 * lda, a + 3 * lda};
+    global B_TYPE *b_ptrs = {b};
 
     for (int y = 0; y < 16; y++) {
         for (int z = 0; z < 2; z++) {
             ci[z][y] = 0;
         }
     }
-
     int k_align = k & ~3;
-    for (int h = 0; h < k_align; h += 4) {
 
-        // Load A
-        for (int hh = 0; hh < 4; hh++) {
-            BLOCKREADA(h, hh);
+#ifndef ALLOW_READ_OVERRUNS
+    if (irem2 >= 32 && jrem2 >= 16) {
+#endif
+        for (int h = 0; h < k_align; h += 4) {
+            // Load A
+            for (int hh = 0; hh < 4; hh++) {
+                BLOCK_READ_A(h, hh);
 #ifdef BOFFNONZERO
-            ADDAROWT();
+                ADD_ROW_AT();
+#endif
+            }
+            // Copy A
+            COPYA();
+            // Load B
+            VLOAD4_B((b_ptrs + h));
+#ifdef AOFFNONZERO
+            ADD_COL_B();
+#endif
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(4);
 #endif
         }
-        // Copy A
-        COPYA();
-        // Load B
-        VLOADB4((b_ptrs + h));
-#ifdef AOFFNONZERO
-        ADDBCOL();
-#endif
-
-        // Compute
-        FMA_I_LOOP(0);
+        // Remainder Loop
+        int krem = k & 3;
+        if (krem > 0) {
+            ai[0] = 0;
+            ai[1] = 0;
+            ai[2] = 0;
+            ai[3] = 0;
+            bi = 0;
+            // Load A
+            for (int hh = 0; hh < krem; hh++) {
+                BLOCK_READ_A(k_align, hh);
 #ifdef BOFFNONZERO
-        ADD_BOFF_LOOP();
+                ADD_ROW_AT();
+#endif
+            }
+            // Copy A
+            COPYA();
+            // Load B
+            LOADB_REM((b_ptrs + k_align));
+#ifdef AOFFNONZERO
+            ADD_COL_B();
+#endif
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
 #endif
 #ifdef AOFFNONZERO
-        ADD_AOFF_LOOP(4);
-#endif
-    }
-
-    // Remainder Loop
-    int krem = k & 3;
-    if (krem > 0) {
-        ai[0] = 0;
-        ai[1] = 0;
-        ai[2] = 0;
-        ai[3] = 0;
-        bi = 0;
-        // Load A
-        for (int hh = 0; hh < krem; hh++) {
-            BLOCKREADA(k_align, hh);
-#ifdef BOFFNONZERO
-            ADDAROWT();
+            ADD_AOFF_LOOP(krem);
 #endif
         }
 
-        // Copy A
-        COPYA();
-
-        // Load B
-        LOADB_REM((b_ptrs + k_align));
-#ifdef AOFFNONZERO
-        ADDBCOL();
+#ifndef ALLOW_READ_OVERRUNS
+    } else {
+        for (int h = 0; h < k_align; h += 4) {
+            // Load A
+            for (int hh = 0; hh < 4; hh++) {
+                if (irem2 > lid) {
+#ifdef ALIGNED
+                    ai[hh].s0 = *((a_ptrs[hh] + h * lda) + 0 + lid);
+                    ai[hh].s1 = *((a_ptrs[hh] + h * lda) + 16 + lid);
+#else
+                    ai[hh].s0 = *((a_ptrs[hh] + h * lda) + 0);
+                    ai[hh].s1 = *((a_ptrs[hh] + h * lda) + 16);
 #endif
-        // Compute
-        FMA_I_LOOP(0);
 #ifdef BOFFNONZERO
-        ADD_BOFF_LOOP();
+                    ADD_ROW_AT();
+#endif
+                }
+            }
+            // Copy A
+            COPYA();
+            // Load B
+            if (jrem > lid) {
+                VLOAD4_B((b_ptrs + h));
+#ifdef AOFFNONZERO
+                ADD_COL_B();
+#endif
+            }
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
 #endif
 #ifdef AOFFNONZERO
-        ADD_AOFF_LOOP(krem);
+            ADD_AOFF_LOOP(4);
 #endif
+        }
+        // Remainder Loop
+        int krem = k & 3;
+        if (krem > 0) {
+            ai[0] = 0;
+            ai[1] = 0;
+            ai[2] = 0;
+            ai[3] = 0;
+            bi = 0;
+            // Load A
+            for (int hh = 0; hh < krem; hh++) {
+                if (irem2 > lid) {
+#ifdef ALIGNED
+                    ai[hh].s0 = *((a_ptrs[hh] + k_align * lda) + 0 + lid);
+                    ai[hh].s1 = *((a_ptrs[hh] + k_align * lda) + 16 + lid);
+#else
+                    ai[hh].s0 = *((a_ptrs[hh] + k_align * lda) + 0);
+                    ai[hh].s1 = *((a_ptrs[hh] + k_align * lda) + 16);
+#endif
+#ifdef BOFFNONZERO
+                    ADD_ROW_AT();
+#endif
+                }
+            }
+            // Copy A
+            COPYA();
+            // Load B
+            if (jrem > lid) {
+                LOADB_REM((b_ptrs + k_align));
+#ifdef AOFFNONZERO
+                ADD_COL_B();
+#endif
+            }
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(krem);
+#endif
+        }
     }
+#endif /* ALLOW_READ_OVERHEAD */
 
     // Store C
-    global INTC *c2 = c + 16;
+    global int *c2 = c + 16;
 
     // Update C
     if (beta == 0)
@@ -681,40 +826,44 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
 
 #ifdef NT
 __attribute__((intel_reqd_sub_group_size(16))) kernel void
-gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
-        global INTC *c, int offsetA, int offsetB, int offsetC, int lda, int ldb,
-        int ldc, int m, int n, int k, int beta, CHARA ao, CHARB bo,
-        global INTC *co, int offsetCO, int apply_co, local CHARA *sa,
-        local CHARB *sb, int apply_eltwise, float eltwise_alpha,
+gen12lp_gemm_compute_x8x8s32_kernel(global A_TYPE *a, global B_TYPE *b,
+        global int *c, int offsetA, int offsetB, int offsetC, int lda, int ldb,
+        int ldc, int m, int n, int k, int beta, A_TYPE ao, B_TYPE bo,
+        global int *co, int offsetCO, int apply_co, local A_TYPE *sa,
+        local B_TYPE *sb, int apply_eltwise, float eltwise_alpha,
         float eltwise_beta) {
 
-    // unroll_m = 32, unroll_n = 16, subgroupsize = 16
-    CHARA2 ai[4]; // 32x4 block of A, 4x 32x1 block access
-    CHARB bi[4]; // 4x16 block of B, 4x 1x16 block access
-    INTC ci[2][16]; // 32x16 block of C, 16x1 x 2x16 scattered access
+    // clang-format off
+    A_TYPE2 ai[4];   // 32x4 block of A, 4x 32x1 block access
+    B_TYPE bi[4];    // 4x16 block of B, 4x 1x16 block access
+    int ci[2][16];  // 32x16 block of C, 16x1 x 2x16 scattered access
+    // clang-format on
 
-    INTC sumRowA[2] = {0, 0};
-    INTC sumColB = 0;
+    int sumRowA[2] = {0, 0};
+    int sumColB = 0;
 
-    CHARA4 ait[2];
-    CHARA4 biit;
+    A_TYPE4 ait[2];
+    A_TYPE4 biit;
 
     int idM = get_group_id(0);
     int idN = get_group_id(1);
     int idlM = get_local_id(0);
     int idlN = get_local_id(1);
     int lid = get_sub_group_local_id();
-    int lsm = 32; //get_local_size(0)
-    int lsn = 8; //get_local_size(1)
+    int lsm = 32;
+    int lsn = 8;
 
     int i0 = (idM * lsm / 16) * 32 + (get_local_id(0) / 16) * 32;
     int j0 = idlN * 16 + (idN * lsn * 16);
 
     int irem = m - i0 - lid;
     int jrem = n - j0;
+    int irem2 = m - i0;
+    int jrem2 = n - j0;
 
     if (irem < 0) irem = 0;
     if (jrem < 0) jrem = 0;
+
 #ifdef ALIGNED
     a += offsetA + i0;
 #else
@@ -729,7 +878,7 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
 
     c += offsetC + (i0) + (j0 * ldc) + lid;
 
-    int c_offset_type = 0; //0:Fixed, 1:Column, 2:Row
+    int c_offset_type = 0;
 
 #ifdef FF
     co += offsetCO;
@@ -744,8 +893,8 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
     c_offset_type = 2;
 #endif
 
-    global CHARA *a_ptrs[4] = {a, a + 1 * lda, a + 2 * lda, a + 3 * lda};
-    global CHARB *b_ptrs[4] = {b, b + 1 * ldb, b + 2 * ldb, b + 3 * ldb};
+    global A_TYPE *a_ptrs[4] = {a, a + 1 * lda, a + 2 * lda, a + 3 * lda};
+    global B_TYPE *b_ptrs[4] = {b, b + 1 * ldb, b + 2 * ldb, b + 3 * ldb};
 
     for (int y = 0; y < 16; y++) {
         for (int z = 0; z < 2; z++) {
@@ -753,81 +902,185 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
         }
     }
 
+    int insidea1 = 5;
+    int insidea2 = 5;
+    int insideb = 5;
+
     int k_align = k & ~3;
-    for (int h = 0; h < k_align; h += 4) {
 
-        // Load A
-        for (int hh = 0; hh < 4; hh++) {
-            BLOCKREADA(h, hh);
+#ifndef ALLOW_READ_OVERRUNS
+    if (irem2 >= 32 && jrem2 >= 16) {
+#endif
+        for (int h = 0; h < k_align; h += 4) {
+            // Load A
+            for (int hh = 0; hh < 4; hh++) {
+                BLOCK_READ_A(h, hh);
 #ifdef BOFFNONZERO
-            ADDAROWT();
+                ADD_ROW_AT();
+#endif
+            }
+            // Copy A
+            COPYA();
+            // Load B
+            for (int hh = 0; hh < 4; hh++) {
+                BLOCK_READ_B(h, hh);
+#ifdef AOFFNONZERO
+                ADD_COL_BT();
+#endif
+            }
+            // Copy B
+            COPYB();
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(4);
 #endif
         }
-        // Copy A
-        COPYA();
-        // Load B
-        for (int hh = 0; hh < 4; hh++) {
-            BLOCKREADB(h, hh);
+        // Remainder Loop
+        int krem = k & 3;
+        if (krem > 0) {
+            ai[0] = 0;
+            ai[1] = 0;
+            ai[2] = 0;
+            ai[3] = 0;
+
+            bi[0] = 0;
+            bi[1] = 0;
+            bi[2] = 0;
+            bi[3] = 0;
+            // Load A
+            for (int hh = 0; hh < krem; hh++) {
+                BLOCK_READ_A(k_align, hh);
+#ifdef BOFFNONZERO
+                ADD_ROW_AT();
+#endif
+            }
+            // Copy A
+            COPYA();
+            // Load B
+            for (int hh = 0; hh < krem; hh++) {
+                BLOCK_READ_B(k_align, hh);
 #ifdef AOFFNONZERO
-            ADDBCOLT();
+                ADD_COL_BT();
+#endif
+            }
+            // Copy B
+            COPYB();
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(krem);
 #endif
         }
-        // Copy B
-        COPYB();
 
-        // Compute
-        FMA_I_LOOP(0);
+#ifndef ALLOW_READ_OVERRUNS
+    } else {
+        for (int h = 0; h < k_align; h += 4) {
+            // Load A
+            for (int hh = 0; hh < 4; hh++) {
+                if (irem2 > lid) {
+#ifdef ALIGNED
+                    ai[hh].s0 = *((a_ptrs[hh] + h * lda) + 0 + lid);
+                    ai[hh].s1 = *((a_ptrs[hh] + h * lda) + 16 + lid);
+#else
+                    ai[hh].s0 = *((a_ptrs[hh] + h * lda) + 0);
+                    ai[hh].s1 = *((a_ptrs[hh] + h * lda) + 16);
+#endif
 #ifdef BOFFNONZERO
-        ADD_BOFF_LOOP();
+                    ADD_ROW_AT();
+#endif
+                }
+            }
+            // Copy A
+            COPYA();
+            // Load B
+            for (int hh = 0; hh < 4; hh++) {
+                if (jrem > lid) {
+#ifdef ALIGNED
+                    bi[hh] = *((b_ptrs[hh] + h * ldb) + lid);
+#else
+                    bi[hh] = *(b_ptrs[hh] + h * ldb);
 #endif
 #ifdef AOFFNONZERO
-        ADD_AOFF_LOOP(4);
+                    ADD_COL_BT();
 #endif
+                }
+            }
+            // Copy B
+            COPYB();
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(4);
+#endif
+        }
+        // Remainder Loop
+        int krem = k & 3;
+        if (krem > 0) {
+            ai[0] = 0;
+            ai[1] = 0;
+            ai[2] = 0;
+            ai[3] = 0;
+
+            bi[0] = 0;
+            bi[1] = 0;
+            bi[2] = 0;
+            bi[3] = 0;
+            // Load A
+            for (int hh = 0; hh < krem; hh++) {
+                if (irem2 > lid) {
+#ifdef ALIGNED
+                    ai[hh].s0 = *((a_ptrs[hh] + k_align * lda) + 0 + lid);
+                    ai[hh].s1 = *((a_ptrs[hh] + k_align * lda) + 16 + lid);
+#else
+                    ai[hh].s0 = *((a_ptrs[hh] + k_align * lda) + 0);
+                    ai[hh].s1 = *((a_ptrs[hh] + k_align * lda) + 16);
+#endif
+#ifdef BOFFNONZERO
+                    ADD_ROW_AT();
+#endif
+                }
+            }
+            // Copy A
+            COPYA();
+            // Load B
+            for (int hh = 0; hh < krem; hh++) {
+                if (jrem > lid) {
+#ifdef ALIGNED
+                    bi[hh] = *((b_ptrs[hh] + k_align * ldb) + lid);
+#else
+                    bi[hh] = *(b_ptrs[hh] + k_align * ldb);
+#endif
+#ifdef AOFFNONZERO
+                    ADD_COL_BT();
+#endif
+                }
+            }
+            // Copy B
+            COPYB();
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(krem);
+#endif
+        }
     }
-
-    // Remainder Loop
-    int krem = k & 3;
-    if (krem > 0) {
-        ai[0] = 0;
-        ai[1] = 0;
-        ai[2] = 0;
-        ai[3] = 0;
-
-        bi[0] = 0;
-        bi[1] = 0;
-        bi[2] = 0;
-        bi[3] = 0;
-        // Load A
-        for (int hh = 0; hh < krem; hh++) {
-            BLOCKREADA(k_align, hh);
-#ifdef BOFFNONZERO
-            ADDAROWT();
-#endif
-        }
-        // Copy A
-        COPYA();
-
-        // Load B
-        for (int hh = 0; hh < krem; hh++) {
-            BLOCKREADB(k_align, hh);
-#ifdef AOFFNONZERO
-            ADDBCOLT();
-#endif
-        }
-        // Copy B
-        COPYB();
-        // Compute
-        FMA_I_LOOP(0);
-#ifdef BOFFNONZERO
-        ADD_BOFF_LOOP();
-#endif
-#ifdef AOFFNONZERO
-        ADD_AOFF_LOOP(krem);
-#endif
-    }
+#endif /* ALLOW_READ_OVERHEAD */
 
     // Store C
-    global INTC *c2 = c + 16;
+    global int *c2 = c + 16;
 
     // Update C
     if (beta == 0)
@@ -839,30 +1092,31 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
 
 #ifdef TT
 __attribute__((intel_reqd_sub_group_size(16))) kernel void
-gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
-        global INTC *c, int offsetA, int offsetB, int offsetC, int lda, int ldb,
-        int ldc, int m, int n, int k, int beta, CHARA ao, CHARB bo,
-        global INTC *co, int offsetCO, int apply_co, local CHARA *sa,
-        local CHARB *sb, int apply_eltwise, float eltwise_alpha,
+gen12lp_gemm_compute_x8x8s32_kernel(global A_TYPE *a, global B_TYPE *b,
+        global int *c, int offsetA, int offsetB, int offsetC, int lda, int ldb,
+        int ldc, int m, int n, int k, int beta, A_TYPE ao, B_TYPE bo,
+        global int *co, int offsetCO, int apply_co, local A_TYPE *sa,
+        local B_TYPE *sb, int apply_eltwise, float eltwise_alpha,
         float eltwise_beta) {
 
-    // unroll_m = 32, unroll_n = 16, subgroupsize = 16
-    CHARA4 ai[2]; // 32x4 block of A, 2x 16x4 scattered access
-    CHARB bi[4]; // 4x16 block of B, 4x 1x16 block access
-    INTC ci[2][16]; // 32x16 block of C, 16x1 x 2x16 scattered access
+    // clang-format off
+    A_TYPE4 ai[2];  // 32x4 block of A, 2x 16x4 scattered access
+    B_TYPE bi[4];   // 4x16 block of B, 4x 1x16 block access
+    int ci[2][16]; // 32x16 block of C, 16x1 x 2x16 scattered access
+    // clang-format on
 
-    INTC sumRowA[2] = {0, 0};
-    INTC sumColB = 0;
+    int sumRowA[2] = {0, 0};
+    int sumColB = 0;
 
-    CHARA4 biit;
+    A_TYPE4 biit;
 
     int idM = get_group_id(0);
     int idN = get_group_id(1);
     int idlM = get_local_id(0);
     int idlN = get_local_id(1);
     int lid = get_sub_group_local_id();
-    int lsm = 32; //get_local_size(0)
-    int lsn = 8; //get_local_size(1)
+    int lsm = 32;
+    int lsn = 8;
 
     int i0 = (idM * lsm / 16) * 32 + (get_local_id(0) / 16) * 32;
     int j0 = idlN * 16 + (idN * lsn * 16);
@@ -872,6 +1126,9 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
 
     if (irem < 0) irem = 0;
     if (jrem < 0) jrem = 0;
+    int irem2 = m - i0;
+    int jrem2 = n - j0;
+
     a += offsetA + (i0 * lda) + (lid * lda);
 
 #ifdef ALIGNED
@@ -897,8 +1154,8 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
     c_offset_type = 2;
 #endif
 
-    global CHARA *a_ptrs[2] = {a, a + 16 * lda};
-    global CHARB *b_ptrs[4] = {b, b + 1 * ldb, b + 2 * ldb, b + 3 * ldb};
+    global A_TYPE *a_ptrs[2] = {a, a + 16 * lda};
+    global B_TYPE *b_ptrs[4] = {b, b + 1 * ldb, b + 2 * ldb, b + 3 * ldb};
 
     for (int y = 0; y < 16; y++) {
         for (int z = 0; z < 2; z++) {
@@ -907,74 +1164,159 @@ gen12lp_gemm_compute_x8x8s32_kernel(global CHARA *a, global CHARB *b,
     }
 
     int k_align = k & ~3;
-    for (int h = 0; h < k_align; h += 4) {
 
-        // Load A
-        for (int z = 0; z < 2; z++) {
-            VLOADA4(z, ((a_ptrs[z]) + h));
+#ifndef ALLOW_READ_OVERRUNS
+    if (irem2 >= 32 && jrem2 >= 16) {
+#endif
+        for (int h = 0; h < k_align; h += 4) {
+            // Load A
+            for (int z = 0; z < 2; z++) {
+                VLOAD4_A(z, ((a_ptrs[z]) + h));
 #ifdef BOFFNONZERO
-            ADDAROW(z);
+                ADD_ROW_A(z);
+#endif
+            }
+            // Load B
+            for (int hh = 0; hh < 4; hh++) {
+                BLOCK_READ_B(h, hh);
+#ifdef AOFFNONZERO
+                ADD_COL_BT();
+#endif
+            }
+            // Copy B
+            COPYB();
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(4);
 #endif
         }
-        // Load B
-        for (int hh = 0; hh < 4; hh++) {
-            BLOCKREADB(h, hh);
+        // Remainder Loop
+        int krem = k & 3;
+        if (krem > 0) {
+            ai[0] = 0;
+            ai[1] = 0;
+
+            bi[0] = 0;
+            bi[1] = 0;
+            bi[2] = 0;
+            bi[3] = 0;
+
+            // Load A
+            for (int z = 0; z < 2; z++) {
+                LOADA_REM(z, ((a_ptrs[z]) + k_align));
+#ifdef BOFFNONZERO
+                ADD_ROW_A(z);
+#endif
+            }
+            // Load B
+            for (int hh = 0; hh < krem; hh++) {
+                BLOCK_READ_B(k_align, hh);
 #ifdef AOFFNONZERO
-            ADDBCOLT();
+                ADD_COL_BT();
+#endif
+            }
+            // Copy B
+            COPYB();
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(krem);
 #endif
         }
-        // Copy B
-        COPYB();
 
-        // Compute
-        FMA_I_LOOP(0);
+#ifndef ALLOW_READ_OVERRUNS
+    } else {
+
+        for (int h = 0; h < k_align; h += 4) {
+            // Load A
+            for (int z = 0; z < 2; z++) {
+                if (irem > z * 16) {
+                    VLOAD4_A(z, (a_ptrs[z] + h));
 #ifdef BOFFNONZERO
-        ADD_BOFF_LOOP();
+                    ADD_ROW_A(z);
+#endif
+                }
+            }
+            // Load B
+            for (int hh = 0; hh < 4; hh++) {
+                if (jrem > lid) {
+#ifdef ALIGNED
+                    bi[hh] = *((b_ptrs[hh] + h * ldb) + lid);
+#else
+                    bi[hh] = *(b_ptrs[hh] + h * ldb);
 #endif
 #ifdef AOFFNONZERO
-        ADD_AOFF_LOOP(4);
+                    ADD_COL_BT();
 #endif
+                }
+            }
+            // Copy B
+            COPYB();
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(4);
+#endif
+        }
+        // Remainder Loop
+        int krem = k & 3;
+        if (krem > 0) {
+            ai[0] = 0;
+            ai[1] = 0;
+
+            bi[0] = 0;
+            bi[1] = 0;
+            bi[2] = 0;
+            bi[3] = 0;
+
+            // Load A
+            for (int z = 0; z < 2; z++) {
+                if (irem > z * 16) {
+                    LOADA_REM(z, (a_ptrs[z] + k_align));
+#ifdef BOFFNONZERO
+                    ADD_ROW_A(z);
+#endif
+                }
+            }
+            // Load B
+            for (int hh = 0; hh < krem; hh++) {
+                if (jrem > lid) {
+#ifdef ALIGNED
+                    bi[hh] = *((b_ptrs[hh] + k_align * ldb) + lid);
+#else
+                    bi[hh] = *(b_ptrs[hh] + k_align * ldb);
+#endif
+#ifdef AOFFNONZERO
+                    ADD_COL_BT();
+#endif
+                }
+            }
+            // Copy B
+            COPYB();
+            // Compute
+            FMA_I_LOOP(0);
+#ifdef BOFFNONZERO
+            ADD_BOFF_LOOP();
+#endif
+#ifdef AOFFNONZERO
+            ADD_AOFF_LOOP(krem);
+#endif
+        }
     }
-
-    // Remainder Loop
-    int krem = k & 3;
-    if (krem > 0) {
-        ai[0] = 0;
-        ai[1] = 0;
-
-        bi[0] = 0;
-        bi[1] = 0;
-        bi[2] = 0;
-        bi[3] = 0;
-
-        // Load A
-        for (int z = 0; z < 2; z++) {
-            LOADA_REM(z, ((a_ptrs[z]) + k_align));
-#ifdef BOFFNONZERO
-            ADDAROW(z);
-#endif
-        }
-        // Load B
-        for (int hh = 0; hh < krem; hh++) {
-            BLOCKREADB(k_align, hh);
-#ifdef AOFFNONZERO
-            ADDBCOLT();
-#endif
-        }
-        // Copy B
-        COPYB();
-        // Compute
-        FMA_I_LOOP(0);
-#ifdef BOFFNONZERO
-        ADD_BOFF_LOOP();
-#endif
-#ifdef AOFFNONZERO
-        ADD_AOFF_LOOP(krem);
-#endif
-    }
+#endif /* ALLOW_READ_OVERHEAD */
 
     // Store C
-    global INTC *c2 = c + 16;
+    global int *c2 = c + 16;
 
     // Update C
     if (beta == 0)

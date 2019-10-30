@@ -29,10 +29,9 @@ struct jit_gen12lp_gemm_driver_params {};
 
 template <>
 struct jit_gen12lp_gemm_driver_params<data_type::s32, true> {
-    //unroll_m = 32, unroll_n = 16
-    static constexpr auto block_m = 2048; //2048
-    static constexpr auto block_n = 2048; //1024
-    static constexpr auto block_k = 1024; //1024
+    static constexpr auto block_m = 2048;
+    static constexpr auto block_n = 2048;
+    static constexpr auto block_k = 1024;
 };
 
 template <data_type_t a_type, data_type_t b_type, data_type_t c_type>
@@ -42,10 +41,10 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_x8x8s32(
         int64_t offset_b, int64_t offset_c, int64_t lda, int64_t ldb,
         int64_t ldc, int64_t m, int64_t n, int64_t k, int64_t beta, ao_t ao,
         bo_t bo, const memory_storage_t &co, int64_t offset_co, bool apply_co,
-        bool apply_eltwise, c_t eltwise_alpha, c_t eltwise_beta, bool aligned,
-        bool aoffnonzero, bool boffnonzero) const {
+        bool apply_eltwise, c_t eltwise_alpha, c_t eltwise_beta,
+        bool aligned) const {
 
-    auto &kernel = compute_x8x8s32_kernel_[aligned][aoffnonzero][boffnonzero];
+    auto &kernel = compute_x8x8s32_kernel_[aligned];
     assert(kernel);
 
     int unroll_m, unroll_n, block_m, block_n;
@@ -86,8 +85,8 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::launch_x8x8s32(
     size_t nthreads_x = (m + unroll_m - 1) / unroll_m;
     size_t nthreads_y = (n + unroll_n - 1) / unroll_n;
 
-    size_t lthreads_x = 2; //m
-    size_t lthreads_y = 8; //n
+    size_t lthreads_x = 2;
+    size_t lthreads_y = 8;
 
 #ifndef CL_VERSION_2_0
     while (nthreads_x % lthreads_x)
@@ -228,10 +227,6 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute_standard(
 
     bool apply_co = true;
     bool aligned = false;
-    bool aoffnonzero = false;
-    if (ao != 0) aoffnonzero = true;
-    bool boffnonzero = false;
-    if (bo != 0) boffnonzero = true;
 
     int64_t size_k, size_m, size_n;
 
@@ -270,7 +265,7 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute_standard(
                                 size_m, size_n, size_k, eff_beta, ao, bo, co,
                                 offset_co_src, (int)apply_co,
                                 (int)apply_eltwise, eltwise_alpha, eltwise_beta,
-                                aligned, aoffnonzero, boffnonzero);
+                                aligned);
 
                         if (status) return status;
                     } else if (do_scale) {
@@ -285,8 +280,7 @@ status_t jit_gen12lp_gemm_t<a_type, b_type, c_type>::execute_standard(
                                 *temp_buf_, off_a_src, off_b_src, off_c, lda,
                                 ldb, m, size_m, size_n, size_k, eff_beta, ao,
                                 bo, co, offset_co_src, apply_co, 0,
-                                eltwise_alpha, eltwise_beta, aligned,
-                                aoffnonzero, boffnonzero);
+                                eltwise_alpha, eltwise_beta, aligned);
                         if (status) return status;
                     }
                 }
