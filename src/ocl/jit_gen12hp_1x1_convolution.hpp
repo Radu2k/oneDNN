@@ -50,6 +50,9 @@ struct jit_gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
             using namespace data_type;
             assert(this->engine()->kind() == engine_kind::gpu);
 
+            const auto attr_skip_mask = primitive_attr_t::skip_mask_t::oscale
+                    | primitive_attr_t::skip_mask_t::post_ops;
+
             bool ok = true
                     && utils::one_of(this->desc()->prop_kind, forward_training,
                             forward_inference)
@@ -57,7 +60,9 @@ struct jit_gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
                     && utils::one_of(true,
                             expect_data_types(u8, s8, f32, dst_type, s32),
                             expect_data_types(bf16, bf16, bf16, dst_type, f32),
-                            expect_data_types(f16, f16, f16, dst_type, f16));
+                            expect_data_types(f16, f16, f16, dst_type, f16))
+                    && attr()->has_default_values(attr_skip_mask)
+                    && post_ops_ok(attr());
             if (!ok) return status::unimplemented;
 
             status_t status = jit_gen12hp_1x1_conv_fwd_kernel::init_conf(jcp_,

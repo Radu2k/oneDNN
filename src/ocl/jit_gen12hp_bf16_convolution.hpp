@@ -58,7 +58,8 @@ struct jit_gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
                             || expect_data_types(bf16, f32, f32, bf16,
                                     f32)) //f32 wei, f32 bias
                     && compute_engine->mayiuse(
-                            compute::device_ext_t::intel_subgroups);
+                            compute::device_ext_t::intel_subgroups)
+                    && attr()->has_default_values();
 
             if (!ok) return status::unimplemented;
 
