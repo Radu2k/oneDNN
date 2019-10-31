@@ -26,6 +26,9 @@
 #define BLOCK_READ_WHT(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
 
+#define BLOCK_READ_BIA(data, idx) \
+    data = as_float4(intel_sub_group_block_read4((__global uint *)&bias[idx]));
+
 #define CHANNEL_OFFSET 1
 #define MB_OFFSET IC_BLOCK
 #define PIXEL_WIDTH_OFFSET (MB_OFFSET * MB_BLOCK)
@@ -112,8 +115,8 @@ gen12lp_1x1_conv_fwd_u8s8s32u8_kernel(const __global uchar *src,
     uint8 D0, D1, D2, D3;
 
 #if WITH_BIAS
-    bias += (oc_group_id + sg_id) * OC_BLOCK + get_sub_group_local_id() * 4;
-    float4 bia = (float4)(bias[0], bias[1], bias[2], bias[3]);
+    float4 bia;
+    BLOCK_READ_BIA(bia, (oc_group_id + sg_id) * OC_BLOCK);
     bia *= scales;
 #define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)scales, bia);
 #else
@@ -181,8 +184,10 @@ gen12lp_1x1_conv_fwd_u8s8s32u8_kernel(const __global uchar *src,
             DO_POST_SUM_ELTWISE(); \
             CONVERT_PACK(n_i); \
         } \
-        intel_sub_group_block_write8( \
-                (__global uint *)&dst[mb_stride * OC_BLOCK], dst_pack); \
+        intel_sub_group_block_write_uc16( \
+                &dst[mb_stride * OC_BLOCK], as_uchar16(dst_pack.s0123)); \
+        intel_sub_group_block_write_uc16(&dst[mb_stride * OC_BLOCK + 16 * 8], \
+                as_uchar16(dst_pack.s4567)); \
     } while (0)
 
     STORE_DST(C00, C01, C02, C03, D0, 0);

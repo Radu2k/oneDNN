@@ -84,10 +84,9 @@ struct jit_memory_desc_info_t {
         //
         // This is specific for GPU and required for the
         // implementations relying on the subgroup extension.
-        if (mdw.matches_one_of_tag(OIdhw4o8i8o4i, OIhw4o8i8o4i, OIw4o8i8o4i,
-                    OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o, gOIdhw4o8i8o4i,
-                    gOIhw4o8i8o4i, gOIw4o8i8o4i, gOIw8o16i2o, gOIhw8o16i2o,
-                    gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i)) {
+        if (mdw.matches_one_of_tag(OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o,
+                    gOIw8o16i2o, gOIhw8o16i2o, gOIdhw8o16i2o, OIhw2o8i8o2i,
+                    gOIhw2o8i8o2i)) {
             int d = (levels[0] == 2) ? 0 : 1;
             nstl::swap(jit_md_info.blocks[d][2], jit_md_info.blocks[d][1]);
             nstl::swap(jit_md_info.strides[d][2], jit_md_info.strides[d][1]);

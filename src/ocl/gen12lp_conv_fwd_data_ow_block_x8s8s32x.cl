@@ -26,7 +26,6 @@
 #define DST_DATA_BLOCK_T uint4
 #define READ_BLOCK intel_sub_group_block_read4
 #define WRITE_LOCAL WRITE_LOCAL_4
-#define WRITE_BLOCK intel_sub_group_block_write4
 #define MMAD mmad8x4
 #else
 #define ACC_DATA_BLOCK int8
@@ -34,14 +33,17 @@
 #define DST_DATA_BLOCK_T uint8
 #define READ_BLOCK intel_sub_group_block_read8
 #define WRITE_LOCAL WRITE_LOCAL_8
-#define WRITE_BLOCK intel_sub_group_block_write8
 #define MMAD mmad8x8
 #endif
 
 #define BLOCK_READ_SRC(data, idx) \
     data = intel_sub_group_block_read8((__global uint *)&src[idx]);
+
 #define BLOCK_READ_WHT(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
+
+#define BLOCK_READ_BIA(data, idx) \
+    data = as_float4(intel_sub_group_block_read4((__global uint *)&bias[idx]));
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
@@ -241,8 +243,8 @@ conv_fwd_ow_block_x8s8s32x_kernel(const __global SRC_DATA_T *src,
         DST_DATA_BLOCK_T D0, D1, D2, D3;
 
 #if WITH_BIAS
-        bias += (group_oc + oc) * OC_BLOCK + get_sub_group_local_id() * 4;
-        float4 bia = (float4)(bias[0], bias[1], bias[2], bias[3]);
+        float4 bia;
+        BLOCK_READ_BIA(bia, (group_oc + oc) * OC_BLOCK);
         bia *= scales;
 #define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)scales, bia);
 #else
@@ -317,12 +319,19 @@ conv_fwd_ow_block_x8s8s32x_kernel(const __global SRC_DATA_T *src,
             __attribute__((opencl_unroll_hint(OW_TAIL))) for (int i = 0;
                                                               i < OW_TAIL;
                                                               i++) {
-                intel_sub_group_block_write(
-                        (__global uint *)&dst[i * 32], dst_pack[i]);
+                intel_sub_group_block_write_uc4(
+                        &dst[i * 32], as_uchar4(dst_pack[i]));
             }
         } else {
 #endif
-            WRITE_BLOCK((__global uint *)&dst[0], dst_pack);
+#if OW_BLOCK == 4
+            intel_sub_group_block_write_uc16(dst, as_uchar16(dst_pack));
+#endif
+#if OW_BLOCK == 8
+            intel_sub_group_block_write_uc16(dst, as_uchar16(dst_pack.s0123));
+            intel_sub_group_block_write_uc16(
+                    dst + 16 * 8, as_uchar16(dst_pack.s4567));
+#endif
 #if OW_TAIL
         }
 #endif
