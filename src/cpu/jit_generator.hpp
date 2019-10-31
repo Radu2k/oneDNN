@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef CPU_JIT_AVX2_GENERATOR_HPP
-#define CPU_JIT_AVX2_GENERATOR_HPP
+#ifndef CPU_JIT_GENERATOR_HPP
+#define CPU_JIT_GENERATOR_HPP
 
 #include <limits.h>
 
@@ -606,6 +606,16 @@ public:
         vfnmadd231ps(x1, x2, op);
     }
 
+    void uni_vfmsub213ps(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op) {
+        mulps(x1, x2);
+        subps(x1, op);
+    }
+    void uni_vfmsub213ps(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
+            const Xbyak::Operand &op) {
+        vfmsub213ps(x1, x2, op);
+    }
+
     void uni_vsqrtps(const Xbyak::Xmm &x, const Xbyak::Operand &op) {
         sqrtps(x, op);
     }
@@ -649,6 +659,19 @@ public:
             vpord(x1, x2, op);
     }
 
+    void uni_vxorps(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op = Xbyak::Operand()) {
+        if (x1.getIdx() != x2.getIdx()) { uni_vmovups(x1, x2); }
+        xorps(x1, op);
+    }
+    void uni_vxorps(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
+            const Xbyak::Operand &op = Xbyak::Operand()) {
+        if (!mayiuse(avx512_common) || x1.getBit() < 512)
+            vxorps(x1, x2, op);
+        else
+            vpxord(x1, x2, op);
+    }
+
     void uni_vpslld(
             const Xbyak::Xmm &x, const Xbyak::Operand &op, const int imm) {
         assert(x.getIdx() == op.getIdx());
@@ -661,7 +684,7 @@ public:
 
     void uni_vpsrld(
             const Xbyak::Xmm &x, const Xbyak::Operand &op, const int imm) {
-        assert(x.getIdx() == op.getIdx());
+        if (x.getIdx() != op.getIdx()) uni_vmovups(x, op);
         psrld(x, imm);
     }
     void uni_vpsrld(
@@ -689,26 +712,14 @@ public:
         vminps(x, op1, op2);
     }
 
-    void uni_vcmpgtps(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
-            const Xbyak::Operand &op) {
-        assert(x1.getIdx() == x2.getIdx());
-        cmpps(x1, op, _cmp_nle_us);
+    void uni_vcmpps(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op, int cmp_predicate) {
+        if (x1.getIdx() != x2.getIdx()) uni_vmovups(x1, x2);
+        cmpps(x1, op, cmp_predicate);
     }
-
-    void uni_vcmpgtps(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
-            const Xbyak::Operand &op) {
-        vcmpgtps(x1, x2, op);
-    }
-
-    void uni_vcmpgeps(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
-            const Xbyak::Operand &op) {
-        assert(x1.getIdx() == x2.getIdx());
-        cmpps(x1, op, _cmp_nlt_us);
-    }
-
-    void uni_vcmpgeps(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
-            const Xbyak::Operand &op) {
-        vcmpps(x1, x2, op, _cmp_nlt_us);
+    void uni_vcmpps(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
+            const Xbyak::Operand &op, int cmp_predicate) {
+        vcmpps(x1, x2, op, cmp_predicate);
     }
 
     void uni_vtestps(const Xbyak::Xmm &x1, const Xbyak::Operand &op) {

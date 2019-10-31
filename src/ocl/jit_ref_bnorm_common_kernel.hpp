@@ -142,6 +142,27 @@ struct jit_ref_bnorm_common_kernel {
         return status::success;
     }
 
+    static void init_scratchpad(memory_tracking::registrar_t &scratchpad,
+            const jit_bnorm_conf_t &jbn) {
+        if (jbn.is_forward) {
+            if (jbn.ic_block == 16 && jbn.calculate_stats) {
+                size_t size = 2 * jbn.mb_chunk * jbn.sp_chunk * jbn.ic
+                        * types::data_type_size(data_type::f32);
+
+                scratchpad.book(
+                        memory_tracking::names::key_bnorm_reduction, size);
+            }
+        }
+        if (jbn.is_backward) {
+            if (jbn.ic_block == 16) {
+                size_t size = 2 * jbn.mb_chunk * jbn.sp_chunk * jbn.ic
+                        * types::data_type_size(data_type::f32);
+                scratchpad.book(
+                        memory_tracking::names::key_bnorm_reduction, size);
+            }
+        }
+    }
+
     jit_bnorm_conf_t jbn;
 };
 

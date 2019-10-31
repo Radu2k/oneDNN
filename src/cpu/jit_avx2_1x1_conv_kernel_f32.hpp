@@ -14,15 +14,15 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef JIT_AVX2_1x1_CONV_KERNEL_F32_HPP
-#define JIT_AVX2_1x1_CONV_KERNEL_F32_HPP
+#ifndef JIT_AVX2_1X1_CONV_KERNEL_F32_HPP
+#define JIT_AVX2_1X1_CONV_KERNEL_F32_HPP
 
 #include "c_types_map.hpp"
 #include "memory_tracking.hpp"
 
 #include "jit_generator.hpp"
 #include "jit_primitive_conf.hpp"
-#include "jit_uni_eltwise.hpp"
+#include "jit_uni_eltwise_injector.hpp"
 #include "memory.hpp"
 
 namespace dnnl {

@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef JIT_UNI_DW_CONVOLUTION_UTILS_HPP
-#define JIT_UNI_DW_CONVOLUTION_UTILS_HPP
+#ifndef JIT_UNI_DW_CONV_KERNEL_UTILS_HPP
+#define JIT_UNI_DW_CONV_KERNEL_UTILS_HPP
 
 #include "nstl.hpp"
 #include "type_helpers.hpp"
@@ -26,7 +26,7 @@
 
 #include "jit_generator.hpp"
 #include "jit_primitive_conf.hpp"
-#include "jit_uni_eltwise.hpp"
+#include "jit_uni_eltwise_injector.hpp"
 
 #include "jit_avx512_core_bf16_dw_conv_kernel.hpp"
 #include "jit_uni_dw_conv_kernel_f32.hpp"
@@ -514,4 +514,4 @@ template struct jit_uni_dw_conv_bwd_weights_kernel<sse41, data_type::f32>;
 } // namespace cpu
 } // namespace impl
 } // namespace dnnl
-#endif /* JIT_UNI_DW_CONVOLUTION_UTILS_HPP */
+#endif /* JIT_UNI_DW_CONV_KERNEL_UTILS_HPP */

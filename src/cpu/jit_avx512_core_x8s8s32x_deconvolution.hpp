@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef CPU_JIT_AVX512_CORE_U8S8S32X_DECONVOLUTION_HPP
-#define CPU_JIT_AVX512_CORE_U8S8S32X_DECONVOLUTION_HPP
+#ifndef CPU_JIT_AVX512_CORE_X8S8S32X_DECONVOLUTION_HPP
+#define CPU_JIT_AVX512_CORE_X8S8S32X_DECONVOLUTION_HPP
 
 #include "c_types_map.hpp"
 #include "dnnl_thread.hpp"
@@ -27,7 +27,7 @@
 #include "cpu_deconvolution_pd.hpp"
 #include "jit_generator.hpp"
 #include "jit_primitive_conf.hpp"
-#include "jit_uni_eltwise.hpp"
+#include "jit_uni_eltwise_injector.hpp"
 
 namespace dnnl {
 namespace impl {

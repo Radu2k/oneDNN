@@ -103,12 +103,12 @@ DNNL is licensed under
 [Apache License Version 2.0](http://www.apache.org/licenses/LICENSE-2.0). This
 software includes the following third-party components:
 * [Xbyak](https://github.com/herumi/xbyak) distributed under
-[3-clause BSD licence](src/cpu/xbyak/COPYRIGHT)
+[3-clause BSD license](src/cpu/xbyak/COPYRIGHT)
 * [gtest](https://github.com/google/googletest) distributed under
 [3-clause BSD license](tests/gtests/gtest/LICENSE)
 * [ittnotify](https://github.com/intel/IntelSEAPI) distributed under
 [3-clause BSD license](src/cpu/jit_utils/jitprofiling/LICENSE.BSD)
-* [Cmake](https://github.com/Kitware/CMake) distributed under
+* [CMake](https://github.com/Kitware/CMake) distributed under
 [3-clause BSD license](cmake/Copyright.txt)
 * [MathJax](https://github.com/mathjax/MathJax) distributed under
 [Apache License Version 2.0](doc/assets/mathjax/LICENSE)
@@ -146,7 +146,7 @@ The library is optimized for the following GPUs:
 
 ## Requirements for Building from Source
 DNNL supports systems meeting the following requirements:
-* Operating sytem with Intel 64 architecture support
+* Operating system with Intel 64 architecture support
 * C++ compiler with C++11 standard support
 * [CMake](https://cmake.org/download/) 2.8.11 or later
 * [Doxygen](http://www.doxygen.nl/download.html#srcbin) 1.8.5 or later to build
@@ -195,7 +195,7 @@ Runtime specific dependencies:
 | `DNNL_CPU_RUNTIME=OMP` | Intel C/C++ Compiler          | Intel OpenMP runtime (libiomp5.so)
 | `DNNL_CPU_RUNTIME=OMP` | Clang                         | Intel OpenMP runtime (libiomp5.so)
 | `DNNL_CPU_RUNTIME=TBB` | any                           | Threading Building Blocks (libtbb.so)
-| `DNNL_GPU_RUNTIME=OCL` | any                           | Intel Graphics Compute Runtime for OpenCL (libOpenCL.so)
+| `DNNL_GPU_RUNTIME=OCL` | any                           | OpenCL runtime (libOpenCL.so)
 
 #### Windows
 Common dependencies:
@@ -208,7 +208,7 @@ Runtime specific dependencies:
 | `DNNL_CPU_RUNTIME=OMP` | Microsoft Visual C++ Compiler | No additional requirements
 | `DNNL_CPU_RUNTIME=OMP` | Intel C/C++ Compiler          | Intel OpenMP runtime (iomp5.dll)
 | `DNNL_CPU_RUNTIME=TBB` | any                           | Threading Building Blocks (tbb.dll)
-| `DNNL_GPU_RUNTIME=OCL` | any                           | Intel Graphics Driver (OpenCL.dll)
+| `DNNL_GPU_RUNTIME=OCL` | any                           | OpenCL runtime (OpenCL.dll)
 
 #### macOS
 Common dependencies:
@@ -239,12 +239,12 @@ on macOS 10.13 (High Sierra) with
   18.0 and 19.0
 
 GPU engine was validated on Ubuntu\* 18.04 with
-* GNU Compiler Collection 5.4 and 8.1
+* GNU Compiler Collection 6.1 and 8.1
 * Clang 3.8.1
 * [Intel C/C++ Compiler](https://software.intel.com/en-us/intel-parallel-studio-xe)
   19.0
 * [Intel SDK for OpenCL applications](https://software.intel.com/en-us/intel-opencl) 2019 Update 3
-* [Intel Graphics Compute Runtime for OpenCL](https://github.com/intel/compute-runtime/releases) 19.15.12831
+* [Intel Graphics Compute Runtime for OpenCL](https://github.com/intel/compute-runtime/releases) 19.37.14191
 
 on Windows Server 2019 with
 * Microsoft Visual C++ 14.0 (Visual Studio 2015 Update 3)
