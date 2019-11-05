@@ -18,22 +18,11 @@
 /// @copybrief cross_engine_reorder_cpp
 /// > Annotated version: @ref cross_engine_reorder_cpp
 
-#include <iostream>
-#include <sstream>
-
-/// @page cross_engine_reorder_cpp Getting started on GPU
-/// This C++ API example demonstrates programming for Intel(R) Processor
-/// Graphics with DNNL.
+/// @page cross_engine_reorder_cpp Reorder between CPU and GPU engines
+/// This C++ API example demonstrates programming flow when reordering memory
+/// between CPU and GPU engines.
 ///
 /// > Example code: @ref cross_engine_reorder.cpp
-///
-///   - How to create DNNL memory objects for both GPU and CPU.
-///   - How to get data from the user's buffer into an DNNL
-///     GPU memory object.
-///   - How to get results from an DNNL GPU memory object
-///     into the user's buffer.
-///   - How to create DNNL primitives on GPU.
-///   - How to execute the primitives on GPU.
 ///
 /// @section cross_engine_reorder_cpp_headers Public headers
 ///
@@ -45,6 +34,12 @@
 /// All C++ API types and functions reside in the `dnnl` namespace.
 /// For simplicity of the example we import this namespace.
 /// @page cross_engine_reorder_cpp
+
+#include <iostream>
+#include <numeric>
+#include <sstream>
+#include <vector>
+
 /// @snippet cross_engine_reorder.cpp Prologue
 // [Prologue]
 #include "dnnl.hpp"
@@ -52,39 +47,34 @@
 // Optional header to access debug functions like `dnnl_status2str()`
 #include "dnnl_debug.h"
 
+#include "example_utils.hpp"
+
 using namespace dnnl;
 
 using namespace std;
 // [Prologue]
 
-size_t product(const memory::dims adims) {
-    size_t n_elems = 1;
-    for (size_t d = 0; d < adims.size(); ++d) {
-        n_elems *= (size_t)adims[d];
-    }
-    return n_elems;
+memory::dim product(const memory::dims &dims) {
+    return std::accumulate(dims.begin(), dims.end(), (memory::dim)1,
+            std::multiplies<memory::dim>());
 }
 
-void fill(const memory &mem, const memory::dims adims) {
-    float *array = mem.map_data<float>();
-
-    for (size_t e = 0; e < adims.size(); ++e) {
+void fill(memory &mem, const memory::dims &adims) {
+    std::vector<float> array(product(adims));
+    for (size_t e = 0; e < array.size(); ++e) {
         array[e] = e % 7 ? 1.0f : -1.0f;
     }
-
-    mem.unmap_data(array);
+    write_to_dnnl_memory(array.data(), mem);
 }
 
-int find_negative(const memory &mem, const memory::dims adims) {
+int find_negative(memory &mem, const memory::dims &adims) {
     int negs = 0;
-
-    float *array = mem.map_data<float>();
+    std::vector<float> array(product(adims));
+    read_from_dnnl_memory(array.data(), mem);
 
     for (size_t e = 0; e < adims.size(); ++e) {
         negs += array[e] < 0.0f;
     }
-
-    mem.unmap_data(array);
     return negs;
 }
 
@@ -182,7 +172,7 @@ void cross_engine_reorder_tutorial() {
     auto relu = eltwise_forward(relu_pd);
     // [Create a ReLU primitive]
 
-    /// @subsection cross_engine_reorder_cpp_sub4 Getting results from an DNNL GPU memory object
+    /// @subsection cross_engine_reorder_cpp_sub4 Getting results from a DNNL GPU memory object
     /// After the ReLU operation, users need to get data from GPU to CPU memory
     /// by reorder.
     /// @snippet cross_engine_reorder.cpp reorder gpu2cpu
@@ -214,8 +204,7 @@ void cross_engine_reorder_tutorial() {
     ///    All primitives are executed in the SAME GPU stream (the first
     ///    parameter of the `execute()` method).
     ///
-    /// Depending on the stream kind, an execution might be blocking or
-    /// non-blocking. This means that we need to call @ref
+    /// Execution is asynchronous on GPU. This means that we need to call @ref
     /// dnnl::stream::wait before accessing the results.
     ///
     /// @snippet cross_engine_reorder.cpp Execute primitives

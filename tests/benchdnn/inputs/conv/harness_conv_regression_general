@@ -7,7 +7,7 @@
 # DNNL-611
 --reset --cfg=f32
 --dir=FWD_D mb1ic64ih150iw200oc256oh150ow200kh1kw1ph0pw0sh1sw1n"rfcn-resnet50-res2a_branch1"
---dir=FWD_B --attr=post_ops='relu' mb1ic64ih150iw200oc256oh150ow200kh1kw1ph0pw0sh1sw1n"rfcn-resnet50-res2a_branch1" 
+--dir=FWD_B --attr=post_ops='relu' mb1ic64ih150iw200oc256oh150ow200kh1kw1ph0pw0sh1sw1n"rfcn-resnet50-res2a_branch1"
 --attr=
 --dir=BWD_W mb1ic256ih150iw200oc64oh150ow200kh1kw1ph0pw0sh1sw1n"rfcn-resnet50-res2a_branch1"
 
@@ -149,3 +149,17 @@ mb1_g16ic16oc16_ih1oh1kh2ph0_iw1ow1kw3pw1n"s8s8_padding:dw5"
 # Depthwise s8s8 tail processing
 --reset --allow-unimpl=true --cfg=s8s8s32
 mb1_g184ic184oc184_ih3oh3kh3sh1dh0ph1_iw3ow3kw3sw1dw0pw1
+
+# Read past end-of-buffer in int8 jit
+--reset
+--cfg=s8s8s8
+mb1_ic1oc16_ih123kh3oh121n"jit_reads_past_end_of_src_buffer:1"
+mb1_ic1oc16_ih124kh3oh122n"jit_reads_past_end_of_src_buffer:2"
+--cfg=u8s8u8
+mb1_ic1oc16_ih16kh3oh16ph1n"jit_reads_past_end_of_src_buffer:3"
+mb1_ic2oc16_ih16kh3oh16ph1n"jit_reads_past_end_of_src_buffer:4"
+
+# Test Input-channel blocking w/stride heuristic
+--reset --dir=BWD_D
+ic32oc1_id5ih1iw1_od2oh1ow1_kd3kh1kw1_sd2sh1sw1n"ic-blocking_stride-d_test"
+ic32oc1_ih5iw1_oh2ow1_kh3kw1_sh2sw1n"ic-blocking_stride-h_test"

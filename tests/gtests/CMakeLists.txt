@@ -44,8 +44,7 @@ file(GLOB PRIM_TEST_CASES_SRC
                               test_reorder.cpp
                               test_cross_engine_reorder.cpp
                               test_concat.cpp
-                              test_softmax_forward.cpp
-                              test_softmax_backward.cpp
+                              test_softmax.cpp
                               test_eltwise.cpp
                               test_lrn_forward.cpp
                               test_lrn_backward.cpp
@@ -78,6 +77,7 @@ file(GLOB PRIM_TEST_CASES_SRC
                               test_rnn_forward.cpp
                               test_layer_normalization.cpp
                               test_binary.cpp
+                              test_logsoftmax.cpp
                               )
 
 # Workaround for an Intel compiler bug: stack unwinding does not restore
@@ -96,6 +96,7 @@ foreach(TEST_FILE ${PRIM_TEST_CASES_SRC})
     get_filename_component(exe ${TEST_FILE} NAME_WE)
 
     add_executable(${exe} ${MAIN_SRC_GTEST} ${TEST_FILE})
+    maybe_configure_windows_test(${exe} TARGET)
     add_definitions(-DNOMINMAX) # to allow std::max on Windows with parentheses
     target_link_libraries(${exe} ${LIB_NAME} dnnl_gtest ${EXTRA_SHARED_LIBS})
 

@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef TYPE_MAPPING_HPP
-#define TYPE_MAPPING_HPP
+#ifndef C_TYPES_MAP_HPP
+#define C_TYPES_MAP_HPP
 
 #include "dnnl_types.h"
 #include "gemm_types.hpp"
@@ -76,6 +76,7 @@ const alg_kind_t eltwise_soft_relu = dnnl_eltwise_soft_relu;
 const alg_kind_t eltwise_logistic = dnnl_eltwise_logistic;
 const alg_kind_t eltwise_exp = dnnl_eltwise_exp;
 const alg_kind_t eltwise_gelu = dnnl_eltwise_gelu;
+const alg_kind_t eltwise_log = dnnl_eltwise_log;
 const alg_kind_t pooling_max = dnnl_pooling_max;
 const alg_kind_t pooling_avg = dnnl_pooling_avg;
 const alg_kind_t pooling_avg_include_padding = dnnl_pooling_avg_include_padding;
@@ -529,6 +530,7 @@ const primitive_kind_t inner_product = dnnl_inner_product;
 const primitive_kind_t rnn = dnnl_rnn;
 const primitive_kind_t gemm = dnnl_gemm;
 const primitive_kind_t binary = dnnl_binary;
+const primitive_kind_t logsoftmax = dnnl_logsoftmax;
 } // namespace primitive_kind
 
 using query_t = dnnl_query_t;
@@ -568,6 +570,7 @@ const query_t inner_product_d = dnnl_query_inner_product_d;
 const query_t rnn_d = dnnl_query_rnn_d;
 const query_t gemm_d = dnnl_query_gemm_d;
 const query_t binary_d = dnnl_query_binary_d;
+const query_t logsoftmax_d = dnnl_query_logsoftmax_d;
 
 const query_t some_md = dnnl_query_some_md;
 const query_t src_md = dnnl_query_src_md;
@@ -598,6 +601,7 @@ using batch_normalization_desc_t = dnnl_batch_normalization_desc_t;
 using layer_normalization_desc_t = dnnl_layer_normalization_desc_t;
 using inner_product_desc_t = dnnl_inner_product_desc_t;
 using binary_desc_t = dnnl_binary_desc_t;
+using logsoftmax_desc_t = dnnl_logsoftmax_desc_t;
 
 using rnn_direction_t = dnnl_rnn_direction_t;
 using rnn_desc_t = dnnl_rnn_desc_t;
@@ -640,7 +644,7 @@ struct op_desc_t {
         binary_desc_t binary;
     };
 
-#define DECL_CTOR_AND_CONVERTERS(c_type, name) \
+#define DECL_CTOR_AND_CONVERTERS(c_type) \
     op_desc_t(const c_type &) = delete; \
     static op_desc_t *convert_from_c(c_type *_) { \
         return reinterpret_cast<op_desc_t *>(_); \
@@ -649,21 +653,21 @@ struct op_desc_t {
         return reinterpret_cast<const op_desc_t *>(_); \
     }
 
-    DECL_CTOR_AND_CONVERTERS(convolution_desc_t, convolution);
-    DECL_CTOR_AND_CONVERTERS(shuffle_desc_t, shuffle);
-    DECL_CTOR_AND_CONVERTERS(pooling_desc_t, pooling);
-    DECL_CTOR_AND_CONVERTERS(eltwise_desc_t, eltwise);
-    DECL_CTOR_AND_CONVERTERS(softmax_desc_t, softmax);
-    DECL_CTOR_AND_CONVERTERS(lrn_desc_t, lrn);
-    DECL_CTOR_AND_CONVERTERS(batch_normalization_desc_t, batch_normalization);
-    DECL_CTOR_AND_CONVERTERS(layer_normalization_desc_t, layer_normalization);
-    DECL_CTOR_AND_CONVERTERS(inner_product_desc_t, inner_product);
-    DECL_CTOR_AND_CONVERTERS(rnn_desc_t, rnn);
-    DECL_CTOR_AND_CONVERTERS(gemm_desc_t, gemm);
-    DECL_CTOR_AND_CONVERTERS(concat_desc_t, concat);
-    DECL_CTOR_AND_CONVERTERS(reorder_desc_t, reorder);
-    DECL_CTOR_AND_CONVERTERS(sum_desc_t, sum);
-    DECL_CTOR_AND_CONVERTERS(binary_desc_t, binary);
+    DECL_CTOR_AND_CONVERTERS(convolution_desc_t);
+    DECL_CTOR_AND_CONVERTERS(shuffle_desc_t);
+    DECL_CTOR_AND_CONVERTERS(pooling_desc_t);
+    DECL_CTOR_AND_CONVERTERS(eltwise_desc_t);
+    DECL_CTOR_AND_CONVERTERS(softmax_desc_t);
+    DECL_CTOR_AND_CONVERTERS(lrn_desc_t);
+    DECL_CTOR_AND_CONVERTERS(batch_normalization_desc_t);
+    DECL_CTOR_AND_CONVERTERS(layer_normalization_desc_t);
+    DECL_CTOR_AND_CONVERTERS(inner_product_desc_t);
+    DECL_CTOR_AND_CONVERTERS(rnn_desc_t);
+    DECL_CTOR_AND_CONVERTERS(gemm_desc_t);
+    DECL_CTOR_AND_CONVERTERS(concat_desc_t);
+    DECL_CTOR_AND_CONVERTERS(reorder_desc_t);
+    DECL_CTOR_AND_CONVERTERS(sum_desc_t);
+    DECL_CTOR_AND_CONVERTERS(binary_desc_t);
 
     // concat_desc_t and sum_desc_t have data members which have non-trivial
     // special member functions hence the default destructor is implicitly

@@ -97,14 +97,27 @@ function(register_benchdnn_test name engine cmd)
         # Create non-suffixed target for compatibility
         if (engine STREQUAL "cpu")
             add_custom_target(${name} DEPENDS ${benchdnn_target})
+            maybe_configure_windows_test(${name} TARGET)
         endif()
     endif()
 endfunction()
 
-register_benchdnn_test(test_benchdnn_conv
-    cpu "-v1 --conv --batch=inputs/conv/test_conv_all")
+register_benchdnn_test(test_benchdnn_conv_bfloat16 # temporary proxy
+    cpu "-v1 --conv --batch=inputs/conv/test_conv_bfloat16")
 register_benchdnn_test(test_benchdnn_conv_bf16
     cpu "-v1 --conv --batch=inputs/conv/test_conv_bfloat16")
+register_benchdnn_test(test_benchdnn_conv_f32
+    cpu "-v1 --conv --batch=inputs/conv/test_conv_f32")
+register_benchdnn_test(test_benchdnn_conv_int8
+    cpu "-v1 --conv --batch=inputs/conv/test_conv_int8")
+register_benchdnn_test(test_benchdnn_conv_function
+    cpu "-v1 --conv --batch=inputs/conv/test_conv_function")
+register_benchdnn_test(test_benchdnn_gemm_conv_f32
+    cpu "-v1 --conv --batch=inputs/conv/test_gemm_conv_f32")
+register_benchdnn_test(test_benchdnn_gemm_conv_int8
+    cpu "-v1 --conv --batch=inputs/conv/test_gemm_conv_int8")
+register_benchdnn_test(test_benchdnn_gemm_conv_bf16
+    cpu "-v1 --conv --batch=inputs/conv/test_gemm_conv_bfloat16")
 register_benchdnn_test(test_benchdnn_deconv
     cpu "-v1 --deconv --batch=inputs/deconv/test_deconv_all")
 register_benchdnn_test(test_benchdnn_deconv_bf16

@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef CPU_JIT_GEMM_BF16_CONVOLUTION_HPP
-#define CPU_JIT_GEMM_BF16_CONVOLUTION_HPP
+#ifndef CPU_GEMM_BF16_CONVOLUTION_HPP
+#define CPU_GEMM_BF16_CONVOLUTION_HPP
 
 #include "c_types_map.hpp"
 #include "memory_tracking.hpp"
@@ -26,7 +26,7 @@
 #include "gemm/gemm.hpp"
 #include "gemm_convolution_utils.hpp"
 #include "jit_avx512_core_bf16cvt.hpp"
-#include "jit_uni_eltwise.hpp"
+#include "jit_uni_eltwise_injector.hpp"
 
 namespace dnnl {
 namespace impl {

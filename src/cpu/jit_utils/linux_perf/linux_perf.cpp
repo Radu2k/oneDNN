@@ -29,6 +29,7 @@
 #include <sys/types.h>
 
 #include <elf.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <syscall.h>
 #include <unistd.h>
@@ -38,6 +39,8 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+
+#include <string>
 
 #include "linux_perf.hpp"
 #include "utils.hpp"
@@ -308,8 +311,8 @@ private:
         if (ret >= PATH_MAX) return fail();
 
         fp_ = fopen(fname, "w+");
-        setvbuf(fp_, NULL, _IOLBF, 0); // disable line buffering
         if (!fp_) return fail();
+        setvbuf(fp_, NULL, _IOLBF, 0); // disable line buffering
 
         return true;
     }
