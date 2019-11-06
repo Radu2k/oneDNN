@@ -29,7 +29,7 @@ using namespace dnnl::impl::format_tag;
 static constexpr bool use_int8_slm_impl = false;
 
 struct jit_gen12hp_1x1_conv_fwd_kernel {
-    jit_gen12hp_1x1_conv_fwd_kernel(jit_conv_conf_t ajcp) : jcp(ajcp) {}
+    jit_gen12hp_1x1_conv_fwd_kernel(const jit_conv_conf_t &ajcp) : jcp(ajcp) {}
 
     ~jit_gen12hp_1x1_conv_fwd_kernel() {}
 

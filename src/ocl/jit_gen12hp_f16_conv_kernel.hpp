@@ -25,9 +25,9 @@ namespace impl {
 namespace ocl {
 
 struct jit_gen12hp_f16_conv_fwd_kernel {
-    jit_gen12hp_f16_conv_fwd_kernel(jit_conv_conf_t ajcp) : jcp(ajcp) {};
+    jit_gen12hp_f16_conv_fwd_kernel(const jit_conv_conf_t &ajcp) : jcp(ajcp) {}
 
-    ~jit_gen12hp_f16_conv_fwd_kernel() {};
+    ~jit_gen12hp_f16_conv_fwd_kernel() {}
 
     static status_t init_conf(jit_conv_conf_t &jcp,
             const convolution_desc_t &cd, const memory_desc_t &src_md,

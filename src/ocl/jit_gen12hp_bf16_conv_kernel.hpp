@@ -27,8 +27,8 @@ namespace impl {
 namespace ocl {
 
 struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
-    jit_gen12hp_bf16_conv_bwd_weights_kernel(jit_conv_conf_t ajcp)
-        : jcp(ajcp) {};
+    jit_gen12hp_bf16_conv_bwd_weights_kernel(const jit_conv_conf_t &ajcp)
+        : jcp(ajcp) {}
 
     static status_t init_conf(jit_conv_conf_t &jcp,
             const convolution_desc_t &cd, const memory_desc_t &src_md,
