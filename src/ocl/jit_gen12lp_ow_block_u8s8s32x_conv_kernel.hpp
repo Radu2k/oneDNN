@@ -27,10 +27,10 @@ namespace ocl {
 using namespace dnnl::impl::format_tag;
 
 struct jit_gen12lp_ow_block_u8s8s32x_conv_fwd_kernel {
-    jit_gen12lp_ow_block_u8s8s32x_conv_fwd_kernel(jit_conv_conf_t ajcp)
-        : jcp(ajcp) {};
+    jit_gen12lp_ow_block_u8s8s32x_conv_fwd_kernel(const jit_conv_conf_t &ajcp)
+        : jcp(ajcp) {}
 
-    ~jit_gen12lp_ow_block_u8s8s32x_conv_fwd_kernel() {};
+    ~jit_gen12lp_ow_block_u8s8s32x_conv_fwd_kernel() {}
 
     static status_t init_conf(jit_conv_conf_t &jcp,
             const convolution_desc_t &cd, const memory_desc_t &src_md,
