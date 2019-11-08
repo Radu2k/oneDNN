@@ -166,21 +166,21 @@ gen12hp_1x1_conv_fwd_kernel_bf16(const __global ushort *src,
         BLOCK_READ_WHT(W11, NEXT_KERNEL_OFFSET + KERNEL_BLOCK_OFFSET);
 
         // MB 0-7, OC sg_lid
-        C00 = mmad8x8(S0, as_int8((ushort16)(W00, W01)), C00);
+        C00 = MMAD8X8(S0, as_int8((ushort16)(W00, W01)), C00);
         // MB 0-7, OC sg_lid + sg_size
-        C10 = mmad8x8(S0, as_int8((ushort16)(W10, W11)), C10);
+        C10 = MMAD8X8(S0, as_int8((ushort16)(W10, W11)), C10);
         // MB 8-15, OC sg_lid
-        C01 = mmad8x8(S1, as_int8((ushort16)(W00, W01)), C01);
+        C01 = MMAD8X8(S1, as_int8((ushort16)(W00, W01)), C01);
         // MB 8-15, OC sg_lid + sg_size
-        C11 = mmad8x8(S1, as_int8((ushort16)(W10, W11)), C11);
+        C11 = MMAD8X8(S1, as_int8((ushort16)(W10, W11)), C11);
         // MB 16-23, OC sg_lid
-        C02 = mmad8x8(S2, as_int8((ushort16)(W00, W01)), C02);
+        C02 = MMAD8X8(S2, as_int8((ushort16)(W00, W01)), C02);
         // MB 16-23, OC sg_lid + sg_size
-        C12 = mmad8x8(S2, as_int8((ushort16)(W10, W11)), C12);
+        C12 = MMAD8X8(S2, as_int8((ushort16)(W10, W11)), C12);
         // MB 24-31, OC sg_lid
-        C03 = mmad8x8(S3, as_int8((ushort16)(W00, W01)), C03);
+        C03 = MMAD8X8(S3, as_int8((ushort16)(W00, W01)), C03);
         // MB 24-31, OC sg_lid + sg_size
-        C13 = mmad8x8(S3, as_int8((ushort16)(W10, W11)), C13);
+        C13 = MMAD8X8(S3, as_int8((ushort16)(W10, W11)), C13);
 
         src += INPUT_CHANNEL_BLOCK_OFFSET;
         wei += KERNEL_BLOCK_OFFSET * 2;

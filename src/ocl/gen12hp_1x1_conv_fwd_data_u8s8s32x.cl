@@ -139,22 +139,22 @@ gen12hp_1x1_conv_fwd_kernel_u8s8s32x(const __global uchar *src,
         BLOCK_READ_WHT(W3, 24 * IC_BLOCK);
 #endif
 
-        C00 = mmad8x8(S0, W0, C00);
-        C01 = mmad8x8(S0, W1, C01);
-        C02 = mmad8x8(S0, W2, C02);
-        C03 = mmad8x8(S0, W3, C03);
-        C10 = mmad8x8(S1, W0, C10);
-        C11 = mmad8x8(S1, W1, C11);
-        C12 = mmad8x8(S1, W2, C12);
-        C13 = mmad8x8(S1, W3, C13);
-        C20 = mmad8x8(S2, W0, C20);
-        C21 = mmad8x8(S2, W1, C21);
-        C22 = mmad8x8(S2, W2, C22);
-        C23 = mmad8x8(S2, W3, C23);
-        C30 = mmad8x8(S3, W0, C30);
-        C31 = mmad8x8(S3, W1, C31);
-        C32 = mmad8x8(S3, W2, C32);
-        C33 = mmad8x8(S3, W3, C33);
+        C00 = MMAD8X8(S0, W0, C00);
+        C01 = MMAD8X8(S0, W1, C01);
+        C02 = MMAD8X8(S0, W2, C02);
+        C03 = MMAD8X8(S0, W3, C03);
+        C10 = MMAD8X8(S1, W0, C10);
+        C11 = MMAD8X8(S1, W1, C11);
+        C12 = MMAD8X8(S1, W2, C12);
+        C13 = MMAD8X8(S1, W3, C13);
+        C20 = MMAD8X8(S2, W0, C20);
+        C21 = MMAD8X8(S2, W1, C21);
+        C22 = MMAD8X8(S2, W2, C22);
+        C23 = MMAD8X8(S2, W3, C23);
+        C30 = MMAD8X8(S3, W0, C30);
+        C31 = MMAD8X8(S3, W1, C31);
+        C32 = MMAD8X8(S3, W2, C32);
+        C33 = MMAD8X8(S3, W3, C33);
 
         src += INPUT_CHANNEL_BLOCK_OFFSET;
         wei += KERNEL_BLOCK_OFFSET;

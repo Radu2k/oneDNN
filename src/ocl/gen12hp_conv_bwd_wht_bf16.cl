@@ -78,8 +78,8 @@
 #define GEMM_IC_blk(o, i) \
     do { \
         ACC[o][2 * i] \
-                = mmad8x8(as_uint8(D[o]), as_int8(S[i][0]), ACC[o][2 * i]); \
-        ACC[o][2 * i + 1] = mmad8x8( \
+                = MMAD8X8(as_uint8(D[o]), as_int8(S[i][0]), ACC[o][2 * i]); \
+        ACC[o][2 * i + 1] = MMAD8X8( \
                 as_uint8(D[o]), as_int8(S[i][1]), ACC[o][2 * i + 1]); \
     } while (0)
 

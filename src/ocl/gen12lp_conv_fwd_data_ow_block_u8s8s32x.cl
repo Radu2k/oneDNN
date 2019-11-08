@@ -33,7 +33,7 @@
 #define READ_BLOCK intel_sub_group_block_read8
 #define WRITE_LOCAL WRITE_LOCAL_8
 #define WRITE_BLOCK intel_sub_group_block_write8
-#define MMAD mmad8x8
+#define MMAD MMAD8X8
 #endif
 
 #define BLOCK_READ_SRC(data, idx) \

@@ -47,7 +47,15 @@ inline int __imad(uchar4 a, char4 b, int c) __attribute__((overloadable)) {
     int __builtin_IB_dp4a_us(int c, int a, int b) __attribute__((const));
     return __builtin_IB_dp4a_us(c, as_int(a), as_int(b));
 }
+#define IMAD(_O, _I, _W) __imad(_O, _I, _W)
 
+#else // cl_intel_dot_accumulate
+
+#define IMAD(_O, _I, _W) mmad_4(_O, _I, _W)
+
+#endif
+
+#ifdef cl_intel_subgroup_matrix_multiply_accumulate
 inline int8 __dpas(uint8 a, int8 b, int8 acc) __attribute__((overloadable)) {
     int8 __builtin_IB_sub_group_idpas_u8_s8_8_8(int8 acc, uint8 a, int8 b)
             __attribute__((const));
@@ -70,6 +78,15 @@ inline float8 __dpas(uint8 a, int8 b, float8 acc)
 }
 #endif
 
+#define MMAD8X8(_O, _I, _W) __dpas(_O, _I, _W)
+
+#else // cl_intel_subgroup_matrix_multiply_accumulate
+
+#define MMAD8X8(_O, _I, _W) mmad8x8(_O, _I, _W)
+
+#endif
+
+#ifdef cl_intel_subgroup_local_block_io
 inline uint8 subgroup_block_read_uint8(const __local uint *p)
         __attribute__((overloadable)) {
     uint8 __builtin_IB_simd_block_read_8_local(const __local uint *p)
@@ -108,7 +125,6 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v)
     __builtin_IB_simd_block_write_8_local(p, v);
 }
 
-#define IMAD(_O, _I, _W) __imad(_O, _I, _W)
 #define READ_LOCAL_8(_P) subgroup_block_read_uint8(_P)
 #define READ_LOCAL_1(_P) subgroup_block_read_uint(_P)
 #define WRITE_LOCAL_8(_P, _V) subgroup_block_write_uint8(_P, _V)
@@ -116,11 +132,8 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v)
 #define WRITE_LOCAL_2(_P, _V) subgroup_block_write_uint2(_P, _V)
 #define WRITE_LOCAL_1(_P, _V) subgroup_block_write_uint(_P, _V)
 
-#define mmad8x8(_O, _I, _W) __dpas(_O, _I, _W)
+#else // cl_intel_subgroup_local_block_io
 
-#else // cl_intel_dot_accumulate
-
-#define IMAD(_O, _I, _W) mmad_4(_O, _I, _W)
 #define READ_LOCAL_8(_P) subgroup_block_read_uint8(_P)
 #define READ_LOCAL_1(_P) subgroup_block_read_uint(_P)
 #define WRITE_LOCAL_8(_P, _V) subgroup_block_write_uint8(_P, _V)
@@ -197,6 +210,7 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v) {
     p += get_max_sub_group_size();
     p[idx] = v.s7;
 }
+#endif
 
 inline int mmad_4(uchar4 input, char4 weight, int acc)
         __attribute__((overloadable)) {
@@ -394,8 +408,6 @@ inline float8 mmad8x8(uint8 A_vectors, int8 B_vectors, float8 acc)
     }
     return ret;
 }
-#endif
-
 #endif
 
 ushort8 convert_f32_to_bf16_vec8(float8 f) {
