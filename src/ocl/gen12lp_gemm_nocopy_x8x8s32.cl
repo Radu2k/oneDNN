@@ -198,10 +198,7 @@
 #define COPYA() \
     do { \
         ait[0].s0 = ai[0].s0; \
-        \ 
-        ait[0] \
-                .s1 \
-                = ai[1].s0; \
+        ait[0].s1 = ai[1].s0; \
         ait[0].s2 = ai[2].s0; \
         ait[0].s3 = ai[3].s0; \
         ait[1].s0 = ai[0].s1; \
@@ -213,7 +210,6 @@
 #define COPYB() \
     do { \
         biit.s0 = bi[0]; \
-        \ 
         biit.s1 = bi[1]; \
         biit.s2 = bi[2]; \
         biit.s3 = bi[3]; \
@@ -345,22 +341,18 @@
                     POST_OP(val); \
                     *c = val; \
                 } \
-                \  
                 if (c_offset_type == 1) { \
                     int val = ((betaZero) ? 0 : *c) \
                             + ((!apply_co) ? 0 : co[0]) + ci[0][i]; \
                     POST_OP(val); \
                     *c = val; \
                 } \
-                \  
                 if (c_offset_type == 2) { \
                     int val = ((betaZero) ? 0 : *c) \
                             + ((!apply_co) ? 0 : co[i]) + ci[0][i]; \
                     POST_OP(val); \
                     *c = val; \
                 } \
-                \  
-               \
             } \
             if (irem > 16) { \
                 if (c_offset_type == 0) { \
