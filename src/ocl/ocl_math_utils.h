@@ -48,6 +48,15 @@ inline int __imad(uchar4 a, char4 b, int c) __attribute__((overloadable)) {
     return __builtin_IB_dp4a_us(c, as_int(a), as_int(b));
 }
 
+#define IMAD(_O, _I, _W) __imad(_O, _I, _W)
+
+#else
+
+#define IMAD(_O, _I, _W) mmad_4(_O, _I, _W)
+
+#endif
+
+#ifdef cl_intel_subgroup_local_block_io
 inline uint8 intel_sub_group_block_read_local_ui8(const __local uint *p)
         __attribute__((overloadable)) {
     uint8 __builtin_IB_simd_block_read_8_local(const __local uint *p)
@@ -86,7 +95,6 @@ void intel_sub_group_block_write_local_ui8(__local uint *p, uint8 v)
     __builtin_IB_simd_block_write_8_local(p, v);
 }
 
-#define IMAD(_O, _I, _W) __imad(_O, _I, _W)
 #define READ_LOCAL_8(_P) intel_sub_group_block_read_local_ui8(_P)
 #define READ_LOCAL_1(_P) intel_sub_group_block_read_local_ui(_P)
 #define WRITE_LOCAL_8(_P, _V) intel_sub_group_block_write_local_ui8(_P, _V)
@@ -96,7 +104,6 @@ void intel_sub_group_block_write_local_ui8(__local uint *p, uint8 v)
 
 #else
 
-#define IMAD(_O, _I, _W) mmad_4(_O, _I, _W)
 #define READ_LOCAL_8(_P) intel_sub_group_block_read_local_ui8(_P)
 #define READ_LOCAL_1(_P) intel_sub_group_block_read_local_ui(_P)
 #define WRITE_LOCAL_8(_P, _V) intel_sub_group_block_write_local_ui8(_P, _V)

@@ -63,6 +63,8 @@ static compute::device_ext_t get_extensions(gpu_arch_t gpu_arch) {
     switch (gpu_arch) {
         case gpu_arch_t::gen12lp:
             extensions |= (uint64_t)compute::device_ext_t::intel_dot_accumulate;
+            extensions |= (uint64_t)
+                    compute::device_ext_t::intel_subgroup_local_block_io;
         case gpu_arch_t::gen9:
             extensions |= (uint64_t)compute::device_ext_t::khr_fp16;
             extensions |= (uint64_t)compute::device_ext_t::intel_subgroups;
@@ -121,7 +123,8 @@ public:
 
             // These extensions are not handled properly by the OpenCL runtime.
             // Pass macros for them manually.
-            if (utils::one_of(ext, device_ext_t::intel_dot_accumulate))
+            if (utils::one_of(ext, device_ext_t::intel_dot_accumulate,
+                        device_ext_t::intel_subgroup_local_block_io))
                 opts += std::string("-D") + ext2cl_str(ext) + " ";
         }
         if (!opts.empty()) { opts[opts.size() - 1] = '\0'; }

@@ -32,6 +32,7 @@ enum class device_ext_t : int64_t {
     intel_subgroups = 1 << 1,
     intel_subgroups_short = 1 << 2,
     intel_dot_accumulate = 1 << 3,
+    intel_subgroup_local_block_io = 1 << 4,
     last
 };
 
@@ -43,6 +44,7 @@ static inline const char *ext2cl_str(compute::device_ext_t ext) {
         CASE(intel_subgroups);
         CASE(intel_subgroups_short);
         CASE(intel_dot_accumulate);
+        CASE(intel_subgroup_local_block_io);
         default: return nullptr;
     }
 #undef CASE
