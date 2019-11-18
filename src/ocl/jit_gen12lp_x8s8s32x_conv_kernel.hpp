@@ -383,6 +383,7 @@ struct jit_gen12lp_x8s8s32x_conv_bwd_data_kernel {
 
         kernel_ctx.set_data_type(jcp.dst_data_type);
         def_data_type(kernel_ctx, jcp.src_data_type, "SRC");
+        kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
         return status::success;
     }

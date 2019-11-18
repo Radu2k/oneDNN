@@ -90,12 +90,6 @@ struct jit_memory_desc_info_t {
             int d = (levels[0] == 2) ? 0 : 1;
             nstl::swap(jit_md_info.blocks[d][2], jit_md_info.blocks[d][1]);
             nstl::swap(jit_md_info.strides[d][2], jit_md_info.strides[d][1]);
-        } else if (mdw.matches_one_of_tag(IOw4i8o8i4o, IOhw4i8o8i4o,
-                           IOdhw4i8o8i4o, gIOw4i8o8i4o, gIOhw4i8o8i4o,
-                           gIOdhw4i8o8i4o)) {
-            int d = (levels[0] == 2) ? 1 : 2;
-            nstl::swap(jit_md_info.blocks[d][2], jit_md_info.blocks[d][1]);
-            nstl::swap(jit_md_info.strides[d][2], jit_md_info.strides[d][1]);
         }
         return jit_md_info;
     }

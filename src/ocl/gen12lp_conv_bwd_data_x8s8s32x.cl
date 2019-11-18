@@ -24,6 +24,9 @@
 #define BLOCK_READ_WHT(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
 
+#define BLOCK_READ_BIA(data, idx) \
+    data = as_float4(intel_sub_group_block_read4((__global uint *)&bias[idx]));
+
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_bwd_data_x8s8s32x_kernel(const __global uchar *src,
@@ -152,11 +155,12 @@ conv_bwd_data_x8s8s32x_kernel(const __global uchar *src,
     T1[idx] = as_uint(D01);
 
 #if WITH_BIAS
-    bias += (group_ic + ic) * IC_BLOCK + get_sub_group_local_id() * 4;
-    float b0 = bias[0];
-    float b1 = bias[1];
-    float b2 = bias[2];
-    float b3 = bias[3];
+    float4 bia;
+    BLOCK_READ_BIA(bia, (group_ic + ic) * IC_BLOCK);
+    float b0 = bia[0];
+    float b1 = bia[1];
+    float b2 = bia[2];
+    float b3 = bia[3];
 #endif // WITH_BIAS
 
     uchar4 D00, D01;
@@ -172,8 +176,14 @@ conv_bwd_data_x8s8s32x_kernel(const __global uchar *src,
     PACK(6);
     PACK(7);
 
-    intel_sub_group_block_write8((__global uint *)&src[0 * IC_BLOCK], T0);
+    intel_sub_group_block_write_uc16(
+            (__global uchar *)&src[0 * IC_BLOCK], as_uchar16(T0.s0123));
+    intel_sub_group_block_write_uc16(
+            (__global uchar *)&src[4 * IC_BLOCK], as_uchar16(T0.s4567));
 #if MB > 8
-    intel_sub_group_block_write8((__global uint *)&src[8 * IC_BLOCK], T1);
+    intel_sub_group_block_write_uc16(
+            (__global uchar *)&src[8 * IC_BLOCK], as_uchar16(T1.s0123));
+    intel_sub_group_block_write_uc16(
+            (__global uchar *)&src[12 * IC_BLOCK], as_uchar16(T1.s4567));
 #endif // MB > 8
 }
