@@ -257,7 +257,6 @@
 #define SRC_DATA4_T CONCAT2(SRC_DATA_T, 4)
 #define SRC_DATA8_T CONCAT2(SRC_DATA_T, 8)
 #ifdef SRC_DT_U8
-#define AS_SRC_DATA4_T as_uchar4
 #define MMAD_DATA_T uint
 #define MMAD_DATA4_T uint4
 #define MMAD_DATA8_T uint8
