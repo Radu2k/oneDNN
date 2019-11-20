@@ -38,6 +38,7 @@
 #include "ocl/ref_inner_product.hpp"
 #include "ocl/ref_layer_normalization.hpp"
 #include "ocl/ref_lrn.hpp"
+#include "ocl/ref_matmul.hpp"
 #include "ocl/ref_pooling.hpp"
 #include "ocl/ref_shuffle.hpp"
 #include "ocl/ref_softmax.hpp"
@@ -246,6 +247,8 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(ref_layer_normalization_bwd_t),
         /* binary */
         INSTANCE(ref_binary_t),
+        /* matmul */
+        INSTANCE(ref_matmul_t),
         nullptr,
 };
 

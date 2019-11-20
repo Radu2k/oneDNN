@@ -125,12 +125,14 @@ struct jit_avx512_core_f32_wino_conv_4x3_fwd_t
                 jit_avx512_core_f32_wino_conv_4x3_fwd_t, USE_GLOBAL_SCRATCHPAD);
 
         status_t init() {
-            bool ok = true && dnnl_thr_syncable() && is_fwd()
+            bool ok = true && is_fwd()
                     && utils::one_of(desc()->alg_kind,
                             alg_kind::convolution_auto,
                             alg_kind::convolution_winograd)
                     && expect_data_types(data_type::f32, data_type::f32,
                             data_type::f32, data_type::f32, data_type::f32)
+                    && attr()->has_default_values(
+                            primitive_attr_t::skip_mask_t::post_ops)
                     && set_default_formats();
             if (!ok) return status::unimplemented;
 
@@ -214,7 +216,7 @@ struct jit_avx512_core_f32_wino_conv_4x3_bwd_data_t
                             alg_kind::convolution_winograd)
                     && expect_data_types(data_type::f32, data_type::f32,
                             data_type::undef, data_type::f32, data_type::f32)
-                    && set_default_formats();
+                    && attr()->has_default_values() && set_default_formats();
             if (!ok) return status::unimplemented;
 
             status_t status
@@ -296,7 +298,7 @@ struct jit_avx512_core_f32_wino_conv_4x3_bwd_weights_t
                             alg_kind::convolution_winograd)
                     && expect_data_types(data_type::f32, data_type::f32,
                             data_type::f32, data_type::f32, data_type::f32)
-                    && set_default_formats();
+                    && attr()->has_default_values() && set_default_formats();
             if (!ok) return status::unimplemented;
 
             status_t status
