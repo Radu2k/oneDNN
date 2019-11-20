@@ -124,8 +124,13 @@ gen12lp_1x1_conv_fwd_u8s8s32u8_kernel(const __global uchar *src,
 #endif
 
 #if WITH_SUM
-    D0 = intel_sub_group_block_read8((__global uint *)dst);
-    D1 = intel_sub_group_block_read8((__global uint *)&dst[8 * OC_BLOCK]);
+    D0.s0123 = as_uint4(intel_sub_group_block_read_uc16((__global uchar *)dst));
+    D0.s4567 = as_uint4(intel_sub_group_block_read_uc16(
+            (__global uchar *)&dst[4 * OC_BLOCK]));
+    D1.s0123 = as_uint4(intel_sub_group_block_read_uc16(
+            (__global uchar *)&dst[8 * OC_BLOCK]));
+    D1.s4567 = as_uint4(intel_sub_group_block_read_uc16(
+            (__global uchar *)&dst[12 * OC_BLOCK]));
 
 #define DO_SUM(d_pack) \
     do { \

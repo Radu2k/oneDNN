@@ -175,12 +175,23 @@ conv_fwd_mb_block_x8s8s32x_kernel(const __global uchar *src,
 #endif
 
 #if WITH_SUM
-    D0 = intel_sub_group_block_read8((__global uint *)dst);
+    D0.s0123 = as_uint4(intel_sub_group_block_read_uc16((__global uchar *)dst));
+    D0.s4567 = as_uint4(intel_sub_group_block_read_uc16(
+            (__global uchar *)&dst[4 * OC_BLOCK]));
 #if MB > 8
-    D1 = intel_sub_group_block_read8((__global uint *)&dst[8 * OC_BLOCK]);
+    D1.s0123 = as_uint4(intel_sub_group_block_read_uc16(
+            (__global uchar *)&dst[8 * OC_BLOCK]));
+    D1.s4567 = as_uint4(intel_sub_group_block_read_uc16(
+            (__global uchar *)&dst[12 * OC_BLOCK]));
 #ifdef MB_FULL_BLOCK
-    D2 = intel_sub_group_block_read8((__global uint *)&dst[16 * OC_BLOCK]);
-    D3 = intel_sub_group_block_read8((__global uint *)&dst[24 * OC_BLOCK]);
+    D2.s0123 = as_uint4(intel_sub_group_block_read_uc16(
+            (__global uchar *)&dst[16 * OC_BLOCK]));
+    D2.s4567 = as_uint4(intel_sub_group_block_read_uc16(
+            (__global uchar *)&dst[20 * OC_BLOCK]));
+    D3.s0123 = as_uint4(intel_sub_group_block_read_uc16(
+            (__global uchar *)&dst[24 * OC_BLOCK]));
+    D3.s4567 = as_uint4(intel_sub_group_block_read_uc16(
+            (__global uchar *)&dst[28 * OC_BLOCK]));
 #endif // MB_FULL_BLOCK
 #endif // MB > 8
 

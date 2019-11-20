@@ -252,7 +252,13 @@ conv_fwd_ow_block_x8s8s32x_kernel(const __global SRC_DATA_T *src,
 #endif
 
 #if WITH_SUM
-        D0 = READ_BLOCK((__global uint *)dst);
+#if OW_BLOCK == 4
+        D0 = as_uint4(intel_sub_group_block_read_uc16(dst));
+#endif
+#if OW_BLOCK == 8
+        D0.s0123 = as_uint4(intel_sub_group_block_read_uc16(dst));
+        D0.s4567 = as_uint4(intel_sub_group_block_read_uc16(dst + 16 * 8));
+#endif
 
 #define DO_SUM(d_pack) \
     do { \
