@@ -34,10 +34,10 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) // attr:no-format
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12hp_conv_fwd_f16_kernel(const __global half *src, const __global half *wei,
-        const __global half *bias, __global half *dst, float eltwise_alpha,
-        float eltwise_beta, float sum_scale, float scales) {
-
+gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
+        const __global DATA_T *wei, const __global BIA_DATA_T *bias,
+        __global DST_DATA_T *dst, float eltwise_alpha, float eltwise_beta,
+        float sum_scale, float scales) {
     const int group_oc = get_group_id(0) * OC_GROUP;
     const int group_mb = get_group_id(2) * MB_GROUP;
     const int group_sp = get_group_id(1) * SP_GROUP;
@@ -90,8 +90,8 @@ gen12hp_conv_fwd_f16_kernel(const __global half *src, const __global half *wei,
     float8 C30 = 0, C31 = 0, C32 = 0, C33 = 0;
 
 #if SLM_WEI
-    __local half wei_loc[KW * OC_GROUP * WEI_BLOCK];
-    __local half *wei_loc_base = wei_loc + KW * WEI_BLOCK * oc;
+    __local DATA_T wei_loc[KW * OC_GROUP * WEI_BLOCK];
+    __local DATA_T *wei_loc_base = wei_loc + KW * WEI_BLOCK * oc;
 #endif // SLM_WEI
 
     __attribute__((opencl_unroll_hint(1))) for (int ic_chunk = 0;
@@ -115,9 +115,9 @@ gen12hp_conv_fwd_f16_kernel(const __global half *src, const __global half *wei,
 
 #if SLM_WEI
                 barrier(CLK_LOCAL_MEM_FENCE);
-                const __global half *wei_copy_from
+                const __global DATA_T *wei_copy_from
                         = wei + sp * KW * WEI_BLOCK / LWS_1;
-                __local half *wei_copy_to
+                __local DATA_T *wei_copy_to
                         = wei_loc_base + sp * KW * WEI_BLOCK / LWS_1;
                 for (int bl = 0; bl < KW; bl++) {
                     WRITE_LOCAL_4(
@@ -126,7 +126,7 @@ gen12hp_conv_fwd_f16_kernel(const __global half *src, const __global half *wei,
                                     (__global uint *)&wei_copy_from[bl * 4
                                             * IC_BLOCK]));
                 }
-                __local half *wei_tmp = wei_loc_base;
+                __local DATA_T *wei_tmp = wei_loc_base;
                 barrier(CLK_LOCAL_MEM_FENCE);
 #endif // SLM_WEI
 
@@ -186,7 +186,8 @@ gen12hp_conv_fwd_f16_kernel(const __global half *src, const __global half *wei,
 #if WITH_BIAS
     bias += (group_oc + oc) * OC_CALC_BLOCK
             + get_sub_group_local_id() * OC_CALC_BLOCK / OC_BLOCK;
-    float4 bia = (float4)(bias[0], bias[1], bias[16], bias[17]);
+    float4 bia = (float4)(BIA_TO_REF(bias[0]), BIA_TO_REF(bias[1]),
+            BIA_TO_REF(bias[16]), BIA_TO_REF(bias[17]));
     bia *= scales;
 #define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)scales, bia);
 #else
@@ -196,10 +197,10 @@ gen12hp_conv_fwd_f16_kernel(const __global half *src, const __global half *wei,
 #if WITH_SUM
 #define DO_SUM(d_pack0, d_pack1) \
     do { \
-        DATA2_T d0 = AS_DATA2_T(d_pack0); \
-        DATA2_T d1 = AS_DATA2_T(d_pack1); \
-        tmp.s01 = fma(convert_float2(d0), (float2)sum_scale, tmp.s01); \
-        tmp.s23 = fma(convert_float2(d1), (float2)sum_scale, tmp.s23); \
+        DST_DATA2_T d0 = AS_DST_DATA2_T(d_pack0); \
+        DST_DATA2_T d1 = AS_DST_DATA2_T(d_pack1); \
+        tmp.s01 = fma(DST_TO_REF2(d0), (float2)sum_scale, tmp.s01); \
+        tmp.s23 = fma(DST_TO_REF2(d1), (float2)sum_scale, tmp.s23); \
     } while (0)
 #else
 #define DO_SUM(d_pack0, d_pack1) ;
@@ -235,12 +236,12 @@ gen12hp_conv_fwd_f16_kernel(const __global half *src, const __global half *wei,
 
 #define CONVERT_PACK(idx) \
     do { \
-        DATA2_T tmp_cvt0 \
-                = (DATA2_T)(CONVERT_DATA_T(tmp.s0), CONVERT_DATA_T(tmp.s1)); \
-        dst_pack0[idx] = as_uint(tmp_cvt0); \
-        DATA2_T tmp_cvt1 \
-                = (DATA2_T)(CONVERT_DATA_T(tmp.s2), CONVERT_DATA_T(tmp.s3)); \
-        dst_pack1[idx] = as_uint(tmp_cvt1); \
+        DST_DATA2_T tmp_cvt0 \
+                = (DST_DATA2_T)(REF_TO_DST(tmp.s0), REF_TO_DST(tmp.s1)); \
+        dst_pack0[idx] = AS_DST_PACK(tmp_cvt0); \
+        DST_DATA2_T tmp_cvt1 \
+                = (DST_DATA2_T)(REF_TO_DST(tmp.s2), REF_TO_DST(tmp.s3)); \
+        dst_pack1[idx] = AS_DST_PACK(tmp_cvt1); \
     } while (0)
 
 #define STORE_DST(C0, C1, C2, C3, D0, D1) \
@@ -253,32 +254,45 @@ gen12hp_conv_fwd_f16_kernel(const __global half *src, const __global half *wei,
             DO_POST_SUM_ELTWISE(); \
             CONVERT_PACK(n_i); \
         } \
-        intel_sub_group_block_write8((__global uint *)&dst[0], dst_pack0); \
-        __global half *dst1 = dst + OC_BLOCK * MB_BLOCK * OD * OH * OW; \
-        intel_sub_group_block_write8((__global uint *)&dst1[0], dst_pack1); \
+        BLOCK_WRITE_DST((__global uint *)&dst[0], dst_pack0); \
+        __global DST_DATA_T *dst1 = dst + OC_BLOCK * MB_BLOCK * OD * OH * OW; \
+        BLOCK_WRITE_DST((__global uint *)&dst1[0], dst_pack1); \
     } while (0)
 
     if (ow < OW) {
         float4 tmp;
+
+#if DST_DT_F32
+        ulong8 dst_pack0, dst_pack1;
+        ulong8 D00, D01, D02, D03;
+        ulong8 D10, D11, D12, D13;
+#define AS_DST_PACK as_ulong
+#define BLOCK_WRITE_DST intel_sub_group_block_write_ul8
+#define BLOCK_READ_DST intel_sub_group_block_read_ul8
+#else
         uint8 dst_pack0, dst_pack1;
         uint8 D00, D01, D02, D03;
         uint8 D10, D11, D12, D13;
+#define AS_DST_PACK as_uint
+#define BLOCK_WRITE_DST intel_sub_group_block_write8
+#define BLOCK_READ_DST intel_sub_group_block_read8
+#endif
 
 #if WITH_SUM
-        D00 = intel_sub_group_block_read8((__global uint *)dst);
-        D10 = intel_sub_group_block_read8(
+        D00 = BLOCK_READ_DST((__global uint *)dst);
+        D10 = BLOCK_READ_DST(
                 (__global uint *)&dst[OC_BLOCK * MB_BLOCK * OD * OH * OW]);
 #if MB > 8
-        D01 = intel_sub_group_block_read8((__global uint *)&dst[8 * OC_BLOCK]);
-        D11 = intel_sub_group_block_read8((__global uint *)&dst[8 * OC_BLOCK
+        D01 = BLOCK_READ_DST((__global uint *)&dst[8 * OC_BLOCK]);
+        D11 = BLOCK_READ_DST((__global uint *)&dst[8 * OC_BLOCK
                 + OC_BLOCK * MB_BLOCK * OD * OH * OW]);
 #if MB > 16
-        D02 = intel_sub_group_block_read8((__global uint *)&dst[16 * OC_BLOCK]);
-        D12 = intel_sub_group_block_read8((__global uint *)&dst[16 * OC_BLOCK
+        D02 = BLOCK_READ_DST((__global uint *)&dst[16 * OC_BLOCK]);
+        D12 = BLOCK_READ_DST((__global uint *)&dst[16 * OC_BLOCK
                 + OC_BLOCK * MB_BLOCK * OD * OH * OW]);
 #if MB > 24
-        D03 = intel_sub_group_block_read8((__global uint *)&dst[24 * OC_BLOCK]);
-        D13 = intel_sub_group_block_read8((__global uint *)&dst[24 * OC_BLOCK
+        D03 = BLOCK_READ_DST((__global uint *)&dst[24 * OC_BLOCK]);
+        D13 = BLOCK_READ_DST((__global uint *)&dst[24 * OC_BLOCK
                 + OC_BLOCK * MB_BLOCK * OD * OH * OW]);
 #endif // MB > 24
 #endif // MB > 16

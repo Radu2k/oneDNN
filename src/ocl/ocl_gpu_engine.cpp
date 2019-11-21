@@ -22,8 +22,8 @@
 #include "ocl/gemm_x8s8s32x_inner_product.hpp"
 #include "ocl/jit_gen12hp_1x1_convolution.hpp"
 #include "ocl/jit_gen12hp_bf16_convolution.hpp"
-#include "ocl/jit_gen12hp_f16_convolution.hpp"
 #include "ocl/jit_gen12hp_u8s8s32x_convolution.hpp"
+#include "ocl/jit_gen12hp_x16_convolution.hpp"
 #include "ocl/jit_gen12lp_gemm.hpp"
 #include "ocl/jit_gen12lp_ow_block_u8s8s32x_convolution.hpp"
 #include "ocl/jit_gen12lp_u8s8s32u8_1x1_convolution.hpp"
@@ -195,10 +195,12 @@ static const pd_create_f ocl_impl_list[] = {
         /*conv*/
         INSTANCE(jit_gen12hp_1x1_convolution_fwd_t<bf16>),
         INSTANCE(jit_gen12hp_1x1_convolution_fwd_t<f16>),
+        INSTANCE(jit_gen12hp_x16_convolution_fwd_t<bf16>),
+        INSTANCE(jit_gen12hp_x16_convolution_fwd_t<f16>),
+        INSTANCE(jit_gen12hp_x16_convolution_fwd_t<f32>),
         INSTANCE(jit_gen12hp_bf16_convolution_bwd_weights_t),
         INSTANCE(jit_gen12hp_1x1_convolution_fwd_t<u8>),
         INSTANCE(jit_gen12hp_1x1_convolution_fwd_t<s8>),
-        INSTANCE(jit_gen12hp_f16_convolution_fwd_t<f16>),
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_fwd_t<u8>),
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_fwd_t<s8>),
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_bwd_data_t<u8>),

@@ -18,8 +18,8 @@
 --attr=post_ops='relu:0.5;sum'
 --cfg=u8s8s8 --batch=shapes_resnet_50
 
-# f16
---reset --cfg=f16
+# f16, bf16
+--reset --cfg=f16,bf16bf16bf16
 --mb=2,32
 
 --dir=FWD_B

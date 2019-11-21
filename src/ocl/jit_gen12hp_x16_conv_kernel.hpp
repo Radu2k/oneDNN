@@ -24,10 +24,10 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-struct jit_gen12hp_f16_conv_fwd_kernel {
-    jit_gen12hp_f16_conv_fwd_kernel(const jit_conv_conf_t &ajcp) : jcp(ajcp) {}
+struct jit_gen12hp_x16_conv_fwd_kernel {
+    jit_gen12hp_x16_conv_fwd_kernel(const jit_conv_conf_t &ajcp) : jcp(ajcp) {};
 
-    ~jit_gen12hp_f16_conv_fwd_kernel() {}
+    ~jit_gen12hp_x16_conv_fwd_kernel() {};
 
     static status_t init_conf(jit_conv_conf_t &jcp,
             const convolution_desc_t &cd, const memory_desc_t &src_md,
@@ -51,6 +51,7 @@ struct jit_gen12hp_f16_conv_fwd_kernel {
         jcp.oc_block = 16;
         jcp.ic_block = 16;
         jcp.nchunk = utils::div_up(jcp.oc * jcp.ngroups, 32);
+        jcp.wei_block = 32 * 32 / types::data_type_size(jcp.weights_data_type);
         int oc_group = nstl::min(jcp.nchunk, 2);
 
         jcp.lws_d[0] = 8 * oc_group;
@@ -62,6 +63,7 @@ struct jit_gen12hp_f16_conv_fwd_kernel {
         jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block);
 
         jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
+        jcp.bias_data_type = jcp.with_bias ? bias_md.data_type : data_type::f32;
         format_tag_t src_tag, dst_tag, wei_tag;
 
         src_tag = utils::pick(jcp.ndims - 3, format_tag::NCw32n16c,
@@ -113,8 +115,7 @@ struct jit_gen12hp_f16_conv_fwd_kernel {
         kernel_ctx.define_int("MB_BLOCK", jcp.mb_block);
         kernel_ctx.define_int("OC_BLOCK", jcp.oc_block);
         kernel_ctx.define_int("OC_CALC_BLOCK", 32);
-        kernel_ctx.define_int(
-                "WEI_BLOCK", 32 * 32 / types::data_type_size(data_type::f16));
+        kernel_ctx.define_int("WEI_BLOCK", jcp.wei_block);
         kernel_ctx.define_int("IC_BLOCK", jcp.ic_block);
         kernel_ctx.define_int("OC_GROUP", utils::div_up(jcp.lws_d[0], 8));
         kernel_ctx.define_int("MB_GROUP", 1);
@@ -124,7 +125,6 @@ struct jit_gen12hp_f16_conv_fwd_kernel {
         kernel_ctx.define_int("WITH_BIAS", jcp.with_bias);
         kernel_ctx.define_int("WITH_ELTWISE", jcp.with_eltwise);
         kernel_ctx.define_int("WITH_SUM", jcp.with_sum);
-        kernel_ctx.define_int("SUM_SCALE", jcp.sum_scale == 1.0);
         kernel_ctx.define_int(
                 "WITH_POST_SUM_ELTWISE", jcp.with_post_sum_eltwise);
         kernel_ctx.define_int("SUB_GROUP_SIZE", jcp.sub_group_size);
@@ -133,7 +133,12 @@ struct jit_gen12hp_f16_conv_fwd_kernel {
         kernel_ctx.define_int("LWS_2", jcp.lws_d[2]);
         kernel_ctx.define_int("SLM_WEI", jcp.wht_slm_size <= 8192);
 
-        kernel_ctx.set_data_type(jcp.dst_data_type);
+        kernel_ctx.set_data_type(jcp.src_data_type);
+        def_data_type(kernel_ctx, jcp.dst_data_type, "DST");
+        def_data_type(kernel_ctx, jcp.bias_data_type, "BIA");
+        if (jcp.dst_data_type == data_type::f32) {
+            kernel_ctx.add_option("-Dcl_intel_subgroups_long");
+        }
 
         if (jcp.with_eltwise || jcp.with_post_sum_eltwise) {
             def_postops(kernel_ctx, jcp.eltwise.alg);

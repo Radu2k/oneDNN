@@ -82,6 +82,7 @@
 #define CONVERT_DATA_T convert_half
 #define CONVERT_DATA8_T convert_half8
 #define CONVERT_FLOAT_T convert_float
+#define CONVERT_FLOAT2_T convert_float2
 #define CONVERT_FLOAT8_T convert_float8
 #define ROUND
 
@@ -90,6 +91,7 @@
 #define BLOCK_READ8 intel_sub_group_block_read_us8
 #define BLOCK_WRITE8 intel_sub_group_block_write_us8
 #define AS_DATA_T as_half
+#define AS_DATA2_T as_half2
 #define AS_DATA8_T as_half8
 
 #define AS_UINT_T as_ushort
@@ -101,6 +103,7 @@
 #define AS_BLOCK_DATA8_T as_ushort8
 #elif DT_BF16 == 1
 #define DATA_T ushort
+#define DATA2_T ushort2
 #define POST_OP_DATA_T float
 #define DATA8_T ushort8
 #define DATA_MAX as_float(0x7f7f0000)
@@ -115,6 +118,7 @@
 #define CONVERT_DATA_T convert_f32_to_bf16
 #define CONVERT_DATA8_T convert_f32_to_bf16_vec8
 #define CONVERT_FLOAT_T convert_bf16_to_f32
+#define CONVERT_FLOAT2_T convert_bf16_to_f32_vec2
 #define CONVERT_FLOAT8_T convert_bf16_to_f32_vec8
 #define ROUND
 
@@ -123,6 +127,7 @@
 #define BLOCK_READ8 intel_sub_group_block_read_us8
 #define BLOCK_WRITE8 intel_sub_group_block_write_us8
 #define AS_DATA_T as_ushort
+#define AS_DATA2_T as_ushort2
 #define AS_DATA8_T as_ushort8
 
 #define AS_UINT_T as_ushort
@@ -322,14 +327,23 @@
 #endif
 
 #ifdef DST_DATA_T
+#define DST_DATA2_T CONCAT2(DST_DATA_T, 2)
 #define DST_DATA8_T CONCAT2(DST_DATA_T, 8)
+#define AS_DST_DATA2_T CONCAT2(as_, DST_DATA2_T)
 #if DST_DT_BF16
 #define DST_TO_REF(x) convert_bf16_to_f32(x)
+#define DST_TO_REF2(x) convert_bf16_to_f32_vec2(x)
 #define DST_TO_REF8(x) convert_bf16_to_f32_vec8(x)
 #define REF_TO_DST(x) convert_f32_to_bf16(x)
 #define REF_TO_DST8(x) convert_f32_to_bf16_vec8(convert_float8(x))
+#elif DST_DT_F16
+#define REF_TO_DST(x) convert_half(x)
+#define DST_TO_REF(x) convert_float(x)
+#define DST_TO_REF2(x) convert_float2(x)
+#define DST_TO_REF8(x) convert_float8(x)
 #else
 #define DST_TO_REF(x) (x)
+#define DST_TO_REF2(x) (x)
 #define DST_TO_REF8(x) (x)
 #define REF_TO_DST(x) (x)
 #define REF_TO_DST8(x) (x)

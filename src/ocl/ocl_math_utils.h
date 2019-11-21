@@ -30,6 +30,30 @@ float convert_bf16_to_f32(ushort b) {
     return f;
 }
 
+ushort8 convert_f32_to_bf16_vec8(float8 f) {
+    ushort8 r;
+    for (int i = 0; i < 8; i++) {
+        r[i] = convert_f32_to_bf16(f[i]);
+    }
+    return r;
+}
+
+float8 convert_bf16_to_f32_vec8(ushort8 b) {
+    float8 f;
+    for (int i = 0; i < 8; i++) {
+        f[i] = convert_bf16_to_f32(b[i]);
+    }
+    return f;
+}
+
+float2 convert_bf16_to_f32_vec2(ushort2 b) {
+    float2 f;
+    for (int i = 0; i < 2; i++) {
+        f[i] = convert_bf16_to_f32(b[i]);
+    }
+    return f;
+}
+
 #ifdef cl_intel_dot_accumulate
 inline int __imad(char4 a, char4 b, int c) __attribute__((overloadable)) {
     int __builtin_IB_dp4a_ss(int c, int a, int b) __attribute__((const));
@@ -409,29 +433,4 @@ inline float8 mmad8x8(uint8 A_vectors, int8 B_vectors, float8 acc)
     return ret;
 }
 #endif
-
-ushort8 convert_f32_to_bf16_vec8(float8 f) {
-    ushort8 r;
-    for (int i = 0; i < 8; i++) {
-        r[i] = convert_f32_to_bf16(f[i]);
-    }
-    return r;
-}
-
-float8 convert_bf16_to_f32_vec8(ushort8 b) {
-    float8 f;
-    for (int i = 0; i < 8; i++) {
-        f[i] = convert_bf16_to_f32(b[i]);
-    }
-    return f;
-}
-
-float2 convert_bf16_to_f32_vec2(ushort2 b) {
-    float2 f;
-    for (int i = 0; i < 2; i++) {
-        f[i] = convert_bf16_to_f32(b[i]);
-    }
-    return f;
-}
-
 #endif
