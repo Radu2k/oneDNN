@@ -32,13 +32,7 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-template <impl::data_type_t a_type, impl::data_type_t b_type,
-        impl::data_type_t c_type>
 struct jit_gen12lp_gemm_t : public primitive_impl_t {
-    using c_t = typename prec_traits<c_type>::type;
-    using ao_t = typename prec_traits<a_type>::type;
-    using bo_t = typename prec_traits<b_type>::type;
-
     enum class type { no_copy };
 
     struct pd_t : public ocl_gemm_pd_t {
@@ -49,7 +43,6 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
             : ocl_gemm_pd_t(engine, adesc, attr) {}
 
         DECLARE_COMMON_PD_T("ocl:gemm:any", jit_gen12lp_gemm_t);
-
         status_t init() {
             using namespace prop_kind;
             using namespace data_type;
@@ -58,13 +51,16 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine());
 
-            bool ok = true && desc()->a_type == a_type
-                    && desc()->b_type == b_type && desc()->c_type == c_type
+            bool ok = true
+                    && utils::one_of(
+                            desc()->a_type, data_type::u8, data_type::s8)
+                    && utils::one_of(
+                            desc()->b_type, data_type::u8, data_type::s8)
+                    && utils::one_of(desc()->c_type, data_type::s32)
                     && compute_engine->mayiuse(
                             compute::device_ext_t::intel_subgroups);
 
             if (!ok) return status::unimplemented;
-
             return status::success;
         }
 
@@ -124,7 +120,7 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
         const char *kernel_name = nullptr;
 
         //compute kernel
-        switch (c_type) {
+        switch (pd()->desc()->c_type) {
             case data_type::s32:
                 kernel_name = "gen12lp_gemm_compute_x8x8s32_kernel";
                 break;
@@ -149,11 +145,12 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
         for (bool aligned : {false, true}) {
             compute::kernel_ctx_t kernel_ctx;
 
-            auto status = jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type,
-                    c_type>::init_const_def(kernel_ctx, pd()->desc()->transa,
-                    pd()->desc()->transb, fixed_c, column_c, row_c,
-                    pd()->with_eltwise(), pd()->eltwise_alg_kind(), aligned,
-                    a_off_non_zero, b_off_non_zero);
+            auto status = jit_gen12lp_gemm_x8x8s32_kernel::init_const_def(
+                    kernel_ctx, pd()->desc()->transa, pd()->desc()->transb,
+                    fixed_c, column_c, row_c, pd()->with_eltwise(),
+                    pd()->eltwise_alg_kind(), aligned, a_off_non_zero,
+                    b_off_non_zero, pd()->desc()->a_type, pd()->desc()->b_type,
+                    pd()->desc()->c_type);
             if (status != status::success) return status;
 
             compute_engine->create_kernel(
@@ -165,9 +162,10 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
         kernel_name = "gen12lp_gemm_scale_x8x8s32_kernel";
         compute::kernel_ctx_t kernel_ctx;
 
-        auto status = jit_gen12lp_gemm_scale_x8x8s32_kernel<a_type, b_type,
-                c_type>::init_const_def(kernel_ctx, pd()->with_eltwise(),
-                pd()->eltwise_alg_kind());
+        auto status = jit_gen12lp_gemm_scale_x8x8s32_kernel::init_const_def(
+                kernel_ctx, pd()->with_eltwise(), pd()->eltwise_alg_kind(),
+                pd()->desc()->a_type, pd()->desc()->b_type,
+                pd()->desc()->c_type);
         if (status != status::success) return status;
 
         compute_engine->create_kernel(
@@ -186,9 +184,9 @@ private:
             const memory_storage_t &a, const memory_storage_t &b,
             const memory_storage_t &c, int64_t offset_a, int64_t offset_b,
             int64_t offset_c, int64_t lda, int64_t ldb, int64_t ldc, int64_t m,
-            int64_t n, int64_t k, int64_t beta, ao_t ao, bo_t bo,
+            int64_t n, int64_t k, int64_t beta, int64_t ao, int64_t bo,
             const memory_storage_t &co, int64_t offset_co, bool apply_co,
-            bool apply_eltwise, c_t eltwise_alpha, c_t eltwise_beta,
+            bool apply_eltwise, float eltwise_alpha, float eltwise_beta,
             bool aligned) const;
 
     status_t launch_scale_x8x8s32(compute::compute_stream_t *s,
@@ -196,7 +194,7 @@ private:
             char offsetc, int64_t offset_c, int64_t m, int64_t n, int64_t ldc,
             float alpha, float beta, const memory_storage_t &co,
             int64_t offset_co, bool alpha_is_zero, bool apply_eltwise,
-            c_t eltwise_alpha, c_t eltwise_beta) const;
+            float eltwise_alpha, float eltwise_beta) const;
 
     virtual status_t execute_standard(const exec_ctx_t &ctx) const;
 

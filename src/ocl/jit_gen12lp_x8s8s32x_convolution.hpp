@@ -32,7 +32,6 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-template <impl::data_type_t src_type, impl::data_type_t dst_type>
 struct jit_gen12lp_x8s8s32x_convolution_fwd_t : public primitive_impl_t {
     struct pd_t : public ocl_convolution_fwd_pd_t {
         pd_t(engine_t *engine, const convolution_desc_t *adesc,
@@ -58,7 +57,10 @@ struct jit_gen12lp_x8s8s32x_convolution_fwd_t : public primitive_impl_t {
                     && utils::one_of(this->desc()->prop_kind, forward_training,
                             forward_inference)
                     && this->desc()->alg_kind == alg_kind::convolution_direct
-                    && expect_data_types(src_type, s8, f32, dst_type, s32)
+                    && utils::one_of(desc()->src_desc.data_type, u8, s8)
+                    && utils::one_of(desc()->dst_desc.data_type, u8, s8)
+                    && expect_data_types(desc()->src_desc.data_type, s8, f32,
+                            desc()->dst_desc.data_type, s32)
                     && compute_engine->mayiuse(
                             compute::device_ext_t::intel_subgroups)
                     && attr()->has_default_values(attr_skip_mask)
@@ -125,7 +127,6 @@ private:
     compute::kernel_t kernel_;
 };
 
-template <data_type_t src_type, data_type_t dst_type>
 struct jit_gen12lp_x8s8s32x_convolution_bwd_data_t : public primitive_impl_t {
     struct pd_t : public ocl_convolution_bwd_data_pd_t {
         pd_t(engine_t *engine, const convolution_desc_t *adesc,
@@ -147,7 +148,10 @@ struct jit_gen12lp_x8s8s32x_convolution_bwd_data_t : public primitive_impl_t {
             const auto attr_skip_mask = primitive_attr_t::skip_mask_t::post_ops;
 
             bool ok = true
-                    && expect_data_types(src_type, s8, f32, dst_type, s32)
+                    && utils::one_of(desc()->diff_src_desc.data_type, s8, u8)
+                    && utils::one_of(desc()->diff_dst_desc.data_type, s8, u8)
+                    && expect_data_types(desc()->diff_src_desc.data_type, s8,
+                            f32, desc()->diff_dst_desc.data_type, s32)
                     && desc()->prop_kind == prop_kind::backward_data
                     && desc()->alg_kind == alg_kind::convolution_direct
                     && compute_engine->mayiuse(
