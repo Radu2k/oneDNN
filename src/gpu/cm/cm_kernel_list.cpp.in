@@ -14,37 +14,31 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "gpu/gpu_impl_list.hpp"
+#include <cassert>
+#include <string>
+#include <unordered_map>
 
-#include "cm/simple_sum.hpp"
-#include "common/utils.hpp"
-#include "gpu/gpu_sum_pd.hpp"
-#include "gpu/jit/gen9_simple_sum.hpp"
-#include "gpu/ocl/ref_sum.hpp"
-#include "gpu/ocl/simple_sum.hpp"
+#include "gpu/cm/kernel_utils.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace gpu {
+namespace cm {
 
-using spd_create_f = engine_t::sum_primitive_desc_create_f;
+@KER_LIST_EXTERN@
 
-namespace {
-#define INSTANCE(...) __VA_ARGS__::pd_t::create
-static const spd_create_f sum_impl_list[] = {
-        INSTANCE(cm::simple_sum_t),
-        INSTANCE(jit::gen9_simple_sum_t),
-        INSTANCE(ocl::simple_sum_t<data_type::f32>),
-        INSTANCE(ocl::ref_sum_t),
-        nullptr,
-};
-#undef INSTANCE
-} // namespace
+const char **get_kernel_source(const char *name) {
+    static const std::unordered_map<std::string, const char ** > kernel_list = {
+        @KER_LIST_ENTRIES@
+    };
 
-const spd_create_f *gpu_impl_list_t::get_sum_implementation_list() {
-    return sum_impl_list;
+    if (!name) return nullptr;
+
+    assert(kernel_list.count(name) == 1);
+    return kernel_list.at(name);
 }
 
+} // namespace cm
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl

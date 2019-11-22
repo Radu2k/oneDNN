@@ -363,6 +363,15 @@ struct lnorm_conf_t {
     compute::dispatch_t dispatch;
 };
 
+// Sum
+struct sum_conf_t {
+    data_type_t data_type;
+
+    int ndims;
+    int block_size;
+    size_t gws_d[3];
+};
+
 // Binary
 struct binary_conf_t {
     int ndims;
