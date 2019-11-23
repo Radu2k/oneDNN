@@ -215,6 +215,7 @@ typedef enum {
     dnnl_ABc4b4a,
     dnnl_ABc8a16b2a,
     dnnl_ABc8a8b,
+    dnnl_ABc8a4b,
     /// 3D tensor blocked by 2nd dimension with block size 8
     dnnl_aBc8b,
     dnnl_ABc8b16a2b,
@@ -242,6 +243,7 @@ typedef enum {
     dnnl_aBCd4b4c,
     dnnl_ABcd8a16b2a,
     dnnl_ABcd8a8b,
+    dnnl_ABcd8a4b,
     /// 4D tensor blocked by 2nd dimension with block size 8
     dnnl_aBcd8b,
     dnnl_ABcd8b16a2b,
@@ -250,6 +252,7 @@ typedef enum {
     /// 4D tensor blocked by 1st and 2nd dimension with block size 8
     dnnl_ABcd8b8a,
     dnnl_aBCd8b8c,
+    dnnl_aBCd8b4c,
     dnnl_aBCd8c16b2c,
     dnnl_ABcde8a16b2a,
     dnnl_aCBd8b16c2b,
@@ -258,6 +261,8 @@ typedef enum {
     dnnl_Abcde32a,
     dnnl_ABcde16a16b,
     dnnl_BAcde8a16b2a,
+    /// 5D tensor blocked by 1st dimension with block size 16
+    dnnl_ABcde4b16a4b,
     /// 5D tensor blocked by 2nd dimension with block size 16
     dnnl_aBcde16b,
     dnnl_ABcde16b16a,
@@ -275,6 +280,7 @@ typedef enum {
     dnnl_aBCde4c4b,
     dnnl_Abcde8a,
     dnnl_ABcde8a8b,
+    dnnl_ABcde8a4b,
     dnnl_BAcde16b16a,
     /// 5D tensor blocked by 2nd dimension with block size 8
     dnnl_aBcde8b,
@@ -285,6 +291,7 @@ typedef enum {
     dnnl_ABcde32a16b,
     dnnl_ABcde32a32b,
     dnnl_aBCde8b8c,
+    dnnl_aBCde8b4c,
     dnnl_ABc4a8b8a4b,
     dnnl_ABcd4a8b8a4b,
     dnnl_ABcde4a8b8a4b,
@@ -307,11 +314,13 @@ typedef enum {
     dnnl_aBcdef16b,
     dnnl_aBCdef16b16c,
     dnnl_aBCdef16c16b,
+    dnnl_aBCdef4c16b4c,
     /// 6D tensor blocked by 2nd dimension with block size 4
     dnnl_aBcdef4b,
     dnnl_aBCdef4c4b,
     dnnl_aBCdef4b4c,
     dnnl_aBCdef8b8c,
+    dnnl_aBCdef8b4c,
     dnnl_aBCdef8c16b2c,
     dnnl_aBCdef4b8c8b4c,
     dnnl_aBCdef8b16c2b,
@@ -518,6 +527,7 @@ typedef enum {
     dnnl_OIw8o16i2o = dnnl_ABc8a16b2a,
     dnnl_IOw8o16i2o = dnnl_BAc8a16b2a,
     dnnl_OIw8o8i = dnnl_ABc8a8b,
+    dnnl_OIw8o4i = dnnl_ABc8a4b,
     dnnl_Owi16o = dnnl_Acb16a,
     dnnl_Owi4o = dnnl_Acb4a,
     dnnl_Owi8o = dnnl_Acb8a,
@@ -541,6 +551,7 @@ typedef enum {
     dnnl_OIhw8o16i2o = dnnl_ABcd8a16b2a,
     dnnl_IOhw8o16i2o = dnnl_BAcd8a16b2a,
     dnnl_OIhw8o8i = dnnl_ABcd8a8b,
+    dnnl_OIhw8o4i = dnnl_ABcd8a4b,
 
     // weights, 5D
     dnnl_Odhwi16o = dnnl_Acdeb16a,
@@ -556,7 +567,9 @@ typedef enum {
     dnnl_OIdhw8i8o = dnnl_ABcde8b8a,
     dnnl_OIdhw8o16i2o = dnnl_ABcde8a16b2a,
     dnnl_IOdhw8o16i2o = dnnl_BAcde8a16b2a,
+    dnnl_OIdhw4i16o4i = dnnl_ABcde4b16a4b,
     dnnl_OIdhw8o8i = dnnl_ABcde8a8b,
+    dnnl_OIdhw8o4i = dnnl_ABcde8a4b,
     dnnl_IOdhw16i16o = dnnl_BAcde16b16a,
     dnnl_OIdhw4o8i8o4i = dnnl_ABcde4a8b8a4b,
 
@@ -576,6 +589,7 @@ typedef enum {
     dnnl_gOIw8o16i2o = dnnl_aBCd8b16c2b,
     dnnl_gIOw8o16i2o = dnnl_aCBd8b16c2b,
     dnnl_gOIw8o8i = dnnl_aBCd8b8c,
+    dnnl_gOIw8o4i = dnnl_aBCd8b4c,
     dnnl_gOwi16o = dnnl_aBdc16b,
     dnnl_gOwi4o = dnnl_aBdc4b,
     dnnl_gOwi8o = dnnl_aBdc8b,
@@ -603,6 +617,7 @@ typedef enum {
     dnnl_gOIhw8o16i2o = dnnl_aBCde8b16c2b,
     dnnl_gIOhw8o16i2o = dnnl_aCBde8b16c2b,
     dnnl_gOIhw8o8i = dnnl_aBCde8b8c,
+    dnnl_gOIhw8o4i = dnnl_aBCde8b4c,
     dnnl_Goihw32g = dnnl_Abcde32a,
 
     dnnl_OIw4o8i8o4i = dnnl_ABc4a8b8a4b,
@@ -632,6 +647,7 @@ typedef enum {
     dnnl_gOdhwi4o = dnnl_aBdefc4b,
     dnnl_gOdhwi8o = dnnl_aBdefc8b,
     dnnl_gOIdhw16i16o = dnnl_aBCdef16c16b,
+    dnnl_gOIdhw4i16o4i = dnnl_aBCdef4c16b4c,
     dnnl_gOIdhw16o16i = dnnl_aBCdef16b16c,
     dnnl_gOidhw16o = dnnl_aBcdef16b,
     dnnl_gOIdhw4i4o = dnnl_aBCdef4c4b,
@@ -642,6 +658,7 @@ typedef enum {
     dnnl_gOIdhw8o16i2o = dnnl_aBCdef8b16c2b,
     dnnl_gIOdhw8o16i2o = dnnl_aCBdef8b16c2b,
     dnnl_gOIdhw8o8i = dnnl_aBCdef8b8c,
+    dnnl_gOIdhw8o4i = dnnl_aBCdef8b4c,
     dnnl_Goidhw16g = dnnl_Abcdef16a,
     dnnl_Goidhw32g = dnnl_Abcdef32a,
 } dnnl_format_tag_t;
@@ -705,12 +722,14 @@ typedef enum {
     dnnl_inner_product,
     /// A rnn primitive.
     dnnl_rnn,
-    /// A matrix multiplication primitive.
+    /// A matrix multiplication primitive (internal).
     dnnl_gemm,
     /// A binary primitive.
     dnnl_binary,
     /// A logsoftmax primitive.
     dnnl_logsoftmax,
+    /// A matrix multiplication primitive.
+    dnnl_matmul,
 } dnnl_primitive_kind_t;
 
 /// Kinds of algorithms.
@@ -839,6 +858,35 @@ typedef enum {
 /// of space used for the tensor description. Individual computational
 /// primitives may support only tensors of certain dimensions.
 #define DNNL_MAX_NDIMS 12
+
+/// A wildcard value for dimensions that are unknown at a primitive creation
+/// time.
+#define DNNL_RUNTIME_DIM_VAL INT64_MIN
+
+/// A `size_t` counterpart of the DNNL_RUNTIME_DIM_VAL.
+/// For instance, this value is returned by dnnl_memory_desc_get_size() if
+/// either of the dimensions or strides equal to #DNNL_RUNTIME_DIM_VAL.
+#define DNNL_RUNTIME_SIZE_VAL ((size_t)DNNL_RUNTIME_DIM_VAL)
+
+/// @cond DO_NOT_DOCUMENT_THIS
+/// Hex representation for a **special** quiet NAN (!= NAN from math.h)
+static const union {
+    unsigned u;
+    float f;
+} DNNL_RUNTIME_F32_VAL_REP = {0x7fc000d0};
+/// @endcond
+
+/// A wildcard value for floating point values that are unknown at a primitive
+/// creation time.
+#define DNNL_RUNTIME_F32_VAL (DNNL_RUNTIME_F32_VAL_REP.f)
+
+/// @cond DO_NOT_DOCUMENT_THIS
+static const int DNNL_RUNTIME_S32_VAL_REP = INT32_MIN;
+/// @endcond
+
+/// A wildcard value for int32_t values that are unknown at a primitive creation
+/// time.
+#define DNNL_RUNTIME_S32_VAL DNNL_RUNTIME_S32_VAL_REP
 
 /// A type to describe tensor dimension.
 typedef int64_t dnnl_dim_t;
@@ -1388,6 +1436,29 @@ typedef struct {
     dnnl_memory_desc_t dst_desc;
 } dnnl_binary_desc_t;
 
+/// A descriptor of a matrix multiplication operation.
+///
+/// 2D case:
+///     dst[m, n] = src[m, k] * weights[k, n] + bias[m, n]
+///
+/// 3D case:
+///     dst[mb, m, n] = src[mb, m, k] * weights[mb, k, n] + bias[mb, m, n]
+typedef struct {
+    /// The kind of primitive. Used for self-identifying the primitive
+    /// descriptor. Must be #dnnl_matmul.
+    dnnl_primitive_kind_t primitive_kind;
+    /// Source memory descriptor.
+    dnnl_memory_desc_t src_desc;
+    /// Weights memory descriptor.
+    dnnl_memory_desc_t weights_desc;
+    /// Bias memory descriptor.
+    dnnl_memory_desc_t bias_desc;
+    /// Destination memory descriptor.
+    dnnl_memory_desc_t dst_desc;
+    /// The accumulator data type. Initialized automatically.
+    dnnl_data_type_t accum_data_type;
+} dnnl_matmul_desc_t;
+
 /// @}
 
 /// @addtogroup c_api_engine_types Engine
@@ -1600,17 +1671,17 @@ typedef const struct dnnl_primitive *const_dnnl_primitive_t;
 
 #define DNNL_ARG_DIFF_BIAS 169
 
+#define DNNL_ARG_ATTR_OUTPUT_SCALES 513
+
 #define DNNL_ARG_MULTIPLE_SRC 1024
 #define DNNL_ARG_MULTIPLE_DST 2048
 
+#define DNNL_ARG_ATTR_ZERO_POINTS 4096
+
 /// @}
 
-/// An auxiliary structure to specify primitive's inputs/outputs at execution
-///
-/// @warning
-///      With this API it's impossible to preserve constness of memory, so all
-///      memories are passed w/o const qualifier. However only memories with
-///      output semantics might be changed during the execution
+/// A structure that contains an index and a memory object, and is used to pass
+/// arguments to dnnl_primitive_execute().
 typedef struct {
     int arg; ///< An argument index, e.g. DNNL_ARG_SRC
     dnnl_memory_t memory; ///< Input/output memory
@@ -1688,9 +1759,10 @@ typedef enum {
     dnnl_query_layer_normalization_d, ///< layer normalization descriptor
     dnnl_query_inner_product_d, ///< inner product descriptor
     dnnl_query_rnn_d, ///< rnn descriptor
-    dnnl_query_gemm_d, ///< GEMM descriptor
+    dnnl_query_gemm_d, ///< GEMM descriptor (internal)
     dnnl_query_binary_d, ///< binary descriptor
     dnnl_query_logsoftmax_d, ///< logsoftmax descriptor
+    dnnl_query_matmul_d, ///< matrix multiplication (matmul) descriptor
 
     // memory descriptor section
     dnnl_query_some_md = 128, ///< stub

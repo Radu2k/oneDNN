@@ -42,6 +42,10 @@ struct jit_gen12lp_gemm_kernel {
 #else
         kernel_ctx.add_option("-Dget_enqueued_local_size=get_local_size");
 #endif
+
+#ifndef _WIN32
+        kernel_ctx.add_option("-DALLOW_READ_OVERRUNS");
+#endif
         return status::success;
     }
 
@@ -57,7 +61,8 @@ template <impl::data_type_t a_type, impl::data_type_t b_type,
 struct jit_gen12lp_gemm_x8x8s32_kernel : public jit_gen12lp_gemm_kernel {
     static status_t init_const_def(compute::kernel_ctx_t &kernel_ctx,
             bool trans_a, bool trans_b, bool fixed_c, bool column_c, bool row_c,
-            bool with_eltwise, alg_kind_t alg) {
+            bool with_eltwise, alg_kind_t alg, bool aligned,
+            bool a_off_non_zero, bool b_off_non_zero) {
 
         auto status = init_cl_options<a_type, b_type, c_type>(kernel_ctx);
         if (status) return status;
@@ -96,12 +101,19 @@ struct jit_gen12lp_gemm_x8x8s32_kernel : public jit_gen12lp_gemm_kernel {
         else
             return status::unimplemented;
 
+        if (aligned) kernel_ctx.add_option("-DALIGNED");
+
+        if (a_off_non_zero) kernel_ctx.add_option("-DAOFFNONZERO");
+        if (b_off_non_zero) kernel_ctx.add_option("-DBOFFNONZERO");
+
         kernel_ctx.define_int("UNROLL_M", copy_params::unroll_m);
         kernel_ctx.define_int("UNROLL_N", copy_params::unroll_n);
         kernel_ctx.define_int("UNROLL_K", copy_params::unroll_k);
 
         kernel_ctx.define_int("WITH_ELTWISE", with_eltwise);
         if (with_eltwise) def_postops(kernel_ctx, alg);
+
+        kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
         kernel_ctx.print_options();
         return status::success;

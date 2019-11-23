@@ -121,6 +121,8 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
         kernel_ctx.define_int("OC_NCHUNK", jcp.oc / jcp.oc_block);
         kernel_ctx.define_int("IC_NCHUNK", jcp.ic / jcp.ic_block);
 
+        kernel_ctx.add_option("-Dcl_intel_subgroups_char");
+
         return status::success;
     }
 

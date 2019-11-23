@@ -61,12 +61,8 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
             bool ok = true && desc()->a_type == a_type
                     && desc()->b_type == b_type && desc()->c_type == c_type
                     && compute_engine->mayiuse(
-                            compute::device_ext_t::intel_subgroups)
-                    && IMPLICATION(c_type == s32,
-                            true
-                                    && compute_engine->mayiuse(
-                                            compute::device_ext_t::
-                                                    intel_subgroups_short));
+                            compute::device_ext_t::intel_subgroups);
+
             if (!ok) return status::unimplemented;
 
             return status::success;
@@ -137,7 +133,6 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
 
         auto *compute_engine
                 = utils::downcast<compute::compute_engine_t *>(engine());
-        compute::kernel_ctx_t kernel_ctx;
 
         memory_storage_t *temp_buf_ptr;
         this->engine()->create_memory_storage(
@@ -148,20 +143,29 @@ struct jit_gen12lp_gemm_t : public primitive_impl_t {
         bool column_c = (pd()->desc()->offsetc == dnnl_column);
         bool row_c = (pd()->desc()->offsetc == dnnl_row);
 
-        auto status = jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type,
-                c_type>::init_const_def(kernel_ctx, pd()->desc()->transa,
-                pd()->desc()->transb, fixed_c, column_c, row_c,
-                pd()->with_eltwise(), pd()->eltwise_alg_kind());
-        if (status != status::success) return status;
+        bool a_off_non_zero = (pd()->desc()->ao != 0);
+        bool b_off_non_zero = (pd()->desc()->bo != 0);
 
-        compute_engine->create_kernel(
-                &compute_x8x8s32_kernel_, kernel_name, kernel_ctx);
-        if (!compute_x8x8s32_kernel_) return status::runtime_error;
+        for (bool aligned : {false, true}) {
+            compute::kernel_ctx_t kernel_ctx;
+
+            auto status = jit_gen12lp_gemm_x8x8s32_kernel<a_type, b_type,
+                    c_type>::init_const_def(kernel_ctx, pd()->desc()->transa,
+                    pd()->desc()->transb, fixed_c, column_c, row_c,
+                    pd()->with_eltwise(), pd()->eltwise_alg_kind(), aligned,
+                    a_off_non_zero, b_off_non_zero);
+            if (status != status::success) return status;
+
+            compute_engine->create_kernel(
+                    &compute_x8x8s32_kernel_[aligned], kernel_name, kernel_ctx);
+            if (!compute_x8x8s32_kernel_[aligned]) return status::runtime_error;
+        }
 
         //scale kernel
         kernel_name = "gen12lp_gemm_scale_x8x8s32_kernel";
+        compute::kernel_ctx_t kernel_ctx;
 
-        status = jit_gen12lp_gemm_scale_x8x8s32_kernel<a_type, b_type,
+        auto status = jit_gen12lp_gemm_scale_x8x8s32_kernel<a_type, b_type,
                 c_type>::init_const_def(kernel_ctx, pd()->with_eltwise(),
                 pd()->eltwise_alg_kind());
         if (status != status::success) return status;
@@ -184,7 +188,8 @@ private:
             int64_t offset_c, int64_t lda, int64_t ldb, int64_t ldc, int64_t m,
             int64_t n, int64_t k, int64_t beta, ao_t ao, bo_t bo,
             const memory_storage_t &co, int64_t offset_co, bool apply_co,
-            bool apply_eltwise, c_t eltwise_alpha, c_t eltwise_beta) const;
+            bool apply_eltwise, c_t eltwise_alpha, c_t eltwise_beta,
+            bool aligned) const;
 
     status_t launch_scale_x8x8s32(compute::compute_stream_t *s,
             const memory_storage_t &c_temp, const memory_storage_t &c,
@@ -195,7 +200,7 @@ private:
 
     virtual status_t execute_standard(const exec_ctx_t &ctx) const;
 
-    compute::kernel_t compute_x8x8s32_kernel_;
+    compute::kernel_t compute_x8x8s32_kernel_[2];
     compute::kernel_t scale_x8x8s32_kernel_;
 
     std::unique_ptr<memory_storage_t> temp_buf_;

@@ -121,6 +121,13 @@ void rnn_utils::init_rnn_conf(rnn_conf_t &rnn, const rnn_desc_t &rd,
     rnn.parts_bias[0] = rnn.n_bias;
     rnn.parts_bias[1] = 0;
 
+    // Decide if to merge gemm across iterations
+    // It's currently used only for FWD
+    // TODO: investigate/fix BWD issue
+
+    rnn.merge_gemm_layer = rnn.is_fwd;
+    rnn.merge_gemm_iter = false;
+
     // Decide to copy bias
     rnn.copy_bias = rnn.is_int8;
 
@@ -213,7 +220,6 @@ void rnn_utils::set_rnn_conf(rnn_conf_t &rnn, const rnn_desc_t &rd,
     int precise_elsz = rnn.precise_data_type == data_type::f16 ? sizeof(cl_half)
                                                                : sizeof(float);
 
-    rnn.use_workspace = rnn.is_training;
     rnn.ws_states_size = (size_t)(rnn.n_layer + 1) * rnn.n_dir
             * (rnn.n_iter + 1) * rnn.mb * rnn.states_ws_ld * rnn.ws_states_elsz;
     bool is_lstm = rd.cell_kind == dnnl_vanilla_lstm;

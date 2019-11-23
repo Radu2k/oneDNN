@@ -22,6 +22,8 @@
 #include "dnnl_common.hpp"
 #include "dnnl_memory.hpp"
 
+#include "dnn_types.hpp"
+
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
 // All formats with 2+ levels of blocking on GPU are assumed permuted
 static bool is_gpu_permuted_format(const dnnl_memory_desc_t &md) {
@@ -37,8 +39,10 @@ static bool is_gpu_permuted_format(const dnnl_memory_desc_t &md) {
 }
 #endif
 
-int execute_reorder(
-        const dnn_mem_t &src, dnn_mem_t &dst, dnnl_primitive_attr_t attr) {
+int execute_reorder(const dnn_mem_t &src, dnn_mem_t &dst,
+        const attr_bundle_t *attr_bundle) {
+    const_dnnl_primitive_attr_t attr
+            = attr_bundle ? attr_bundle->dnnl_attr() : nullptr;
 
     std::shared_ptr<const dnn_mem_t> r_src(&src, [](const dnn_mem_t *) {});
     std::shared_ptr<dnn_mem_t> r_dst(&dst, [](dnn_mem_t *) {});
@@ -108,9 +112,21 @@ int execute_reorder(
             CRIT);
     DNN_SAFE(dnnl_primitive_desc_destroy(r_pd), CRIT);
 
+    dnn_mem_t scales, src_zero_points_m, dst_zero_points_m;
+    if (attr_bundle) {
+        maybe_prepare_runtime_scales(scales, *attr_bundle, engine_tgt);
+        maybe_prepare_runtime_zero_points(
+                src_zero_points_m, attr_bundle->attr, DNNL_ARG_SRC, engine_tgt);
+        maybe_prepare_runtime_zero_points(
+                dst_zero_points_m, attr_bundle->attr, DNNL_ARG_DST, engine_tgt);
+    }
+
     args_t args;
     args.set(DNNL_ARG_FROM, *r_src);
     args.set(DNNL_ARG_TO, *r_dst);
+    args.set(DNNL_ARG_ATTR_OUTPUT_SCALES, scales);
+    args.set(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zero_points_m);
+    args.set(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zero_points_m);
 
     DNN_SAFE(execute_and_wait(r, r_stream, args), CRIT);
     DNN_SAFE(dnnl_primitive_destroy(r), CRIT);

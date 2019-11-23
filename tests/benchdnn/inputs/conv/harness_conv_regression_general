@@ -32,7 +32,7 @@
 --reset --cfg=f32 --dir=BWD_WB --skip-impl="ref:gemm" mb2ic672ih29iw29oc192kh1kw1sh1sw1ph0pw0n"DENSENET_161:conv3_11/x1"
 
 # DNNL-671
---reset --dir=BWD_D ic2ih1iw9oc3oh1ow4kh1kw3sh1sw2n"wip"
+--reset --dir=BWD_D ic2ih1iw9oc3oh1ow4kh1kw3sh1sw2
 
 # DNNL-796: large asymmetric padding
 --reset --cfg=f32_full mb2_g1ic32oc32_ih7oh11kh3ph2
@@ -163,3 +163,18 @@ mb1_ic2oc16_ih16kh3oh16ph1n"jit_reads_past_end_of_src_buffer:4"
 --reset --dir=BWD_D
 ic32oc1_id5ih1iw1_od2oh1ow1_kd3kh1kw1_sd2sh1sw1n"ic-blocking_stride-d_test"
 ic32oc1_ih5iw1_oh2ow1_kh3kw1_sh2sw1n"ic-blocking_stride-h_test"
+
+# Test-case to ensure pre-condition for dispatching optimized channel blocking
+--reset
+--dir=BWD_D
+ic16ih7oc16oh5kh3ph0n"small_spatial_optimization"
+ic48ih7oc48oh5kh3ph0n"small_spatial_optimization"
+
+# False positives due to long accumulation chains
+--reset
+mb1_ic16oc16_id100od1kd100
+--cfg=f32_full --dir=bwd_w mb28_ic16oc16_id10od10kd3
+
+# Int 3D Depthwise dispatch check
+--reset --skip-impl="ref:gemm" --cfg=u8s8u8
+g16mb1ic16id3ih3iw3oc16od3oh3ow3kd3kh3kw3sd1sh1sw1pd1ph1pw1n"check_int8_3d_depthwise_dispatch"

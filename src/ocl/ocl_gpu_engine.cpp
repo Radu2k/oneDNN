@@ -25,9 +25,8 @@
 #include "ocl/jit_gen12hp_u8s8s32x_convolution.hpp"
 #include "ocl/jit_gen12hp_x16_convolution.hpp"
 #include "ocl/jit_gen12lp_gemm.hpp"
-#include "ocl/jit_gen12lp_ow_block_u8s8s32x_convolution.hpp"
 #include "ocl/jit_gen12lp_u8s8s32u8_1x1_convolution.hpp"
-#include "ocl/jit_gen12lp_u8s8s32x_convolution.hpp"
+#include "ocl/jit_gen12lp_x8s8s32x_convolution.hpp"
 #include "ocl/jit_gen9_common_convolution.hpp"
 #include "ocl/jit_gen9_gemm.hpp"
 #include "ocl/jit_gen9_gemm_x8x8s32.hpp"
@@ -43,6 +42,7 @@
 #include "ocl/ref_inner_product.hpp"
 #include "ocl/ref_layer_normalization.hpp"
 #include "ocl/ref_lrn.hpp"
+#include "ocl/ref_matmul.hpp"
 #include "ocl/ref_pooling.hpp"
 #include "ocl/ref_shuffle.hpp"
 #include "ocl/ref_softmax.hpp"
@@ -206,12 +206,15 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_bwd_data_t<u8>),
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_bwd_data_t<s8>),
         INSTANCE(jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t<u8>),
-        INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<u8>),
-        INSTANCE(jit_gen12lp_u8s8s32x_convolution_fwd_t<s8>),
-        INSTANCE(jit_gen12lp_ow_block_u8s8s32x_convolution_fwd_t<u8>),
-        INSTANCE(jit_gen12lp_ow_block_u8s8s32x_convolution_fwd_t<s8>),
-        INSTANCE(jit_gen12lp_u8s8s32x_convolution_bwd_data_t<u8>),
-        INSTANCE(jit_gen12lp_u8s8s32x_convolution_bwd_data_t<s8>),
+        // TODO: turn it ON once permuted formats support implemented
+        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<s8, s8>),
+        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<s8, u8>),
+        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<u8, s8>),
+        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<u8, u8>),
+        INSTANCE(jit_gen12lp_x8s8s32x_convolution_bwd_data_t<s8, s8>),
+        INSTANCE(jit_gen12lp_x8s8s32x_convolution_bwd_data_t<s8, u8>),
+        INSTANCE(jit_gen12lp_x8s8s32x_convolution_bwd_data_t<u8, s8>),
+        INSTANCE(jit_gen12lp_x8s8s32x_convolution_bwd_data_t<u8, u8>),
         INSTANCE(jit_gen9_common_convolution_fwd_t),
         INSTANCE(jit_gen9_common_convolution_bwd_data_t),
         INSTANCE(jit_gen9_common_convolution_bwd_weights_t),
@@ -261,6 +264,8 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(ref_layer_normalization_bwd_t),
         /* binary */
         INSTANCE(ref_binary_t),
+        /* matmul */
+        INSTANCE(ref_matmul_t),
         nullptr,
 };
 

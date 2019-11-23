@@ -155,6 +155,8 @@ enum conv_version_t {
     ver_1stconv,
     ver_16mb16c,
     ver_8ow16c,
+    ver_mb_block,
+    ver_ow_block
 };
 
 struct jit_conv_conf_t {

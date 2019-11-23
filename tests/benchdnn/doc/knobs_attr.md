@@ -8,15 +8,17 @@
 The attribute string *attr_str* is defined as follows (line breaks are for
 readability):
 ```
-    [oscale={none,common,per_oc}[:scale];]
+    [oscale={none,common,per_oc}[:scale[*]];]
+    [zero_points=[arg:zero_point[*]][_]...;]
     [post_ops='eltwise[:alpha[:beta[:int8_eltwise_scale]]];sum[:sum_scale];';]
 ```
 
 where `oscale` stands for output_scales. The first parameter is the policy that
 is defined below. `scale` is the second optional parameter, which is a real
-number that specifies either the one common output scale (for the `none` and
-`common` polices) or a starting point for the `per_oc` policy, which uses many
-scales. The default scale is `1.0`.
+number that specifies either a common output scale (for `common` policy) or a
+starting point for the policies with non-zero mask (e.g. `per_oc`), which uses
+many scales. The default scale is `1.0`. Optional asterisk (`*`) after scale
+indicates the scales should be passed to a primitive at run-time.
 
 Known policies are:
   - `none` (default) means no output scales set (i.e. scale = 1)
@@ -32,6 +34,16 @@ Known policies are:
   - `per_dim_01` corresponds to `mask=(1<<0) + (1<<1)`. Elements corresponding
                  to a single {dim0, dim1} point have same factor. Different
                  {dim0, dim1} points have different scaling factors.
+
+`zero_points` sets zero points for given memory arguments `arg`.
+Possible arguments:
+  - `src` corresponds to `DNNL_ARG_SRC`
+  - `wei` corresponds to `DNNL_ARG_WEIGHTS`
+  - `dst` corresponds to `DNNL_ARG_DST`
+Optional asterisk (`*`) after zero point value indicates the zero point should
+be passed to a primitive at run-time.
+Optional underscore (`_`) is used as a delimiter for different arguments to
+improve readability.
 
 `post_ops` stands for post operation sequence. All post operations support
 output scale (relevant for int8 operations only) which is used as a multiplier
