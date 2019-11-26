@@ -124,7 +124,7 @@ dnnl_status_t execute_and_wait(
             const char *sim_run_env = getenv("DNNL_GPU_SIM_RUN");
             const char *sim_verbose_env = getenv("DNNL_GPU_SIM_VERBOSE");
             const int sim_run = !sim_run_env ? -1 : atoi(sim_run_env);
-            const int sim_verbose = atoi(sim_verbose_env);
+            const int sim_verbose = !sim_verbose_env ? 0: atoi(sim_verbose_env);
 
             // Destroy library objects and exit from benchdnn for the following cases:
             // - Performance simulation
@@ -155,7 +155,8 @@ dnnl_status_t execute_and_wait(
                     sorted_mems[dnnl_memory_get_sim_id(mem)] = mem;
 
                 // Load memory contents from binaries
-                std::string aub_file(getenv("DNNL_GPU_SIM_AUB_FILE"));
+                const char *sim_aub_file = getenv("DNNL_GPU_SIM_AUB_FILE");
+                std::string aub_file(!sim_aub_file ? "out.aub" : sim_aub_file);
                 aub_file.resize(aub_file.length() - strlen(".aub"));
                 int ctr = 0;
                 for (auto &kv : sorted_mems) {
