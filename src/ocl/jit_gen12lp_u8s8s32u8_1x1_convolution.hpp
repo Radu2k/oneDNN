@@ -32,7 +32,6 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-template <impl::data_type_t dst_type>
 struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
     struct pd_t : public ocl_convolution_fwd_pd_t {
         pd_t(engine_t *engine, const convolution_desc_t *adesc,
@@ -61,7 +60,7 @@ struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
                     && this->desc()->src_desc.data_type == data_type::u8
                     && this->desc()->weights_desc.data_type == data_type::s8
                     && this->desc()->accum_data_type == data_type::s32
-                    && this->desc()->dst_desc.data_type == dst_type
+                    && this->desc()->dst_desc.data_type == u8
                     && IMPLICATION(this->with_bias(),
                             true && this->desc()->bias_desc.data_type == f32)
                     && compute_engine->mayiuse(
@@ -110,8 +109,6 @@ struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
     }
 
     ~jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t() { delete ker_; }
-
-    typedef typename prec_traits<dst_type>::type dst_data_t;
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
         return execute_forward(ctx);

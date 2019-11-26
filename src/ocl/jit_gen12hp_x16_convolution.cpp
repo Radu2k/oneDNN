@@ -25,8 +25,7 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-template <data_type_t dst_type>
-status_t jit_gen12hp_x16_convolution_fwd_t<dst_type>::execute_forward(
+status_t jit_gen12hp_x16_convolution_fwd_t::execute_forward(
         const exec_ctx_t &ctx) const {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
@@ -54,12 +53,6 @@ status_t jit_gen12hp_x16_convolution_fwd_t<dst_type>::execute_forward(
 
     return status;
 }
-
-using namespace data_type;
-
-template struct jit_gen12hp_x16_convolution_fwd_t<f16>;
-template struct jit_gen12hp_x16_convolution_fwd_t<bf16>;
-template struct jit_gen12hp_x16_convolution_fwd_t<f32>;
 
 } // namespace ocl
 } // namespace impl

@@ -21,8 +21,7 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-template <data_type_t dst_type>
-status_t jit_gen12hp_1x1_convolution_fwd_t<dst_type>::execute_forward(
+status_t jit_gen12hp_1x1_convolution_fwd_t::execute_forward(
         const exec_ctx_t &ctx) const {
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
@@ -52,15 +51,6 @@ status_t jit_gen12hp_1x1_convolution_fwd_t<dst_type>::execute_forward(
 
     return status;
 }
-
-using namespace data_type;
-
-template struct jit_gen12hp_1x1_convolution_fwd_t<f32>;
-template struct jit_gen12hp_1x1_convolution_fwd_t<bf16>;
-template struct jit_gen12hp_1x1_convolution_fwd_t<f16>;
-template struct jit_gen12hp_1x1_convolution_fwd_t<s8>;
-template struct jit_gen12hp_1x1_convolution_fwd_t<u8>;
-
 } // namespace ocl
 } // namespace impl
 } // namespace dnnl

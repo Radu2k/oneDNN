@@ -33,7 +33,6 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-template <impl::data_type_t dst_type>
 struct jit_gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
     struct pd_t : public ocl_convolution_fwd_pd_t {
         pd_t(engine_t *engine, const convolution_desc_t *adesc,
@@ -56,11 +55,16 @@ struct jit_gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
                     && utils::one_of(this->desc()->prop_kind, forward_training,
                             forward_inference)
                     && this->desc()->alg_kind == alg_kind::convolution_direct
+                    && utils::one_of(
+                            desc()->dst_desc.data_type, bf16, f16, s8, u8)
                     && utils::one_of(true,
-                            expect_data_types(u8, s8, f32, dst_type, s32),
-                            expect_data_types(
-                                    bf16, bf16, dst_type, dst_type, f32),
-                            expect_data_types(f16, f16, f16, dst_type, f16))
+                            expect_data_types(u8, s8, f32,
+                                    desc()->dst_desc.data_type, s32),
+                            expect_data_types(bf16, bf16,
+                                    desc()->dst_desc.data_type,
+                                    desc()->dst_desc.data_type, f32),
+                            expect_data_types(f16, f16, f16,
+                                    desc()->dst_desc.data_type, f16))
                     && attr()->has_default_values(attr_skip_mask)
                     && post_ops_ok(attr());
             if (!ok) return status::unimplemented;
@@ -106,8 +110,6 @@ struct jit_gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
     }
 
     ~jit_gen12hp_1x1_convolution_fwd_t() { delete ker_; }
-
-    typedef typename prec_traits<dst_type>::type dst_data_t;
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
         return execute_forward(ctx);

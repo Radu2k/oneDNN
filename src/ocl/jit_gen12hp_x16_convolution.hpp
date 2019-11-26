@@ -28,7 +28,6 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-template <impl::data_type_t dst_type>
 struct jit_gen12hp_x16_convolution_fwd_t : public primitive_impl_t {
     struct pd_t : public ocl_convolution_fwd_pd_t {
         pd_t(engine_t *engine, const convolution_desc_t *adesc,
