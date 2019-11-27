@@ -124,7 +124,8 @@ dnnl_status_t execute_and_wait(
             const char *sim_run_env = getenv("DNNL_GPU_SIM_RUN");
             const char *sim_verbose_env = getenv("DNNL_GPU_SIM_VERBOSE");
             const int sim_run = !sim_run_env ? -1 : atoi(sim_run_env);
-            const int sim_verbose = !sim_verbose_env ? 0: atoi(sim_verbose_env);
+            const int sim_verbose
+                    = !sim_verbose_env ? 0 : atoi(sim_verbose_env);
 
             // Destroy library objects and exit from benchdnn for the following cases:
             // - Performance simulation
