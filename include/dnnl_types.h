@@ -184,6 +184,7 @@ typedef enum {
     dnnl_abdec, ///< permuted 5D tensor
     dnnl_acb, ///< permuted 3D tensor
     dnnl_acbde, ///< permuted 5D tensor
+    dnnl_acbdef, ///< permuted 6D tensor
     dnnl_acdb, ///< permuted 4D tensor
     dnnl_acdeb, ///< permuted 5D tensor
     dnnl_ba, ///< permuted 2D tensor
@@ -211,6 +212,7 @@ typedef enum {
     /// 3D tensor blocked by 2nd dimension with block size 4
     dnnl_aBc4b,
     dnnl_ABc4b16a4b,
+    dnnl_ABc2b8a4b,
     dnnl_ABc4b4a,
     dnnl_ABc8a16b2a,
     dnnl_ABc8a8b,
@@ -221,6 +223,7 @@ typedef enum {
     dnnl_BAc8a16b2a,
     dnnl_ABc8b8a,
     dnnl_Abcd16a,
+    dnnl_Abcd8a,
     dnnl_ABcd16a16b,
     dnnl_Abcd32a,
     dnnl_ABcd32a32b,
@@ -237,9 +240,11 @@ typedef enum {
     dnnl_ABcd4b4a,
     dnnl_ABcd4a4b,
     dnnl_aBCd4c16b4c,
+    dnnl_aBCd2c8b4c,
     dnnl_aBCd4c4b,
     dnnl_aBCd4b4c,
     dnnl_ABcd8a16b2a,
+    dnnl_ABcd2b8a4b,
     dnnl_ABcd8a8b,
     dnnl_ABcd8a4b,
     /// 4D tensor blocked by 2nd dimension with block size 8
@@ -424,6 +429,8 @@ typedef enum {
     dnnl_giohw = dnnl_acbde,
     /// 6D CNN weights tensor (incl. groups), an alias to #dnnl_abcdef
     dnnl_goidhw = dnnl_abcdef,
+    /// 6D CNN weights tensor (incl. groups), an alias to #dnnl_acbdef
+    dnnl_giodhw = dnnl_acbdef,
 
     /// 3D RNN data tensor in the format (seq_length, batch, input channels).
     dnnl_tnc = dnnl_abc,
@@ -507,6 +514,7 @@ typedef enum {
     dnnl_OIw16o16i = dnnl_ABc16a16b,
     dnnl_Oiw16o = dnnl_Abc16a,
     dnnl_OIw4i16o4i = dnnl_ABc4b16a4b,
+    dnnl_OIw2i8o4i = dnnl_ABc2b8a4b,
     dnnl_OIw4i4o = dnnl_ABc4b4a,
     dnnl_OIw4o4i = dnnl_ABc4a4b,
     dnnl_Oiw4o = dnnl_Abc4a,
@@ -537,6 +545,7 @@ typedef enum {
     dnnl_OIhw8i16o2i = dnnl_ABcd8b16a2b,
     dnnl_OIhw8i8o = dnnl_ABcd8b8a,
     dnnl_OIhw8o16i2o = dnnl_ABcd8a16b2a,
+    dnnl_OIhw2i8o4i = dnnl_ABcd2b8a4b,
     dnnl_IOhw8o16i2o = dnnl_BAcd8a16b2a,
     dnnl_OIhw8o8i = dnnl_ABcd8a8b,
     dnnl_OIhw8o4i = dnnl_ABcd8a4b,
@@ -563,12 +572,14 @@ typedef enum {
 
     // weights w/ groups, 3D
     dnnl_Goiw16g = dnnl_Abcd16a,
+    dnnl_Goiw8g = dnnl_Abcd8a,
     dnnl_gIOw16o16i = dnnl_aCBd16b16c,
     dnnl_gIOw16i16o = dnnl_aCBd16c16b,
     dnnl_gOIw16i16o = dnnl_aBCd16c16b,
     dnnl_gOIw16o16i = dnnl_aBCd16b16c,
     dnnl_gOiw16o = dnnl_aBcd16b,
     dnnl_gOIw4i16o4i = dnnl_aBCd4c16b4c,
+    dnnl_gOIw2i8o4i = dnnl_aBCd2c8b4c,
     dnnl_gOIw4i4o = dnnl_aBCd4c4b,
     dnnl_gOIw4o4i = dnnl_aBCd4b4c,
     dnnl_gOiw4o = dnnl_aBcd4b,
@@ -758,6 +769,8 @@ typedef enum {
     dnnl_eltwise_swish = 0xdf,
     /// Eltwise: natural logarithm
     dnnl_eltwise_log = 0xef,
+    /// Eltwise: clip
+    dnnl_eltwise_clip = 0xff,
     /// Max pooling
     dnnl_pooling_max = 0x1ff,
     /// Average pooling include padding
@@ -1122,7 +1135,7 @@ typedef struct {
     /// #dnnl_eltwise_abs, #dnnl_eltwise_sqrt, #dnnl_eltwise_linear,
     /// #dnnl_eltwise_bounded_relu, #dnnl_eltwise_soft_relu,
     /// #dnnl_eltwise_logistic, #dnnl_eltwise_exp, #dnnl_eltwise_gelu,
-    /// #dnnl_eltwise_swish, #dnnl_eltwise_log.
+    /// #dnnl_eltwise_swish, #dnnl_eltwise_log, #dnnl_eltwise_clip.
     dnnl_alg_kind_t alg_kind;
     /// Source and destination memory descriptor.
     dnnl_memory_desc_t data_desc;
@@ -1144,6 +1157,7 @@ typedef struct {
     ///  - #dnnl_eltwise_gelu: @p alpha and @p beta ignored
     ///  - #dnnl_eltwise_swish: @p alpha -- sigmoid arg scaling, @p beta ignored
     ///  - #dnnl_eltwise_log: @p alpha and @p beta ignored
+    ///  - #dnnl_eltwise_clip: @p alpha -- lower bound, @p beta -- upper bound
     float alpha, beta;
 } dnnl_eltwise_desc_t;
 
