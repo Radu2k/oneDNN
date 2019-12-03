@@ -209,11 +209,7 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_fwd_t),
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_bwd_data_t),
         INSTANCE(jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t),
-        // TODO: turn it ON once permuted formats support implemented
-        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<s8, s8>),
-        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<s8, u8>),
-        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<u8, s8>),
-        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<u8, u8>),
+        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t),
         INSTANCE(jit_gen12lp_x8s8s32x_convolution_bwd_data_t),
         INSTANCE(jit_gen9_common_convolution_fwd_t),
         INSTANCE(jit_gen9_common_convolution_bwd_data_t),

@@ -188,6 +188,8 @@ struct jit_gen12hp_1x1_conv_fwd_kernel {
             kernel_ctx.define_int("XF16_SRC_SLM", 1);
         if (use_xf16_wei_slm_impl) kernel_ctx.define_int("XF16_WEI_SLM", 1);
 
+        kernel_ctx.add_option("-Dcl_intel_subgroups_char");
+
         return status::success;
     }
 

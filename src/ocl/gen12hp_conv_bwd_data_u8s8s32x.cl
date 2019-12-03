@@ -39,6 +39,9 @@
     data = AS_INT8_T( \
             intel_sub_group_block_read8((__global uint *)&current_dst[idx]));
 
+#define BLOCK_READ_BIA(data, idx) \
+    data = as_float4(intel_sub_group_block_read4((__global uint *)&bias[idx]));
+
 #undef CONVERT_DATA_T
 #define CONVERT_DATA_T convert_uchar_sat
 
@@ -231,11 +234,8 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
     if (iw < IW) {
 #endif // SLM_WEI
 #if WITH_BIAS
-        bias += (group_ic + ic) * IC_BLOCK + get_sub_group_local_id() * 4;
-        float b0 = bias[0];
-        float b1 = bias[1];
-        float b2 = bias[2];
-        float b3 = bias[3];
+        float4 bia;
+        BLOCK_READ_BIA(bia, (group_ic + ic) * IC_BLOCK);
 #endif // WITH_BIAS
 
         uchar4 D00, D01, D02, D03;
@@ -253,12 +253,24 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
         PACK(6);
         PACK(7);
 
-        intel_sub_group_block_write8((__global uint *)&src[0 * IC_BLOCK], T0);
+        intel_sub_group_block_write_uc16(
+                (__global uchar *)&src[0 * IC_BLOCK], as_uchar16(T0.s0123));
+        intel_sub_group_block_write_uc16(
+                (__global uchar *)&src[4 * IC_BLOCK], as_uchar16(T0.s4567));
 #if MB > 8
-        intel_sub_group_block_write8((__global uint *)&src[8 * IC_BLOCK], T1);
+        intel_sub_group_block_write_uc16(
+                (__global uchar *)&src[8 * IC_BLOCK], as_uchar16(T1.s0123));
+        intel_sub_group_block_write_uc16(
+                (__global uchar *)&src[12 * IC_BLOCK], as_uchar16(T1.s4567));
 #ifdef MB_FULL_BLOCK
-        intel_sub_group_block_write8((__global uint *)&src[16 * IC_BLOCK], T2);
-        intel_sub_group_block_write8((__global uint *)&src[24 * IC_BLOCK], T3);
+        intel_sub_group_block_write_uc16(
+                (__global uchar *)&src[16 * IC_BLOCK], as_uchar16(T2.s0123));
+        intel_sub_group_block_write_uc16(
+                (__global uchar *)&src[20 * IC_BLOCK], as_uchar16(T2.s4567));
+        intel_sub_group_block_write_uc16(
+                (__global uchar *)&src[24 * IC_BLOCK], as_uchar16(T3.s0123));
+        intel_sub_group_block_write_uc16(
+                (__global uchar *)&src[28 * IC_BLOCK], as_uchar16(T3.s4567));
 #endif // MB_FULL_BLOCK
 #endif // MB > 8
 #ifdef SLM_WEI
