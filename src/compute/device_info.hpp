@@ -35,6 +35,7 @@ enum class device_ext_t : int64_t {
     intel_subgroup_local_block_io = 1 << 4,
     intel_subgroup_matrix_multiply_accumulate = 1 << 5,
     intel_subgroup_split_matrix_multiply_accumulate = 1 << 6,
+    intel_global_float_atomics = 1 << 7,
     last
 };
 
@@ -49,6 +50,7 @@ static inline const char *ext2cl_str(compute::device_ext_t ext) {
         CASE(intel_subgroup_local_block_io);
         CASE(intel_subgroup_matrix_multiply_accumulate);
         CASE(intel_subgroup_split_matrix_multiply_accumulate);
+        CASE(intel_global_float_atomics);
         default: return nullptr;
     }
 #undef CASE

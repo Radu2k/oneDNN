@@ -69,6 +69,8 @@ static compute::device_ext_t get_extensions(gpu_arch_t gpu_arch) {
                     intel_subgroup_matrix_multiply_accumulate;
             extensions |= (uint64_t)compute::device_ext_t::
                     intel_subgroup_split_matrix_multiply_accumulate;
+            extensions |= (uint64_t)
+                    compute::device_ext_t::intel_global_float_atomics;
         case gpu_arch_t::gen12lp:
             extensions |= (uint64_t)compute::device_ext_t::intel_dot_accumulate;
             extensions |= (uint64_t)
@@ -135,7 +137,8 @@ public:
                         device_ext_t::intel_subgroup_local_block_io,
                         device_ext_t::intel_subgroup_matrix_multiply_accumulate,
                         device_ext_t::
-                                intel_subgroup_split_matrix_multiply_accumulate))
+                                intel_subgroup_split_matrix_multiply_accumulate,
+                        device_ext_t::intel_global_float_atomics))
                 opts += std::string("-D") + ext2cl_str(ext) + " ";
         }
         if (!opts.empty()) { opts[opts.size() - 1] = '\0'; }

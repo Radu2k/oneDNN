@@ -108,7 +108,6 @@ inline float16 convert_bf16_to_f32_vec16(ushort16 b) {
     return __builtin_IB_bftof_16(as_short16(b));
 }
 
-
 #if DT_F16
 inline float8 __dpas(uint8 a, int8 b, float8 acc)
         __attribute__((overloadable)) {
@@ -605,6 +604,29 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v) {
     p += get_max_sub_group_size();
     p[idx] = v.s7;
 }
+#endif
+
+#if __OPENCL_C_VERSION__ >= 200
+#ifdef cl_intel_global_float_atomics
+inline void atomic_add_global(
+        volatile global atomic_float *source, float operand) {
+    atomic_fetch_add(source, operand);
+}
+
+#else // float atomics
+inline void atomic_add_global(
+        volatile __global atomic_float *source, float operand) {
+    float old_val = atomic_load_explicit(
+            source, memory_order_relaxed, memory_scope_device);
+    bool success = false;
+    do {
+        float new_val = old_val + operand;
+        success = atomic_compare_exchange_strong_explicit(source, &old_val,
+                new_val, memory_order_acq_rel, memory_order_relaxed,
+                memory_scope_device);
+    } while (!success);
+}
+#endif
 #endif
 
 #endif
