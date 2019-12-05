@@ -113,8 +113,24 @@ dnnl_status_t execute_and_wait(
     if (status != dnnl_success) return status;
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-    // Handle simulation
-    if (is_gpu_sim()) {
+    if (!is_gpu_sim()) {
+        execute_map_args(args);
+        return dnnl_success;
+    }
+
+    // Handle simulation for GPU
+    bool is_gpu_prim = false;
+    const_dnnl_primitive_desc_t pd;
+    DNN_SAFE_V(dnnl_primitive_get_primitive_desc(prim, &pd));
+
+    dnnl_engine_t eng_q;
+    DNN_SAFE_V(dnnl_primitive_desc_query(pd, dnnl_query_engine, 0, &eng_q));
+
+    dnnl_engine_kind_t eng_kind;
+    DNN_SAFE_V(dnnl_engine_get_kind(eng_q, &eng_kind));
+    is_gpu_prim = (eng_kind == dnnl_gpu);
+
+    if (is_gpu_prim) {
         int nargs = (int)dnnl_args.size();
 
         // Stop execution on the first non-reorder primitive.
