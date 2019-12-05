@@ -483,6 +483,8 @@ enum class algorithm {
     eltwise_gelu = dnnl_eltwise_gelu,
     /// Eltwise: natural logarithm
     eltwise_log = dnnl_eltwise_log,
+    /// Eltwise: clip
+    eltwise_clip = dnnl_eltwise_clip,
     /// Local response normalization (LRN) across multiple channels
     lrn_across_channels = dnnl_lrn_across_channels,
     /// LRN within a single channel
@@ -1436,6 +1438,7 @@ struct memory : public handle<dnnl_memory_t> {
         abdec = dnnl_abdec, ///< permuted 5D tensor
         acb = dnnl_acb, ///< permuted 3D tensor
         acbde = dnnl_acbde, ///< permuted 5D tensor
+        acbdef = dnnl_acbdef, ///< permuted 6D tensor
         acdb = dnnl_acdb, ///< permuted 4D tensor
         acdeb = dnnl_acdeb, ///< permuted 5D tensor
         ba = dnnl_ba, ///< permuted 2D tensor
@@ -1458,6 +1461,7 @@ struct memory : public handle<dnnl_memory_t> {
         Abc4a = dnnl_Abc4a,
         aBc4b = dnnl_aBc4b,
         ABc4b16a4b = dnnl_ABc4b16a4b,
+        ABc2b8a4b = dnnl_ABc2b8a4b,
         ABc4b4a = dnnl_ABc4b4a,
         ABc8a16b2a = dnnl_ABc8a16b2a,
         ABc8a8b = dnnl_ABc8a8b,
@@ -1476,9 +1480,11 @@ struct memory : public handle<dnnl_memory_t> {
         Abcd4a = dnnl_Abcd4a,
         aBcd4b = dnnl_aBcd4b,
         ABcd4b16a4b = dnnl_ABcd4b16a4b,
+        ABcd2b8a4b = dnnl_ABcd2b8a4b,
         ABcd4b4a = dnnl_ABcd4b4a,
         ABcd4a4b = dnnl_ABcd4a4b,
         aBCd4c16b4c = dnnl_aBCd4c16b4c,
+        aBCd2c8b4c = dnnl_aBCd2c8b4c,
         aBCd4c4b = dnnl_aBCd4c4b,
         aBCd4b4c = dnnl_aBCd4b4c,
         ABcd8a16b2a = dnnl_ABcd8a16b2a,
@@ -1608,6 +1614,7 @@ struct memory : public handle<dnnl_memory_t> {
         hwigo = dnnl_hwigo,
         giohw = dnnl_giohw,
         goidhw = dnnl_goidhw,
+        giodhw = dnnl_giodhw,
         tnc = dnnl_tnc,
         ntc = dnnl_ntc,
         ldnc = dnnl_ldnc,
@@ -1641,6 +1648,7 @@ struct memory : public handle<dnnl_memory_t> {
         OIw16o16i = dnnl_OIw16o16i,
         Oiw16o = dnnl_Oiw16o,
         OIw4i16o4i = dnnl_OIw4i16o4i,
+        OIw2i8o4i = dnnl_OIw2i8o4i,
         OIw4i4o = dnnl_OIw4i4o,
         OIw4o4i = dnnl_OIw4o4i,
         Oiw4o = dnnl_Oiw4o,
@@ -1668,6 +1676,7 @@ struct memory : public handle<dnnl_memory_t> {
         OIhw8o16i2o = dnnl_OIhw8o16i2o,
         OIhw8o8i = dnnl_OIhw8o8i,
         OIhw8o4i = dnnl_OIhw8o4i,
+        OIhw2i8o4i = dnnl_OIhw2i8o4i,
         Odhwi16o = dnnl_Odhwi16o,
         Odhwi4o = dnnl_Odhwi4o,
         Odhwi8o = dnnl_Odhwi8o,
@@ -1687,6 +1696,7 @@ struct memory : public handle<dnnl_memory_t> {
         gOIw16o16i = dnnl_gOIw16o16i,
         gOiw16o = dnnl_gOiw16o,
         gOIw4i16o4i = dnnl_gOIw4i16o4i,
+        gOIw2i8o4i = dnnl_gOIw2i8o4i,
         gOIw4i4o = dnnl_gOIw4i4o,
         gOIw4o4i = dnnl_gOIw4o4i,
         gOiw4o = dnnl_gOiw4o,
@@ -1698,6 +1708,8 @@ struct memory : public handle<dnnl_memory_t> {
         gOwi16o = dnnl_gOwi16o,
         gOwi4o = dnnl_gOwi4o,
         gOwi8o = dnnl_gOwi8o,
+        Goiw8g = dnnl_Goiw8g,
+        Goiw16g = dnnl_Goiw16g,
         gIOhw16o16i = dnnl_gIOhw16o16i,
         gOhwi16o = dnnl_gOhwi16o,
         gOhwi4o = dnnl_gOhwi4o,
@@ -1706,8 +1718,8 @@ struct memory : public handle<dnnl_memory_t> {
         gOIhw16i16o = dnnl_gOIhw16i16o,
         gOIhw16o16i = dnnl_gOIhw16o16i,
         gOihw16o = dnnl_gOihw16o,
-        gOIhw2i8o4i = dnnl_gOIhw2i8o4i,
         gOIhw4i16o4i = dnnl_gOIhw4i16o4i,
+        gOIhw2i8o4i = dnnl_gOIhw2i8o4i,
         gOIhw4i4o = dnnl_gOIhw4i4o,
         gOIhw4o4i = dnnl_gOIhw4o4i,
         gOihw4o = dnnl_gOihw4o,
@@ -1800,7 +1812,7 @@ struct memory : public handle<dnnl_memory_t> {
         /// @param offsets Offsets of a sub-memory from the encompassing
         ///                memory object in each dimension
         desc submemory_desc(
-                const memory::dims &dims, const memory::dims &offsets) {
+                const memory::dims &dims, const memory::dims &offsets) const {
             dnnl_memory_desc_t sub_md;
             error::wrap_c_api(dnnl_memory_desc_init_submemory(
                                       &sub_md, &data, &dims[0], &offsets[0]),
@@ -1812,7 +1824,7 @@ struct memory : public handle<dnnl_memory_t> {
         //
         /// @param dims New dimensions. The product of dimensions must
         /// remain constant.
-        desc reshape(const memory::dims &dims) {
+        desc reshape(const memory::dims &dims) const {
             dnnl_memory_desc_t out_md;
             error::wrap_c_api(dnnl_memory_desc_reshape(&out_md, &data,
                                       (int)dims.size(), &dims[0]),
@@ -2363,7 +2375,7 @@ struct reorder : public primitive {
     ///               as the primitive.
     /// @param src Source memory object.
     /// @param dst Destination memory object.
-    void execute(stream stream, memory &src, memory &dst) {
+    void execute(stream stream, memory &src, memory &dst) const {
         primitive::execute(stream, {{DNNL_ARG_FROM, src}, {DNNL_ARG_TO, dst}});
     }
 };

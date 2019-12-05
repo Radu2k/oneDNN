@@ -462,7 +462,26 @@
 #define OFF_MD(prefix, x0, x1, x2, x3, x4, x5) \
     CONCAT2(OFF_MD_, prefix##_NLEVELS)(prefix, x0, x1, x2, x3, x4, x5)
 
-#if NDIMS == 3
+#if NDIMS == 2
+#define SRC_OFF(x0, x1, d, h, w) \
+    (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0 \
+            + ((x1) % SRC_B1) * SRC_SB1 + ((x1) / SRC_B1) * SRC_S1)
+
+#if WITH_GROUPS == 1
+#define WHT_OFF(x0, x1, x2, d, h, w) \
+    (((x0) % WHT_B0) * WHT_SB0 + ((x0) / WHT_B0) * WHT_S0 \
+            + ((x1) % WHT_B1) * WHT_SB1 + ((x1) / WHT_B1) * WHT_S1 \
+            + ((x2) % WHT_B2) * WHT_SB2 + ((x2) / WHT_B2) * WHT_S2)
+#else
+#define WHT_OFF(g, x0, x1, d, h, w) \
+    (((x0) % WHT_B0) * WHT_SB0 + ((x0) / WHT_B0) * WHT_S0 \
+            + ((x1) % WHT_B1) * WHT_SB1 + ((x1) / WHT_B1) * WHT_S1)
+#endif
+
+#define DST_OFF(x0, x1, d, h, w) \
+    (((x0) % DST_B0) * DST_SB0 + ((x0) / DST_B0) * DST_S0 \
+            + ((x1) % DST_B1) * DST_SB1 + ((x1) / DST_B1) * DST_S1)
+#elif NDIMS == 3
 #define SRC_OFF(x0, x1, d, h, x2) \
     (((x0) % SRC_B0) * SRC_SB0 + ((x0) / SRC_B0) * SRC_S0 \
             + ((x1) % SRC_B1) * SRC_SB1 + ((x1) / SRC_B1) * SRC_S1 \
