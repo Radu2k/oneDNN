@@ -187,9 +187,19 @@ extern "C" int dnnl_memory_get_sim_id(dnnl_memory_t mem);
 #endif
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+bool is_gpu_sim();
+bool is_gpu_perf_sim();
+
 void register_dnn_mem_object(dnn_mem_t *mem);
 void unregister_dnn_mem_object(dnn_mem_t *mem);
 #else
+inline bool is_gpu_sim() {
+    return false;
+}
+inline bool is_gpu_perf_sim() {
+    return false;
+}
+
 inline void register_dnn_mem_object(dnn_mem_t *mem) {}
 inline void unregister_dnn_mem_object(dnn_mem_t *mem) {}
 #endif

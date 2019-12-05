@@ -310,7 +310,7 @@ int fill_src(const prb_t *p, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *r) {
             });
 
     SAFE(mem_dt.reorder(mem_00), WARN);
-    if (need_extra_mem) {
+    if (need_extra_mem && !is_gpu_perf_sim()) {
         SAFE(mem_fp.reorder(mem_dt), WARN);
         SAFE(compare_src(p, mem_fp, mem_00, r), WARN);
     }
@@ -346,7 +346,7 @@ int fill_wei(const prb_t *p, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *r) {
             });
 
     SAFE(mem_dt.reorder(mem_00), WARN);
-    if (check_reorder) {
+    if (check_reorder && !is_gpu_perf_sim()) {
         SAFE(mem_fp.reorder(mem_dt), WARN);
         SAFE(compare_wei(p, mem_fp, mem_00, r), WARN);
     }
@@ -375,7 +375,7 @@ int fill_bia(const prb_t *p, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *r) {
     }
 
     SAFE(mem_dt.reorder(mem_00), WARN);
-    if (need_extra_mem) {
+    if (need_extra_mem && !is_gpu_perf_sim()) {
         SAFE(mem_fp.reorder(mem_dt), WARN);
         SAFE(compare_bia(p, mem_fp, mem_00, r), WARN);
     }
@@ -407,7 +407,7 @@ int fill_dst(const prb_t *p, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *r) {
             });
 
     SAFE(mem_dt.reorder(mem_00), WARN);
-    if (need_extra_mem) {
+    if (need_extra_mem && !is_gpu_perf_sim()) {
         SAFE(mem_fp.reorder(mem_dt), WARN);
         SAFE(compare_dst(p, mem_fp, mem_00, r), WARN);
     }

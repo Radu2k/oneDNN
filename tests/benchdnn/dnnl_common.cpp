@@ -54,13 +54,13 @@ void execute_map_args(const args_t &args) {
 }
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-static bool is_gpu_sim() {
+bool is_gpu_sim() {
     static const char *sim_env = getenv("DNNL_GPU_SIM");
     static bool _is_sim = sim_env && atoi(sim_env) == 1;
     return _is_sim;
 }
 
-static bool is_gpu_perf_sim() {
+bool is_gpu_perf_sim() {
     static const char *sim_perf_env = getenv("DNNL_GPU_PERF_SIM");
     static bool _is_perf_sim = sim_perf_env && atoi(sim_perf_env) == 1;
     return _is_perf_sim;
@@ -75,7 +75,8 @@ void register_dnn_mem_object(dnn_mem_t *mem) {
 void unregister_dnn_mem_object(dnn_mem_t *mem) {
     dnn_mem_objects.erase(mem);
 }
-void destroy_dnn_mem_objects() {
+
+static void destroy_dnn_mem_objects() {
     std::vector<dnn_mem_t *> to_destroy;
     for (auto *mem : dnn_mem_objects)
         to_destroy.push_back(mem);
