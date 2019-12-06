@@ -32,6 +32,19 @@
 #define BLOCK_READ_SRC(data, idx) \
     data = intel_sub_group_block_read8((__global uint *)&src[idx]);
 
+#if BIA_DT_F32
+#define BLOCK_READ_BIA(data, idx) \
+    data = as_float4(intel_sub_group_block_read4((__global uint *)&bias[idx]));
+#elif BIA_DT_F16
+#define BLOCK_READ_BIA(data, idx) \
+    data = convert_float4(as_half4( \
+            intel_sub_group_block_read_us4((__global ushort *)&bias[idx])));
+#elif BIA_DT_BF16
+#define BLOCK_READ_BIA(data, idx) \
+    data = convert_bf16_to_f32_vec4( \
+            intel_sub_group_block_read_us4((__global ushort *)&bias[idx]));
+#endif
+
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) // attr:no-format
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
@@ -184,10 +197,8 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
     }
 
 #if WITH_BIAS
-    bias += (group_oc + oc) * OC_CALC_BLOCK
-            + get_sub_group_local_id() * OC_CALC_BLOCK / OC_BLOCK;
-    float4 bia = (float4)(BIA_TO_REF(bias[0]), BIA_TO_REF(bias[1]),
-            BIA_TO_REF(bias[16]), BIA_TO_REF(bias[17]));
+    float4 bia;
+    BLOCK_READ_BIA(bia, (group_oc + oc) * OC_CALC_BLOCK);
     bia *= scales;
 #define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)scales, bia);
 #else
@@ -254,9 +265,11 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
             DO_POST_SUM_ELTWISE(); \
             CONVERT_PACK(n_i); \
         } \
-        BLOCK_WRITE_DST((__global uint *)&dst[0], dst_pack0); \
+        BLOCK_WRITE_DST(dst, dst_pack0.s0123, 0) \
+        BLOCK_WRITE_DST(dst, dst_pack0.s4567, 4 * OC_BLOCK) \
         __global DST_DATA_T *dst1 = dst + OC_BLOCK * MB_BLOCK * OD * OH * OW; \
-        BLOCK_WRITE_DST((__global uint *)&dst1[0], dst_pack1); \
+        BLOCK_WRITE_DST(dst1, dst_pack1.s0123, 0) \
+        BLOCK_WRITE_DST(dst1, dst_pack1.s4567, 4 * OC_BLOCK) \
     } while (0)
 
     if (ow < OW) {
@@ -267,33 +280,50 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
         ulong8 D00, D01, D02, D03;
         ulong8 D10, D11, D12, D13;
 #define AS_DST_PACK as_ulong
-#define BLOCK_WRITE_DST intel_sub_group_block_write_ul8
-#define BLOCK_READ_DST intel_sub_group_block_read_ul8
+#define BLOCK_WRITE_DST(p, data, idx) \
+    intel_sub_group_block_write_ui8((__global uint *)&p[idx], as_uint8(data));
+#define BLOCK_READ_DST(idx) \
+    as_ulong4(intel_sub_group_block_read_ui8((__global uint *)&dst[idx]));
 #else
         uint8 dst_pack0, dst_pack1;
         uint8 D00, D01, D02, D03;
         uint8 D10, D11, D12, D13;
 #define AS_DST_PACK as_uint
-#define BLOCK_WRITE_DST intel_sub_group_block_write8
-#define BLOCK_READ_DST intel_sub_group_block_read8
+#define BLOCK_WRITE_DST(p, data, idx) \
+    intel_sub_group_block_write_us8( \
+            (__global ushort *)&p[idx], as_ushort8(data));
+#define BLOCK_READ_DST(idx) \
+    as_uint4(intel_sub_group_block_read_us8((__global ushort *)&dst[idx]));
 #endif
 
 #if WITH_SUM
-        D00 = BLOCK_READ_DST((__global uint *)dst);
-        D10 = BLOCK_READ_DST(
-                (__global uint *)&dst[OC_BLOCK * MB_BLOCK * OD * OH * OW]);
+        D00.s0123 = BLOCK_READ_DST(0);
+        D00.s4567 = BLOCK_READ_DST(4 * OC_BLOCK);
+        D10.s0123 = BLOCK_READ_DST(OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        D10.s4567 = BLOCK_READ_DST(
+                4 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
 #if MB > 8
-        D01 = BLOCK_READ_DST((__global uint *)&dst[8 * OC_BLOCK]);
-        D11 = BLOCK_READ_DST((__global uint *)&dst[8 * OC_BLOCK
-                + OC_BLOCK * MB_BLOCK * OD * OH * OW]);
+        D01.s0123 = BLOCK_READ_DST(8 * OC_BLOCK);
+        D01.s4567 = BLOCK_READ_DST(12 * OC_BLOCK);
+        D11.s0123 = BLOCK_READ_DST(
+                8 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        D11.s4567 = BLOCK_READ_DST(
+                12 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
 #if MB > 16
-        D02 = BLOCK_READ_DST((__global uint *)&dst[16 * OC_BLOCK]);
-        D12 = BLOCK_READ_DST((__global uint *)&dst[16 * OC_BLOCK
-                + OC_BLOCK * MB_BLOCK * OD * OH * OW]);
+
+        D02.s0123 = BLOCK_READ_DST(16 * OC_BLOCK);
+        D02.s4567 = BLOCK_READ_DST(20 * OC_BLOCK);
+        D12.s0123 = BLOCK_READ_DST(
+                16 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        D12.s4567 = BLOCK_READ_DST(
+                20 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
 #if MB > 24
-        D03 = BLOCK_READ_DST((__global uint *)&dst[24 * OC_BLOCK]);
-        D13 = BLOCK_READ_DST((__global uint *)&dst[24 * OC_BLOCK
-                + OC_BLOCK * MB_BLOCK * OD * OH * OW]);
+        D03.s0123 = BLOCK_READ_DST(24 * OC_BLOCK);
+        D03.s4567 = BLOCK_READ_DST(28 * OC_BLOCK);
+        D13.s0123 = BLOCK_READ_DST(
+                24 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        D13.s4567 = BLOCK_READ_DST(
+                28 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
 #endif // MB > 24
 #endif // MB > 16
 #endif // MB > 8

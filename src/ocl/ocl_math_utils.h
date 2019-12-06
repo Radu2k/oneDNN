@@ -100,6 +100,10 @@ inline float2 convert_bf16_to_f32_vec2(ushort2 b) {
     return __builtin_IB_bftof_2(as_short2(b));
 }
 
+inline float4 convert_bf16_to_f32_vec4(ushort4 b) {
+    return __builtin_IB_bftof_4(as_short4(b));
+}
+
 inline float8 convert_bf16_to_f32_vec8(ushort8 b) {
     return __builtin_IB_bftof_8(as_short8(b));
 }
@@ -351,6 +355,14 @@ inline float convert_bf16_to_f32(ushort b) {
 inline float2 convert_bf16_to_f32_vec2(ushort2 b) {
     float2 f;
     for (int i = 0; i < 2; i++) {
+        f[i] = convert_bf16_to_f32(b[i]);
+    }
+    return f;
+}
+
+inline float4 convert_bf16_to_f32_vec4(ushort4 b) {
+    float4 f;
+    for (int i = 0; i < 4; i++) {
         f[i] = convert_bf16_to_f32(b[i]);
     }
     return f;
