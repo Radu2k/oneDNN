@@ -133,7 +133,9 @@ struct jit_gen12hp_convolution_bwd_data_t : public primitive_impl_t {
             bool ok = true
                     && utils::one_of(true,
                             expect_data_types(u8, s8, f32, u8, s32),
-                            expect_data_types(u8, s8, f32, s8, s32))
+                            expect_data_types(u8, s8, f32, s8, s32),
+                            expect_data_types(s8, s8, f32, u8, s32),
+                            expect_data_types(s8, s8, f32, s8, s32))
                     && desc()->prop_kind == prop_kind::backward_data
                     && desc()->alg_kind == alg_kind::convolution_direct
                     && compute_engine->mayiuse(
@@ -158,7 +160,7 @@ struct jit_gen12hp_convolution_bwd_data_t : public primitive_impl_t {
     };
 
     status_t init() override {
-        const char *kernel_name = "gen12hp_conv_bwd_data_u8s8s32x_kernel";
+        const char *kernel_name = "gen12hp_conv_bwd_data_x8s8s32x_kernel";
         compute::kernel_ctx_t kernel_ctx;
         auto status = jit_gen12hp_conv_bwd_data_kernel::init_const_def(
                 kernel_ctx, pd()->jcp_);

@@ -17,14 +17,6 @@
 #include "ocl/ocl_math_utils.h"
 #include "ocl/ocl_types.h"
 
-#ifndef MB_FULL_BLOCK
-#define MB_FULL_BLOCK
-#endif
-
-#if KW * OC_BLOCK * IC_BLOCK * IC_GROUP <= 8192
-#define SLM_WEI
-#endif
-
 #ifdef SLM_WEI
 #define WEI wei_tmp
 #define BLOCK_READ_WHT(data, idx) \
@@ -47,22 +39,14 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
-        const __global char *wei, const __global float *bias,
-        __global DATA_T *dst) {
-
-#ifdef MB_FULL_BLOCK
-    const int mb_blocks = 1;
-#else // MB_FULL_BLOCK
-    const int mb_blocks = 2;
-#endif // MB_FULL_BLOCK
-
+gen12hp_conv_bwd_data_x8s8s32x_kernel(const __global SRC_DATA_T *src,
+        const __global WEI_DATA_T *wei, const __global BIA_DATA_T *bias,
+        __global DST_DATA_T *dst) {
     const int group_ic = get_group_id(0) * IC_GROUP;
-    const int group_mb = get_group_id(2) * MB_GROUP / mb_blocks;
+    const int group_mb = get_group_id(2) * MB_GROUP;
     const int group_sp = get_group_id(1) * SP_GROUP;
 
     const int sub_group_id = get_sub_group_id();
-    const int mb = get_group_id(2) % mb_blocks;
     const int ic = (sub_group_id % IC_GROUP);
     const int sp = (sub_group_id / IC_GROUP);
 
@@ -87,12 +71,10 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
 
     src += IC_BLOCK * ID * IH * IW * MB_BLOCK * (group_ic + ic);
     src += IC_BLOCK * ID * IH * IW * IC_NCHUNK * G * MB_BLOCK * group_mb;
-    src += IC_BLOCK * MB_BLOCK / 2 * mb;
     src += IC_BLOCK * MB_BLOCK * (IW * IH * id + IW * ih + iw);
 
     dst += OC_BLOCK * OD * OH * OW * MB_BLOCK * group_oc;
     dst += OC_BLOCK * OD * OH * OW * OC_NCHUNK * G * MB_BLOCK * group_mb;
-    dst += OC_BLOCK * MB_BLOCK / 2 * mb;
 
     wei += OC_BLOCK * KD * KH * KW * IC_BLOCK * (group_ic + ic) * OC_NCHUNK;
 
@@ -159,10 +141,12 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
                             BLOCK_READ_DST(D0, 0);
 #if MB > 8
                             BLOCK_READ_DST(D1, 8 * OC_BLOCK);
-#ifdef MB_FULL_BLOCK
+#if MB > 16
                             BLOCK_READ_DST(D2, 16 * OC_BLOCK);
+#if MB > 24
                             BLOCK_READ_DST(D3, 24 * OC_BLOCK);
-#endif // MB_FULL_BLOCK
+#endif // MB > 24
+#endif // MB > 16
 #endif // MB > 8
                             BLOCK_READ_WHT(W0, 0);
                             BLOCK_READ_WHT(W1, 8 * IC_BLOCK);
@@ -177,16 +161,18 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
                             C11 = MMAD8X8(D1, W1, C11);
                             C12 = MMAD8X8(D1, W2, C12);
                             C13 = MMAD8X8(D1, W3, C13);
-#ifdef MB_FULL_BLOCK
+#if MB > 16
                             C20 = MMAD8X8(D2, W0, C20);
                             C21 = MMAD8X8(D2, W1, C21);
                             C22 = MMAD8X8(D2, W2, C22);
                             C23 = MMAD8X8(D2, W3, C23);
+#if MB > 24
                             C30 = MMAD8X8(D3, W0, C30);
                             C31 = MMAD8X8(D3, W1, C31);
                             C32 = MMAD8X8(D3, W2, C32);
                             C33 = MMAD8X8(D3, W3, C33);
-#endif // MB_FULL_BLOCK
+#endif // MB > 24
+#endif // MB > 16
 #endif // MB > 8
                         }
                     }
@@ -203,9 +189,9 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
 #if WITH_BIAS
 #define BIAS_SUM_RELU(RES, TMP, ACC, BIA) \
     TMP = (float)ACC + BIA; \
-    RES = CONVERT_DATA_T(TMP);
+    RES = TO_SRC(TMP);
 #else // WITH_BIAS
-#define BIAS_SUM_RELU(RES, TMP, ACC, BIA) RES = CONVERT_DATA_T((float)ACC);
+#define BIAS_SUM_RELU(RES, TMP, ACC, BIA) RES = TO_SRC((float)ACC);
 #endif // WITH_BIAS
 
 #define PACK(idx) \
@@ -262,16 +248,18 @@ gen12hp_conv_bwd_data_u8s8s32x_kernel(const __global uchar *src,
                 (__global uchar *)&src[8 * IC_BLOCK], as_uchar16(T1.s0123));
         intel_sub_group_block_write_uc16(
                 (__global uchar *)&src[12 * IC_BLOCK], as_uchar16(T1.s4567));
-#ifdef MB_FULL_BLOCK
+#if MB > 16
         intel_sub_group_block_write_uc16(
                 (__global uchar *)&src[16 * IC_BLOCK], as_uchar16(T2.s0123));
         intel_sub_group_block_write_uc16(
                 (__global uchar *)&src[20 * IC_BLOCK], as_uchar16(T2.s4567));
+#if MB > 24
         intel_sub_group_block_write_uc16(
                 (__global uchar *)&src[24 * IC_BLOCK], as_uchar16(T3.s0123));
         intel_sub_group_block_write_uc16(
                 (__global uchar *)&src[28 * IC_BLOCK], as_uchar16(T3.s4567));
-#endif // MB_FULL_BLOCK
+#endif // MB > 24
+#endif // MB > 16
 #endif // MB > 8
 #ifdef SLM_WEI
     }

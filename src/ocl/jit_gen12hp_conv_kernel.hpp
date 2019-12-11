@@ -178,11 +178,6 @@ struct jit_gen12hp_conv_bwd_data_kernel {
             const memory_desc_t &weights_md, const memory_desc_t &dst_md,
             const memory_desc_t &bias_md, const primitive_attr_t &attr) {
 
-        const memory_desc_wrapper src_mdw(&src_md);
-        const memory_desc_wrapper weights_mdw(&weights_md);
-        const memory_desc_wrapper dst_mdw(&dst_md);
-        const memory_desc_wrapper bias_mdw(&bias_md);
-
         set_default_conf(jcp, cd, src_md, weights_md, dst_md, attr);
 
         status_t status = status::success;
@@ -192,8 +187,6 @@ struct jit_gen12hp_conv_bwd_data_kernel {
         if (jcp.with_groups && jcp.ngroups > 1
                 && (jcp.oc % 32 != 0 || jcp.ic % 32 != 0))
             return status::unimplemented;
-
-        jcp.dst_data_type = dst_mdw.data_type();
 
         jcp.sub_group_size = 8;
         jcp.mb_block = 32;
@@ -211,6 +204,7 @@ struct jit_gen12hp_conv_bwd_data_kernel {
         jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block);
 
         jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
+        jcp.bias_data_type = jcp.with_bias ? bias_md.data_type : data_type::f32;
 
         format_tag_t src_tag, dst_tag, wei_tag;
 
@@ -226,6 +220,8 @@ struct jit_gen12hp_conv_bwd_data_kernel {
         jcp.src_tag = src_tag;
         jcp.wei_tag = wei_tag;
         jcp.dst_tag = dst_tag;
+
+        jcp.wht_slm_size = jcp.kw * 32 * 32 * utils::div_up(jcp.lws_d[0], 8);
 
         return status;
     }
@@ -274,8 +270,13 @@ struct jit_gen12hp_conv_bwd_data_kernel {
         kernel_ctx.define_int("LWS_0", jcp.lws_d[0]);
         kernel_ctx.define_int("LWS_1", jcp.lws_d[1]);
         kernel_ctx.define_int("LWS_2", jcp.lws_d[2]);
+        kernel_ctx.define_int("SLM_WEI", jcp.wht_slm_size <= 8192);
 
         kernel_ctx.set_data_type(jcp.dst_data_type);
+        def_data_type(kernel_ctx, jcp.src_data_type, "SRC");
+        def_data_type(kernel_ctx, jcp.dst_data_type, "DST");
+        def_data_type(kernel_ctx, jcp.weights_data_type, "WEI");
+        def_data_type(kernel_ctx, jcp.bias_data_type, "BIA");
 
         kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
