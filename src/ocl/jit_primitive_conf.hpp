@@ -155,7 +155,7 @@ struct jit_conv_conf_t {
 
     int od_block, oh_block, ow_block;
     int id_block, ih_block, iw_block;
-    int oc_block, ic_block, nchunk;
+    int oc_block, ic_block, calc_block, nchunk;
     size_t wei_block;
     int icb;
     int ocb;

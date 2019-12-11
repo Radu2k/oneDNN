@@ -19,13 +19,13 @@
 #include "common/dnnl_traits.hpp"
 #include "common/type_helpers.hpp"
 
-#include "ocl/jit_gen12hp_u8s8s32x_convolution.hpp"
+#include "ocl/jit_gen12hp_convolution.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace ocl {
 
-status_t jit_gen12hp_u8s8s32x_convolution_fwd_t::execute_forward(
+status_t jit_gen12hp_convolution_fwd_t::execute_forward(
         const exec_ctx_t &ctx) const {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
@@ -54,7 +54,7 @@ status_t jit_gen12hp_u8s8s32x_convolution_fwd_t::execute_forward(
     return status;
 }
 
-status_t jit_gen12hp_u8s8s32x_convolution_bwd_data_t::execute_backward_data(
+status_t jit_gen12hp_convolution_bwd_data_t::execute_backward_data(
         const exec_ctx_t &ctx) const {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());

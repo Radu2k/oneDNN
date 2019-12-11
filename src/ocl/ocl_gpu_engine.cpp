@@ -22,8 +22,7 @@
 #include "ocl/gemm_x8s8s32x_inner_product.hpp"
 #include "ocl/jit_gen12hp_1x1_convolution.hpp"
 #include "ocl/jit_gen12hp_bf16_convolution.hpp"
-#include "ocl/jit_gen12hp_u8s8s32x_convolution.hpp"
-#include "ocl/jit_gen12hp_x16_convolution.hpp"
+#include "ocl/jit_gen12hp_convolution.hpp"
 #include "ocl/jit_gen12lp_gemm.hpp"
 #include "ocl/jit_gen12lp_u8s8s32u8_1x1_convolution.hpp"
 #include "ocl/jit_gen12lp_x8s8s32x_convolution.hpp"
@@ -204,11 +203,10 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(ref_deconvolution_bwd_weights_t),
         /*conv*/
         INSTANCE(jit_gen12hp_1x1_convolution_fwd_t),
-        INSTANCE(jit_gen12hp_x16_convolution_fwd_t),
         INSTANCE(jit_gen12hp_bf16_convolution_bwd_weights_t),
         INSTANCE(jit_gen12hp_1x1_convolution_fwd_t),
-        INSTANCE(jit_gen12hp_u8s8s32x_convolution_fwd_t),
-        INSTANCE(jit_gen12hp_u8s8s32x_convolution_bwd_data_t),
+        INSTANCE(jit_gen12hp_convolution_fwd_t),
+        INSTANCE(jit_gen12hp_convolution_bwd_data_t),
         INSTANCE(jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t),
         // TODO: turn it ON once permuted formats support implemented
         // INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t),

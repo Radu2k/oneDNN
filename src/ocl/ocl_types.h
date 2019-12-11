@@ -272,10 +272,17 @@
 #define MMAD_DATA_T uint
 #define MMAD_DATA4_T uint4
 #define MMAD_DATA8_T uint8
+#define MMAD_ACC_DATA8_T int8
 #elif SRC_DT_S8
 #define MMAD_DATA_T int
 #define MMAD_DATA4_T int4
 #define MMAD_DATA8_T int8
+#define MMAD_ACC_DATA8_T int8
+#else
+#define MMAD_DATA_T uint
+#define MMAD_DATA4_T uint4
+#define MMAD_DATA8_T uint8
+#define MMAD_ACC_DATA8_T float8
 #endif
 #define AS_SRC_DATA4_T CONCAT2(as_, SRC_DATA4_T)
 #define AS_MMAD_DATA8_T CONCAT2(as_, MMAD_DATA8_T)
@@ -346,6 +353,7 @@
 
 #ifdef DST_DATA_T
 #define DST_DATA2_T CONCAT2(DST_DATA_T, 2)
+#define DST_DATA4_T CONCAT2(DST_DATA_T, 4)
 #define DST_DATA8_T CONCAT2(DST_DATA_T, 8)
 #define AS_DST_DATA2_T CONCAT2(as_, DST_DATA2_T)
 #if DST_DT_BF16
@@ -359,6 +367,18 @@
 #define DST_TO_REF(x) convert_float(x)
 #define DST_TO_REF2(x) convert_float2(x)
 #define DST_TO_REF8(x) convert_float8(x)
+#elif DST_DT_U8
+#define DST_TO_REF(x) (x)
+#define DST_TO_REF2(x) (x)
+#define DST_TO_REF8(x) (x)
+#define REF_TO_DST(x) convert_uchar(x)
+#define REF_TO_DST8(x) convert_uchar8(x)
+#elif DST_DT_S8
+#define DST_TO_REF(x) (x)
+#define DST_TO_REF2(x) (x)
+#define DST_TO_REF8(x) (x)
+#define REF_TO_DST(x) convert_char(x)
+#define REF_TO_DST8(x) convert_char8(x)
 #else
 #define DST_TO_REF(x) (x)
 #define DST_TO_REF2(x) (x)

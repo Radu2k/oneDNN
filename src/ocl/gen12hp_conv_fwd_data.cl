@@ -19,6 +19,9 @@
 #include "ocl/ocl_post_ops.h"
 #endif
 
+#define SRC_DATA_BLOCK_T MMAD_DATA8_T
+#define AS_SRC_DATA_BLOCK_T AS_MMAD_DATA8_T
+
 #if SLM_WEI
 #define WEI wei_tmp
 #define BLOCK_READ_WHT(data, idx) \
@@ -30,7 +33,8 @@
 #endif
 
 #define BLOCK_READ_SRC(data, idx) \
-    data = intel_sub_group_block_read8((__global uint *)&src[idx]);
+    data = AS_SRC_DATA_BLOCK_T( \
+            intel_sub_group_block_read8((__global uint *)&src[idx]));
 
 #if BIA_DT_F32
 #define BLOCK_READ_BIA(data, idx) \
@@ -47,8 +51,8 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) // attr:no-format
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
-        const __global DATA_T *wei, const __global BIA_DATA_T *bias,
+gen12hp_conv_fwd_kernel(const __global SRC_DATA_T *src,
+        const __global WEI_DATA_T *wei, const __global BIA_DATA_T *bias,
         __global DST_DATA_T *dst, float eltwise_alpha, float eltwise_beta,
         float sum_scale, float scales) {
     const int group_oc = get_group_id(0) * OC_GROUP;
@@ -97,20 +101,20 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
 
     wei += WEI_BLOCK * KD * KH * KW * (group_oc + oc) * IC_NCHUNK;
 
-    float8 C00 = 0, C01 = 0, C02 = 0, C03 = 0;
-    float8 C10 = 0, C11 = 0, C12 = 0, C13 = 0;
-    float8 C20 = 0, C21 = 0, C22 = 0, C23 = 0;
-    float8 C30 = 0, C31 = 0, C32 = 0, C33 = 0;
+    MMAD_ACC_DATA8_T C00 = 0, C01 = 0, C02 = 0, C03 = 0;
+    MMAD_ACC_DATA8_T C10 = 0, C11 = 0, C12 = 0, C13 = 0;
+    MMAD_ACC_DATA8_T C20 = 0, C21 = 0, C22 = 0, C23 = 0;
+    MMAD_ACC_DATA8_T C30 = 0, C31 = 0, C32 = 0, C33 = 0;
 
 #if SLM_WEI
-    __local DATA_T wei_loc[KW * OC_GROUP * WEI_BLOCK];
-    __local DATA_T *wei_loc_base = wei_loc + KW * WEI_BLOCK * oc;
+    __local WEI_DATA_T wei_loc[KW * OC_GROUP * WEI_BLOCK];
+    __local WEI_DATA_T *wei_loc_base = wei_loc + KW * WEI_BLOCK * oc;
 #endif // SLM_WEI
 
     __attribute__((opencl_unroll_hint(1))) for (int ic_chunk = 0;
                                                 ic_chunk < IC_NCHUNK;
                                                 ic_chunk++) {
-        uint8 S0, S1, S2, S3;
+        SRC_DATA_BLOCK_T S0, S1, S2, S3;
         int8 W0, W1, W2, W3;
         __attribute__((opencl_unroll_hint(1))) for (int kd = 0; kd < KD; kd++) {
             if (kd * (1 + DD) + id < 0 || kd * (1 + DD) + id >= ID) {
@@ -128,9 +132,9 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
 
 #if SLM_WEI
                 barrier(CLK_LOCAL_MEM_FENCE);
-                const __global DATA_T *wei_copy_from
+                const __global WEI_DATA_T *wei_copy_from
                         = wei + sp * KW * WEI_BLOCK / LWS_1;
-                __local DATA_T *wei_copy_to
+                __local WEI_DATA_T *wei_copy_to
                         = wei_loc_base + sp * KW * WEI_BLOCK / LWS_1;
                 for (int bl = 0; bl < KW; bl++) {
                     WRITE_LOCAL_4(
@@ -139,7 +143,7 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
                                     (__global uint *)&wei_copy_from[bl * 4
                                             * IC_BLOCK]));
                 }
-                __local DATA_T *wei_tmp = wei_loc_base;
+                __local WEI_DATA_T *wei_tmp = wei_loc_base;
                 barrier(CLK_LOCAL_MEM_FENCE);
 #endif // SLM_WEI
 
@@ -206,6 +210,7 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
 #endif
 
 #if WITH_SUM
+#if DT_F16 || DT_BF16
 #define DO_SUM(d_pack0, d_pack1) \
     do { \
         DST_DATA2_T d0 = AS_DST_DATA2_T(d_pack0); \
@@ -213,7 +218,15 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
         tmp.s01 = fma(DST_TO_REF2(d0), (float2)sum_scale, tmp.s01); \
         tmp.s23 = fma(DST_TO_REF2(d1), (float2)sum_scale, tmp.s23); \
     } while (0)
-#else
+#else // DT_F16 || DT_BF16
+#define DO_SUM(d_pack, d_pack1) \
+    do { \
+        DST_DATA4_T d = AS_DST_DATA4_T(d_pack); \
+        float4 df = convert_float4(d); \
+        tmp = fma(df, (float4)sum_scale, tmp); \
+    } while (0)
+#endif // DT_F16 || DT_BF16
+#else // WITH_SUM
 #define DO_SUM(d_pack0, d_pack1) ;
 #endif // WITH_SUM
 
@@ -245,6 +258,7 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
         tmp[3] = C3[idx]; \
     } while (0)
 
+#if DT_F16 || DT_BF16
 #define CONVERT_PACK(idx) \
     do { \
         DST_DATA2_T tmp_cvt0 \
@@ -254,6 +268,29 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
                 = (DST_DATA2_T)(REF_TO_DST(tmp.s2), REF_TO_DST(tmp.s3)); \
         dst_pack1[idx] = AS_DST_PACK(tmp_cvt1); \
     } while (0)
+
+#define WRITE_DST() \
+    do { \
+        BLOCK_WRITE_DST(dst, dst_pack0.s0123, 0) \
+        BLOCK_WRITE_DST(dst, dst_pack0.s4567, 4 * OC_BLOCK) \
+        __global DST_DATA_T *dst1 = dst + OC_BLOCK * MB_BLOCK * OD * OH * OW; \
+        BLOCK_WRITE_DST(dst1, dst_pack1.s0123, 0) \
+        BLOCK_WRITE_DST(dst1, dst_pack1.s4567, 4 * OC_BLOCK) \
+    } while (0)
+#else
+#define CONVERT_PACK(idx) \
+    do { \
+        DST_DATA4_T tmp_cvt = (DST_DATA4_T)(TO_DST(tmp.s0), TO_DST(tmp.s1), \
+                TO_DST(tmp.s2), TO_DST(tmp.s3)); \
+        dst_pack0[idx] = as_uint(tmp_cvt); \
+    } while (0)
+
+#define WRITE_DST() \
+    do { \
+        BLOCK_WRITE_DST(dst, dst_pack0.s0123, 0) \
+        BLOCK_WRITE_DST(dst, dst_pack0.s4567, 4 * OC_BLOCK) \
+    } while (0)
+#endif
 
 #define STORE_DST(C0, C1, C2, C3, D0, D1) \
     do { \
@@ -265,11 +302,7 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
             DO_POST_SUM_ELTWISE(); \
             CONVERT_PACK(n_i); \
         } \
-        BLOCK_WRITE_DST(dst, dst_pack0.s0123, 0) \
-        BLOCK_WRITE_DST(dst, dst_pack0.s4567, 4 * OC_BLOCK) \
-        __global DST_DATA_T *dst1 = dst + OC_BLOCK * MB_BLOCK * OD * OH * OW; \
-        BLOCK_WRITE_DST(dst1, dst_pack1.s0123, 0) \
-        BLOCK_WRITE_DST(dst1, dst_pack1.s4567, 4 * OC_BLOCK) \
+        WRITE_DST(); \
     } while (0)
 
     if (ow < OW) {
@@ -284,7 +317,7 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
     intel_sub_group_block_write_ui8((__global uint *)&p[idx], as_uint8(data));
 #define BLOCK_READ_DST(idx) \
     as_ulong4(intel_sub_group_block_read_ui8((__global uint *)&dst[idx]));
-#else
+#elif DST_DT_BF16 || DST_DT_F16
         uint8 dst_pack0, dst_pack1;
         uint8 D00, D01, D02, D03;
         uint8 D10, D11, D12, D13;
@@ -294,36 +327,51 @@ gen12hp_conv_fwd_x16_kernel(const __global DATA_T *src,
             (__global ushort *)&p[idx], as_ushort8(data));
 #define BLOCK_READ_DST(idx) \
     as_uint4(intel_sub_group_block_read_us8((__global ushort *)&dst[idx]));
+#else
+        uint8 dst_pack0;
+        uint8 D00, D01, D02, D03;
+#define BLOCK_WRITE_DST(p, data, idx) \
+    intel_sub_group_block_write_uc16( \
+            (__global uchar *)&p[idx], as_uchar16(data));
+#define BLOCK_READ_DST(idx) \
+    as_uint4(intel_sub_group_block_read_uc16((__global uchar *)&dst[idx]));
 #endif
 
 #if WITH_SUM
         D00.s0123 = BLOCK_READ_DST(0);
         D00.s4567 = BLOCK_READ_DST(4 * OC_BLOCK);
+#if DT_F16 || DT_BF16
         D10.s0123 = BLOCK_READ_DST(OC_BLOCK * MB_BLOCK * OD * OH * OW);
         D10.s4567 = BLOCK_READ_DST(
                 4 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+#endif
 #if MB > 8
         D01.s0123 = BLOCK_READ_DST(8 * OC_BLOCK);
         D01.s4567 = BLOCK_READ_DST(12 * OC_BLOCK);
+#if DT_F16 || DT_BF16
         D11.s0123 = BLOCK_READ_DST(
                 8 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
         D11.s4567 = BLOCK_READ_DST(
                 12 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+#endif
 #if MB > 16
-
         D02.s0123 = BLOCK_READ_DST(16 * OC_BLOCK);
         D02.s4567 = BLOCK_READ_DST(20 * OC_BLOCK);
+#if DT_F16 || DT_BF16
         D12.s0123 = BLOCK_READ_DST(
                 16 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
         D12.s4567 = BLOCK_READ_DST(
                 20 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+#endif
 #if MB > 24
         D03.s0123 = BLOCK_READ_DST(24 * OC_BLOCK);
         D03.s4567 = BLOCK_READ_DST(28 * OC_BLOCK);
+#if DT_F16 || DT_BF16
         D13.s0123 = BLOCK_READ_DST(
                 24 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
         D13.s4567 = BLOCK_READ_DST(
                 28 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+#endif
 #endif // MB > 24
 #endif // MB > 16
 #endif // MB > 8
