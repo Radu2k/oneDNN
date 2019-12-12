@@ -50,14 +50,14 @@ struct jit_gen12hp_conv_fwd_kernel {
         jcp.calc_block = 32;
 
         if (!jcp.is_depthwise && jcp.with_groups && jcp.ngroups > 1
-                && (jcp.oc % jcp.oc_block != 0 || jcp.ic % jcp.ic_block != 0))
+                && (jcp.oc % jcp.calc_block != 0 || jcp.ic % jcp.ic_block != 0))
             return status::unimplemented;
 
         jcp.sub_group_size = 8;
 
         jcp.nchunk = utils::div_up(jcp.oc * jcp.ngroups, jcp.calc_block);
         jcp.wei_block = 32 * 32 / types::data_type_size(jcp.weights_data_type);
-        int oc_group = nstl::min(jcp.nchunk, 2);
+        int oc_group = 1;
 
         jcp.lws_d[0] = 8 * oc_group;
         jcp.lws_d[1] = 8;
@@ -177,23 +177,26 @@ struct jit_gen12hp_conv_bwd_data_kernel {
             const convolution_desc_t &cd, const memory_desc_t &src_md,
             const memory_desc_t &weights_md, const memory_desc_t &dst_md,
             const memory_desc_t &bias_md, const primitive_attr_t &attr) {
-
+        using namespace data_type;
         set_default_conf(jcp, cd, src_md, weights_md, dst_md, attr);
 
         status_t status = status::success;
 
         if (jcp.mb < 8) return status::unimplemented;
 
+        jcp.mb_block = 32;
+        jcp.oc_block = (utils::one_of(jcp.src_data_type, u8, s8)) ? 32 : 16;
+        jcp.ic_block = (utils::one_of(jcp.src_data_type, u8, s8)) ? 32 : 16;
+        jcp.calc_block = 32;
+
         if (jcp.with_groups && jcp.ngroups > 1
-                && (jcp.oc % 32 != 0 || jcp.ic % 32 != 0))
+                && (jcp.oc % jcp.oc_block != 0 || jcp.ic % jcp.calc_block != 0))
             return status::unimplemented;
 
         jcp.sub_group_size = 8;
-        jcp.mb_block = 32;
-        jcp.oc_block = 32;
-        jcp.ic_block = 32;
-        jcp.nchunk = utils::div_up(jcp.ic * jcp.ngroups, jcp.ic_block);
-        int ic_group = nstl::min(jcp.nchunk, 2);
+        jcp.nchunk = utils::div_up(jcp.ic * jcp.ngroups, jcp.calc_block);
+        jcp.wei_block = 32 * 32 / types::data_type_size(jcp.weights_data_type);
+        int ic_group = 1;
 
         jcp.lws_d[0] = 8 * ic_group;
         jcp.lws_d[1] = 8;
@@ -207,15 +210,28 @@ struct jit_gen12hp_conv_bwd_data_kernel {
         jcp.bias_data_type = jcp.with_bias ? bias_md.data_type : data_type::f32;
 
         format_tag_t src_tag, dst_tag, wei_tag;
-
-        src_tag = utils::pick(
-                jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
-        dst_tag = utils::pick(
-                jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
-        wei_tag = jcp.with_groups ? utils::pick(jcp.ndims - 3, gIOw4i8o8i4o,
-                          gIOhw4i8o8i4o, gIOdhw4i8o8i4o)
-                                  : utils::pick(jcp.ndims - 3, IOw4i8o8i4o,
-                                          IOhw4i8o8i4o, IOdhw4i8o8i4o);
+        if (utils::one_of(jcp.src_data_type, u8, s8)) {
+            src_tag = utils::pick(
+                    jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+            dst_tag = utils::pick(
+                    jcp.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+            wei_tag = jcp.with_groups ? utils::pick(jcp.ndims - 3, gIOw4i8o8i4o,
+                              gIOhw4i8o8i4o, gIOdhw4i8o8i4o)
+                                      : utils::pick(jcp.ndims - 3, IOw4i8o8i4o,
+                                              IOhw4i8o8i4o, IOdhw4i8o8i4o);
+        } else {
+            src_tag = utils::pick(jcp.ndims - 3, format_tag::NCw32n16c,
+                    format_tag::NChw32n16c, format_tag::NCdhw32n16c);
+            dst_tag = utils::pick(jcp.ndims - 3, format_tag::NCw32n16c,
+                    format_tag::NChw32n16c, format_tag::NCdhw32n16c);
+            wei_tag = jcp.with_groups
+                    ? utils::pick(jcp.ndims - 3, format_tag::gIOw4i8o8i2o,
+                            format_tag::gIOhw4i8o8i2o,
+                            format_tag::gIOdhw4i8o8i2o)
+                    : utils::pick(jcp.ndims - 3, format_tag::IOw4i8o8i2o,
+                            format_tag::IOhw4i8o8i2o,
+                            format_tag::IOdhw4i8o8i2o);
+        }
 
         jcp.src_tag = src_tag;
         jcp.wei_tag = wei_tag;
@@ -255,6 +271,8 @@ struct jit_gen12hp_conv_bwd_data_kernel {
 
         kernel_ctx.define_int("MB_BLOCK", jcp.mb_block);
         kernel_ctx.define_int("OC_BLOCK", jcp.oc_block);
+        kernel_ctx.define_int("IC_CALC_BLOCK", jcp.calc_block);
+        kernel_ctx.define_int("WEI_BLOCK", jcp.wei_block);
         kernel_ctx.define_int("IC_BLOCK", jcp.ic_block);
 
         kernel_ctx.define_int("IC_GROUP", utils::div_up(jcp.lws_d[0], 8));
