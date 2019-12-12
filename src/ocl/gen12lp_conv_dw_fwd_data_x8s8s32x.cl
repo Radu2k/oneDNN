@@ -25,7 +25,7 @@
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_dw_fwd_x8s8s32x_kernel(const __global uchar *src, const __global char *wei,
-        const __global float *bias, __global DATA_T *dst, float alpha,
+        const __global float *bias, __global DST_DATA_T *dst, float alpha,
         float beta, float sum_scale, float scales) {
 
     const int osp = get_global_id(1);
@@ -193,7 +193,7 @@ conv_dw_fwd_x8s8s32x_kernel(const __global uchar *src, const __global char *wei,
     DO_ELTWISE();
 #endif
 #if WITH_SUM
-    DATA16_T D00 = AS_DATA16_T(
+    DST_DATA16_T D00 = AS_DST_DATA16_T(
             intel_sub_group_block_read_uc16((const __global uchar *)dst));
 #if SUM_SCALE
     tmp00 += convert_float8(D00.s01234567);
@@ -207,7 +207,6 @@ conv_dw_fwd_x8s8s32x_kernel(const __global uchar *src, const __global char *wei,
     DO_ELTWISE();
 #endif
 
-    const DATA16_T R0
-            = (DATA16_T)(CONVERT_DATA8_T(tmp00), CONVERT_DATA8_T(tmp01));
+    const DST_DATA16_T R0 = (DST_DATA16_T)(TO_DST8(tmp00), TO_DST8(tmp01));
     intel_sub_group_block_write_uc16((__global uchar *)dst, as_uchar16(R0));
 }

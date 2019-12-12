@@ -42,7 +42,7 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_fwd_first_x8s8s32x_kernel(const __global uchar *src,
         const __global char *wei, const __global float *bias,
-        __global DATA_T *dst, float alpha, float beta, float sum_scale,
+        __global DST_DATA_T *dst, float alpha, float beta, float sum_scale,
         float scales) {
 
     const int group_oc = get_group_id(0) * OC_GROUP;
@@ -510,7 +510,7 @@ conv_fwd_first_x8s8s32x_kernel(const __global uchar *src,
         }
         wei += OC_BLOCK;
     }
-    DATA16_T R1, R2, R3, R4;
+    DST_DATA16_T R1, R2, R3, R4;
 
 #if WITH_BIAS
     float4 bia = as_float4(intel_sub_group_block_read4((__global uint *)bias));
@@ -529,14 +529,15 @@ conv_fwd_first_x8s8s32x_kernel(const __global uchar *src,
 #if WITH_SUM
 #define DO_SUM() \
     do { \
-        DATA4_T d = AS_DATA4_T(intel_sub_group_block_read_uc4(dst)); \
+        DST_DATA4_T d = AS_DST_DATA4_T(intel_sub_group_block_read_uc4(dst)); \
         float4 df = convert_float4(d); \
         tmp = fma(df, (float4)sum_scale, tmp); \
     } while (0)
 
 #define DO_SUM_4() \
     do { \
-        DATA16_T d = AS_DATA16_T(intel_sub_group_block_read_uc16(dst)); \
+        DST_DATA16_T d \
+                = AS_DST_DATA16_T(intel_sub_group_block_read_uc16(dst)); \
         float8 df0 = convert_float8(d.s01234567); \
         float8 df1 = convert_float8(d.s89abcdef); \
         tmp0 = fma(df0, (float8)sum_scale, tmp0); \
@@ -625,14 +626,14 @@ conv_fwd_first_x8s8s32x_kernel(const __global uchar *src,
 
 #define CONVERT_PACK() \
     do { \
-        tmp_cvt = (DATA4_T)(CONVERT_DATA_T(tmp.s0), CONVERT_DATA_T(tmp.s1), \
-                CONVERT_DATA_T(tmp.s2), CONVERT_DATA_T(tmp.s3)); \
+        tmp_cvt = (DST_DATA4_T)(TO_DST(tmp.s0), TO_DST(tmp.s1), \
+                TO_DST(tmp.s2), TO_DST(tmp.s3)); \
     } while (0)
 
 #define CONVERT_PACK_4() \
     do { \
-        R.s01234567 = CONVERT_DATA8_T(tmp0); \
-        R.s89abcdef = CONVERT_DATA8_T(tmp1); \
+        R.s01234567 = TO_DST8(tmp0); \
+        R.s89abcdef = TO_DST8(tmp1); \
     } while (0)
 
 #define STORE_DST(C0, C1, C2, C3, i) \
@@ -661,9 +662,9 @@ conv_fwd_first_x8s8s32x_kernel(const __global uchar *src,
 
     if (ow < OW) {
         float4 tmp;
-        DATA4_T tmp_cvt;
+        DST_DATA4_T tmp_cvt;
         float8 tmp0, tmp1;
-        DATA16_T R;
+        DST_DATA16_T R;
 
 #if OW_TAIL
         if (ow + OW_BLOCK < OW) {

@@ -49,7 +49,7 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_fwd_ow_block_x8s8s32x_kernel(const __global SRC_DATA_T *src,
         const __global char *wei, const __global float *bias,
-        __global DATA_T *dst, float alpha, float beta, float sum_scale,
+        __global DST_DATA_T *dst, float alpha, float beta, float sum_scale,
         float scales) {
 
     const int group_oc = get_group_id(0) * OC_GROUP;
@@ -262,7 +262,7 @@ conv_fwd_ow_block_x8s8s32x_kernel(const __global SRC_DATA_T *src,
 
 #define DO_SUM(d_pack) \
     do { \
-        DATA4_T d = AS_DATA4_T(d_pack); \
+        DST_DATA4_T d = AS_DST_DATA4_T(d_pack); \
         float4 df = convert_float4(d); \
         tmp = fma(df, (float4)sum_scale, tmp); \
     } while (0)
@@ -301,9 +301,8 @@ conv_fwd_ow_block_x8s8s32x_kernel(const __global SRC_DATA_T *src,
 
 #define CONVERT_PACK(idx) \
     do { \
-        DATA4_T tmp_cvt \
-                = (DATA4_T)(CONVERT_DATA_T(tmp.s0), CONVERT_DATA_T(tmp.s1), \
-                        CONVERT_DATA_T(tmp.s2), CONVERT_DATA_T(tmp.s3)); \
+        DST_DATA4_T tmp_cvt = (DST_DATA4_T)(TO_DST(tmp.s0), TO_DST(tmp.s1), \
+                TO_DST(tmp.s2), TO_DST(tmp.s3)); \
         dst_pack[idx] = as_uint(tmp_cvt); \
     } while (0)
 

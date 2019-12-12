@@ -261,8 +261,9 @@ struct jit_gen12lp_x8s8s32x_conv_fwd_kernel {
         kernel_ctx.define_int("LWS_1", jcp.lws_d[1]);
         kernel_ctx.define_int("LWS_2", jcp.lws_d[2]);
 
-        kernel_ctx.set_data_type(jcp.dst_data_type);
+        kernel_ctx.set_data_type(jcp.src_data_type);
         def_data_type(kernel_ctx, jcp.src_data_type, "SRC");
+        def_data_type(kernel_ctx, jcp.dst_data_type, "DST");
         kernel_ctx.add_option("-Dcl_intel_subgroups_char");
         return status::success;
     }
