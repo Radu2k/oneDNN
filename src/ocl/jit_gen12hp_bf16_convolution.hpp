@@ -63,10 +63,12 @@ struct jit_gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
 
             if (!ok) return status::unimplemented;
 
+            auto scratchpad = scratchpad_registry().registrar();
             status_t status
                     = jit_gen12hp_bf16_conv_bwd_weights_kernel::init_conf(jcp_,
                             *desc(), *src_md(), *diff_weights_md(),
-                            *diff_dst_md(), *diff_weights_md(1), *attr());
+                            *diff_dst_md(), *diff_weights_md(1), *attr(),
+                            scratchpad);
             if (status != status::success) return status;
 
             ok = set_default_formats_common(
@@ -81,7 +83,11 @@ struct jit_gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
     };
 
     status_t init() override {
-        const char *kernel_name = "gen12hp_conv_bwd_wht_kernel_bf16";
+        std::vector<const char *> kernel_names {
+                "gen12hp_conv_bwd_wht_kernel_bf16",
+                "gen12hp_wht_f32_zero_init_kernel"};
+        if (pd()->jcp_.weights_data_type == data_type::bf16)
+            kernel_names.push_back("gen12hp_wht_convert_f32_to_bf16_kernel");
 
         compute::kernel_ctx_t kernel_ctx;
         auto status = jit_gen12hp_bf16_conv_bwd_weights_kernel::init_const_def(
@@ -90,8 +96,14 @@ struct jit_gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
 
         auto *compute_engine
                 = utils::downcast<compute::compute_engine_t *>(engine());
-        compute_engine->create_kernel(&kernel_, kernel_name, kernel_ctx);
-        if (!kernel_) return status::runtime_error;
+        std::vector<compute::kernel_t> kernels;
+        CHECK(compute_engine->create_kernels(
+                &kernels, kernel_names, kernel_ctx));
+        conv_kernel_ = kernels[0];
+        zero_init_kernel_ = kernels[1];
+
+        if (pd()->jcp_.weights_data_type == data_type::bf16)
+            convert_f32_to_bf16_kernel_ = kernels[2];
 
         return status::success;
     }
@@ -111,7 +123,9 @@ private:
     status_t execute_backward_weights(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
     jit_gen12hp_bf16_conv_bwd_weights_kernel *ker_;
-    compute::kernel_t kernel_;
+    compute::kernel_t conv_kernel_;
+    compute::kernel_t zero_init_kernel_;
+    compute::kernel_t convert_f32_to_bf16_kernel_;
 };
 
 } // namespace ocl

@@ -34,9 +34,9 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
             const convolution_desc_t &cd, const memory_desc_t &src_md,
             const memory_desc_t &diff_weights_md,
             const memory_desc_t &diff_dst_md, const memory_desc_t &diff_bias_md,
-            const primitive_attr_t &attr) {
+            const primitive_attr_t &attr,
+            memory_tracking::registrar_t &scratchpad) {
 
-        using namespace dnnl::impl::format_tag;
         set_default_conf(jcp, cd, src_md, diff_weights_md, diff_dst_md, attr);
 
         //TODO: move this to set_default conf
@@ -46,71 +46,87 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
         status_t status = status::success;
 
         // TODO: remove restrictions on oc and ic
-        if (jcp.is_depthwise || jcp.oc % 64 != 0 || jcp.ic % 64 != 0)
+        if (jcp.is_depthwise || jcp.mb % 32 != 0 || jcp.oc % 64 != 0
+                || jcp.ic % 64 != 0)
             return status::unimplemented;
         jcp.with_bias = cd.diff_bias_desc.format_kind != format_kind::undef;
-        // disable corner case with padding larger than kernel size
-        // since in this case, bias computation
-        // leads to non-performant assembly for whole kernel
-        if (jcp.with_bias
-                && (jcp.kd <= nstl::max(jcp.f_pad, jcp.back_pad)
-                        || jcp.kh <= nstl::max(jcp.t_pad, jcp.b_pad)
-                        || jcp.kw <= nstl::max(jcp.l_pad, jcp.r_pad)))
-            return status::unimplemented;
+
+        using namespace dnnl::impl::format_tag;
 
         jcp.src_tag = utils::pick(
                 jcp.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
         jcp.dst_tag = utils::pick(
                 jcp.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
-        if (jcp.weights_data_type == data_type::bf16) {
-            jcp.wei_tag = jcp.with_groups
-                    ? utils::pick(jcp.ndims - 3, gOIw16o16i, gOIhw16o16i,
-                            gOIdhw16o16i)
-                    : utils::pick(
-                            jcp.ndims - 3, OIw16o16i, OIhw16o16i, OIdhw16o16i);
-        } else {
-            jcp.wei_tag = jcp.with_groups
-                    ? utils::pick(
-                            jcp.ndims - 3, gOIw8o8i, gOIhw8o8i, gOIdhw8o8i)
-                    : utils::pick(jcp.ndims - 3, OIw8o8i, OIhw8o8i, OIdhw8o8i);
-        }
+        jcp.wei_tag = jcp.with_groups ? utils::pick(jcp.ndims - 3, gOIw16o16i,
+                              gOIhw16o16i, gOIdhw16o16i)
+                                      : utils::pick(jcp.ndims - 3, OIw16o16i,
+                                              OIhw16o16i, OIdhw16o16i);
 
-        // TODO: experiment with parallelization over mb,sp
         jcp.sub_group_size = 8;
         jcp.mb_block = 16;
         jcp.oc_block = 16;
         jcp.ic_block = 16;
-        // Each DSS (or workgroup) loads:
+        // Each workgroup loads:
         // SRC: (mb_blk_unroll * mb_block) * (ic_blk_unroll * ic_block),
         // DIFF_DST: (mb_blk_unroll * mb_block) * (oc_blk_unroll * oc_block)
         // to compute and store WEI : (oc_blk_unroll * oc_block) * (ic_blk_unroll * ic_block).
         jcp.mb_blk_unroll = nstl::min(2, utils::div_up(jcp.mb, jcp.mb_block));
-        jcp.oc_blk_unroll = 4;
+        jcp.oc_blk_unroll = ((jcp.oc / jcp.oc_block) % 8) == 0 ? 8 : 4;
         jcp.ic_blk_unroll = ((jcp.ic / jcp.ic_block) % 8) == 0 ? 8 : 4;
-
-        jcp.lws_d[0] = 4;
-        jcp.lws_d[1] = jcp.sub_group_size * 4;
-        jcp.lws_d[2] = 1;
-
-        jcp.gws_d[0] = jcp.oc
-                / (jcp.oc_blk_unroll * jcp.oc_block
-                        / jcp.lws_d[0]); //16 oc/workitem
-        jcp.gws_d[1] = jcp.ic
-                / (jcp.ic_blk_unroll * jcp.ic_block
-                        / jcp.lws_d[1]); //In best case, 4 ic/workitem
-        jcp.gws_d[2] = jcp.ngroups * jcp.kd * jcp.kh * jcp.kw;
 
         const int num_buffers = 2;
         jcp.src_slm_size = num_buffers * jcp.mb_blk_unroll * jcp.mb_block
-                * jcp.ic_block * jcp.ic_blk_unroll;
+                * jcp.ic_block * jcp.ic_blk_unroll / 2;
         jcp.dst_slm_size = num_buffers * jcp.mb_blk_unroll * jcp.mb_block
-                * jcp.oc_block * jcp.oc_blk_unroll;
+                * jcp.oc_block * jcp.oc_blk_unroll / 2;
 
-        jcp.k_blocks = (jcp.mb / (jcp.mb_blk_unroll * jcp.mb_block)) * jcp.od
-                * jcp.oh * jcp.ow;
-        const int max_k_unroll
-                = 10; //hand-tuned parameter to minimize register spilling
-        jcp.k_unroll = utils::max_div(jcp.k_blocks, max_k_unroll);
+        // TODO: try workgroup size 32
+        const int workgroup_size = 16; // 16 EUs/DSS
+        // TODO: Fine-tune max_subgroups according to conv sizes
+        //  1 tile with 4thr/EU can dispatch maximum 2048 subgroups,
+        //  but 4096 seems to better for resnet_50 convolutions (when measured through gsim)
+        const int max_subgroups = 4096;
+        jcp.lws_d[0] = jcp.sub_group_size * 4;
+        jcp.lws_d[1] = workgroup_size / 4;
+        jcp.lws_d[2] = 1;
+
+        jcp.gws_d[0] = jcp.ic
+                / (jcp.ic_blk_unroll * jcp.ic_block
+                        / jcp.lws_d[0]); // In best case, 4 ic/workitem
+        jcp.gws_d[1] = jcp.oc
+                / (jcp.oc_blk_unroll * jcp.oc_block
+                        / jcp.lws_d[1]); // In best case, 32 oc/workitem
+
+        // Parallelize along k-dimension to utilize all logical threads
+        const int k_dim = (jcp.mb / (jcp.mb_blk_unroll * jcp.mb_block) * jcp.od
+                * jcp.oh * jcp.ow);
+
+        jcp.workgroups_along_k = utils::max_div(k_dim,
+                utils::div_up(max_subgroups,
+                        (jcp.gws_d[0] * jcp.gws_d[1] / jcp.sub_group_size)
+                                * jcp.ngroups * jcp.kd * jcp.kh * jcp.kw));
+
+        jcp.k_blocks = k_dim / jcp.workgroups_along_k;
+        jcp.k_block_tail = k_dim % jcp.workgroups_along_k;
+
+        jcp.gws_d[2] = jcp.ngroups * jcp.kd * jcp.kh * jcp.kw
+                * jcp.workgroups_along_k;
+
+        size_t wei_size = jcp.weights_data_type == data_type::bf16
+                ? jcp.ngroups * jcp.oc * jcp.ic * jcp.kd * jcp.kh * jcp.kw
+                        * sizeof(float)
+                : 0;
+        if (wei_size)
+            scratchpad.book(
+                    memory_tracking::names::key_conv_wei_reduction, wei_size);
+        size_t bia_size
+                = ((jcp.with_bias && jcp.bias_data_type == data_type::bf16)
+                                  ? jcp.ngroups * jcp.oc
+                                  : 0)
+                * sizeof(float);
+        if (bia_size)
+            scratchpad.book(
+                    memory_tracking::names::key_conv_bia_reduction, bia_size);
 
         return status;
     }
@@ -151,8 +167,9 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
         kernel_ctx.define_int("MB_BLK_UNROLL", jcp.mb_blk_unroll);
         kernel_ctx.define_int("IC_BLK_UNROLL", jcp.ic_blk_unroll);
         kernel_ctx.define_int("OC_BLK_UNROLL", jcp.oc_blk_unroll);
+        kernel_ctx.define_int("K_WORKGROUPS", jcp.workgroups_along_k);
         kernel_ctx.define_int("K_BLOCKS", jcp.k_blocks);
-        kernel_ctx.define_int("K_UNROLL", jcp.k_unroll);
+        kernel_ctx.define_int("K_BLOCK_TAIL", jcp.k_block_tail);
 
         kernel_ctx.define_int("SRC_SLM_SIZE", jcp.src_slm_size);
         kernel_ctx.define_int("DST_SLM_SIZE", jcp.dst_slm_size);
@@ -172,14 +189,11 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
         def_offsets(off.dst_off, kernel_ctx, "DST", jcp.ndims);
 
         def_data_type(kernel_ctx, jcp.weights_data_type, "WEI");
-        if (jcp.with_bias)
-            def_data_type(kernel_ctx, jcp.bias_data_type, "BIA");
-        else
-            //some valid data type needs to be defined since bias is passed
-            //as an arg to kernel
-            def_data_type(kernel_ctx, data_type::f32, "BIA");
-        kernel_ctx.set_data_type(data_type::
-                        bf16); // for enabling correct mmad8x8/dpas instructions
+        if (jcp.with_bias) def_data_type(kernel_ctx, jcp.bias_data_type, "BIA");
+        kernel_ctx.set_data_type(
+                data_type::bf16); // for enabling correct mmad8x8/dpas macro
+
+        kernel_ctx.add_option("-cl-std=CL2.0");
         kernel_ctx.print_options();
         return status::success;
     }

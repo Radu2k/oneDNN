@@ -17,63 +17,33 @@
 #include "ocl/ocl_math_utils.h"
 #include "ocl/ocl_types.h"
 
-#define write_local8(mem_loc, mem_glob) \
-    do { \
-        uint8 tmp = intel_sub_group_block_read8(mem_glob); \
-        WRITE_LOCAL_8(mem_loc, tmp); \
-    } while (0)
+#define USHORT_PER_READ (16 * SUB_GROUP_SIZE)
+#define INT_PER_READ (USHORT_PER_READ / 2)
 
-#define write_local4(mem_loc, mem_glob) \
-    do { \
-        uint4 tmp = intel_sub_group_block_read4(mem_glob); \
-        WRITE_LOCAL_4(mem_loc, tmp); \
-    } while (0)
+// Using hard-code strides instead of SRC_OFF/DST_OFF/WHT_OFF
+// because compiler generates ugly code for SRC_OFF
+#define SRC_W_STRIDE (2 * MB_BLOCK * IC_BLOCK)
+#define SRC_H_STRIDE (IW * SRC_W_STRIDE)
+#define SRC_D_STRIDE (IH * SRC_H_STRIDE)
+#define SRC_C_STRIDE (ID * SRC_D_STRIDE)
+#define SRC_MB_STRIDE (G * IC / IC_BLOCK * SRC_C_STRIDE)
 
-#define read_dst_bias(mem_glob) \
-    do { \
-        uint4 tmp = intel_sub_group_block_read4(mem_glob); \
-        if (compute_bias) { \
-            for (int i = 0; i < 4; ++i) { \
-                ushort2 tu = as_ushort2(tmp[i]); \
-                BIAS_ACC[0] += convert_bf16_to_f32(tu.s0); \
-                BIAS_ACC[1] += convert_bf16_to_f32(tu.s1); \
-            } \
-        } \
-    } while (0)
+#define DST_W_STRIDE (2 * MB_BLOCK * OC_BLOCK)
+#define DST_H_STRIDE (OW * DST_W_STRIDE)
+#define DST_D_STRIDE (OH * DST_H_STRIDE)
+#define DST_C_STRIDE (OD * DST_D_STRIDE)
+#define DST_MB_STRIDE (G * OC / OC_BLOCK * DST_C_STRIDE)
 
-#define write_dst_bias(mem_loc, mem_glob) \
-    do { \
-        uint4 tmp = intel_sub_group_block_read4(mem_glob); \
-        if (compute_bias) { \
-            for (int i = 0; i < 4; ++i) { \
-                ushort2 tu = as_ushort2(tmp[i]); \
-                BIAS_ACC[0] += convert_bf16_to_f32(tu.s0); \
-                BIAS_ACC[1] += convert_bf16_to_f32(tu.s1); \
-            } \
-        } \
-        WRITE_LOCAL_4(mem_loc, tmp); \
-    } while (0)
-
-#define INTS_PER_READ (8 * SUB_GROUP_SIZE)
-#define INTS_PER_READ_DST (INTS_PER_READ / 2)
-
-#if IC_BLK_UNROLL == 8
-#define write_src write_local8
-#define INTS_PER_READ_SRC INTS_PER_READ
-
-#elif IC_BLK_UNROLL == 4
-#define write_src write_local4
-#define INTS_PER_READ_SRC (INTS_PER_READ / 2)
-
+#if WEI_DT_BF16
+#define WEI_W_STRIDE (8 * 8 / 2)
 #else
-#error Unexpected IC_BLK_UNROLL
+#define WEI_W_STRIDE (8 * 8)
 #endif
-
-#if WITH_BIAS
-#define write_dst write_dst_bias
-#else
-#define write_dst write_local4
-#endif
+#define WEI_H_STRIDE (KW * WEI_W_STRIDE)
+#define WEI_D_STRIDE (KH * WEI_H_STRIDE)
+#define WEI_IC_STRIDE (KD * WEI_D_STRIDE)
+#define WEI_OC_STRIDE (IC / 8 * WEI_D_STRIDE)
+#define WEI_G_STRIDE (OC / 8 * WEI_OC_STRIDE)
 
 #define GEMM_IC_blk(o, i) \
     do { \
@@ -83,194 +53,221 @@
                 as_uint8(D[o]), as_int8(S[i][1]), ACC[o][2 * i + 1]); \
     } while (0)
 
-#define TRANSPOSE_DST() \
+#define READ_DST() \
     do { \
-        D_tmp[0] = vload8( \
-                2 * sg_loc_id, &diff_dst_loc_read[loc_dst_slice_idx]); \
-        D_tmp[1] = vload8( \
-                2 * sg_loc_id, &diff_dst_loc_read[loc_dst_slice_idx + 8]); \
-        for (int i = 0; i < 8; i++) { \
-            ushort2 tn0 = as_ushort2(D_tmp[0][i]); \
-            ushort2 tn1 = as_ushort2(D_tmp[1][i]); \
-            D[i / 4][(2 * i) % 8] = as_uint((ushort2)(tn0.s0, tn1.s0)); \
-            D[i / 4][(2 * i) % 8 + 1] = as_uint((ushort2)(tn0.s1, tn1.s1)); \
-        } \
+        D[0] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_slice_idx]); \
+        D[1] = READ_LOCAL_8( \
+                &diff_dst_loc_read[loc_dst_slice_idx + INT_PER_READ]); \
+        D[2] = READ_LOCAL_8( \
+                &diff_dst_loc_read[loc_dst_slice_idx + 2 * INT_PER_READ]); \
+        D[3] = READ_LOCAL_8( \
+                &diff_dst_loc_read[loc_dst_slice_idx + 3 * INT_PER_READ]); \
     } while (0)
 
-#define TRANSPOSE_SRC(i_c) \
+#define READ_SRC(i_c) \
     do { \
-        S_tmp[0] = READ_LOCAL_8( \
-                &src_loc_read[loc_src_slice_idx + 2 * i_c * INTS_PER_READ]); \
-        S_tmp[1] = READ_LOCAL_8(&src_loc_read[loc_src_slice_idx \
-                + (2 * i_c + 1) * INTS_PER_READ]); \
-        for (int i = 0; i < 8; i++) { \
-            ushort2 tn0 = as_ushort2(S_tmp[i / 4][(2 * i) % 8]); \
-            ushort2 tn1 = as_ushort2(S_tmp[i / 4][(2 * i) % 8 + 1]); \
-            S[i_c][0][i] = as_uint((ushort2)(tn0.s0, tn1.s0)); \
-            S[i_c][1][i] = as_uint((ushort2)(tn0.s1, tn1.s1)); \
-        } \
+        S[i_c][0] = READ_LOCAL_8( \
+                &src_loc_read[loc_src_slice_idx + 2 * i_c * INT_PER_READ]); \
+        S[i_c][1] = READ_LOCAL_8(&src_loc_read[loc_src_slice_idx \
+                + (2 * i_c + 1) * INT_PER_READ]); \
     } while (0)
 
-#if MB_BLK_UNROLL == 2
-#define WRITE_TO_SLM() \
+#define PACK(i) as_uint((short2)(D_tmp[0][i], D_tmp[1][i]))
+
+#if WITH_BIAS
+#define CONVERT_TO_F32(x) convert_bf16_to_f32(x)
+
+#define WRITE_DST() \
     do { \
-        write_src(&src_loc_write[sg_id * INTS_PER_READ_SRC], src_read); \
-        write_src(&src_loc_write[src_slm_offset + sg_id * INTS_PER_READ_SRC], \
-                &src_read[src_nblock_off]); \
-        write_dst(&diff_dst_loc_write[sg_id * INTS_PER_READ_DST], \
-                diff_dst_read); \
-        write_dst(&diff_dst_loc_write[dst_slm_offset \
-                          + sg_id * INTS_PER_READ_DST], \
-                &diff_dst_read[dst_nblock_off]); \
+        dst_off = (size_t)n_block * DST_MB_STRIDE + od * DST_D_STRIDE \
+                + oh * DST_H_STRIDE + ow * DST_W_STRIDE; \
+        Dt[0] = __builtin_IB_simd_block_read_16_global_h(&diff_dst[dst_off]); \
+        Dt[1] = __builtin_IB_simd_block_read_16_global_h( \
+                &diff_dst[dst_off + USHORT_PER_READ]); \
+        BIAS_ACC[0] += (CONVERT_TO_F32(Dt[0].s0) + CONVERT_TO_F32(Dt[1].s0) \
+                + CONVERT_TO_F32(Dt[0].s2) + CONVERT_TO_F32(Dt[1].s2) \
+                + CONVERT_TO_F32(Dt[0].s4) + CONVERT_TO_F32(Dt[1].s4) \
+                + CONVERT_TO_F32(Dt[0].s6) + CONVERT_TO_F32(Dt[1].s6) \
+                + CONVERT_TO_F32(Dt[0].s8) + CONVERT_TO_F32(Dt[1].s8) \
+                + CONVERT_TO_F32(Dt[0].sa) + CONVERT_TO_F32(Dt[1].sa) \
+                + CONVERT_TO_F32(Dt[0].sc) + CONVERT_TO_F32(Dt[1].sc) \
+                + CONVERT_TO_F32(Dt[0].se) + CONVERT_TO_F32(Dt[1].se)); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s0) \
+                + CONVERT_TO_F32(Dt[1].odd.s0); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s1) \
+                + CONVERT_TO_F32(Dt[1].odd.s1); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s2) \
+                + CONVERT_TO_F32(Dt[1].odd.s2); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s3) \
+                + CONVERT_TO_F32(Dt[1].odd.s3); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s4) \
+                + CONVERT_TO_F32(Dt[1].odd.s4); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s5) \
+                + CONVERT_TO_F32(Dt[1].odd.s5); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s6) \
+                + CONVERT_TO_F32(Dt[1].odd.s6); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s7) \
+                + CONVERT_TO_F32(Dt[1].odd.s7); \
+        vstore16((ushort16)(Dt[0].even, Dt[1].even), sg_loc_id, \
+                diff_dst_loc_write[k_blk_iter % 2]); \
+        vstore16((ushort16)(Dt[0].odd, Dt[1].odd), sg_loc_id + 8, \
+                diff_dst_loc_write[k_blk_iter % 2]); \
+    } while (0)
+
+#else //WITHOUT  BIAS
+#define WRITE_DST() \
+    do { \
+        dst_off = (size_t)n_block * DST_MB_STRIDE + od * DST_D_STRIDE \
+                + oh * DST_H_STRIDE + ow * DST_W_STRIDE; \
+        Dt[0] = __builtin_IB_simd_block_read_16_global_h(&diff_dst[dst_off]); \
+        Dt[1] = __builtin_IB_simd_block_read_16_global_h( \
+                &diff_dst[dst_off + USHORT_PER_READ]); \
+        vstore16((ushort16)(Dt[0].even, Dt[1].even), sg_loc_id, \
+                diff_dst_loc_write[k_blk_iter % 2]); \
+        vstore16((ushort16)(Dt[0].odd, Dt[1].odd), sg_loc_id + 8, \
+                diff_dst_loc_write[k_blk_iter % 2]); \
+    } while (0)
+#endif // WITH_BIAS
+
+#define WRITE_SRC() \
+    do { \
+        src_off = (size_t)n_block * SRC_MB_STRIDE + id * SRC_D_STRIDE \
+                + ih * SRC_H_STRIDE + iw * SRC_W_STRIDE; \
+        Dt[0] = __builtin_IB_simd_block_read_16_global_h(&src[src_off]); \
+        Dt[1] = __builtin_IB_simd_block_read_16_global_h( \
+                &src[src_off + USHORT_PER_READ]); \
+        WRITE_LOCAL_8(src_loc_write[k_blk_iter % 2], \
+                (uint8)(as_uint(Dt[0].s02), as_uint(Dt[0].s46), \
+                        as_uint(Dt[0].s8A), as_uint(Dt[0].sCE), \
+                        as_uint(Dt[1].s02), as_uint(Dt[1].s46), \
+                        as_uint(Dt[1].s8A), as_uint(Dt[1].sCE))); \
+        WRITE_LOCAL_8(&src_loc_write[k_blk_iter % 2][INT_PER_READ], \
+                (uint8)(as_uint(Dt[0].s13), as_uint(Dt[0].s57), \
+                        as_uint(Dt[0].s9B), as_uint(Dt[0].sDF), \
+                        as_uint(Dt[1].s13), as_uint(Dt[1].s57), \
+                        as_uint(Dt[1].s9B), as_uint(Dt[1].sDF))); \
+    } while (0)
+
+#if OC_BLK_UNROLL == 8
+#define COMPUTE(i_c) \
+    do { \
+        READ_SRC(i_c); \
+        GEMM_IC_blk(0, i_c); \
+        GEMM_IC_blk(1, i_c); \
+        GEMM_IC_blk(2, i_c); \
+        GEMM_IC_blk(3, i_c); \
+    } while (0)
+#elif OC_BLK_UNROLL == 4
+#define COMPUTE(i_c) \
+    do { \
+        READ_SRC(i_c); \
+        GEMM_IC_blk(0, i_c); \
+        GEMM_IC_blk(1, i_c); \
     } while (0)
 #else
-#define WRITE_TO_SLM() \
-    do { \
-        write_src(&src_loc_write[sg_id * INTS_PER_READ_SRC], src_read); \
-        write_dst(&diff_dst_loc_write[sg_id * INTS_PER_READ_DST], \
-                diff_dst_read); \
-    } while (0)
+#error UNEXPECTED OC_BLK_UNROLL
 #endif
-
-#define WRITE_SECOND_SLM_BUFFER() \
-    do { \
-        src_loc_write = &src_slm[(k_blk_iter % 2) * (SRC_SLM_SIZE / 2)]; \
-        diff_dst_loc_write \
-                = &diff_dst_slm[(k_blk_iter % 2) * (DST_SLM_SIZE / 2)]; \
-        ow++; \
-        if (ow == ow_end) { \
-            ow = ow_start; \
-            oh++; \
-        } \
-        if (oh == oh_end) { \
-            oh = oh_start; \
-            od++; \
-        } \
-        if (od == od_end) { \
-            od = od_start; \
-            n += MB_BLK_UNROLL * MB_BLOCK; \
-        } \
-        src_read = &src[SRC_OFF(n, 0, SD * od - id_pad, SH * oh - ih_pad, \
-                                SW * ow - iw_pad) \
-                / 2]; \
-        diff_dst_read = &diff_dst[DST_OFF(n, 0, od, oh, ow) / 2]; \
-        WRITE_TO_SLM(); \
-    } while (0)
-
-#if IC_BLK_UNROLL == 8
-#define COMPUTE() \
-    do { \
-        TRANSPOSE_SRC(0); \
-        GEMM_IC_blk(0, 0); \
-        GEMM_IC_blk(1, 0); \
-        TRANSPOSE_SRC(1); \
-        GEMM_IC_blk(0, 1); \
-        GEMM_IC_blk(1, 1); \
-    } while (0)
-#elif IC_BLK_UNROLL == 4
-#define COMPUTE() \
-    do { \
-        TRANSPOSE_SRC(0); \
-        GEMM_IC_blk(0, 0); \
-        GEMM_IC_blk(1, 0); \
-    } while (0)
-#endif
-
-#define COMPUTE_HALF_MB_BLOCK() \
-    do { \
-        TRANSPOSE_DST(); \
-        COMPUTE(); \
-    } while (0)
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12hp_conv_bwd_wht_kernel_bf16(const __global uint *src,
-        __global WEI_DATA_T *diff_wei, __global uint *diff_bias,
-        const __global uint *diff_dst) {
+gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
+        __global float *diff_wei, __global float *diff_bias,
+        const __global ushort *diff_dst) {
 
-    const int group_oc = get_group_id(0) * OC_BLK_UNROLL * OC_BLOCK;
-    const int group_ic = get_group_id(1) * IC_BLK_UNROLL * IC_BLOCK;
-    const int group_g = get_group_id(2) / (KD * KH * KW);
-    const int group_kd = (get_group_id(2) % (KD * KH * KW)) / (KH * KW);
-    const int group_kh = (get_group_id(2) % (KH * KW)) / KW;
-    const int group_kw = get_group_id(2) % KW;
+    const int gid[3] = {get_group_id(0), get_group_id(1), get_group_id(2)};
     const int sg_id = get_sub_group_id();
     const int sg_loc_id = get_sub_group_local_id();
 
-    const int id_pad = PD - group_kd * (1 + DD);
-    const int ih_pad = PH - group_kh * (1 + DH);
-    const int iw_pad = PW - group_kw * (1 + DW);
+    const int sgid_mod_2 = sg_id % 2;
+    const int sgid_div_2 = sg_id / 2;
 
-    const int od_start = max(0, (id_pad + SD - 1) / SD);
-    const int oh_start = max(0, (ih_pad + SH - 1) / SH);
-    const int ow_start = max(0, (iw_pad + SW - 1) / SW);
+    const int sgid_mod_4 = sg_id % 4;
+    const int sgid_div_4 = sg_id / 4;
 
-    const int id_start = od_start * SD - id_pad;
-    const int ih_start = oh_start * SH - ih_pad;
-    const int iw_start = ow_start * SW - iw_pad;
+    const int group_ic = gid[0] * IC_BLK_UNROLL;
+    const int group_oc = gid[1] * OC_BLK_UNROLL;
 
-    const int id_pad_end = PD_R - (KD - 1 - group_kd) * (DD + 1);
-    const int ih_pad_end = PH_R - (KH - 1 - group_kh) * (DH + 1);
-    const int iw_pad_end = PW_R - (KW - 1 - group_kw) * (DW + 1);
+    const int group_g = (gid[2] / K_WORKGROUPS) / (KD * KH * KW);
+    const int group_k_block = (gid[2] % K_WORKGROUPS) * K_BLOCKS;
+    const int kd = (gid[2] / K_WORKGROUPS / KH / KW) % KD;
+    const int kh = (gid[2] / K_WORKGROUPS / KW) % KH;
+    const int kw = (gid[2] / K_WORKGROUPS) % KW;
 
-    const int od_end = OD - max(0, (id_pad_end + SD - 1) / SD);
-    const int oh_end = OH - max(0, (ih_pad_end + SH - 1) / SH);
-    const int ow_end = OW - max(0, (iw_pad_end + SW - 1) / SW);
+    const int od_start = max((PD - kd * (1 + DD) + SD - 1) / SD, 0);
+    const int oh_start = max((PH - kh * (1 + DH) + SH - 1) / SH, 0);
+    const int ow_start = max((PW - kw * (1 + DW) + SW - 1) / SW, 0);
 
-    const int k_blocks = (od_end - od_start) * (ow_end - ow_start)
-            * (oh_end - oh_start)
-            * ((MB + (MB_BLK_UNROLL * MB_BLOCK - 1))
-                    / (MB_BLK_UNROLL * MB_BLOCK));
+    const int od_end
+            = OD - max(0, (PD_R - (KD - 1 - kd) * (1 + DD) + SD - 1) / SD) - 1;
+    const int oh_end
+            = OH - max(0, (PH_R - (KH - 1 - kh) * (1 + DH) + SH - 1) / SH) - 1;
+    const int ow_end
+            = OW - max(0, (PW_R - (KW - 1 - kw) * (1 + DW) + SW - 1) / SW) - 1;
 
-    const int k_blk_unrolls = k_blocks / K_UNROLL;
-    const int k_blk_tails = k_blocks % K_UNROLL;
+    const int total_od = od_end - od_start + 1;
+    const int total_oh = oh_end - oh_start + 1;
+    const int total_ow = ow_end - ow_start + 1;
+    const int total_k_blocks = (MB / (MB_BLK_UNROLL * MB_BLOCK)) * total_od
+            * total_oh * total_ow;
 
-#if IC_BLK_UNROLL == 8
-    src += SRC_OFF((sg_id % 2) * 8,
-                   group_g * IC + group_ic + (sg_id / 2) * IC_BLOCK, 0, 0, 0)
-            / 2;
-#elif IC_BLK_UNROLL == 4
-    src += SRC_OFF((sg_id % 4) * 4,
-                   group_g * IC + group_ic + (sg_id / 4) * IC_BLOCK, 0, 0, 0)
-            / 2;
+    const int max_k_blocks = min(K_BLOCKS, total_k_blocks - group_k_block);
+
+    int od = od_start + ((group_k_block / total_ow / total_oh) % total_od);
+    int oh = oh_start + ((group_k_block / total_ow) % total_oh);
+    int ow = ow_start + (group_k_block % total_ow);
+
+    int n_block = group_k_block / (total_od * total_oh * total_ow);
+
+    const int group_id = od * SD - PD + kd * (1 + DD);
+    const int group_ih = oh * SH - PH + kh * (1 + DH);
+    const int group_iw = ow * SW - PW + kw * (1 + DW);
+    int id = group_id;
+    int ih = group_ih;
+    int iw = group_iw;
+#if IC_BLK_UNROLL == 4
+    if (sg_id < 8)
 #endif
-
-    diff_wei += WHT_OFF(group_g, group_oc + (sg_id % 4) * OC_BLOCK,
-            group_ic + (sg_id / 4) * (IC_BLK_UNROLL / 4) * IC_BLOCK, group_kd,
-            group_kh, group_kw);
-
-    diff_dst += DST_OFF((sg_id % 4) * 4,
-                        group_g * OC + group_oc + (sg_id / 4) * OC_BLOCK, 0, 0,
-                        0)
-            / 2;
+        src += sgid_mod_2 * MB_BLOCK * IC_BLOCK
+                + (group_g * IC / IC_BLOCK + group_ic + sgid_div_2)
+                        * SRC_C_STRIDE;
+#if OC_BLK_UNROLL == 4
+    if (sg_id < 8)
+#endif
+        diff_dst += sgid_mod_2 * MB_BLOCK * OC_BLOCK
+                + (group_g * OC / OC_BLOCK + group_oc + sgid_div_2)
+                        * DST_C_STRIDE;
+    const int wei_off = WHT_OFF(group_g,
+            (group_oc + (sgid_mod_4) * (OC_BLK_UNROLL / 4)) * OC_BLOCK,
+            (group_ic + (sgid_div_4) * (IC_BLK_UNROLL / 4)) * IC_BLOCK, kd, kh,
+            kw);
+    diff_wei += WHT_OFF(group_g,
+            (group_oc + (sgid_mod_4) * (OC_BLK_UNROLL / 4)) * OC_BLOCK,
+            (group_ic + (sgid_div_4) * (IC_BLK_UNROLL / 4)) * IC_BLOCK, kd, kh,
+            kw);
 
 #if WITH_BIAS
-    bool compute_bias
-            = group_kh == 0 && group_kw == 0 && group_kd == 0 && group_ic == 0;
-    __local uint bias_slm[OC_BLK_UNROLL * OC_BLOCK * 4];
-    __local uint *bias_loc_write = &bias_slm[sg_id * OC_BLOCK];
-    float2 BIAS_ACC = 0.0;
-    if (compute_bias && sg_id % 4 == 0) {
-#if BIA_DT_BF16
-        diff_bias += (group_g * OC + group_oc + (sg_id / 4) * OC_BLOCK) / 2;
+    float2 BIAS_ACC = 0.0f;
+    bool compute_bias = group_ic == 0 && kd == min(PD, KD - 1)
+            && kh == min(PH, KH - 1) && kw == min(PW, KW - 1);
+#if OC_BLK_UNROLL == 4
+    compute_bias &= sg_id < 8;
+#endif
+    size_t bia_off;
+    volatile __global atomic_float *dbias;
+#if OC_BLK_UNROLL == 4
+    bia_off = group_g * OC + (group_oc + (sg_id % 8) / 2) * OC_BLOCK;
 #else
-        diff_bias += (group_g * OC + group_oc + (sg_id / 4) * OC_BLOCK);
+    bia_off = group_g * OC + (group_oc + sg_id / 2) * OC_BLOCK;
 #endif
-    }
-#endif
+    dbias = (volatile __global atomic_float *)&diff_bias[bia_off];
+#endif // WITH_BIAS
 
-    uint8 S[2][2], S_tmp[2];
+    uint8 S[2][2];
 
-    uint8 D[2], D_tmp[2];
+    uint8 D[4];
+    ushort16 Dt[2];
 
-    float8 ACC[2][4];
-
-    uint8 tmp[2];
-
-    for (int i_o = 0; i_o < 2; i_o++)
-        for (int i_i = 0; i_i < 4; i_i++) {
-            ACC[i_o][i_i] = 0.0;
-        }
+    float8 ACC[4][4] = {0.0f};
 
     __local uint src_slm[SRC_SLM_SIZE];
     __local uint diff_dst_slm[DST_SLM_SIZE];
@@ -279,185 +276,309 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global uint *src,
     int dst_slm_offset = MB_BLOCK * OC_BLK_UNROLL * OC_BLOCK / 2;
 
     const int loc_src_slice_idx
-            = sg_id / 4 * (MB_BLOCK * (IC_BLK_UNROLL / 4) * IC_BLOCK / 2);
+            = sgid_div_4 * (MB_BLOCK * (IC_BLK_UNROLL / 4) * IC_BLOCK / 2);
 
-    const int loc_dst_slice_idx = (sg_id % 4) * MB_BLOCK * OC_BLOCK / 2;
+    const int loc_dst_slice_idx
+            = (sgid_mod_4)*MB_BLOCK * (OC_BLK_UNROLL / 4) * OC_BLOCK / 2;
 
-    const int src_nblock_off
-            = SRC_OFF(MB_BLOCK, 0, 0, 0, 0) / 2; // 2 = num of DATA_T per int
-    const int dst_nblock_off = DST_OFF(MB_BLOCK, 0, 0, 0, 0) / 2;
+    const int src_loc_offset
+            = sgid_div_2 * USHORT_PER_READ + sgid_mod_2 * src_slm_offset;
+    __local uint *src_loc_write[2] = {&src_slm[src_loc_offset],
+            &src_slm[SRC_SLM_SIZE / 2 + src_loc_offset]};
 
-    __local uint *src_loc_write = src_slm;
-    __local uint *diff_dst_loc_write = diff_dst_slm;
+    const int dst_loc_offset
+            = sgid_div_2 * USHORT_PER_READ + sgid_mod_2 * dst_slm_offset;
+    __local ushort *diff_dst_loc_write[2] = {
+            (__local ushort *)&diff_dst_slm[dst_loc_offset],
+            (__local ushort *)&diff_dst_slm[DST_SLM_SIZE / 2 + dst_loc_offset]};
+
     const __local uint *src_loc_read = src_slm;
     const __local uint *diff_dst_loc_read = diff_dst_slm;
 
-    const __global uint *src_read
-            = &src[SRC_OFF(0, 0, id_start, ih_start, iw_start) / 2];
-    const __global uint *diff_dst_read
-            = &diff_dst[DST_OFF(0, 0, od_start, oh_start, ow_start) / 2];
+    int k_blk_iter = 0;
 
-    WRITE_TO_SLM();
+    size_t src_off, dst_off;
+
+    if (max_k_blocks > 0) {
+#if IC_BLK_UNROLL == 4
+        if (sg_id < 8)
+#endif
+            WRITE_SRC();
+#if OC_BLK_UNROLL == 4
+        if (sg_id < 8)
+#endif
+            WRITE_DST();
+    }
 
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    int n = 0;
-    int od = od_start;
-    int oh = oh_start;
-    int ow = ow_start;
-
-    int k_blk_iter = 0;
-
     __attribute__((opencl_unroll_hint(1))) // attr:no-format
-    for (int ki = 0; ki < k_blk_unrolls; ++ki) {
-        __attribute__((opencl_unroll_hint(K_UNROLL))) // attr:no-format
-        for (int ur = 0; ur < K_UNROLL; ++ur) {
+    for (int k_blk = 0; k_blk < max_k_blocks; ++k_blk) {
 
-            src_loc_read = &src_slm[(k_blk_iter % 2)
-                    * (SRC_SLM_SIZE / 2)]; // Fixme give name to magic number
+        src_loc_read = &src_slm[(k_blk_iter % 2) * (SRC_SLM_SIZE / 2)];
+        diff_dst_loc_read
+                = &diff_dst_slm[(k_blk_iter % 2) * (DST_SLM_SIZE / 2)];
+
+        ow++;
+        iw += SW;
+        if (ow == ow_end + 1) {
+            ow = max((PW - kw * (1 + DW) + SW - 1) / SW, 0);
+            oh++;
+            iw = ow * SW - PW + kw * (1 + DW);
+            ih += SH;
+        }
+        if (oh == oh_end + 1) {
+            oh = max((PH - kh * (1 + DH) + SH - 1) / SH, 0);
+            od++;
+            ih = oh * SH - PH + kh * (1 + DH);
+            id += SD;
+        }
+        if (od == od_end + 1) {
+            od = max((PD - kd * (1 + DD) + SD - 1) / SD, 0);
+            id = od * SD - PD + kd * (1 + DD);
+            n_block++;
+        }
+
+        k_blk_iter++;
+
+        // Read first 16n block of diff_dst (block size: 2c16n16c) from SLM
+        READ_DST();
+        // Compute 32o32i with reduction on first block of 16n
+        COMPUTE(0);
+#if IC_BLK_UNROLL == 8
+        COMPUTE(1);
+#endif
+
+        if (k_blk < max_k_blocks - 1) {
+#if IC_BLK_UNROLL == 4
+            if (sg_id < 8)
+#endif
+                WRITE_SRC();
+#if OC_BLK_UNROLL == 4
+            if (sg_id < 8)
+#endif
+                WRITE_DST();
+        }
+
+        src_loc_read += src_slm_offset;
+        diff_dst_loc_read += dst_slm_offset;
+
+        // Read second 16n block of diff_dst (block size: 2c16n16c) from SLM
+        READ_DST();
+        // Reduce on the same block(32o32i) with reduction on second block of 16n
+        COMPUTE(0);
+#if IC_BLK_UNROLL == 8
+        COMPUTE(1);
+#endif
+
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+#if K_BLOCK_TAIL != 0
+    if (group_k_block / K_BLOCKS == K_WORKGROUPS - 1) {
+        WRITE_SECOND_SLM_BUFFER();
+        barrier(CLK_LOCAL_MEM_FENCE);
+        __attribute__((opencl_unroll_hint(1))) // attr:no-format
+        for (int k_blk = 0; k_blk < K_BLOCK_TAIL; ++k_blk) {
+
+            src_loc_read = &src_slm[(k_blk_iter % 2) * (SRC_SLM_SIZE / 2)];
             diff_dst_loc_read
                     = &diff_dst_slm[(k_blk_iter % 2) * (DST_SLM_SIZE / 2)];
 
+            ow++;
+            iw += SW;
+            if (ow == ow_end + 1) {
+                ow = max((PW - kw * (1 + DW) + SW - 1) / SW, 0);
+                oh++;
+                iw = ow * SW - PW + kw * (1 + DW);
+                ih += SH;
+            }
+            if (oh == oh_end + 1) {
+                oh = max((PH - kh * (1 + DH) + SH - 1) / SH, 0);
+                od++;
+                ih = oh * SH - PH + kh * (1 + DH);
+                id += SD;
+            }
+            if (od == od_end + 1) {
+                od = max((PD - kd * (1 + DD) + SD - 1) / SD, 0);
+                id = od * SD - PD + kd * (1 + DD);
+                n_block++;
+            }
+
             k_blk_iter++;
 
-            COMPUTE_HALF_MB_BLOCK();
+            READ_DST();
+            COMPUTE(0);
+#if IC_BLK_UNROLL == 8
+            COMPUTE(1);
+#endif
 
-            if (k_blk_iter < k_blocks) { WRITE_SECOND_SLM_BUFFER(); }
+            if (k_blk < K_BLOCK_TAIL - 1) {
+#if IC_BLK_UNROLL == 4
+                if (sg_id < 8)
+#endif
+                    WRITE_SRC();
+#if OC_BLK_UNROLL == 4
+                if (sg_id < 8)
+#endif
+                    WRITE_DST();
+            }
 
-#if MB_BLK_UNROLL == 2
             src_loc_read += src_slm_offset;
             diff_dst_loc_read += dst_slm_offset;
 
-            COMPUTE_HALF_MB_BLOCK();
+            READ_DST();
+            COMPUTE(0);
+#if IC_BLK_UNROLL == 8
+            COMPUTE(1);
 #endif
 
             barrier(CLK_LOCAL_MEM_FENCE);
         }
     }
-
-    for (int ti = 0; ti < k_blk_tails; ti++) {
-        src_loc_read = &src_slm[(k_blk_iter % 2) * SRC_SLM_SIZE
-                / 2]; // Fixme give name to magic number 2= num_buffers
-        diff_dst_loc_read = &diff_dst_slm[(k_blk_iter % 2) * DST_SLM_SIZE / 2];
-
-        k_blk_iter++;
-
-        COMPUTE_HALF_MB_BLOCK();
-
-        if (k_blk_iter < k_blocks) { WRITE_SECOND_SLM_BUFFER(); }
-
-#if MB_BLK_UNROLL == 2
-        src_loc_read += src_slm_offset;
-        diff_dst_loc_read += dst_slm_offset;
-
-        COMPUTE_HALF_MB_BLOCK();
 #endif
 
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
+    volatile __global atomic_float *diff_wei_write;
 
-#if WEI_DT_BF16
 #define WRITE_WEI(i_o, i_i) \
     do { \
-        for (int i = 0; i < 8; ++i) { \
-            tmp[i_i][i] = as_uint( \
-                    (ushort2)(convert_f32_to_bf16(ACC[i_o][2 * i_i][i]), \
-                            convert_f32_to_bf16(ACC[i_o][2 * i_i + 1][i]))); \
-        } \
-        intel_sub_group_block_write8( \
-                (__global uint *)&diff_wei[WHT_OFF( \
-                        0, i_o * 8, i_i * IC_BLOCK, 0, 0, 0)], \
-                tmp[i_i]); \
+        diff_wei_write = (volatile __global atomic_float *)&diff_wei[WHT_OFF( \
+                0, i_o * 8, i_i * IC_BLOCK + sg_loc_id, 0, 0, 0)]; \
+        atomic_add_global(&diff_wei_write[0], ACC[i_o][2 * i_i].s0); \
+        atomic_add_global(&diff_wei_write[16], ACC[i_o][2 * i_i].s1); \
+        atomic_add_global(&diff_wei_write[32], ACC[i_o][2 * i_i].s2); \
+        atomic_add_global(&diff_wei_write[48], ACC[i_o][2 * i_i].s3); \
+        atomic_add_global(&diff_wei_write[64], ACC[i_o][2 * i_i].s4); \
+        atomic_add_global(&diff_wei_write[80], ACC[i_o][2 * i_i].s5); \
+        atomic_add_global(&diff_wei_write[96], ACC[i_o][2 * i_i].s6); \
+        atomic_add_global(&diff_wei_write[112], ACC[i_o][2 * i_i].s7); \
+        diff_wei_write += SUB_GROUP_SIZE; \
+        atomic_add_global(&diff_wei_write[0], ACC[i_o][2 * i_i + 1].s0); \
+        atomic_add_global(&diff_wei_write[16], ACC[i_o][2 * i_i + 1].s1); \
+        atomic_add_global(&diff_wei_write[32], ACC[i_o][2 * i_i + 1].s2); \
+        atomic_add_global(&diff_wei_write[48], ACC[i_o][2 * i_i + 1].s3); \
+        atomic_add_global(&diff_wei_write[64], ACC[i_o][2 * i_i + 1].s4); \
+        atomic_add_global(&diff_wei_write[80], ACC[i_o][2 * i_i + 1].s5); \
+        atomic_add_global(&diff_wei_write[96], ACC[i_o][2 * i_i + 1].s6); \
+        atomic_add_global(&diff_wei_write[112], ACC[i_o][2 * i_i + 1].s7); \
     } while (0)
-#else // wei data type is f32
-    const int delta_up
-            = ((sg_loc_id + 1) % 2) * (SUB_GROUP_SIZE + sg_loc_id / 2)
-            + (sg_loc_id % 2) * (sg_loc_id - sg_loc_id / 2);
-    const int delta_down
-            = ((sg_loc_id + 1) % 2) * (SUB_GROUP_SIZE / 2 - sg_loc_id / 2)
-            + (sg_loc_id % 2)
-                    * (3 * SUB_GROUP_SIZE / 2 + sg_loc_id / 2 - sg_loc_id);
-#define WRITE_WEI(i_o, i_i) \
-    do { \
-        tmp[0] = as_uint8(intel_sub_group_shuffle_up( \
-                ACC[i_o][2 * i_i], ACC[i_o][2 * i_i + 1], delta_up)); \
-        tmp[1] = as_uint8(intel_sub_group_shuffle_down( \
-                ACC[i_o][2 * i_i], ACC[i_o][2 * i_i + 1], delta_down)); \
-        intel_sub_group_block_write8( \
-                (__global uint *)&diff_wei[WHT_OFF( \
-                        0, i_o * 8, i_i * IC_BLOCK, 0, 0, 0)], \
-                tmp[0]); \
-        intel_sub_group_block_write8( \
-                (__global uint *)&diff_wei[WHT_OFF( \
-                        0, i_o * 8, i_i * IC_BLOCK + 8, 0, 0, 0)], \
-                tmp[1]); \
-    } while (0)
-#endif
 
     WRITE_WEI(0, 0);
     WRITE_WEI(1, 0);
+#if OC_BLK_UNROLL == 8
+    WRITE_WEI(2, 0);
+    WRITE_WEI(3, 0);
+#endif
+
 #if IC_BLK_UNROLL == 8
     WRITE_WEI(0, 1);
     WRITE_WEI(1, 1);
+#if OC_BLK_UNROLL == 8
+    WRITE_WEI(2, 1);
+    WRITE_WEI(3, 1);
+#endif
 #endif
 
 #if WITH_BIAS
+#define COMPUTE_BIAS() \
+    do { \
+        dst_off = n * DST_MB_STRIDE + od * DST_D_STRIDE + oh * DST_H_STRIDE \
+                + ow * DST_W_STRIDE; \
+        Dt[0] = __builtin_IB_simd_block_read_16_global_h( \
+                (__global ushort *)&diff_dst[dst_off]); \
+        Dt[1] = __builtin_IB_simd_block_read_16_global_h( \
+                (__global ushort *)&diff_dst[dst_off + USHORT_PER_READ]); \
+        BIAS_ACC[0] += (CONVERT_TO_F32(Dt[0].s0) + CONVERT_TO_F32(Dt[1].s0) \
+                + CONVERT_TO_F32(Dt[0].s2) + CONVERT_TO_F32(Dt[1].s2) \
+                + CONVERT_TO_F32(Dt[0].s4) + CONVERT_TO_F32(Dt[1].s4) \
+                + CONVERT_TO_F32(Dt[0].s6) + CONVERT_TO_F32(Dt[1].s6) \
+                + CONVERT_TO_F32(Dt[0].s8) + CONVERT_TO_F32(Dt[1].s8) \
+                + CONVERT_TO_F32(Dt[0].sa) + CONVERT_TO_F32(Dt[1].sa) \
+                + CONVERT_TO_F32(Dt[0].sc) + CONVERT_TO_F32(Dt[1].sc) \
+                + CONVERT_TO_F32(Dt[0].se) + CONVERT_TO_F32(Dt[1].se)); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s0) \
+                + CONVERT_TO_F32(Dt[1].odd.s0); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s1) \
+                + CONVERT_TO_F32(Dt[1].odd.s1); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s2) \
+                + CONVERT_TO_F32(Dt[1].odd.s2); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s3) \
+                + CONVERT_TO_F32(Dt[1].odd.s3); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s4) \
+                + CONVERT_TO_F32(Dt[1].odd.s4); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s5) \
+                + CONVERT_TO_F32(Dt[1].odd.s5); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s6) \
+                + CONVERT_TO_F32(Dt[1].odd.s6); \
+        BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s7) \
+                + CONVERT_TO_F32(Dt[1].odd.s7); \
+    } while (0)
+
+    // handle padded region for bias computation
+    // first thread in spatial gws dimension, handles the left padding
+    if (compute_bias && gid[2] % K_WORKGROUPS == 0) {
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_UNROLL); ++n) {
+            for (od = 0; od < od_start; ++od) {
+                for (oh = 0; oh < OH; ++oh) {
+                    for (ow = 0; ow < OW; ++ow) {
+                        COMPUTE_BIAS();
+                    }
+                }
+            }
+        }
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_UNROLL); ++n) {
+            for (od = od_start; od < OD; ++od) {
+                for (oh = 0; oh < oh_start; ++oh) {
+                    for (ow = 0; ow < OW; ++ow) {
+                        COMPUTE_BIAS();
+                    }
+                }
+            }
+        }
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_UNROLL); ++n) {
+            for (od = od_start; od < OD; ++od) {
+                for (oh = oh_start; oh < OH; ++oh) {
+                    for (ow = 0; ow < ow_start; ++ow) {
+                        COMPUTE_BIAS();
+                    }
+                }
+            }
+        }
+    }
+
+    // last thread handles the right padding
+    if (compute_bias && gid[2] % K_WORKGROUPS == K_WORKGROUPS - 1) {
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_UNROLL); ++n) {
+            for (od = od_start; od < OD; ++od) {
+                for (oh = oh_end + 1; oh < OH; ++oh) {
+                    for (ow = ow_start; ow < OW; ++ow) {
+                        COMPUTE_BIAS();
+                    }
+                }
+            }
+        }
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_UNROLL); ++n) {
+            for (od = od_end + 1; od < OD; ++od) {
+                for (oh = oh_start; oh < oh_end + 1; ++oh) {
+                    for (ow = ow_start; ow < OW; ++ow) {
+                        COMPUTE_BIAS();
+                    }
+                }
+            }
+        }
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_UNROLL); ++n) {
+            for (od = od_start; od < od_end + 1; ++od) {
+                for (oh = oh_start; oh < oh_end + 1; ++oh) {
+                    for (ow = ow_end + 1; ow < OW; ++ow) {
+                        COMPUTE_BIAS();
+                    }
+                }
+            }
+        }
+    }
     if (compute_bias) {
-        // tail processing,
-        // when either of od_start, oh_start, ow_start > 0
-        const int num_mb_blks = (MB + MB_BLOCK - 1) / MB_BLOCK;
-        for (int n = 0; n < num_mb_blks; n++) {
-            for (int oh = 0; oh < oh_start; oh++) {
-                for (int od = 0; od < OD; od++) {
-                    for (int ow = 0; ow < OW; ow++) {
-                        read_dst_bias(
-                                &diff_dst[DST_OFF(n * MB_BLOCK, 0, od, oh, ow)
-                                        / 2]);
-                    }
-                }
-            }
-        }
-        for (int n = 0; n < num_mb_blks; n++) {
-            for (int oh = oh_start; oh < OH; oh++) {
-                for (int od = 0; od < od_start; od++) {
-                    for (int ow = 0; ow < OW; ow++) {
-                        read_dst_bias(
-                                &diff_dst[DST_OFF(n * MB_BLOCK, 0, od, oh, ow)
-                                        / 2]);
-                    }
-                }
-            }
-        }
-        for (int n = 0; n < num_mb_blks; n++) {
-            for (int oh = oh_start; oh < OH; oh++) {
-                for (int od = od_start; od < OD; od++) {
-                    for (int ow = 0; ow < ow_start; ow++) {
-                        read_dst_bias(
-                                &diff_dst[DST_OFF(n * MB_BLOCK, 0, od, oh, ow)
-                                        / 2]);
-                    }
-                }
-            }
-        }
-
-        WRITE_LOCAL_2(bias_loc_write, as_uint2(BIAS_ACC));
-        barrier(CLK_LOCAL_MEM_FENCE);
-
-        if (sg_id % 4 == 0) {
-            float8 btmp = as_float8(READ_LOCAL_8(bias_loc_write));
-            for (int ni = 1; ni < 4; ++ni) {
-                BIAS_ACC[0] += btmp[2 * ni];
-                BIAS_ACC[1] += btmp[2 * ni + 1];
-            }
-#if BIA_DT_BF16
-            uint tmp = as_uint((ushort2)(convert_f32_to_bf16(BIAS_ACC.s0),
-                    convert_f32_to_bf16(BIAS_ACC.s1)));
-            intel_sub_group_block_write(diff_bias, tmp);
-#else
-            diff_bias[2 * sg_loc_id] = as_uint(BIAS_ACC[0]);
-            diff_bias[2 * sg_loc_id + 1] = as_uint(BIAS_ACC[1]);
-#endif
-        }
+        atomic_add_global(&dbias[sg_loc_id], BIAS_ACC.s0);
+        atomic_add_global(&dbias[sg_loc_id + SUB_GROUP_SIZE], BIAS_ACC.s1);
     }
 #endif
 }
