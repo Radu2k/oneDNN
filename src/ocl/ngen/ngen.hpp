@@ -257,6 +257,7 @@ private:
 
     void opNop(Opcode op);
 
+protected:
     inline void unsupported();
 
 public:
