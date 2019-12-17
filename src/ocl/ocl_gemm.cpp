@@ -81,8 +81,6 @@ dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
     s.reset(s_ptr);
 
     // Create primitive descriptor
-    using pd_type = typename jit_gen9_gemm_t::pd_t;
-
     gemm_desc_t op_desc;
     op_desc.primitive_kind = dnnl_gemm;
     op_desc.transa = (*transa == 'n' || *transa == 'N') ? transpose::notrans
@@ -114,9 +112,8 @@ dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
     std::unique_ptr<primitive_desc_t> pd;
     primitive_attr_t attr;
     primitive_desc_t *pd_ptr;
-    status = primitive_desc_t::create<pd_type>(&pd_ptr,
-            reinterpret_cast<const op_desc_t *>(&op_desc), &attr, engine.get(),
-            nullptr);
+    status = dnnl_primitive_desc_create(
+            &pd_ptr, &op_desc, &attr, engine.get(), nullptr);
     if (status != status::success) return status;
     pd.reset(pd_ptr);
 

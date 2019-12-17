@@ -31,6 +31,7 @@
 #include "ocl/jit_gen9_gemm.hpp"
 #include "ocl/jit_gen9_gemm_x8x8s32.hpp"
 #include "ocl/ngen_binary_format.hpp"
+#include "ocl/ngen_gen12hp_systolic_gemm.hpp"
 #include "ocl/ocl_kernel_list.hpp"
 #include "ocl/ocl_memory_storage.hpp"
 #include "ocl/ocl_stream.hpp"
@@ -239,6 +240,7 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(ref_softmax_fwd_t),
         INSTANCE(ref_softmax_bwd_t),
         /* gemm */
+        INSTANCE(ngen_gen12hp_systolic_gemm_t),
         INSTANCE(jit_gen12lp_gemm_t),
         INSTANCE(jit_gen9_gemm_x8x8s32_t),
         INSTANCE(jit_gen9_gemm_t),
