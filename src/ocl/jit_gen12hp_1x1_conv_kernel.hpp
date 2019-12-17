@@ -97,13 +97,6 @@ struct jit_gen12hp_1x1_conv_fwd_kernel {
             if (jcp.oc % 32 != 0 || jcp.ic % 16 != 0)
                 return status::unimplemented;
 
-            // NOTE:
-            // This check comes from performance difference between
-            // 1x1 and non 1x1 implementation that uses permuted blocked format
-            // Once the non 1x1 implementation switch to non permuted format
-            // performance should be measured to check if this gap still exists
-            if (jcp.ic <= 64 || jcp.oc <= 64) return status::unimplemented;
-
             jcp.mb_block = 32;
             jcp.oc_block = 32;
             jcp.ic_block = 16;
@@ -124,8 +117,12 @@ struct jit_gen12hp_1x1_conv_fwd_kernel {
             src_tag = utils::pick(jcp.ndims - 3, NCw32n16c, NChw32n16c);
             dst_tag = utils::pick(jcp.ndims - 3, NCw32n16c, NChw32n16c);
             wei_tag = jcp.with_groups
-                    ? utils::pick(jcp.ndims - 3, gOIw8i8o, gOIhw8i8o)
-                    : utils::pick(jcp.ndims - 3, OIw8i8o, OIhw8i8o);
+                    ? utils::pick(jcp.ndims - 3, format_tag::gOIw4o8i8o2i,
+                            format_tag::gOIhw4o8i8o2i,
+                            format_tag::gOIdhw4o8i8o2i)
+                    : utils::pick(jcp.ndims - 3, format_tag::OIw4o8i8o2i,
+                            format_tag::OIhw4o8i8o2i,
+                            format_tag::OIdhw4o8i8o2i);
         } else {
             assert(!"not expected");
         }
