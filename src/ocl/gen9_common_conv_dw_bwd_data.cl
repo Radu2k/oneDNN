@@ -44,10 +44,10 @@ gen9_common_conv_dw_bwd_data(__global DATA_T *diff_src, __global DATA_T *wei,
 
     DATA8_T blockC00 = WITH_BIAS
             ? (DATA8_T)bias[g * IC + gic * IC_BLOCK + local_id]
-            : 0.0f;
+            : DATA_ZERO;
     DATA8_T blockC01 = WITH_BIAS
             ? (DATA8_T)bias[g * IC + gic * IC_BLOCK + local_id]
-            : 0.0f;
+            : DATA_ZERO;
 
     wei += gic * KD * KH * KW * OC_BLOCK * IC_BLOCK
             + g * IC * OC * KD * KH * KW;
@@ -144,7 +144,7 @@ gen9_common_conv_dw_bwd_data(__global DATA_T *diff_src, __global DATA_T *wei,
     const int iw = (ihw % IWB) * IW_BLOCK;
 
     diff_dst += mb * OC * G * OD * OH * OW + g * OC * OD * OH * OW * MB_BLOCK;
-    DATA_T blockC00[IW_BLOCK] = {0.0f};
+    DATA_T blockC00[IW_BLOCK] = {DATA_ZERO};
 
 #if WITH_BIAS
     for (int i = 0; i < IW_BLOCK; i++)
