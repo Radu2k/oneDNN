@@ -22,6 +22,8 @@
 #include <string>
 #include <CL/cl.h>
 
+#include "compute/compute_engine.hpp"
+
 namespace dnnl {
 namespace {
 
@@ -165,6 +167,42 @@ TEST_P(ocl_engine_test, BasicInteropCpp) {
                 ASSERT_EQ(i_ref_count, 1);
             },
             p.expected_status != dnnl_success, p.expected_status);
+}
+
+TEST_P(ocl_engine_test, BinaryKernels) {
+    auto p = GetParam();
+    cl_device_id ocl_dev = (p.adev_kind == dev_kind::gpu)
+            ? gpu_ocl_dev
+            : (p.adev_kind == dev_kind::cpu) ? cpu_ocl_dev : nullptr;
+
+    cl_context ocl_ctx = (p.actx_kind == ctx_kind::gpu)
+            ? gpu_ocl_ctx
+            : (p.actx_kind == ctx_kind::cpu) ? cpu_ocl_ctx : nullptr;
+
+    SKIP_IF(p.adev_kind != dev_kind::null && !ocl_dev,
+            "Required OpenCL device not found.");
+    SKIP_IF(p.actx_kind != ctx_kind::null && !ocl_ctx,
+            "Required OpenCL context not found.");
+    SKIP_IF(cpu_ocl_dev == gpu_ocl_dev
+                    && (p.adev_kind == dev_kind::cpu
+                            || p.actx_kind == ctx_kind::cpu),
+            "OpenCL CPU-only device not found.");
+
+    dnnl_engine_t eng = nullptr;
+    dnnl_status_t s = dnnl_engine_create_ocl(&eng, dnnl_gpu, ocl_dev, ocl_ctx);
+
+    ASSERT_EQ(s, p.expected_status);
+
+    if (s == dnnl_success) {
+        using namespace dnnl::impl::compute;
+        auto handle = reinterpret_cast<compute_engine_t *>(eng);
+#if defined(_MSC_VER) && (_MSC_VER < 1910)
+        // MSVC 2015 and earlier are not supported due to compiler bug
+        ASSERT_EQ(handle->mayiuse_ngen_kernels(), false);
+#else
+        ASSERT_EQ(handle->mayiuse_ngen_kernels(), true);
+#endif
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Simple, ocl_engine_test,
