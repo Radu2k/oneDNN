@@ -59,6 +59,10 @@ elseif(UNIX AND NOT APPLE)
     list(APPEND EXTRA_SHARED_LIBS "${CMAKE_DL_LIBS}")
 endif()
 
+if(DNNL_ENABLE_MAX_CPU_ISA)
+    add_definitions(-DDNNL_ENABLE_MAX_CPU_ISA)
+endif()
+
 if(WIN32)
     add_definitions(-D_WIN)
     add_definitions(-DNOMINMAX)
@@ -69,6 +73,7 @@ if(WIN32)
 endif()
 
 add_subdirectory(common)
+add_subdirectory(compute)
 add_subdirectory(cpu)
 
 if(DNNL_GPU_RUNTIME STREQUAL "OCL")

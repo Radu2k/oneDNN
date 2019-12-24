@@ -29,13 +29,10 @@ extern "C" {
 #include <stdint.h>
 /// @endcond
 
-/// @addtogroup c_api C API
+/// @addtogroup dnnl_api
 /// @{
-///
-/// @addtogroup c_api_types Types
-/// @{
-///
-/// @addtogroup c_api_types_generic Generic
+
+/// @addtogroup dnnl_api_utils
 /// @{
 
 /// Status values returned by the library functions.
@@ -55,6 +52,11 @@ typedef enum {
     /// Queried element is not required for given primitive
     dnnl_not_required = 6,
 } dnnl_status_t;
+
+/// @} dnnl_api_utils
+
+/// @addtogroup dnnl_api_memory
+/// @{
 
 /// Data type specification
 typedef enum {
@@ -266,6 +268,8 @@ typedef enum {
     dnnl_BAcde8a16b2a,
     /// 5D tensor blocked by 1st dimension with block size 16
     dnnl_ABcde4b16a4b,
+    /// 5D tensor blocked by 1st dimension with block size 8
+    dnnl_ABcde2b8a4b,
     /// 5D tensor blocked by 2nd dimension with block size 16
     dnnl_aBcde16b,
     dnnl_ABcde16b16a,
@@ -311,6 +315,8 @@ typedef enum {
     dnnl_aBCdef16b16c,
     dnnl_aBCdef16c16b,
     dnnl_aBCdef4c16b4c,
+    /// 6D tensor blocked by 2nd dimension with block size 8
+    dnnl_aBCdef2c8b4c,
     /// 6D tensor blocked by 2nd dimension with block size 4
     dnnl_aBcdef4b,
     dnnl_aBCdef4c4b,
@@ -565,6 +571,7 @@ typedef enum {
     dnnl_OIdhw8o16i2o = dnnl_ABcde8a16b2a,
     dnnl_IOdhw8o16i2o = dnnl_BAcde8a16b2a,
     dnnl_OIdhw4i16o4i = dnnl_ABcde4b16a4b,
+    dnnl_OIdhw2i8o4i = dnnl_ABcde2b8a4b,
     dnnl_OIdhw8o8i = dnnl_ABcde8a8b,
     dnnl_OIdhw8o4i = dnnl_ABcde8a4b,
     dnnl_IOdhw16i16o = dnnl_BAcde16b16a,
@@ -641,6 +648,7 @@ typedef enum {
     dnnl_gOdhwi8o = dnnl_aBdefc8b,
     dnnl_gOIdhw16i16o = dnnl_aBCdef16c16b,
     dnnl_gOIdhw4i16o4i = dnnl_aBCdef4c16b4c,
+    dnnl_gOIdhw2i8o4i = dnnl_aBCdef2c8b4c,
     dnnl_gOIdhw16o16i = dnnl_aBCdef16b16c,
     dnnl_gOidhw16o = dnnl_aBcdef16b,
     dnnl_gOIdhw4i4o = dnnl_aBCdef4c4b,
@@ -655,6 +663,13 @@ typedef enum {
     dnnl_Goidhw16g = dnnl_Abcdef16a,
     dnnl_Goidhw32g = dnnl_Abcdef32a,
 } dnnl_format_tag_t;
+
+/// @} dnnl_api_memory
+
+/// @addtogroup dnnl_api_primitives
+/// @{
+/// @addtogroup dnnl_api_primitives_common
+/// @{
 
 /// Kinds of propagation.
 typedef enum {
@@ -723,6 +738,8 @@ typedef enum {
     dnnl_logsoftmax,
     /// A matrix multiplication primitive.
     dnnl_matmul,
+    /// A resampling primitive.
+    dnnl_resampling,
 } dnnl_primitive_kind_t;
 
 /// Kinds of algorithms.
@@ -777,6 +794,7 @@ typedef enum {
     dnnl_pooling_avg_include_padding = 0x2ff,
     /// Average pooling exclude padding
     dnnl_pooling_avg_exclude_padding = 0x3ff,
+    /// Average pooling (alias for #dnnl_pooling_avg_exclude_padding)
     dnnl_pooling_avg = dnnl_pooling_avg_exclude_padding,
     /// Local response normalization (LRN) across multiple channels
     dnnl_lrn_across_channels = 0xaff,
@@ -800,6 +818,10 @@ typedef enum {
     dnnl_binary_add = 0x1fff0,
     /// Binary mul
     dnnl_binary_mul = 0x1fff1,
+    /// Nearest Neighbor Resampling Method
+    dnnl_resampling_nearest = 0x2fff0,
+    /// Linear Resampling Method
+    dnnl_resampling_linear = 0x2fff1,
 } dnnl_alg_kind_t;
 
 /// Flags for batch normalization primitive.
@@ -844,9 +866,10 @@ typedef enum {
     dnnl_fuse_norm_relu = 0x4U,
 } dnnl_normalization_flags_t;
 
-/// @}
+/// @} dnnl_api_primitives_common
+/// @} dnnl_api_primitives
 
-/// @addtogroup c_api_types_memory Memory
+/// @addtogroup dnnl_api_memory
 /// @{
 
 /// Maximum number of dimensions a tensor can have. Only restricts the amount
@@ -1052,15 +1075,26 @@ typedef const struct dnnl_memory *const_dnnl_memory_t;
 #define DNNL_MEMORY_NONE (NULL)
 #define DNNL_MEMORY_ALLOCATE ((void *)(size_t)-1)
 
-/// @}
+/// @} dnnl_api_memory
 
-/// @addtogroup c_api_types_op_descs Operation descriptors
+/// @addtogroup dnnl_api_primitives
+/// @{
+/// @addtogroup dnnl_api_primitives_common
 /// @{
 
 /// A pointer to any of the operation descriptors.
 typedef void *dnnl_op_desc_t;
 /// A pointer to any of the operation descriptors (constant variant).
 typedef const void *const_dnnl_op_desc_t;
+
+/// @} dnnl_api_primitives_common
+/// @} dnnl_api_primitives
+
+/// @addtogroup dnnl_api_primitives
+/// @{
+
+/// @addtogroup dnnl_api_convolution
+/// @{
 
 /// A descriptor of a convolution operation.
 typedef struct {
@@ -1102,8 +1136,18 @@ typedef struct {
     dnnl_data_type_t accum_data_type;
 } dnnl_convolution_desc_t;
 
+/// @} dnnl_api_convolution
+
+/// @addtogroup dnnl_api_deconvolution
+/// @{
+
 /// A descriptor of a deconvolution operation.
 typedef dnnl_convolution_desc_t dnnl_deconvolution_desc_t;
+
+/// @} dnnl_api_deconvolution
+
+/// @addtogroup dnnl_api_shuffle
+/// @{
 
 /// A descriptor of a shuffle operation.
 typedef struct {
@@ -1121,6 +1165,11 @@ typedef struct {
     /// Number of groups.
     dnnl_dim_t group_size;
 } dnnl_shuffle_desc_t;
+
+/// @} dnnl_api_shuffle
+
+/// @addtogroup dnnl_api_eltwise
+/// @{
 
 /// A descriptor of a element-wise operation.
 typedef struct {
@@ -1161,6 +1210,11 @@ typedef struct {
     float alpha, beta;
 } dnnl_eltwise_desc_t;
 
+/// @} dnnl_api_eltwise
+
+/// @addtogroup dnnl_api_softmax
+/// @{
+
 /// A descriptor of a Softmax operation.
 typedef struct {
     /// The kind of primitive. Used for self-identifying the primitive
@@ -1177,9 +1231,19 @@ typedef struct {
     int softmax_axis;
 } dnnl_softmax_desc_t;
 
+/// @} dnnl_api_softmax
+
+/// @addtogroup dnnl_api_logsoftmax
+/// @{
+
 /// A descriptor of a LogSoftmax operation. An alias of Softmax structure, but
 /// primitive_kind must be #dnnl_logsoftmax.
 typedef dnnl_softmax_desc_t dnnl_logsoftmax_desc_t;
+
+/// @} dnnl_api_logsoftmax
+
+/// @addtogroup dnnl_api_pooling
+/// @{
 
 /// A descriptor of a pooling operation.
 typedef struct {
@@ -1214,6 +1278,11 @@ typedef struct {
     dnnl_data_type_t accum_data_type;
 } dnnl_pooling_desc_t;
 
+/// @} dnnl_api_pooling
+
+/// @addtogroup dnnl_api_lrn
+/// @{
+
 /// A descriptor of a Local Response Normalization (LRN) operation.
 typedef struct {
     /// The kind of primitive. Used for self-identifying the primitive
@@ -1239,6 +1308,11 @@ typedef struct {
     /// LRN k parameter.
     float lrn_k;
 } dnnl_lrn_desc_t;
+
+/// @} dnnl_api_lrn
+
+/// @addtogroup dnnl_api_batch_normalization
+/// @{
 
 /// A descriptor of a Batch Normalization operation.
 typedef struct {
@@ -1267,6 +1341,11 @@ typedef struct {
     float batch_norm_epsilon;
     unsigned flags;
 } dnnl_batch_normalization_desc_t;
+
+/// @} dnnl_api_batch_normalization
+
+/// @addtogroup dnnl_api_layer_normalization
+/// @{
 
 /// A descriptor of a Layer Normalization operation.
 typedef struct {
@@ -1300,6 +1379,11 @@ typedef struct {
     unsigned flags;
 } dnnl_layer_normalization_desc_t;
 
+/// @} dnnl_api_layer_normalization
+
+/// @addtogroup dnnl_api_inner_product
+/// @{
+
 /// A descriptor of an inner product operation.
 typedef struct {
     /// The kind of primitive. Used for self-identifying the primitive
@@ -1328,6 +1412,11 @@ typedef struct {
     /// The accumulator data type. Initialized automatically.
     dnnl_data_type_t accum_data_type;
 } dnnl_inner_product_desc_t;
+
+/// @} dnnl_api_inner_product
+
+/// @addtogroup dnnl_api_rnn
+/// @{
 
 /// Flags for RNN cell.
 typedef enum {
@@ -1418,6 +1507,11 @@ typedef struct {
 
 } dnnl_rnn_desc_t;
 
+/// @} dnnl_api_rnn
+
+/// @addtogroup dnnl_api_binary
+/// @{
+
 /// A descriptor of a binary operation.
 typedef struct {
     /// The kind of primitive. Used for self-identifying the primitive
@@ -1431,6 +1525,11 @@ typedef struct {
     /// Destination memory descriptor.
     dnnl_memory_desc_t dst_desc;
 } dnnl_binary_desc_t;
+
+/// @} dnnl_api_binary
+
+/// @addtogroup dnnl_api_matmul
+/// @{
 
 /// A descriptor of a matrix multiplication operation.
 ///
@@ -1455,9 +1554,39 @@ typedef struct {
     dnnl_data_type_t accum_data_type;
 } dnnl_matmul_desc_t;
 
-/// @}
+/// @} dnnl_api_matmul
 
-/// @addtogroup c_api_engine_types Engine
+/// @addtogroup dnnl_api_resampling
+/// @{
+
+/// A descriptor of resampling operation.
+typedef struct {
+    /// The kind of primitive. Used for self-identifying the primitive
+    /// descriptor. Must be #dnnl_resampling.
+    dnnl_primitive_kind_t primitive_kind;
+    /// The kind of propagation. Possible values: #dnnl_forward_training,
+    /// #dnnl_forward_inference, #dnnl_backward_data,
+    dnnl_prop_kind_t prop_kind;
+    /// The kind of the resampling algorithm. Possible values:
+    /// #dnnl_resampling_nearest, #dnnl_resampling_linear.
+    dnnl_alg_kind_t alg_kind;
+    /// Source memory descriptor.
+    dnnl_memory_desc_t src_desc;
+    /// Source gradient memory descriptor.
+    dnnl_memory_desc_t diff_src_desc;
+    /// Destination memory descriptor.
+    dnnl_memory_desc_t dst_desc;
+    /// Destination gradient memory descriptor.
+    dnnl_memory_desc_t diff_dst_desc;
+    /// Resampling factor in each spatial dimension.
+    float factors[DNNL_MAX_NDIMS];
+} dnnl_resampling_desc_t;
+
+/// @} dnnl_api_resampling
+
+/// @} dnnl_api_primitives
+
+/// @addtogroup dnnl_api_engine
 /// @{
 
 /// @brief Kinds of engines.
@@ -1481,9 +1610,11 @@ typedef struct dnnl_engine *dnnl_engine_t;
 typedef const struct dnnl_engine *const_dnnl_engine_t;
 #endif
 
-/// @}
+/// @} dnnl_api_engine
 
-/// @addtogroup c_api_primitive_desc_iterators Primitive descriptor iterators
+/// @addtogroup dnnl_api_primitives
+/// @{
+/// @addtogroup dnnl_api_primitives_common
 /// @{
 
 /// @struct dnnl_primitive_desc_iterator
@@ -1497,11 +1628,6 @@ typedef struct dnnl_primitive_desc_iterator *dnnl_primitive_desc_iterator_t;
 typedef const struct dnnl_primitive_desc_iterator
         *const_dnnl_primitive_desc_iterator_t;
 
-/// @}
-
-/// @addtogroup c_api_primitive_descs Primitive descriptors
-/// @{
-
 /// @struct dnnl_primitive_desc
 /// @brief An opaque structure to describe a primitive descriptor.
 struct dnnl_primitive_desc;
@@ -1512,9 +1638,9 @@ typedef struct dnnl_primitive_desc *dnnl_primitive_desc_t;
 /// @brief A constant primitive descriptor handle.
 typedef const struct dnnl_primitive_desc *const_dnnl_primitive_desc_t;
 
-/// @}
+/// @} dnnl_api_primitives_common
 
-/// @addtogroup c_api_primitive_attr Primitive descriptor attributes
+/// @addtogroup dnnl_api_attributes
 /// @{
 
 /// Scratchpad mode
@@ -1583,9 +1709,9 @@ typedef struct dnnl_post_ops *dnnl_post_ops_t;
 /// @brief A constant post operation chain handle.
 typedef const struct dnnl_post_ops *const_dnnl_post_ops_t;
 
-/// @}
+/// @} dnnl_api_attributes
 
-/// @addtogroup c_api_types_primitive Primitive
+/// @addtogroup dnnl_api_primitives_common
 /// @{
 
 /// @struct dnnl_primitive
@@ -1596,85 +1722,160 @@ typedef struct dnnl_primitive *dnnl_primitive_t;
 /// A constant primitive handle.
 typedef const struct dnnl_primitive *const_dnnl_primitive_t;
 
-/// @addtogroup c_api_types_arguments Argument indices
-/// @{
-
+/// Source argument #0.
 #define DNNL_ARG_SRC_0 1
+/// A special mnemonic for source argument for primitives that have a
+/// single source. An alias for #DNNL_ARG_SRC_0.
 #define DNNL_ARG_SRC DNNL_ARG_SRC_0
+/// A special mnemonic for RNN input vector. An alias for
+/// #DNNL_ARG_SRC_0.
 #define DNNL_ARG_SRC_LAYER DNNL_ARG_SRC_0
+/// A special mnemonic for reorder source argument. An alias for
+/// #DNNL_ARG_SRC_0.
 #define DNNL_ARG_FROM DNNL_ARG_SRC_0
 
+/// Source argument #1.
 #define DNNL_ARG_SRC_1 2
+/// A special mnemonic for RNN input recurrent hidden state vector. An alias
+/// for #DNNL_ARG_SRC_1.
 #define DNNL_ARG_SRC_ITER DNNL_ARG_SRC_1
 
+/// Source argument #2.
 #define DNNL_ARG_SRC_2 3
+/// A special mnemonic for RNN input recurrent cell state vector. An alias for
+/// #DNNL_ARG_SRC_2.
 #define DNNL_ARG_SRC_ITER_C DNNL_ARG_SRC_2
 
+/// Destination argument #0.
 #define DNNL_ARG_DST_0 17
+/// A special mnemonic for destination argument for primitives that have a
+/// single destination. An alias for #DNNL_ARG_DST_0.
 #define DNNL_ARG_DST DNNL_ARG_DST_0
+/// A special mnemonic for reorder destination argument. An alias for
+/// #DNNL_ARG_DST_0.
 #define DNNL_ARG_TO DNNL_ARG_DST_0
+/// A special mnemonic for RNN output vector. An alias for #DNNL_ARG_DST_0.
 #define DNNL_ARG_DST_LAYER DNNL_ARG_DST_0
 
+/// Destination argument #1.
 #define DNNL_ARG_DST_1 18
+/// A special mnemonic for RNN input recurrent hidden state vector. An
+/// alias for #DNNL_ARG_DST_1.
 #define DNNL_ARG_DST_ITER DNNL_ARG_DST_1
 
+/// Destination argument #2.
 #define DNNL_ARG_DST_2 19
+/// A special mnemonic for LSTM output recurrent cell state vector. An
+/// alias for #DNNL_ARG_DST_2.
 #define DNNL_ARG_DST_ITER_C DNNL_ARG_DST_2
 
+/// Weights argument #0.
 #define DNNL_ARG_WEIGHTS_0 33
+/// A special mnemonic for primitives that have a single weights
+/// argument. Alias for #DNNL_ARG_WEIGHTS_0.
 #define DNNL_ARG_WEIGHTS DNNL_ARG_WEIGHTS_0
+/// A special mnemonic for scale and shift argument of normalization
+/// primitives. Alias for #DNNL_ARG_WEIGHTS_0.
 #define DNNL_ARG_SCALE_SHIFT DNNL_ARG_WEIGHTS_0
+/// A special mnemonic for RNN weights applied to the layer input. An
+/// alias for #DNNL_ARG_WEIGHTS_0.
 #define DNNL_ARG_WEIGHTS_LAYER DNNL_ARG_WEIGHTS_0
 
+/// Weights argument #1.
 #define DNNL_ARG_WEIGHTS_1 34
+/// A special mnemonic for RNN weights applied to the recurrent input.
+/// An alias for #DNNL_ARG_WEIGHTS_1.
 #define DNNL_ARG_WEIGHTS_ITER DNNL_ARG_WEIGHTS_1
 
+/// Bias tensor argument.
 #define DNNL_ARG_BIAS 41
 
+/// Mean values tensor argument.
 #define DNNL_ARG_MEAN 49
+/// Variance values tensor argument.
 #define DNNL_ARG_VARIANCE 50
 
+/// Workspace tensor argument. Workspace is used to pass information
+/// from forward propagation to backward propagation computations.
 #define DNNL_ARG_WORKSPACE 64
+/// Scratchpad (temporary storage) tensor argument.
 #define DNNL_ARG_SCRATCHPAD 80
 
+/// Gradient (diff) of the source argument #0.
 #define DNNL_ARG_DIFF_SRC_0 129
+/// A special mnemonic for primitives that have a single diff source argument.
+/// An alias for #DNNL_ARG_DIFF_SRC_0.
 #define DNNL_ARG_DIFF_SRC DNNL_ARG_DIFF_SRC_0
+/// A special mnemonic for gradient (diff) of RNN input vector. An alias for
+/// #DNNL_ARG_DIFF_SRC_0.
 #define DNNL_ARG_DIFF_SRC_LAYER DNNL_ARG_DIFF_SRC_0
 
+/// Gradient (diff) of the source argument #1.
 #define DNNL_ARG_DIFF_SRC_1 130
+/// A special mnemonic for gradient (diff) of RNN input recurrent hidden state
+/// vector. An alias for #DNNL_ARG_DIFF_SRC_1.
 #define DNNL_ARG_DIFF_SRC_ITER DNNL_ARG_DIFF_SRC_1
 
+/// Gradient (diff) of the source argument #2.
 #define DNNL_ARG_DIFF_SRC_2 131
+/// A special mnemonic for gradient (diff) of RNN input recurrent cell state
+/// vector. An alias for #DNNL_ARG_DIFF_SRC_1.
 #define DNNL_ARG_DIFF_SRC_ITER_C DNNL_ARG_DIFF_SRC_2
 
+/// Gradient (diff) of the destination argument #0.
 #define DNNL_ARG_DIFF_DST_0 145
+/// A special mnemonic for primitives that have a single diff destination
+/// argument. An alias for #DNNL_ARG_DIFF_DST_0.
 #define DNNL_ARG_DIFF_DST DNNL_ARG_DIFF_DST_0
+/// A special mnemonic for gradient (diff) of RNN output vector. An alias for
+/// #DNNL_ARG_DIFF_DST_0.
 #define DNNL_ARG_DIFF_DST_LAYER DNNL_ARG_DIFF_DST_0
 
+/// Gradient (diff) of the destination argument #1.
 #define DNNL_ARG_DIFF_DST_1 146
+/// A special mnemonic for gradient (diff) of RNN input recurrent hidden state
+/// vector. An alias for #DNNL_ARG_DIFF_DST_1.
 #define DNNL_ARG_DIFF_DST_ITER DNNL_ARG_DIFF_DST_1
 
+/// Gradient (diff) of the destination argument #2.
 #define DNNL_ARG_DIFF_DST_2 147
+/// A special mnemonic for gradient (diff) of RNN input recurrent cell state
+/// vector. An alias for #DNNL_ARG_DIFF_DST_2.
 #define DNNL_ARG_DIFF_DST_ITER_C DNNL_ARG_DIFF_DST_2
 
+/// Gradient (diff) of the weights argument #0.
 #define DNNL_ARG_DIFF_WEIGHTS_0 161
+/// A special mnemonic for primitives that have a single diff weights
+/// argument. Alias for #DNNL_ARG_DIFF_WEIGHTS_0.
 #define DNNL_ARG_DIFF_WEIGHTS DNNL_ARG_DIFF_WEIGHTS_0
+/// A special mnemonic for diff of scale and shift argument of normalization
+/// primitives. Alias for #DNNL_ARG_DIFF_WEIGHTS_0.
 #define DNNL_ARG_DIFF_SCALE_SHIFT DNNL_ARG_DIFF_WEIGHTS_0
+/// A special mnemonic for diff of RNN weights applied to the layer input. An
+/// alias for #DNNL_ARG_DIFF_WEIGHTS_0.
 #define DNNL_ARG_DIFF_WEIGHTS_LAYER DNNL_ARG_DIFF_WEIGHTS_0
 
+/// Gradient (diff) of the weights argument #1.
 #define DNNL_ARG_DIFF_WEIGHTS_1 162
+/// A special mnemonic for diff of RNN weights applied to the recurrent input.
+/// An alias for #DNNL_ARG_DIFF_WEIGHTS_1.
 #define DNNL_ARG_DIFF_WEIGHTS_ITER DNNL_ARG_DIFF_WEIGHTS_1
 
+/// Gradient (diff) of the bias tensor argument.
 #define DNNL_ARG_DIFF_BIAS 169
 
+/// Output scaling factors provided at execution time.
 #define DNNL_ARG_ATTR_OUTPUT_SCALES 513
 
+/// Starting index for source arguments for primitives that take a variable
+/// number of source arguments.
 #define DNNL_ARG_MULTIPLE_SRC 1024
+/// Starting index for destination arguments for primitives that produce a
+/// variable number of destination arguments.
 #define DNNL_ARG_MULTIPLE_DST 2048
 
+/// Zero points provided at execution time.
 #define DNNL_ARG_ATTR_ZERO_POINTS 4096
-
-/// @}
 
 /// A structure that contains an index and a memory object, and is used to pass
 /// arguments to dnnl_primitive_execute().
@@ -1683,28 +1884,29 @@ typedef struct {
     dnnl_memory_t memory; ///< Input/output memory
 } dnnl_exec_arg_t;
 
-/// @}
+/// @} dnnl_api_primitives_common
 
-/// @addtogroup c_api_types_query Queries
+/// @addtogroup dnnl_api_primitives_common
 /// @{
 
 /// Primitive descriptor query specification
 ///
 /// For generic function dnnl_primitive_desc_query(), the type of result must
 /// agree with the queried argument. The correspondence table:
-///      Query                           | type of result
-///      --------------------------------------------------------------
-///      #dnnl_query_engine              | dnnl_engine_t *
-///      #dnnl_query_scratchpad_engine   | dnnl_engine_t *
-///      #dnnl_query_primitive_kind      | dnnl_primitive_kind_t *
-///      *_s32                           | int *
-///      *_s64                           | dnnl_dim_t * (same as int64_t *)
-///      *_f64                           | double *
-///      *_str                           | const char **
-///      #dnnl_query_op_d                | const_dnnl_op_desc_t *
-///      *_md                            | const dnnl_memory_desc_t **
-///      *_${op}_d                       | const dnnl_${op}_desc_t **
-///      *_pd                            | const_dnnl_primitive_desc_t *
+///
+/// Query kind                      | Type of query result
+/// --------------------------------|-----------------------------
+/// #dnnl_query_engine              | #dnnl_engine_t *
+/// #dnnl_query_scratchpad_engine   | #dnnl_engine_t *
+/// #dnnl_query_primitive_kind      | #dnnl_primitive_kind_t *
+/// dnnl_query_*_s32                | int *
+/// dnnl_query_*_s64                | #dnnl_dim_t * (same as int64_t *)
+/// dnnl_query_*_f64                | double *
+/// dnnl_query_*_str                | const char **
+/// #dnnl_query_op_d                | #const_dnnl_op_desc_t *
+/// dnnl_query_*_md                 | const #dnnl_memory_desc_t **
+/// dnnl_query_*_\<op\>_d           | const dnnl_\<op\>_desc_t **
+/// dnnl_query_*_pd                 | #const_dnnl_primitive_desc_t *
 ///
 /// @note
 ///     Rule of thumb: all opaque types and structures are returned by
@@ -1759,6 +1961,7 @@ typedef enum {
     dnnl_query_binary_d, ///< binary descriptor
     dnnl_query_logsoftmax_d, ///< logsoftmax descriptor
     dnnl_query_matmul_d, ///< matrix multiplication (matmul) descriptor
+    dnnl_query_resampling_d, ///< resampling descriptor
 
     // memory descriptor section
     dnnl_query_some_md = 128, ///< stub
@@ -1773,9 +1976,11 @@ typedef enum {
     dnnl_query_exec_arg_md = 255, ///< memory desc of an execute argument
 } dnnl_query_t;
 
-/// @}
+/// @} dnnl_api_primitives_common
 
-/// @addtogroup c_api_types_stream Execution stream
+/// @} dnnl_api_primitives
+
+/// @addtogroup dnnl_api_stream
 /// @{
 
 /// @brief Stream flags.
@@ -1799,10 +2004,25 @@ typedef struct dnnl_stream *dnnl_stream_t;
 /// A constant execution stream handle.
 typedef const struct dnnl_stream *const_dnnl_stream_t;
 
-/// @}
+/// @} dnnl_api_stream
 
-/// @addtogroup c_api_types_service Service
+/// @addtogroup dnnl_api_service
 /// @{
+
+/// No runtime (disabled)
+#define DNNL_RUNTIME_NONE 0u
+
+/// Sequential runtime (CPU only)
+#define DNNL_RUNTIME_SEQ 1u
+
+/// OpenMP runtime (CPU only)
+#define DNNL_RUNTIME_OMP 2u
+
+/// TBB runtime (CPU only)
+#define DNNL_RUNTIME_TBB 4u
+
+/// OpenCL runtime
+#define DNNL_RUNTIME_OCL 256u
 
 /// Structure containing version information as per [Semantic
 /// Versioning](https://semver.org)
@@ -1811,6 +2031,8 @@ typedef struct {
     int minor; ///< Minor version
     int patch; ///< Patch version
     const char *hash; ///< Git hash of the sources (may be absent)
+    unsigned cpu_runtime; ///< CPU runtime
+    unsigned gpu_runtime; ///< GPU runtime
 } dnnl_version_t;
 
 /// Disable profiling completely
@@ -1833,10 +2055,46 @@ typedef struct {
 #define DNNL_JIT_PROFILE_LINUX_PERF \
     (DNNL_JIT_PROFILE_LINUX_JITDUMP | DNNL_JIT_PROFILE_LINUX_PERFMAP)
 
-/// @}
+/// CPU instruction set flags
+typedef enum {
+    /// Any ISA (no restrictions)
+    dnnl_cpu_isa_all = 0x0,
 
-/// @}
-/// @}
+    /// Intel(R) SSE4.1.
+    dnnl_cpu_isa_sse41 = 0x1,
+
+    /// Intel(R) Advanced Vector Extensions.
+    dnnl_cpu_isa_avx = 0x3,
+
+    /// Intel(R) Advanced Vector Extensions 2.
+    dnnl_cpu_isa_avx2 = 0x7,
+
+    /// Intel(R) Advanced Vector Extensions 512 subset for Intel(R) Xeon
+    /// Phi(TM) Processors x200 Series.
+    dnnl_cpu_isa_avx512_mic = 0xf,
+
+    /// Intel(R) Advanced Vector Extensions 512 subset for Intel(R) Xeon
+    /// Phi(TM) Processors 7235, 7285, 7295 Series.
+    dnnl_cpu_isa_avx512_mic_4ops = 0x1f,
+
+    /// Intel(R) Advanced Vector Extensions 512 for Intel(R) Xeon(R) Processor
+    /// Scalable Family and Intel(R) Core(TM) processor family.
+    dnnl_cpu_isa_avx512_core = 0x27,
+
+    /// Intel(R) Advanced Vector Extensions 512 with Intel(R) DL Boost Support
+    /// for Intel(R) Xeon(R) Processor Scalable Family and Intel(R) Core(TM)
+    /// processor family.
+    dnnl_cpu_isa_avx512_core_vnni = 0x67,
+
+    /// Intel(R) Advanced Vector Extensions 512 with Intel(R) DL Boost and
+    /// Bfloat16 Support for Intel(R) Xeon(R) Processor Scalable Family and
+    /// Intel(R) Core(TM) processor family.
+    dnnl_cpu_isa_avx512_core_bf16 = 0xe7,
+} dnnl_cpu_isa_t;
+
+/// @} dnnl_api_service
+
+/// @} dnnl_api
 
 #ifdef __cplusplus
 }

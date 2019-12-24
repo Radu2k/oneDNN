@@ -32,10 +32,13 @@
 #endif
 
 #define MSAN_ENABLED 0
+#define ATTR_NO_MSAN
 #if defined(__has_feature)
 #if __has_feature(memory_sanitizer)
 #undef MSAN_ENABLED
 #define MSAN_ENABLED 1
+#undef ATTR_NO_MSAN
+#define ATTR_NO_MSAN __attribute__((no_sanitize("memory")))
 #include <sanitizer/msan_interface.h>
 #endif
 #endif
@@ -425,6 +428,34 @@ template <typename derived_type, typename base_type>
 inline derived_type downcast(base_type *base) {
     assert(dynamic_cast<derived_type>(base) == base);
     return static_cast<derived_type>(base);
+}
+
+template <typename T,
+        typename std::enable_if<!std::is_same<typename std::decay<T>::type,
+                std::string>::value>::type * = nullptr>
+auto format_cvt_impl(T &&t) -> decltype(std::forward<T>(t)) {
+    return std::forward<T>(t);
+}
+
+template <typename T,
+        typename std::enable_if<std::is_same<typename std::decay<T>::type,
+                std::string>::value>::type * = nullptr>
+const char *format_cvt_impl(T &&t) {
+    return std::forward<T>(t).c_str();
+}
+
+template <typename... Args>
+std::string format_impl(const char *fmt, Args... args) {
+    size_t sz = snprintf(nullptr, 0, fmt, args...);
+    std::string buf(sz + 1, '\0');
+    snprintf(&buf[0], sz + 1, fmt, args...);
+    buf.resize(sz);
+    return buf;
+}
+
+template <typename... Args>
+std::string format(const char *fmt, Args &&... args) {
+    return format_impl(fmt, format_cvt_impl(std::forward<Args>(args))...);
 }
 
 } // namespace utils

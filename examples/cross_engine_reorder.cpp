@@ -232,7 +232,8 @@ void cross_engine_reorder_tutorial() {
 }
 
 int main(int argc, char **argv) {
-    return handle_example_errors(cross_engine_reorder_tutorial);
+    return handle_example_errors({engine::kind::cpu, engine::kind::gpu},
+            cross_engine_reorder_tutorial);
 }
 
 /// @page cross_engine_reorder_cpp
@@ -242,6 +243,6 @@ int main(int argc, char **argv) {
 /// Upon compiling and running the example, the output should be just:
 ///
 /// ~~~
-/// Example passes
+/// Example passed.
 /// ~~~
 ///

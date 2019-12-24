@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef CPU_JIT_UNI_RNN_CELL_POSTGEMM_HPP
-#define CPU_JIT_UNI_RNN_CELL_POSTGEMM_HPP
+#ifndef CPU_JIT_UNI_RNN_CELL_POSTGEMM_FWD_HPP
+#define CPU_JIT_UNI_RNN_CELL_POSTGEMM_FWD_HPP
 
 #include "jit_uni_rnn_common_postgemm.hpp"
 
@@ -94,7 +94,7 @@ protected:
         // Here we cannot use rbp to have initial stack pointer so we
         // use rsp and offset it with the size of pushed registers in
         // preamble
-        auto base_args = rsp + get_size_of_abi_save_regs() + 40;
+        auto base_args = get_stack_params_address();
         mov(addr_states_t_l_copy_reg, ptr[base_args]);
 #else
         auto addr_states_t_l_copy_reg = abi_param5;
