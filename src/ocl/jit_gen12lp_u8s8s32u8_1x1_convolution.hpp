@@ -60,7 +60,7 @@ struct jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
                     && this->desc()->src_desc.data_type == data_type::u8
                     && this->desc()->weights_desc.data_type == data_type::s8
                     && this->desc()->accum_data_type == data_type::s32
-                    && this->desc()->dst_desc.data_type == u8
+                    && this->desc()->dst_desc.data_type == data_type::u8
                     && IMPLICATION(this->with_bias(),
                             true && this->desc()->bias_desc.data_type == f32)
                     && compute_engine->mayiuse(

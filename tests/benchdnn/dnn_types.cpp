@@ -343,7 +343,7 @@ int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
                     if (*s == ':') {
                         char *end;
                         e.sum.scale = strtof(++s, &end);
-                        if (e.sum.scale <= 0 || end == s) return FAIL;
+                        if (end == s) return FAIL;
                         s = end;
                     } else {
                         e.sum.scale = 1.f;
@@ -380,6 +380,15 @@ int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
     }
 
     return FAIL; /* unreachable */
+}
+
+int attr_t::post_ops_t::find(
+        attr_t::post_ops_t::kind_t kind, int start, int stop) const {
+    if (stop == -1) stop = len;
+    stop = MIN2(stop, len);
+    for (int idx = start; idx < stop; ++idx)
+        if (entry[idx].kind == kind) return idx;
+    return -1;
 }
 
 bool attr_t::is_def() const {

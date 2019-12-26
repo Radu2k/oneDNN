@@ -201,10 +201,7 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(jit_gen12hp_u8s8s32x_convolution_bwd_data_t),
         INSTANCE(jit_gen12lp_u8s8s32u8_1x1_convolution_fwd_t),
         // TODO: turn it ON once permuted formats support implemented
-        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<s8, s8>),
-        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<s8, u8>),
-        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<u8, s8>),
-        //        INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t<u8, u8>),
+        // INSTANCE(jit_gen12lp_x8s8s32x_convolution_fwd_t),
         INSTANCE(jit_gen12lp_x8s8s32x_convolution_bwd_data_t),
         INSTANCE(jit_gen9_common_convolution_fwd_t),
         INSTANCE(jit_gen9_common_convolution_bwd_data_t),
@@ -241,6 +238,8 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(ref_rnn_fwd_f16_t),
         INSTANCE(ref_rnn_fwd_f32_t),
         INSTANCE(ref_rnn_bwd_f32_t),
+        INSTANCE(ref_rnn_fwd_bf16_t),
+        INSTANCE(ref_rnn_bwd_bf16_t),
         /* shuffle */
         INSTANCE(ref_shuffle_t),
         /*layer normalization */

@@ -375,6 +375,17 @@ inline bool operator==(const reorder_desc_t &lhs, const reorder_desc_t &rhs) {
     return ret;
 }
 
+inline bool operator==(
+        const resampling_desc_t &lhs, const resampling_desc_t &rhs) {
+    bool ret = COMPARE_DESC_MEMBERS(primitive_kind)
+            && COMPARE_DESC_MEMBERS(alg_kind) && COMPARE_DESC_MEMBERS(src_desc)
+            && COMPARE_DESC_MEMBERS(diff_src_desc)
+            && COMPARE_DESC_MEMBERS(dst_desc)
+            && COMPARE_DESC_MEMBERS(diff_dst_desc)
+            && COMPARE_DESC_ARRAY_MEMBERS(factors, DNNL_MAX_NDIMS);
+    return ret;
+}
+
 inline bool operator==(const rnn_desc_t &lhs, const rnn_desc_t &rhs) {
     bool ret = COMPARE_DESC_MEMBERS(primitive_kind)
             && COMPARE_DESC_MEMBERS(prop_kind)
@@ -490,7 +501,7 @@ inline status_t memory_desc_init_by_blocking_desc(
     const int ndims = nstl::min(DNNL_MAX_NDIMS, md.ndims); // make GCC 5 happy
     utils::array_copy(mblk.strides, blk.strides, ndims);
 
-    dims_t ou_blocks;
+    dims_t ou_blocks = {0};
     utils::array_copy(ou_blocks, md.padded_dims, ndims);
 
     int perm[DNNL_MAX_NDIMS];

@@ -135,7 +135,7 @@ struct jit_gen9_gemm_x8x8s32_t : public primitive_impl_t {
         //compute kernel
         switch (pd()->desc()->c_type) {
             case data_type::s32:
-                kernel_name = "gen9_gemm_compute_x8x8s32_kernel";
+                kernel_name = "gen9_gemm_compute_x8x8s32";
                 break;
             default: return status::unimplemented;
         }
@@ -165,7 +165,7 @@ struct jit_gen9_gemm_x8x8s32_t : public primitive_impl_t {
         if (!compute_x8x8s32_kernel_) return status::runtime_error;
 
         //scale kernel
-        kernel_name = "gen9_gemm_scale_x8x8s32_kernel";
+        kernel_name = "gen9_gemm_scale_x8x8s32";
 
         status = jit_gen9_gemm_scale_x8x8s32_kernel::init_const_def(kernel_ctx,
                 pd()->with_eltwise(), pd()->eltwise_alg_kind(),
