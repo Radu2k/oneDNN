@@ -56,6 +56,8 @@ public:
 
     bool mayiuse(device_ext_t ext) const { return device_info_->has(ext); }
 
+    virtual bool mayiuse_ngen_kernels() const { return false; }
+
 private:
     std::unique_ptr<device_info_t> device_info_;
 };
