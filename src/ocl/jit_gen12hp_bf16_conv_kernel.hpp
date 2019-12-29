@@ -45,10 +45,9 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
 
         status_t status = status::success;
 
-        // TODO: remove restrictions on oc and ic
-        if (jcp.is_depthwise || jcp.mb % 32 != 0 || jcp.oc % 64 != 0
-                || jcp.ic % 64 != 0)
-            return status::unimplemented;
+        //TODO: add depthwise
+        if (jcp.is_depthwise) return status::unimplemented;
+
         jcp.with_bias = cd.diff_bias_desc.format_kind != format_kind::undef;
 
         using namespace dnnl::impl::format_tag;
@@ -62,55 +61,105 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
                                       : utils::pick(jcp.ndims - 3, OIw16o16i,
                                               OIhw16o16i, OIdhw16o16i);
 
+        // TODO: try workgroup size 32
+        //  1 tile with 4thr/EU can dispatch maximum 2048 subgroups,
+        //  but 4096 seems to better for resnet_50 convolutions (when measured through gsim)
+        const int max_workgroup_size = 16;
+        const int max_subgroups = 4096;
         jcp.sub_group_size = 8;
         jcp.mb_block = 16;
         jcp.oc_block = 16;
         jcp.ic_block = 16;
+
+        // sometimes kernel hangs for this case,
+        // when run using emulation on gen9, reason unknown.
+        if (jcp.oc % jcp.oc_block != 0) return status::unimplemented;
+
         // Each workgroup loads:
-        // SRC: (mb_blk_unroll * mb_block) * (ic_blk_unroll * ic_block),
-        // DIFF_DST: (mb_blk_unroll * mb_block) * (oc_blk_unroll * oc_block)
-        // to compute and store WEI : (oc_blk_unroll * oc_block) * (ic_blk_unroll * ic_block).
-        jcp.mb_blk_unroll = nstl::min(2, utils::div_up(jcp.mb, jcp.mb_block));
-        jcp.oc_blk_unroll = ((jcp.oc / jcp.oc_block) % 8) == 0 ? 8 : 4;
-        jcp.ic_blk_unroll = ((jcp.ic / jcp.ic_block) % 8) == 0 ? 8 : 4;
+        // SRC: (mb_blk_wg * mb_block) * (ic_blk_wg * ic_block),
+        // DIFF_DST: (mb_blk_wg * mb_block) * (oc_blk_wg * oc_block)
+        // to compute and store WEI : (oc_blk_wg * oc_block) * (ic_blk_wg * ic_block).
+        //jcp.mb_blk_wg = nstl::min(2, utils::div_up(jcp.mb, jcp.mb_block));
+        jcp.mb_blk_wg = jcp.mb > 16 ? 2 : 1; // mb is padded by 32
 
-        const int num_buffers = 2;
-        jcp.src_slm_size = num_buffers * jcp.mb_blk_unroll * jcp.mb_block
-                * jcp.ic_block * jcp.ic_blk_unroll / 2;
-        jcp.dst_slm_size = num_buffers * jcp.mb_blk_unroll * jcp.mb_block
-                * jcp.oc_block * jcp.oc_blk_unroll / 2;
+        jcp.ic = utils::rnd_up(jcp.ic, jcp.ic_block);
+        jcp.oc = utils::rnd_up(jcp.oc, jcp.oc_block);
+        jcp.max_blk_wg = 16;
+        jcp.oc_blk_wg = utils::max_div(jcp.oc / jcp.oc_block, jcp.max_blk_wg);
+        jcp.ic_blk_wg = utils::max_div(jcp.ic / jcp.ic_block, jcp.max_blk_wg);
 
-        // TODO: try workgroup size 32
-        const int workgroup_size = 16; // 16 EUs/DSS
-        // TODO: Fine-tune max_subgroups according to conv sizes
-        //  1 tile with 4thr/EU can dispatch maximum 2048 subgroups,
-        //  but 4096 seems to better for resnet_50 convolutions (when measured through gsim)
-        const int max_subgroups = 4096;
-        jcp.lws_d[0] = jcp.sub_group_size * 4;
-        jcp.lws_d[1] = workgroup_size / 4;
+        // TODO: Fine-tune blocking sizes on real hardware
+        if (jcp.oc_blk_wg * jcp.ic_blk_wg <= max_workgroup_size) {
+            jcp.ic_blk_sg = 1;
+            jcp.oc_blk_sg = 1;
+        } else {
+            jcp.ic_blk_sg = (jcp.ic_blk_wg % 2) == 0 ? 2 : 1;
+            jcp.oc_blk_sg = (jcp.oc_blk_wg % 2) == 0 ? 2 : 1;
+        }
+        int num_subgroups_for_compute
+                = jcp.oc_blk_wg / jcp.oc_blk_sg * jcp.ic_blk_wg / jcp.ic_blk_sg;
+        if (num_subgroups_for_compute > max_workgroup_size) {
+            do {
+                jcp.ic_blk_wg
+                        = utils::max_div(jcp.ic_blk_wg, jcp.ic_blk_wg / 2);
+                jcp.ic_blk_sg = (jcp.ic_blk_wg % 2) == 0 ? jcp.ic_blk_sg : 1;
+                num_subgroups_for_compute = jcp.oc_blk_wg / jcp.oc_blk_sg
+                        * jcp.ic_blk_wg / jcp.ic_blk_sg;
+                if (num_subgroups_for_compute > max_workgroup_size) {
+                    jcp.oc_blk_wg
+                            = utils::max_div(jcp.oc_blk_wg, jcp.oc_blk_wg / 2);
+                    jcp.oc_blk_sg
+                            = (jcp.oc_blk_wg % 2) == 0 ? jcp.oc_blk_sg : 1;
+                    num_subgroups_for_compute = jcp.oc_blk_wg / jcp.oc_blk_sg
+                            * jcp.ic_blk_wg / jcp.ic_blk_sg;
+                }
+            } while (num_subgroups_for_compute > max_workgroup_size);
+        }
+
+        // Each subgroups loads
+        // SRC: mb_block * ic_block,
+        // DIFF_DST: mb_block * oc_block
+        const int num_subgroups_for_load_global_to_slm
+                = jcp.mb_blk_wg * nstl::max(jcp.oc_blk_wg, jcp.ic_blk_wg);
+        if (num_subgroups_for_load_global_to_slm > num_subgroups_for_compute)
+            jcp.mb_blk_wg = 1;
+
+        jcp.num_buffers = 2;
+        // For  maximum parallelization (4 workgroups/DSS)
+        // total SLM size per WG shouldn't exceed (128/4 =)32 KB.
+        jcp.src_slm_size = jcp.num_buffers * jcp.mb_blk_wg * jcp.mb_block
+                * jcp.ic_block * jcp.ic_blk_wg / 2;
+        jcp.dst_slm_size = jcp.num_buffers * jcp.mb_blk_wg * jcp.mb_block
+                * jcp.oc_block * jcp.oc_blk_wg / 2;
+
+        int max_needed_subgroups
+                = nstl::max(num_subgroups_for_load_global_to_slm,
+                        num_subgroups_for_compute);
+        jcp.lws_d[0] = jcp.sub_group_size
+                * (max_needed_subgroups <= 4
+                                ? 4
+                                : (max_needed_subgroups <= 8 ? 8 : 16));
+        jcp.lws_d[1] = 1;
         jcp.lws_d[2] = 1;
 
-        jcp.gws_d[0] = jcp.ic
-                / (jcp.ic_blk_unroll * jcp.ic_block
-                        / jcp.lws_d[0]); // In best case, 4 ic/workitem
-        jcp.gws_d[1] = jcp.oc
-                / (jcp.oc_blk_unroll * jcp.oc_block
-                        / jcp.lws_d[1]); // In best case, 32 oc/workitem
+        const int num_workgroups_for_compute = jcp.oc * jcp.ic
+                / (jcp.ic_blk_wg * jcp.ic_block * jcp.oc_blk_wg * jcp.oc_block);
+        jcp.gws_d[0] = num_workgroups_for_compute * jcp.lws_d[0];
 
         // Parallelize along k-dimension to utilize all logical threads
-        const int k_dim = (jcp.mb / (jcp.mb_blk_unroll * jcp.mb_block) * jcp.od
-                * jcp.oh * jcp.ow);
+        const int k_dim = utils::div_up(jcp.mb, (jcp.mb_blk_wg * jcp.mb_block))
+                * jcp.od * jcp.oh * jcp.ow;
 
         jcp.workgroups_along_k = utils::max_div(k_dim,
                 utils::div_up(max_subgroups,
-                        (jcp.gws_d[0] * jcp.gws_d[1] / jcp.sub_group_size)
-                                * jcp.ngroups * jcp.kd * jcp.kh * jcp.kw));
+                        (jcp.gws_d[0] / jcp.sub_group_size) * jcp.ngroups
+                                * jcp.kd * jcp.kh * jcp.kw));
 
         jcp.k_blocks = k_dim / jcp.workgroups_along_k;
-        jcp.k_block_tail = k_dim % jcp.workgroups_along_k;
 
-        jcp.gws_d[2] = jcp.ngroups * jcp.kd * jcp.kh * jcp.kw
+        jcp.gws_d[1] = jcp.ngroups * jcp.kd * jcp.kh * jcp.kw
                 * jcp.workgroups_along_k;
+        jcp.gws_d[2] = 1;
 
         size_t wei_size = jcp.weights_data_type == data_type::bf16
                 ? jcp.ngroups * jcp.oc * jcp.ic * jcp.kd * jcp.kh * jcp.kw
@@ -164,13 +213,16 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
         kernel_ctx.define_int("MB_BLOCK", jcp.mb_block);
         kernel_ctx.define_int("OC_BLOCK", jcp.oc_block);
         kernel_ctx.define_int("IC_BLOCK", jcp.ic_block);
-        kernel_ctx.define_int("MB_BLK_UNROLL", jcp.mb_blk_unroll);
-        kernel_ctx.define_int("IC_BLK_UNROLL", jcp.ic_blk_unroll);
-        kernel_ctx.define_int("OC_BLK_UNROLL", jcp.oc_blk_unroll);
+        kernel_ctx.define_int("MB_BLK_WORKGROUP", jcp.mb_blk_wg);
+        kernel_ctx.define_int("MAX_BLK_WORKGROUP", jcp.max_blk_wg);
+        kernel_ctx.define_int("IC_BLK_WORKGROUP", jcp.ic_blk_wg);
+        kernel_ctx.define_int("OC_BLK_WORKGROUP", jcp.oc_blk_wg);
+        kernel_ctx.define_int("IC_BLK_SUBGROUP", jcp.ic_blk_sg);
+        kernel_ctx.define_int("OC_BLK_SUBGROUP", jcp.oc_blk_sg);
         kernel_ctx.define_int("K_WORKGROUPS", jcp.workgroups_along_k);
         kernel_ctx.define_int("K_BLOCKS", jcp.k_blocks);
-        kernel_ctx.define_int("K_BLOCK_TAIL", jcp.k_block_tail);
 
+        kernel_ctx.define_int("NUM_BUF", jcp.num_buffers);
         kernel_ctx.define_int("SRC_SLM_SIZE", jcp.src_slm_size);
         kernel_ctx.define_int("DST_SLM_SIZE", jcp.dst_slm_size);
         kernel_ctx.define_int("WITH_BIAS", jcp.with_bias);
@@ -194,6 +246,7 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
                 data_type::bf16); // for enabling correct mmad8x8/dpas macro
 
         kernel_ctx.add_option("-cl-std=CL2.0");
+        kernel_ctx.add_option("-cl-uniform-work-group-size");
         kernel_ctx.print_options();
         return status::success;
     }

@@ -178,12 +178,14 @@ struct jit_conv_conf_t {
     size_t wei_block;
     int ocb;
     int oh_chunk, mb_chunk, mb_block, slm_ic;
-    int mb_blk_unroll;
-    int oc_blk_unroll, ic_blk_unroll;
+    int mb_blk_wg;
+    int max_blk_wg, ic_blk_wg, oc_blk_wg;
+    int ic_blk_sg, oc_blk_sg;
     int k_blocks, k_block_tail;
     size_t wht_slm_size, src_slm_size, dst_slm_size;
     int sub_group_size;
     int workgroups_along_k;
+    int num_buffers;
 
     size_t gws_d[3], lws_d[3];
 
