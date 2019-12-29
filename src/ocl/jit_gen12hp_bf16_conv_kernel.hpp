@@ -124,7 +124,9 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
         if (num_subgroups_for_load_global_to_slm > num_subgroups_for_compute)
             jcp.mb_blk_wg = 1;
 
+        // TODO: experiment with triple buffering by simply changing this to 3
         jcp.num_buffers = 2;
+        if (jcp.num_buffers > 2) jcp.mb_blk_wg = 1;
         // For  maximum parallelization (4 workgroups/DSS)
         // total SLM size per WG shouldn't exceed (128/4 =)32 KB.
         jcp.src_slm_size = jcp.num_buffers * jcp.mb_blk_wg * jcp.mb_block

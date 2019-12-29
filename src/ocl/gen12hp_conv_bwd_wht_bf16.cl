@@ -37,6 +37,7 @@
 #define SRC_C_STRIDE (ID * SRC_D_STRIDE)
 #define SRC_MB_STRIDE (G * IC / IC_BLOCK * SRC_C_STRIDE)
 
+// DST fmt is NChw32n16c
 #define DST_W_STRIDE (2 * MB_BLOCK * OC_BLOCK)
 #define DST_H_STRIDE (OW * DST_W_STRIDE)
 #define DST_D_STRIDE (OH * DST_H_STRIDE)
@@ -44,6 +45,7 @@
 #define DST_MB_STRIDE (G * OC / OC_BLOCK * DST_C_STRIDE)
 
 #if USE_DPASW == 1
+//NOTE: Dpasw can only be used when IC_BLK_WORKGROUP is multiple of 2
 #define GEMM_IC_blk(o, i) \
     do { \
         ACC[o][2 * i] \
@@ -67,12 +69,12 @@
 #define READ_DST() \
     do { \
         D[0] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
-        D[1] = READ_LOCAL_4( \
-                &diff_dst_loc_read[loc_dst_compute_blk_offset + INT_PER_READ]); \
-        D[2] = READ_LOCAL_4( \
-                &diff_dst_loc_read[loc_dst_compute_blk_offset + 2 * INT_PER_READ]); \
-        D[3] = READ_LOCAL_4( \
-                &diff_dst_loc_read[loc_dst_compute_blk_offset + 3 * INT_PER_READ]); \
+        D[1] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+                + INT_PER_READ]); \
+        D[2] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+                + 2 * INT_PER_READ]); \
+        D[3] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+                + 3 * INT_PER_READ]); \
     } while (0)
 #else // OC_BLK_SUBGROUP == 1
 #define READ_DST() \
@@ -119,7 +121,7 @@
 #if WITH_BIAS
 #define CONVERT_TO_F32(x) convert_bf16_to_f32(x)
 
-#define WRITE_DST() \
+#define READ_DST_GLOBAL() \
     do { \
         dst_off = (size_t)n_block * DST_MB_STRIDE + od * DST_D_STRIDE \
                 + oh * DST_H_STRIDE + ow * DST_W_STRIDE \
@@ -127,6 +129,10 @@
         Dt[0] = __builtin_IB_simd_block_read_16_global_h(&diff_dst[dst_off]); \
         Dt[1] = __builtin_IB_simd_block_read_16_global_h( \
                 &diff_dst[dst_off + USHORT_PER_READ]); \
+    } while (0)
+
+#define WRITE_DST() \
+    do { \
         BIAS_ACC[0] += (CONVERT_TO_F32(Dt[0].s0) + CONVERT_TO_F32(Dt[1].s0) \
                 + CONVERT_TO_F32(Dt[0].s2) + CONVERT_TO_F32(Dt[1].s2) \
                 + CONVERT_TO_F32(Dt[0].s4) + CONVERT_TO_F32(Dt[1].s4) \
@@ -152,13 +158,14 @@
         BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s7) \
                 + CONVERT_TO_F32(Dt[1].odd.s7); \
         vstore16((ushort16)(Dt[0].even, Dt[1].even), sg_loc_id, \
-                diff_dst_loc_write[k_blk_iter % 2]); \
+                diff_dst_loc_write[buf_num]); \
         vstore16((ushort16)(Dt[0].odd, Dt[1].odd), sg_loc_id + 8, \
-                diff_dst_loc_write[k_blk_iter % 2]); \
+                diff_dst_loc_write[buf_num]); \
     } while (0)
 
 #else //WITHOUT  BIAS
-#define WRITE_DST() \
+
+#define READ_DST_GLOBAL() \
     do { \
         dst_off = (size_t)n_block * DST_MB_STRIDE + od * DST_D_STRIDE \
                 + oh * DST_H_STRIDE + ow * DST_W_STRIDE \
@@ -166,14 +173,18 @@
         Dt[0] = __builtin_IB_simd_block_read_16_global_h(&diff_dst[dst_off]); \
         Dt[1] = __builtin_IB_simd_block_read_16_global_h( \
                 &diff_dst[dst_off + USHORT_PER_READ]); \
-        vstore16((ushort16)(Dt[0].even, Dt[1].even), sg_loc_id, \
-                diff_dst_loc_write[k_blk_iter % 2]); \
-        vstore16((ushort16)(Dt[0].odd, Dt[1].odd), sg_loc_id + 8, \
-                diff_dst_loc_write[k_blk_iter % 2]); \
     } while (0)
+#define WRITE_DST() \
+    do { \
+        vstore16((ushort16)(Dt[0].even, Dt[1].even), sg_loc_id, \
+                diff_dst_loc_write[buf_num]); \
+        vstore16((ushort16)(Dt[0].odd, Dt[1].odd), sg_loc_id + 8, \
+                diff_dst_loc_write[buf_num]); \
+    } while (0)
+
 #endif // WITH_BIAS
 
-#define WRITE_SRC() \
+#define READ_SRC_GLOBAL() \
     do { \
         src_off = (size_t)n_block * SRC_MB_STRIDE + id * SRC_D_STRIDE \
                 + ih * SRC_H_STRIDE + iw * SRC_W_STRIDE \
@@ -181,18 +192,22 @@
         Dt[0] = __builtin_IB_simd_block_read_16_global_h(&src[src_off]); \
         Dt[1] = __builtin_IB_simd_block_read_16_global_h( \
                 &src[src_off + USHORT_PER_READ]); \
-        WRITE_LOCAL_8(src_loc_write[k_blk_iter % 2], \
+    } while (0)
+#define WRITE_SRC() \
+    do { \
+        WRITE_LOCAL_8(src_loc_write[buf_num], \
                 (uint8)(as_uint(Dt[0].s02), as_uint(Dt[0].s46), \
                         as_uint(Dt[0].s8A), as_uint(Dt[0].sCE), \
                         as_uint(Dt[1].s02), as_uint(Dt[1].s46), \
                         as_uint(Dt[1].s8A), as_uint(Dt[1].sCE))); \
-        WRITE_LOCAL_8(&src_loc_write[k_blk_iter % 2][INT_PER_READ], \
+        WRITE_LOCAL_8(&src_loc_write[buf_num][INT_PER_READ], \
                 (uint8)(as_uint(Dt[0].s13), as_uint(Dt[0].s57), \
                         as_uint(Dt[0].s9B), as_uint(Dt[0].sDF), \
                         as_uint(Dt[1].s13), as_uint(Dt[1].s57), \
                         as_uint(Dt[1].s9B), as_uint(Dt[1].sDF))); \
     } while (0)
 
+// READ_SRC reads 16n block of src (block layout: 2c8n8c2n) from SLM
 #if OC_BLK_SUBGROUP == 2
 #define COMPUTE(i_c) \
     do { \
@@ -223,9 +238,13 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
     const int sg_id = get_sub_group_id();
     const int sg_loc_id = get_sub_group_local_id();
 
+    // blocks which subgroup will read from global memory
+    // e.g. threads TO,T1 read the same oc_block but different mb_block
     const int sgid_n_block = sg_id % MB_BLK_WORKGROUP;
     const int sgid_c_block = sg_id / MB_BLK_WORKGROUP;
 
+    // compute blocks
+    // threads T0, T1 compute the same oc_block but different ic_block
     const int sg_oc_blk = sg_id / (IC_BLK_WORKGROUP / IC_BLK_SUBGROUP);
     const int sg_ic_blk = sg_id % (IC_BLK_WORKGROUP / IC_BLK_SUBGROUP);
 
@@ -267,7 +286,7 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
 
 #if MB_BLK_WORKGROUP == 1 && MB > 16
     int n_block_inner = group_k_block
-            % 2; // factor 2 because fmt is 32n16c and mb_bloc=16
+            % 2; // factor 2 because fmt is 32n16c and mb_block = 16
     int od = od_start + ((group_k_block / 2 / total_ow / total_oh) % total_od);
     int oh = oh_start + ((group_k_block / 2 / total_ow) % total_oh);
     int ow = ow_start + ((group_k_block / 2) % total_ow);
@@ -289,7 +308,8 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
     int ih = group_ih;
     int iw = group_iw;
 
-    // every subgroups reads (MB_BLOCK * IC_BLOCK + MB_BLOCK * OC_BLOCK) elements from global memory
+    // each subgroup may read (SRC:MB_BLOCK * IC_BLOCK + DST:MB_BLOCK * OC_BLOCK)
+    // elements from global memory
     bool write_src_to_slm = sg_id < MAX_SGID_IC;
 #if MAX_SGID_IC < WORKGROUP_SIZE
     if (write_src_to_slm)
@@ -330,12 +350,10 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
 
 #if USE_DPASW == 1
     uint4 D[4];
-    ushort16 Dt[2];
 #else
     uint8 D[4];
-    ushort16 Dt[2];
 #endif
-    ushort16 St[2];
+    ushort16 Dt[2];
 
     float8 ACC[4][4] = {0.0f};
 
@@ -359,42 +377,55 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
 
     const int loc_src_write_offset
             = sgid_c_block * USHORT_PER_READ + sgid_n_block * src_slm_offset;
-    __local uint *src_loc_write[NUM_BUF] = {&src_slm[loc_src_write_offset],
-            &src_slm[SRC_SLM_SIZE / NUM_BUF
-                    + loc_src_write_offset]}; // second buffer for double buffering
-
     const int loc_dst_write_offset
             = sgid_c_block * USHORT_PER_READ + sgid_n_block * dst_slm_offset;
-    __local ushort *diff_dst_loc_write[NUM_BUF]
-            = {(__local ushort *)&diff_dst_slm[loc_dst_write_offset],
-                    (__local ushort *)&diff_dst_slm[DST_SLM_SIZE / NUM_BUF
-                            + loc_dst_write_offset]};
+    __local uint *src_loc_write[NUM_BUF];
+    __local ushort *diff_dst_loc_write[NUM_BUF];
 
-    const __local uint *src_loc_read = src_slm;
-    const __local uint *diff_dst_loc_read = diff_dst_slm;
+    for (int i = 0; i < NUM_BUF; i++) {
+        src_loc_write[i]
+                = &src_slm[i * (SRC_SLM_SIZE / NUM_BUF) + loc_src_write_offset];
+        diff_dst_loc_write[i]
+                = (__local ushort *)&diff_dst_slm[i * (DST_SLM_SIZE / NUM_BUF)
+                        + loc_dst_write_offset];
+    }
+
+    const __local uint *src_loc_read;
+    const __local uint *diff_dst_loc_read;
 
     int k_blk_iter = 0;
 
     size_t src_off, dst_off;
+    int buf_num = 0;
 
-    if (max_k_blocks > 0) {
+    for (; buf_num < min(max_k_blocks, NUM_BUF - 1); ++buf_num) {
 #if MAX_SGID_IC < WORKGROUP_SIZE
-        if (write_src_to_slm)
+        if (write_src_to_slm) {
 #endif
+            // Each subgroups reads block of 16n16c from global memory
+            READ_SRC_GLOBAL();
+            // Reorder the block to 2c8n8c2n before and write to SLM.
+            // If mb_blk_workgroup=2
+            // layout of a single src buffer in SLM will be 2n2Xc8n8c2n,
+            // else it will be 2Xc8n8c2n (where X = IC_BLK_WORKGROUP).
             WRITE_SRC();
-#if MAX_SGID_OC < WORKGROUP_SIZE
-        if (write_dst_to_slm)
+#if MAX_SGID_IC < WORKGROUP_SIZE
+        }
 #endif
+
+#if MAX_SGID_OC < WORKGROUP_SIZE
+        if (write_dst_to_slm) {
+#endif
+            // Each subgroups reads block of 16n16c from global memory
+            READ_DST_GLOBAL();
+            // Transpose the block to 16c16n before and write to SLM.
+            // If mb_blk_workgroup=2,
+            // layout of a single src buffer in SLM will be 2nXc16n,
+            // else it will be Xc16n (where X = OC_BLK_WORKGROUP).
             WRITE_DST();
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
-    __attribute__((opencl_unroll_hint(1))) // attr:no-format
-    for (int k_blk = 0; k_blk < max_k_blocks; ++k_blk) {
-
-        src_loc_read = &src_slm[(k_blk_iter % 2) * (SRC_SLM_SIZE / 2)];
-        diff_dst_loc_read
-                = &diff_dst_slm[(k_blk_iter % 2) * (DST_SLM_SIZE / 2)];
+#if MAX_SGID_OC < WORKGROUP_SIZE
+        }
+#endif
 
 #if MB_BLK_WORKGROUP == 1 && MB > 16
         n_block_inner++;
@@ -407,6 +438,7 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
         ow++;
         iw += SW;
 #endif
+
         if (ow == ow_end + 1) {
             ow = max((PW - kw * (1 + DW) + SW - 1) / SW, 0);
             oh++;
@@ -424,6 +456,19 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
             id = od * SD - PD + kd * (1 + DD);
             n_block++;
         }
+    }
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    __attribute__((opencl_unroll_hint(1))) // attr:no-format
+    for (int k_blk = 0; k_blk < max_k_blocks; ++k_blk) {
+
+        buf_num = ((k_blk_iter % NUM_BUF) + NUM_BUF - 1) % NUM_BUF;
+
+        src_loc_read
+                = &src_slm[(k_blk_iter % NUM_BUF) * (SRC_SLM_SIZE / NUM_BUF)];
+        diff_dst_loc_read = &diff_dst_slm[(k_blk_iter % NUM_BUF)
+                * (DST_SLM_SIZE / NUM_BUF)];
 
         k_blk_iter++;
 
@@ -445,15 +490,52 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
         }
 #endif
 
-        if (k_blk < max_k_blocks - 1) {
+        if (k_blk < max_k_blocks - (NUM_BUF - 1)) {
 #if MAX_SGID_IC < WORKGROUP_SIZE
-            if (write_src_to_slm)
+            if (write_src_to_slm) {
 #endif
+                READ_SRC_GLOBAL();
                 WRITE_SRC();
-#if MAX_SGID_OC < WORKGROUP_SIZE
-            if (write_dst_to_slm)
+#if MAX_SGID_IC < WORKGROUP_SIZE
+            }
 #endif
+#if MAX_SGID_OC < WORKGROUP_SIZE
+            if (write_dst_to_slm) {
+#endif
+                READ_DST_GLOBAL();
                 WRITE_DST();
+#if MAX_SGID_OC < WORKGROUP_SIZE
+            }
+#endif
+
+#if MB_BLK_WORKGROUP == 1 && MB > 16
+            n_block_inner++;
+            if (n_block_inner == 2) {
+                n_block_inner = 0;
+                ow++;
+                iw += SW;
+            }
+#else
+            ow++;
+            iw += SW;
+#endif
+            if (ow == ow_end + 1) {
+                ow = max((PW - kw * (1 + DW) + SW - 1) / SW, 0);
+                oh++;
+                iw = ow * SW - PW + kw * (1 + DW);
+                ih += SH;
+            }
+            if (oh == oh_end + 1) {
+                oh = max((PH - kh * (1 + DH) + SH - 1) / SH, 0);
+                od++;
+                ih = oh * SH - PH + kh * (1 + DH);
+                id += SD;
+            }
+            if (od == od_end + 1) {
+                od = max((PD - kd * (1 + DD) + SD - 1) / SD, 0);
+                id = od * SD - PD + kd * (1 + DD);
+                n_block++;
+            }
         }
 
 #if MAX_SGID_COMPUTE < WORKGROUP_SIZE
@@ -475,7 +557,9 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
         }
 #endif
 
-        barrier(CLK_LOCAL_MEM_FENCE);
+        if (k_blk < max_k_blocks - (NUM_BUF - 1)) {
+            barrier(CLK_LOCAL_MEM_FENCE);
+        }
     }
 
     volatile __global atomic_float *diff_wei_write;
