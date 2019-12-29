@@ -146,6 +146,7 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
                 / (jcp.ic_blk_wg * jcp.ic_block * jcp.oc_blk_wg * jcp.oc_block);
         jcp.gws_d[0] = num_workgroups_for_compute * jcp.lws_d[0];
 
+        jcp.use_dpasw = false; // TODO: add right condition
         // Parallelize along k-dimension to utilize all logical threads
         const int k_dim = utils::div_up(jcp.mb, (jcp.mb_blk_wg * jcp.mb_block))
                 * jcp.od * jcp.oh * jcp.ow;
@@ -234,6 +235,8 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
         kernel_ctx.define_int("GWS_0", jcp.gws_d[0]);
         kernel_ctx.define_int("GWS_1", jcp.gws_d[1]);
         kernel_ctx.define_int("GWS_2", jcp.gws_d[2]);
+
+        kernel_ctx.define_int("USE_DPASW", jcp.use_dpasw);
 
         def_offsets(off.src_off, kernel_ctx, "SRC", jcp.ndims);
         def_offsets(

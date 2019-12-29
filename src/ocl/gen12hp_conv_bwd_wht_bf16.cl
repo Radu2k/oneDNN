@@ -43,6 +43,15 @@
 #define DST_C_STRIDE (OD * DST_D_STRIDE)
 #define DST_MB_STRIDE (G * OC / OC_BLOCK * DST_C_STRIDE)
 
+#if USE_DPASW == 1
+#define GEMM_IC_blk(o, i) \
+    do { \
+        ACC[o][2 * i] \
+                = __dpasw(as_uint4(D[o]), as_int8(S[i][0]), ACC[o][2 * i]); \
+        ACC[o][2 * i + 1] = __dpasw( \
+                as_uint4(D[o]), as_int8(S[i][1]), ACC[o][2 * i + 1]); \
+    } while (0)
+#else
 #define GEMM_IC_blk(o, i) \
     do { \
         ACC[o][2 * i] \
@@ -50,6 +59,31 @@
         ACC[o][2 * i + 1] = MMAD8X8( \
                 as_uint8(D[o]), as_int8(S[i][1]), ACC[o][2 * i + 1]); \
     } while (0)
+#endif
+
+#if USE_DPASW == 1
+
+#if OC_BLK_SUBGROUP == 2
+#define READ_DST() \
+    do { \
+        D[0] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
+        D[1] = READ_LOCAL_4( \
+                &diff_dst_loc_read[loc_dst_compute_blk_offset + INT_PER_READ]); \
+        D[2] = READ_LOCAL_4( \
+                &diff_dst_loc_read[loc_dst_compute_blk_offset + 2 * INT_PER_READ]); \
+        D[3] = READ_LOCAL_4( \
+                &diff_dst_loc_read[loc_dst_compute_blk_offset + 3 * INT_PER_READ]); \
+    } while (0)
+#else // OC_BLK_SUBGROUP == 1
+#define READ_DST() \
+    do { \
+        D[0] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
+        D[1] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+                + INT_PER_READ]); \
+    } while (0)
+#endif
+
+#else // use normal dpas
 
 #if OC_BLK_SUBGROUP == 2
 #define READ_DST() \
@@ -69,7 +103,8 @@
         D[1] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + INT_PER_READ]); \
     } while (0)
-#endif
+#endif // OC_BLK_SUBGROUP
+#endif // USE DPAS_W
 
 #define READ_SRC(i_c) \
     do { \
@@ -293,8 +328,14 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
 
     uint8 S[2][2];
 
+#if USE_DPASW == 1
+    uint4 D[4];
+    ushort16 Dt[2];
+#else
     uint8 D[4];
     ushort16 Dt[2];
+#endif
+    ushort16 St[2];
 
     float8 ACC[4][4] = {0.0f};
 
@@ -307,8 +348,14 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
     const int loc_src_compute_blk_offset
             = sg_ic_blk * MB_BLOCK * IC_BLK_SUBGROUP * IC_BLOCK / 2;
 
+#if USE_DPASW == 1
+    const int loc_dst_compute_blk_offset
+            = sg_oc_blk * MB_BLOCK * OC_BLK_SUBGROUP * OC_BLOCK / 2
+            + sgid_mod_2 * SUB_GROUP_SIZE * 4;
+#else
     const int loc_dst_compute_blk_offset
             = sg_oc_blk * MB_BLOCK * OC_BLK_SUBGROUP * OC_BLOCK / 2;
+#endif
 
     const int loc_src_write_offset
             = sgid_c_block * USHORT_PER_READ + sgid_n_block * src_slm_offset;
