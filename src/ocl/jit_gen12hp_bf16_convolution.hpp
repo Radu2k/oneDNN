@@ -83,9 +83,14 @@ struct jit_gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
     };
 
     status_t init() override {
-        std::vector<const char *> kernel_names {
-                "gen12hp_conv_bwd_wht_kernel_bf16",
-                "gen12hp_wht_f32_zero_init_kernel"};
+        std::vector<const char *> kernel_names;
+        // split barrier is disabled due to worse performance
+        if (pd()->jcp_.use_split_barrier)
+            kernel_names.push_back(
+                    "gen12hp_conv_bwd_wht_kernel_bf16_split_bar");
+        else
+            kernel_names.push_back("gen12hp_conv_bwd_wht_kernel_bf16");
+        kernel_names.push_back("gen12hp_wht_f32_zero_init_kernel");
         if (pd()->jcp_.weights_data_type == data_type::bf16)
             kernel_names.push_back("gen12hp_wht_convert_f32_to_bf16_kernel");
 

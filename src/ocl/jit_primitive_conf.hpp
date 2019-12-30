@@ -206,6 +206,7 @@ struct jit_conv_conf_t {
     bool is_nchw;
     bool is_nhwc;
     bool use_dpasw;
+    bool use_split_barrier;
     data_type_t src_data_type;
     data_type_t weights_data_type;
     data_type_t bias_data_type;

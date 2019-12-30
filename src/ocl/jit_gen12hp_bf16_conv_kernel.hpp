@@ -148,7 +148,8 @@ struct jit_gen12hp_bf16_conv_bwd_weights_kernel {
                 / (jcp.ic_blk_wg * jcp.ic_block * jcp.oc_blk_wg * jcp.oc_block);
         jcp.gws_d[0] = num_workgroups_for_compute * jcp.lws_d[0];
 
-        jcp.use_dpasw = false; // TODO: add right condition
+        jcp.use_dpasw = false; // TODO: switch it on if better performance
+        jcp.use_split_barrier = false; //TODO: experiment on real hardware
         // Parallelize along k-dimension to utilize all logical threads
         const int k_dim = utils::div_up(jcp.mb, (jcp.mb_blk_wg * jcp.mb_block))
                 * jcp.od * jcp.oh * jcp.ow;
