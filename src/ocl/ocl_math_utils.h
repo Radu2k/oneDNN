@@ -35,7 +35,7 @@ void __attribute__((overloadable))
 intel_sub_group_block_write_uc16(__global uchar *p, uchar16 data);
 
 uchar16 __attribute__((overloadable))
-intel_sub_group_block_read_uc16(__global uchar *p);
+intel_sub_group_block_read_uc16(const __global uchar *p);
 #endif
 
 #ifdef cl_intel_dot_accumulate
