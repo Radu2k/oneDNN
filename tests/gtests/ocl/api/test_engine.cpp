@@ -196,12 +196,7 @@ TEST_P(ocl_engine_test, BinaryKernels) {
     if (s == dnnl_success) {
         using namespace dnnl::impl::compute;
         auto handle = reinterpret_cast<compute_engine_t *>(eng);
-#if defined(_MSC_VER) && (_MSC_VER < 1910)
-        // MSVC 2015 and earlier are not supported due to compiler bug
-        ASSERT_EQ(handle->mayiuse_ngen_kernels(), false);
-#else
         ASSERT_EQ(handle->mayiuse_ngen_kernels(), true);
-#endif
     }
 }
 

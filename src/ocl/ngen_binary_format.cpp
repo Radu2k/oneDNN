@@ -37,11 +37,17 @@ namespace ocl {
 
 using namespace ngen;
 
-class ngen_gen9_binary_format_kernel_t
-    : public ngen::OpenCLCodeGenerator<ngen::HW::Gen9> {
+template <HW hw>
+class ngen_binary_format_kernel_t : public ngen::OpenCLCodeGenerator<hw> {
+    NGEN_FORWARD(hw);
+    using OpenCLCodeGenerator<hw>::interface;
+
 public:
-    ngen_gen9_binary_format_kernel_t()
-        : ngen::OpenCLCodeGenerator<ngen::HW::Gen9>() {
+    ngen_binary_format_kernel_t() : ngen::OpenCLCodeGenerator<hw>() {
+
+        auto low_half = [](uint64_t q) -> uint32_t { return q & 0xFFFFFFFF; };
+        auto high_half = [](uint64_t q) -> uint32_t { return q >> 32; };
+
         interface.newArgument("src0", DataType::ud); // r5.4:ud
         interface.newArgument("src1", DataType::uq); // r5.3:uq
         interface.newArgument("src2", DataType::uw); // r6.0:uw
@@ -58,38 +64,65 @@ public:
 
         Label doWrite;
 
+        auto src0 = interface.getArgument("src0");
+        auto src1 = interface.getArgument("src1");
+        auto src2 = interface.getArgument("src2");
+        auto src3 = interface.getArgument("src3");
+        auto src4 = interface.getArgument("src4");
+        auto src5 = interface.getArgument("src5");
+        auto src_ptr = interface.getArgument("src_ptr");
+        auto ok_surface = Surface(interface.getArgumentSurface("ok"));
+
         auto data = r30;
         auto data2 = r31;
-        auto qtemp = r90.uq(0);
         auto ok = data.ud(0);
         auto header = r64;
 
+        setDefaultNoMask();
+
+        if (hw >= HW::Gen12HP) {
+            // First 8 instructions: load local IDs (not needed).
+            for (int i = 0; i < 8; i++)
+                sync(SyncFunction::nop);
+
+            // Second entrypoint: load arguments.
+            mov<uint32_t>(8, header, uint32_t(0));
+            and_<uint32_t>(1, header[2], r0[0], uint32_t(0xFFFFFFE0));
+            load(16 | SWSB(sb1, 1), r4, aligned_block_oword(8), A32NC, header);
+            sync(SyncFunction::nop, sb1.dst);
+        }
+
+        // Default: test failure.
         mov(1, ok, uint16_t(0));
 
-        cmp(1 | eq | f0[0], null.ud(), interface.getArgument("src0"),
-                uint32_t(MAGIC0));
+        // Validate scalar arguments
+        cmp(1 | eq | f0[0], null.ud(), src0, uint32_t(MAGIC0));
         jmpi(1 | ~f0[0], doWrite);
-        mov(1, qtemp, uint64_t(MAGIC1));
-        cmp(1 | eq | f0[0], null.uq(), interface.getArgument("src1"), qtemp);
+        cmp(1 | eq | f0[0], null.ud(), src1.ud(0), low_half(MAGIC1));
         jmpi(1 | ~f0[0], doWrite);
-        cmp(1 | eq | f0[0], null.uw(), interface.getArgument("src2"),
-                uint16_t(MAGIC2));
+        cmp(1 | eq | f0[0], null.ud(), src1.ud(1), high_half(MAGIC1));
         jmpi(1 | ~f0[0], doWrite);
-        cmp(1 | eq | f0[0], null.uw(), interface.getArgument("src3"),
-                uint16_t(MAGIC3));
+        cmp(1 | eq | f0[0], null.uw(), src2, uint16_t(MAGIC2));
         jmpi(1 | ~f0[0], doWrite);
-        mov(1, qtemp, uint64_t(MAGIC4));
-        cmp(1 | eq | f0[0], null.uq(), interface.getArgument("src4"), qtemp);
+        cmp(1 | eq | f0[0], null.uw(), src3, uint16_t(MAGIC3));
         jmpi(1 | ~f0[0], doWrite);
-        mov(1, qtemp, uint64_t(MAGIC5));
-        cmp(1 | eq | f0[0], null.uq(), interface.getArgument("src5"), qtemp);
+        cmp(1 | eq | f0[0], null.ud(), src4.ud(0), low_half(MAGIC4));
         jmpi(1 | ~f0[0], doWrite);
-
-        mov<uint64_t>(1, header[0], interface.getArgument("src_ptr"));
-        load(1, data2, scattered_dword(), A64, header);
-        cmp(1 | eq | f0[0], null.ud(), data2.ud(0), uint32_t(MAGICPTR));
+        cmp(1 | eq | f0[0], null.ud(), src4.ud(1), high_half(MAGIC4));
+        jmpi(1 | ~f0[0], doWrite);
+        cmp(1 | eq | f0[0], null.ud(), src5.ud(0), low_half(MAGIC5));
+        jmpi(1 | ~f0[0], doWrite);
+        cmp(1 | eq | f0[0], null.ud(), src5.ud(1), high_half(MAGIC5));
         jmpi(1 | ~f0[0], doWrite);
 
+        // Validate A64 pointer argument.
+        mov<uint32_t>(2, header[0](1), src_ptr.ud(0)(1));
+        load(1 | SWSB(sb0, 1), data2, scattered_dword(), A64, header);
+        cmp(1 | eq | f0[0] | sb0.dst, null.ud(), data2.ud(0),
+                uint32_t(MAGICPTR));
+        jmpi(1 | ~f0[0], doWrite);
+
+        // Validate OCL local size arguments
         cmp(1 | eq | f0[0], null.ud(), interface.getLocalSize(0),
                 uint32_t(MAGICSIZEX));
         jmpi(1 | ~f0[0], doWrite);
@@ -100,40 +133,64 @@ public:
                 uint32_t(MAGICSIZEZ));
         jmpi(1 | ~f0[0], doWrite);
 
+        // Test passed.
         mov(1, ok, uint16_t(1));
 
         mark(doWrite);
 
+        // Write out results.
         mov<uint32_t>(1, header, uint16_t(0));
-        store(1, scattered_dword(), Surface(interface.getArgumentSurface("ok")),
-                header, data);
+        store(1 | SWSB(sb2, 1), scattered_dword(), ok_surface, header, data);
+
+        if (hw >= HW::Gen12HP) memfence(sb2, header);
 
         mov<uint32_t>(8, r127, r0);
-        threadend(r127);
+        threadend(SWSB(sb2, 1), r127);
+    }
+
+    static cl_kernel make_kernel(cl_context context, cl_device_id device) {
+        cl_kernel kernel = nullptr;
+
+        if (hw != HW::Unknown) {
+            ngen_binary_format_kernel_t<hw> binary_format_kernel;
+            kernel = binary_format_kernel.getKernel(context, device);
+        } else {
+            auto hw_detect = OpenCLCodeGenerator<HW::Unknown>::detectHW(
+                    context, device);
+            switch (hw_detect) {
+                case HW::Gen9:
+                    kernel = ngen_binary_format_kernel_t<HW::Gen9>::make_kernel(
+                            context, device);
+                    break;
+                case HW::Gen11:
+                    kernel = ngen_binary_format_kernel_t<
+                            HW::Gen11>::make_kernel(context, device);
+                    break;
+                case HW::Gen12LP:
+                    kernel = ngen_binary_format_kernel_t<
+                            HW::Gen12LP>::make_kernel(context, device);
+                    break;
+                case HW::Gen12HP:
+                    kernel = ngen_binary_format_kernel_t<
+                            HW::Gen12HP>::make_kernel(context, device);
+                    break;
+                default: kernel = nullptr; break;
+            }
+        }
+        return kernel;
     }
 };
 
 status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     *ok = false;
 
-    // TODO: binary format kernel supports gen9, extend it for gen12
-#if 0
-    if (!gpu_is_gen9) return status::runtime_error;
-#endif
-
-#if defined(_MSC_VER) && (_MSC_VER < 1910)
-    // MSVC 2015 and earlier are not supported due to compiler bug
-    return status::success;
-#endif
-
     auto *gpu_engine = utils::downcast<ocl_gpu_engine_t *>(engine);
     if (!gpu_engine) return status::runtime_error;
 
-    auto binary_format_kernel
-            = utils::make_unique<ngen_gen9_binary_format_kernel_t>();
-    auto kernel = binary_format_kernel->getKernel(
+    auto kernel = ngen_binary_format_kernel_t<HW::Unknown>::make_kernel(
             gpu_engine->context(), gpu_engine->device());
-    if (!kernel) return status::runtime_error;
+    if (!kernel) return status::success;
+
     auto compute_kernel = compute::kernel_t(new ocl_gpu_kernel_t(kernel));
 
     status_t status = status::success;
@@ -167,6 +224,10 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     OCL_CHECK(clEnqueueWriteBuffer(queue, (cl_mem)magic_buf->data_handle(),
             CL_TRUE, 0, sizeof(magic_ptr), &magic_ptr, 0, nullptr, nullptr));
 
+    int32_t result = 0;
+    OCL_CHECK(clEnqueueWriteBuffer(queue, (cl_mem)result_buf->data_handle(),
+            CL_TRUE, 0, sizeof(int32_t), &result, 0, nullptr, nullptr));
+
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, magic0);
     arg_list.set(1, magic1);
@@ -184,7 +245,6 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     status = stream->wait();
     if (status != status::success) return status::runtime_error;
 
-    int result = 0;
     OCL_CHECK(clEnqueueReadBuffer(queue, (cl_mem)result_buf->data_handle(),
             CL_TRUE, 0, sizeof(int32_t), &result, 0, nullptr, nullptr));
     *ok = (result != 0);
