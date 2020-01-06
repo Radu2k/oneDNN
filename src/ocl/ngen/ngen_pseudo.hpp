@@ -42,6 +42,84 @@ void bfi(const InstructionModifier &mod, const RegData &dst, const RegData &src0
     bfi2(mod, dst, dst, src2, src3);
 }
 
+// Brief math instructions.
+template <typename DT = void>
+void cos(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
+    math<DT>(mod, MathFunction::cos, dst, src0);
+}
+template <typename DT = void>
+void exp(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
+    math<DT>(mod, MathFunction::exp, dst, src0);
+}
+template <typename DT = void>
+void fdiv(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
+    math<DT>(mod, MathFunction::fdiv, dst, src0, src1);
+}
+template <typename DT = void>
+void fdiv(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
+    math<DT>(mod, MathFunction::fdiv, dst, src0, src1);
+}
+template <typename DT = void>
+void idiv(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
+    math<DT>(mod, MathFunction::idiv, dst, src0, src1);
+}
+template <typename DT = void>
+void idiv(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
+    math<DT>(mod, MathFunction::idiv, dst, src0, src1);
+}
+template <typename DT = void>
+void inv(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
+    math<DT>(mod, MathFunction::inv, dst, src0);
+}
+template <typename DT = void>
+void invm(const InstructionModifier &mod, const ExtendedReg &dst, const ExtendedReg &src0, const ExtendedReg &src1) {
+    math<DT>(mod, MathFunction::invm, dst, src0, src1);
+}
+template <typename DT = void>
+void iqot(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
+    math<DT>(mod, MathFunction::iqot, dst, src0, src1);
+}
+template <typename DT = void>
+void iqot(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
+    math<DT>(mod, MathFunction::iqot, dst, src0, src1);
+}
+template <typename DT = void>
+void irem(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
+    math<DT>(mod, MathFunction::irem, dst, src0, src1);
+}
+template <typename DT = void>
+void irem(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
+    math<DT>(mod, MathFunction::irem, dst, src0, src1);
+}
+template <typename DT = void>
+void log(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
+    math<DT>(mod, MathFunction::log, dst, src0);
+}
+template <typename DT = void>
+void pow(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
+    math<DT>(mod, MathFunction::pow, dst, src0, src1);
+}
+template <typename DT = void>
+void pow(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
+    math<DT>(mod, MathFunction::pow, dst, src0, src1);
+}
+template <typename DT = void>
+void rsqt(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
+    math<DT>(mod, MathFunction::rsqt, dst, src0);
+}
+template <typename DT = void>
+void rsqtm(const InstructionModifier &mod, const ExtendedReg &dst, const ExtendedReg &src0) {
+    math<DT>(mod, MathFunction::rsqtm, dst, src0);
+}
+template <typename DT = void>
+void sin(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
+    math<DT>(mod, MathFunction::sin, dst, src0);
+}
+template <typename DT = void>
+void sqt(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
+    math<DT>(mod, MathFunction::sqt, dst, src0);
+}
+
 // IEEE 754-compliant divide math macro sequence.
 //   Requires GRFs initialized with 0.0 and 1.0, as well as temporary GRFs (4 for single precision, 5 for double precision).
 //   dst, num, denom must be distinct GRFs.
@@ -53,15 +131,15 @@ void fdiv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, R
     if (dt == DataType::invalid)
         dt = dst.getType();
 
-    Label labelEndif, labelDone;
+    Label labelSkip;
 
     switch (dt) {
         case DataType::hf:
-            math<DT>(mod, MathFunction::fdiv, dst, num, denom);
+            fdiv<DT>(mod, dst, num, denom);
             break;
         case DataType::f:
-            math<DT>(mod | eo | flag, MathFunction::invm, dst | mme0, num | nomme, denom | nomme);
-            if_(mod | ~flag, labelEndif);
+            invm<DT>(mod | eo | flag,         dst | mme0,      num | nomme,   denom | nomme);
+            if_(mod | ~flag, labelSkip);
 
             madm<DT>(mod, tmp[0] | mme1,     zero | nomme,     num | nomme,     dst | mme0);
             madm<DT>(mod, tmp[1] | mme2,      one | nomme,  -denom | nomme,     dst | mme0);
@@ -71,13 +149,12 @@ void fdiv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, R
             madm<DT>(mod, tmp[1] | mme6,      num | nomme,  -denom | nomme,  tmp[0] | mme5);
             madm<DT>(mod,    dst | nomme,  tmp[0] | mme5,   tmp[1] | mme6,   tmp[2] | mme3);
 
-            mark(labelEndif);
-            endif(mod, labelDone);
-            mark(labelDone);
+            mark(labelSkip);
+            endif(mod);
             break;
         case DataType::df:
-            math<DT>(mod | eo | flag, MathFunction::invm, dst | mme0, num | nomme, denom | nomme);
-            if_(mod | ~flag, labelEndif);
+            invm<DT>(mod | eo | flag,         dst | mme0,      num | nomme,   denom | nomme);
+            if_(mod | ~flag, labelSkip);
 
             madm<DT>(mod, tmp[0] | mme1,     zero | nomme,     num | nomme,     dst | mme0);
             madm<DT>(mod, tmp[1] | mme2,      one | nomme,  -denom | nomme,     dst | mme0);
@@ -90,9 +167,8 @@ void fdiv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, R
             madm<DT>(mod, tmp[2] | mme1,      num | nomme,  -denom | nomme,  tmp[0] | mme7);
             madm<DT>(mod,    dst | nomme,  tmp[0] | mme7,   tmp[2] | mme1,   tmp[3] | mme0);
 
-            mark(labelEndif);
-            endif(mod, labelDone);
-            mark(labelDone);
+            mark(labelSkip);
+            endif(mod);
             break;
         default:
 #ifdef NGEN_SAFE
@@ -112,15 +188,15 @@ void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
     if (dt == DataType::invalid)
         dt = dst.getType();
 
-    Label labelEndif, labelDone;
+    Label labelSkip;
 
     switch (dt) {
         case DataType::hf:
-            math<DT>(mod, MathFunction::inv, dst, src);
+            inv<DT>(mod, dst, src);
             break;
         case DataType::f:
-            math<DT>(mod | eo | flag, MathFunction::invm, dst | mme0, one | nomme, src | nomme);
-            if_(mod | ~flag, labelEndif);
+            invm<DT>(mod | eo | flag,         dst | mme0,      one | nomme,     src | nomme);
+            if_(mod | ~flag, labelSkip);
 
             madm<DT>(mod, tmp[1] | mme2,      one | nomme,    -src | nomme,     dst | mme0);
             madm<DT>(mod, tmp[2] | mme3,      dst | mme0,   tmp[1] | mme2,      dst | mme0);
@@ -128,13 +204,12 @@ void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             madm<DT>(mod, tmp[1] | mme6,      one | nomme,    -src | nomme,  tmp[0] | mme5);
             madm<DT>(mod,    dst | nomme,  tmp[0] | mme5,   tmp[1] | mme6,   tmp[2] | mme3);
 
-            mark(labelEndif);
-            endif(mod, labelDone);
-            mark(labelDone);
+            mark(labelSkip);
+            endif(mod);
             break;
         case DataType::df:
-            math<DT>(mod | eo | flag, MathFunction::invm, dst | mme0, one | nomme, src | nomme);
-            if_(mod | ~flag, labelEndif);
+            invm<DT>(mod | eo | flag,        dst | mme0,      one | nomme,     src | nomme);
+            if_(mod | ~flag, labelSkip);
 
             madm<DT>(mod, tmp[0] | mme2,     one | nomme,    -src | nomme,     dst | mme0);
             madm<DT>(mod, tmp[1] | mme4,     dst | mme0,   tmp[0] | mme2,      dst | mme0);
@@ -144,9 +219,8 @@ void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             madm<DT>(mod, tmp[0] | mme1,     one | nomme,    -src | nomme,     dst | mme6);
             madm<DT>(mod,    dst | nomme,    dst | mme6,   tmp[0] | mme1,   tmp[1] | mme0);
 
-            mark(labelEndif);
-            endif(mod, labelDone);
-            mark(labelDone);
+            mark(labelSkip);
+            endif(mod);
             break;
         default:
 #ifdef NGEN_SAFE
@@ -168,15 +242,15 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
     if (dt == DataType::invalid)
         dt = dst.getType();
 
-    Label labelEndif, labelDone;
+    Label labelSkip;
 
     switch (dt) {
         case DataType::hf:
-            math<DT>(mod, MathFunction::sqt, dst, src);
+            sqt<DT>(mod, dst, src);
             break;
         case DataType::f:
-            math<DT>(mod | eo | flag, MathFunction::rsqtm, dst | mme0, src | nomme);
-            if_(mod | ~flag, labelEndif);
+            rsqtm<DT>(mod | eo | flag,        dst | mme0,       src | nomme);
+            if_(mod | ~flag, labelSkip);
 
             madm<DT>(mod, tmp[0] | mme1,     zero | nomme,  oneHalf | nomme,     dst | mme0);
             madm<DT>(mod, tmp[1] | mme2,     zero | nomme,      src | nomme,     dst | mme0);
@@ -186,13 +260,12 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             madm<DT>(mod, tmp[2] | mme6,      src | nomme,     -dst | mme5,      dst | mme5);
             madm<DT>(mod,    dst | nomme,     dst | mme5,    tmp[0] | mme4,   tmp[2] | mme6);
 
-            mark(labelEndif);
-            endif(mod, labelDone);
-            mark(labelDone);
+            mark(labelSkip);
+            endif(mod);
             break;
         case DataType::df:
-            math<DT>(mod | eo | flag, MathFunction::rsqtm, dst | mme0, src | nomme);
-            if_(mod | ~flag, labelEndif);
+            rsqtm<DT>(mod | eo | flag,        dst | mme0,       src | nomme);
+            if_(mod | ~flag, labelSkip);
 
             madm<DT>(mod, tmp[0] | mme1,     zero | mme0,   oneHalf | nomme,     dst | mme0);
             madm<DT>(mod, tmp[1] | mme2,     zero | mme0,       src | nomme,     dst | mme0);
@@ -206,9 +279,8 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             madm<DT>(mod, tmp[0] | mme1,      src | nomme,     -dst | mme6,      dst | mme6);
             madm<DT>(mod,    dst | nomme,     dst | mme6,    tmp[0] | mme1,   tmp[3] | mme5);
 
-            mark(labelEndif);
-            endif(mod, labelDone);
-            mark(labelDone);
+            mark(labelSkip);
+            endif(mod);
             break;
         default:
 #ifdef NGEN_SAFE

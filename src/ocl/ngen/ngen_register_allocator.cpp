@@ -37,8 +37,9 @@ int Bundle::first_reg(HW hw) const
         return (bundle0 << 1) | bank0;
     case HW::Gen12HP:
         return (bundle0 << 2) | (bank0 << 1);
+    default:
+        return 0;
     }
-    return 0;
 }
 
 int Bundle::group_size(HW hw) const

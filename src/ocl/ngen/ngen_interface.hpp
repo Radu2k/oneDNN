@@ -161,11 +161,13 @@ GRF InterfaceHandler::getLocalID(int dim) const
 class NEOInterfaceHandler : public InterfaceHandler
 {
 public:
-    inline void requireType(DataType type);
-    template <typename T> void requireType()    { requireType(getDataType<T>()); }
     void requireBarrier()                       { needBarrier = true; }
+    void requireDPAS()                          { needDPAS = true; }
     void requireLocalSize()                     { needLocalSize = true; }
     void requireScratch(size_t bytes = 1)       { scratchSize = bytes; }
+    void requireSLM(size_t bytes)               { slmSize = bytes; }
+    inline void requireType(DataType type);
+    template <typename T> void requireType()    { requireType(getDataType<T>()); }
 
     inline void finalize();
 
@@ -180,10 +182,12 @@ public:
 protected:
     bool finalized = false;
     bool needBarrier = false;
+    bool needDPAS = false;
     bool needLocalSize = false;
     bool needHalf = false;
     bool needDouble = false;
     size_t scratchSize = 0;
+    size_t slmSize = 0;
 };
 
 void NEOInterfaceHandler::requireType(DataType type)
@@ -206,6 +210,9 @@ void NEOInterfaceHandler::generateDummyCL(std::ostream &stream) const
 #ifdef NGEN_SAFE
     if (!finalized) throw interface_not_finalized();
 #endif
+    const char *dpasDummy = "    int __builtin_IB_sub_group_idpas_s8_s8_8_1(int, int, int8) __attribute__((const));\n"
+                            "    int z = __builtin_IB_sub_group_idpas_s8_s8_8_1(0, ____[0], 1);\n"
+                            "    for (int i = 0; i < z; i++) (void) ____[0];\n";
 
     if (needHalf)   stream << "#pragma OPENCL EXTENSION cl_khr_fp16 : enable\n";
     if (needDouble) stream << "#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n";
@@ -235,7 +242,9 @@ void NEOInterfaceHandler::generateDummyCL(std::ostream &stream) const
     if (needLocalID)        stream << "    (void) ____[get_local_id(0)];\n";
     if (needLocalSize)      stream << "    (void) ____[get_enqueued_local_size(0)];\n";
     if (needBarrier)        stream << "    barrier(CLK_GLOBAL_MEM_FENCE);\n";
+    if (needDPAS)           stream << dpasDummy;
     if (scratchSize > 0)    stream << "    volatile char scratch[" << scratchSize << "] = {0};\n";
+    if (slmSize > 0)        stream << "    volatile local char slm[" << slmSize << "]; slm[0]++;\n";
 
     stream << "}\n";
 }

@@ -44,20 +44,10 @@ public:
     invalid_checksum() : std::runtime_error("Incompatible OpenCL runtime: invalid checksum.") {}
 };
 
-static inline void replaceKernel(std::vector<uint8_t> &binary, const std::vector<uint8_t> &kernel, const std::vector<uint8_t> &patches)
+inline void findDeviceBinary(const std::vector<uint8_t> &binary, const SElf64SectionHeader **sheaderOut,
+                             const SProgramBinaryHeader **pheaderOut, int *sectionsAfterBinaryOut)
 {
-    using std::memmove;
-
     auto elf_binary = binary.data();
-    auto elf_size = binary.size();
-    auto kernel_size = kernel.size();
-    auto patches_size = patches.size();
-
-    // Pad kernel with 0s.
-    size_t kernel_padded_size;
-
-    kernel_padded_size = kernel.size() + (8 * 8);
-    kernel_padded_size = (kernel_padded_size + 0xFF) & ~0xFF;
 
     // Read ELF
     auto *eheader = (const SElf64Header *)elf_binary;
@@ -87,6 +77,33 @@ static inline void replaceKernel(std::vector<uint8_t> &binary, const std::vector
     // Check for proper device binary header, with one kernel and no program patches.
     if (pheader->Magic != MAGIC_CL || pheader->NumberOfKernels != 1 || pheader->PatchListSize != 0)
         throw bad_binary_section();
+
+    if (sheaderOut != nullptr) *sheaderOut = sheader;
+    if (pheaderOut != nullptr) *pheaderOut = pheader;
+    if (sectionsAfterBinaryOut != nullptr) *sectionsAfterBinaryOut = sections_after_binary;
+}
+
+inline void replaceKernel(std::vector<uint8_t> &binary, const std::vector<uint8_t> &kernel, const std::vector<uint8_t> &patches)
+{
+    using std::memmove;
+
+    auto elf_binary = binary.data();
+    auto elf_size = binary.size();
+    auto kernel_size = kernel.size();
+    auto patches_size = patches.size();
+
+    // Pad kernel with 0s.
+    size_t kernel_padded_size;
+
+    kernel_padded_size = kernel.size() + (8 * 8);
+    kernel_padded_size = (kernel_padded_size + 0xFF) & ~0xFF;
+
+    // Read and validate ELF; find device binary section.
+    int sections_after_binary;
+    const SElf64SectionHeader *sheader;
+    const SProgramBinaryHeader *pheader;
+
+    findDeviceBinary(binary, &sheader, &pheader, &sections_after_binary);
 
     // Kernel binary header immediately follows.
     auto kheader = (const SKernelBinaryHeader *)(pheader + 1);
@@ -143,6 +160,24 @@ static inline void replaceKernel(std::vector<uint8_t> &binary, const std::vector
 
     // Update binary.
     std::swap(new_binary, binary);
+}
+
+inline HW getBinaryArch(const std::vector<uint8_t> &binary)
+{
+    const SProgramBinaryHeader *pheader = nullptr;
+
+    findDeviceBinary(binary, nullptr, &pheader, nullptr);
+
+    switch (pheader->Device) {
+        case OpenCLProgramDeviceType::Gen9:     return HW::Gen9;
+        case OpenCLProgramDeviceType::Gen10:    return HW::Gen10;
+        case OpenCLProgramDeviceType::Gen10LP:  return HW::Gen10;
+        case OpenCLProgramDeviceType::Gen11:    return HW::Gen11;
+        case OpenCLProgramDeviceType::Gen11LP:  return HW::Gen11;
+        case OpenCLProgramDeviceType::Gen12:    return HW::Gen12HP;
+        case OpenCLProgramDeviceType::Gen12LP:  return HW::Gen12LP;
+        default:                                return HW::Unknown;
+    }
 }
 
 } /* namespace npack */

@@ -20,7 +20,8 @@
 #include <cstdint>
 
 /*********************************************************************/
-/* NEO binary format definitions, adapted from                       */
+/* NEO binary format definitions, adapted from IGC:                  */
+/*      inc/common/igfxfmid.h                                        */
 /*      IGC/AdaptorOCL/ocl_igc_shared/executable_format/patch_list.h */
 /*********************************************************************/
 
@@ -30,11 +31,21 @@ namespace npack {
 
 static constexpr uint32_t MAGIC_CL = 0x494E5443;
 
+enum class OpenCLProgramDeviceType : uint32_t {
+    Gen9 = 12,
+    Gen10 = 13,
+    Gen10LP = 14,
+    Gen11 = 15,
+    Gen11LP = 16,
+    Gen12 = 17,
+    Gen12LP = 18
+};
+
 typedef struct
 {
     uint32_t Magic; // = MAGIC_CL ("INTC")
     uint32_t Version;
-    uint32_t Device;
+    OpenCLProgramDeviceType Device;
     uint32_t GPUPointerSizeInBytes;
     uint32_t NumberOfKernels;
     uint32_t SteppingId;

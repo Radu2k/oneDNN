@@ -176,8 +176,13 @@ protected:
     std::ostream *outStream;
     std::vector<InstructionStream*> streamStack;
 
+private:
+#include "ngen_compiler_fix.hpp"
+
 public:
-    AsmCodeGenerator(HW hardware_, std::ostream &outStream_) : hardware(hardware_), isGen12(hardware_ >= HW::Gen12LP), labelManager{}, outStream(&outStream_), defaultModifier{} {
+    AsmCodeGenerator(HW hardware_, std::ostream &outStream_) : hardware(hardware_), isGen12(hardware_ >= HW::Gen12LP),
+            labelManager{}, outStream(&outStream_), defaultModifier{}, sync{this} {
+        _workaround_();
         streamStack.push_back(new InstructionStream(outStream_));
     }
 
@@ -405,15 +410,15 @@ protected:
     }
     template <typename DT = void>
     void cmp(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(Opcode::cmp, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isGen12 ? Opcode::cmp_gen12 : Opcode::cmp, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void cmp(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(Opcode::cmp, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isGen12 ? Opcode::cmp_gen12 : Opcode::cmp, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void cmpn(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(Opcode::cmpn, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isGen12 ? Opcode::cmpn_gen12 : Opcode::cmpn, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void csel(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
@@ -488,6 +493,11 @@ protected:
         (void) jip.getID(labelManager);
         opX(Opcode::endif, mod, NoOperand(), jip);
     }
+    void endif(const InstructionModifier &mod) {
+        Label next;
+        endif(mod, next);
+        mark(next);
+    }
     template <typename DT = void>
     void fbh(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
         opX(Opcode::fbh, getDataType<DT>(), mod, dst, src0);
@@ -540,8 +550,12 @@ protected:
         opX(Opcode::illegal);
     }
     void join(const InstructionModifier &mod, Label &jip) {
-        (void) jip.getID(labelManager);
         opX(Opcode::join, mod, jip);
+    }
+    void join(const InstructionModifier &mod) {
+        Label next;
+        join(mod, next);
+        mark(next);
     }
     void jmpi(const InstructionModifier &mod, Label &jip) {
         (void) jip.getID(labelManager);
@@ -910,24 +924,6 @@ protected:
     void subb(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
         opX(Opcode::subb, getDataType<DT>(), mod | AccWrEn, dst, src0, src1);
     }
-    void sync(SyncFunction fc, const InstructionModifier &mod = InstructionModifier()) {
-        opSync(Opcode::sync, fc, mod, null);
-    }
-    void sync(SyncFunction fc, const RegData &src0) {
-        opSync(Opcode::sync, fc, InstructionModifier(), src0);
-    }
-    void sync(SyncFunction fc, const InstructionModifier &mod, const RegData &src0) {
-        opSync(Opcode::sync, fc, mod, src0);
-    }
-    void sync(SyncFunction fc, int src0) {
-        opSync(Opcode::sync, fc, InstructionModifier(), Immediate(src0));
-    }
-    void sync(SyncFunction fc, const Immediate &src0) {
-        opSync(Opcode::sync, fc, InstructionModifier(), src0);
-    }
-    void sync(SyncFunction fc, const InstructionModifier &mod, const Immediate &src0) {
-        opSync(Opcode::sync, fc, mod, src0);
-    }
     void wait(const InstructionModifier &mod, const RegData &nreg) {
         opX(Opcode::wait, mod, NoOperand(), nreg);
     }
@@ -953,6 +949,65 @@ protected:
         xor_<DT>(mod, dst, src0, src1);
     }
 #endif
+
+private:
+    struct Sync {
+        AsmCodeGenerator &parent;
+
+        Sync(AsmCodeGenerator *parent_) : parent(*parent_) {}
+
+        void operator()(SyncFunction fc, const InstructionModifier &mod = InstructionModifier()) {
+            parent.opSync(Opcode::sync, fc, mod, null);
+        }
+        void operator()(SyncFunction fc, const RegData &src0) {
+            this->operator()(fc, InstructionModifier(), src0);
+        }
+        void operator()(SyncFunction fc, const InstructionModifier &mod, const RegData &src0) {
+            parent.opSync(Opcode::sync, fc, mod, src0);
+        }
+        void operator()(SyncFunction fc, int src0) {
+            this->operator()(fc, InstructionModifier(), src0);
+        }
+        void operator()(SyncFunction fc, const InstructionModifier &mod, int src0) {
+            parent.opSync(Opcode::sync, fc, mod, Immediate(src0));
+        }
+        void allrd(const RegData &src0) {
+            allrd(InstructionModifier(), src0);
+        }
+        void allrd(const InstructionModifier &mod, const RegData &src0) {
+            this->operator()(SyncFunction::allrd, mod, src0);
+        }
+        void allrd(int src0) {
+            allrd(InstructionModifier(), src0);
+        }
+        void allrd(const InstructionModifier &mod, int src0) {
+            this->operator()(SyncFunction::allrd, mod, src0);
+        }
+        void allwr(const RegData &src0) {
+            allwr(InstructionModifier(), src0);
+        }
+        void allwr(const InstructionModifier &mod, const RegData &src0) {
+            this->operator()(SyncFunction::allwr, mod, src0);
+        }
+        void allwr(int src0) {
+            allwr(InstructionModifier(), src0);
+        }
+        void allwr(const InstructionModifier &mod, int src0) {
+            this->operator()(SyncFunction::allwr, mod, src0);
+        }
+        void bar(const InstructionModifier &mod = InstructionModifier()) {
+            this->operator()(SyncFunction::bar, mod);
+        }
+        void host(const InstructionModifier &mod = InstructionModifier()) {
+            this->operator()(SyncFunction::host, mod);
+        }
+        void nop(const InstructionModifier &mod = InstructionModifier()) {
+            this->operator()(SyncFunction::nop, mod);
+        }
+    };
+public:
+    Sync sync;
+
     inline void mark(Label &label);
 
 #include "ngen_pseudo.hpp"
@@ -1069,7 +1124,7 @@ inline void AsmCodeGenerator::outputMods(const InstructionModifier &mod, Opcode 
             if (!isGen12 && mod.getThreadCtrl() == ThreadCtrl::Switch) printPostMod("Switch");
             if (mod.isAccWrEn())    printPostMod("AccWrEn");
             if (mod.isCompact())    printPostMod("Compact");
-            if (mod.isBreakpoint()) printPostMod("Debug");
+            if (mod.isBreakpoint()) printPostMod("Breakpoint");
             if (mod.isEOT())        printPostMod("EOT");
 
             if (havePostMod) *outStream << '}';

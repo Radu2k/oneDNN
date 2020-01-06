@@ -311,12 +311,18 @@ static inline void encodeCommon12(Instruction12 &i, Opcode opcode, const Instruc
 
 static inline unsigned encodeTernaryVS01(const RegData &rd)
 {
-    unsigned vs = rd.getVS();
+    switch (rd.getVS()) {
+        case 0: return 0;
+        case 1: return 1;
+        case 4: return 2;
+        case 8: return 3;
+        default:
 #ifdef NGEN_SAFE
-    if (!(vs < 2 || vs == 4 || vs == 8))
-        throw invalid_region_exception();
+            if (rd.getHS() == 0)
+                throw invalid_region_exception();
 #endif
-    return (vs > 0) + (vs > 1) + (vs > 4);
+            return 3;
+    }
 }
 
 static inline unsigned encodeTernaryVS01(const ExtendedReg &reg)

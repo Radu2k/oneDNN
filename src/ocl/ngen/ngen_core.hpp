@@ -195,7 +195,7 @@ public:
 
 // Gen hardware generations.
 enum class HW {
-    Gen9, Gen10, Gen11, Gen12LP, Gen12HP
+    Unknown, Gen9, Gen10, Gen11, Gen12LP, Gen12HP
 };
 
 // Data types. Bits[0:3] are the ID, bits[4:7] hold the width, in bytes.
@@ -364,7 +364,7 @@ static inline std::ostream &operator<<(std::ostream &str, ARFType type)
 enum class PrintDetail {base = 0, sub_no_type = 1, sub = 2, hs = 3, vs_hs = 4, full = 5};
 #endif
 
-// Invalid singleton class. Can be assigned to ngen objects to invalidate them.
+// Invalid singleton class. Can be assigned to nGEN objects to invalidate them.
 static constexpr class Invalid {} invalid{};
 
 class LabelManager {
@@ -496,7 +496,7 @@ public:
     void invalidate()                     { invalid = true; }
     RegData &operator=(const Invalid &i)  { this->invalidate(); return *this; }
 
-    inline void fixup(int execSize, DataType defaultType, bool isDest);                 // Adjust automatically-computed strides given ESize.
+    inline void fixup(int execSize, DataType defaultType, bool isDest);                    // Adjust automatically-computed strides given ESize.
 
     constexpr RegData operator+() const { return *this; }
     constexpr14 RegData operator-() const {
@@ -1463,14 +1463,16 @@ public:
     void setBranchCtrl(bool branchCtrl)               { parts.accWrCtrl = branchCtrl; }
 
     constexpr InstructionModifier() : all(0) {}
+
+    // Hardcoded shift counts are a workaround for MSVC v140 bug.
     constexpr /* implicit */ InstructionModifier(const PredCtrl &predCtrl_)
-        : parts{0,0,0,0,0,0,static_cast<unsigned>(predCtrl_),0,0,0,0,0,0,0,0,0,0,0,0,0,0} {}
+        : all{static_cast<uint64_t>(predCtrl_) << 16} {}
 
     constexpr /* implicit */ InstructionModifier(const ThreadCtrl &threadCtrl_)
-        : parts{0,0,0,0,0,static_cast<unsigned>(threadCtrl_),0,0,0,0,0,0,0,0,0,0,0,0,0,0,0} {}
+        : all{static_cast<uint64_t>(threadCtrl_) << 14} {}
 
     constexpr /* implicit */ InstructionModifier(const ConditionModifier &cmod_)
-        : parts{0,0,0,0,0,0,0,0,0,static_cast<unsigned>(cmod_),0,0,0,0,0,0,0,0,0,0,0} {}
+        : all{static_cast<uint64_t>(cmod_) << 24} {}
 
     constexpr14 /* implicit */ InstructionModifier(const int &execSize_) : InstructionModifier() {
         parts.execSize = execSize_;
@@ -1485,7 +1487,9 @@ public:
 protected:
     constexpr InstructionModifier(bool accessMode_, bool noDDClr_, bool noDDChk_, unsigned chanOff_, bool accWrCtrl_,
                                   bool debugCtrl_, bool saturate_, bool maskCtrl_, bool fusionCtrl_, bool eot_)
-        : parts{0,accessMode_,noDDClr_,noDDChk_,chanOff_>>2,0,0,0,0,0,accWrCtrl_,0,debugCtrl_,saturate_,0,0,maskCtrl_,0,fusionCtrl_,eot_,0} {}
+        : all{(uint64_t(accessMode_) << 8) | (uint64_t(noDDClr_) << 9) | (uint64_t(noDDChk_) << 10) | (uint64_t(chanOff_ >> 2) << 11)
+            | (uint64_t(accWrCtrl_) << 28) | (uint64_t(debugCtrl_) << 30) | (uint64_t(saturate_) << 31)
+            | (uint64_t(maskCtrl_) << 34) | (uint64_t(fusionCtrl_) << 54) | (uint64_t(eot_) << 55)} {}
 
 public:
     static constexpr InstructionModifier createAccessMode(int accessMode_) {
@@ -1591,10 +1595,10 @@ public:
     static const bool emptyOp = false;
 #endif
 
-    constexpr14 DataType getType()           const { return type; }
-    explicit constexpr14 operator uint64_t() const { return payload; }
-    constexpr14 int getMods()                const { return 0; }
-    constexpr14 bool isARF()                 const { return false; }
+    constexpr14 DataType getType()         const { return type; }
+    explicit constexpr operator uint64_t() const { return payload; }
+    constexpr int getMods()                const { return 0; }
+    constexpr bool isARF()                 const { return false; }
 
     Immediate &setType(DataType type_)           { type = type_; return *this; }
 
@@ -1760,7 +1764,7 @@ union MessageDescriptor {
         unsigned legacySIMD : 1;
         unsigned elements : 2;
         unsigned : 1;
-        unsigned : 1;               /* Status return (DG2/ATS/PVC), invalidate L3 (old?) */
+        unsigned : 1;                /* Status return (DG2/ATS/PVC), invalidate L3 (old?) */
         unsigned messageType : 5;
         unsigned header : 1;
         unsigned responseLen : 5;
@@ -1810,9 +1814,9 @@ union ExtendedMessageDescriptor {
         unsigned sfid : 4;
         unsigned : 1;
         unsigned eot : 1;
-        unsigned extMessageLen : 5; /* # of GRFs sent in src1: valid range 0-15 (pre-Gen12) */
+        unsigned extMessageLen : 5;    /* # of GRFs sent in src1: valid range 0-15 (pre-Gen12) */
         unsigned : 1;
-        unsigned : 4;               /* Part of exFuncCtrl for non-immediate sends */
+        unsigned : 4;                  /* Part of exFuncCtrl for non-immediate sends */
         unsigned exFuncCtrl : 16;
     } parts;
 
@@ -2051,7 +2055,7 @@ public:
         base.checkModel(ModelA32 | ModelA64 | ModelBTS | ModelSLM);
         desc.all = 0;
         desc.parts.header = false;
-        desc.parts.messageLen = dataGRFCount << a64;
+        desc.parts.messageLen = dataGRFCount << int(a64);
         desc.parts.responseLen = dataGRFCount;
 
         if (a64) {
@@ -2078,7 +2082,7 @@ public:
     {
         bool a64 = (base.getModel() == ModelA64);
         int simd16 = mod.getExecSize() >> 4;
-        int addrGRFCount = (1 + simd16) << a64;
+        int addrGRFCount = (1 + simd16) << int(a64);
         int dataGRFCount = 1 + simd16;
 
 #ifdef NGEN_SAFE
@@ -2112,9 +2116,9 @@ public:
 
     template <Access access> void getDescriptors(const InstructionModifier &mod, AddressBase base, MessageDescriptor &desc, ExtendedMessageDescriptor &exdesc) const
     {
-        int a64 = (base.getModel() == ModelA64);
+        bool a64 = (base.getModel() == ModelA64);
         int simd16 = mod.getExecSize() >> 4;
-        int addrGRFCount = (1 + simd16) << a64;
+        int addrGRFCount = (1 + simd16) << int(a64);
         int dataGRFCount = count * (1 + simd16);
 
         base.checkModel(ModelA32 | ModelA64 | ModelBTS | ModelCC);
@@ -2157,7 +2161,7 @@ public:
     {
         bool a64 = (base.getModel() == ModelA64);
         int simd16 = mod.getExecSize() >> 4;
-        int addrGRFCount = (1 + simd16) << a64;
+        int addrGRFCount = (1 + simd16) << int(a64);
         int dataGRFCount = count * 2 * (1 + simd16);
 
         base.checkModel(ModelA32 | ModelA64 | ModelBTS | ModelSLM);

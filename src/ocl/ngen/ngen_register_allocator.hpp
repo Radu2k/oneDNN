@@ -37,15 +37,15 @@ struct Bundle {
     Bundle(int8_t bank_id_, int8_t bundle_id_) : bundle_id(bundle_id_), bank_id(bank_id_) {}
 
     // Number of bundles in each bank (per thread).
-    static constexpr int bundle_count(ngen::HW hw)  { return (hw == ngen::HW::Gen12HP) ? 16 : (hw == ngen::HW::Gen12LP) ? 8 : 2; }
+    static constexpr int bundle_count(ngen::HW hw)    { return (hw == ngen::HW::Gen12HP) ? 16 : (hw == ngen::HW::Gen12LP) ? 8 : 2; }
     // Number of banks.
-    static constexpr int bank_count(ngen::HW hw)    { return 2; }
+    static constexpr int bank_count(ngen::HW hw)      { return 2; }
 
     static Bundle locate(ngen::HW hw, ngen::RegData reg);
 
-    int first_reg(ngen::HW hw) const;                   // The first register in the bundle.
-    int group_size(ngen::HW hw) const;                  // Number of registers in each contiguous group of the bundle.
-    int stride(ngen::HW hw) const;                      // Stride between register groups of the bundle.
+    int first_reg(ngen::HW hw) const;                  // The first register in the bundle.
+    int group_size(ngen::HW hw) const;                 // Number of registers in each contiguous group of the bundle.
+    int stride(ngen::HW hw) const;                     // Stride between register groups of the bundle.
 
     int64_t reg_mask(ngen::HW hw, int offset) const;   // Get register mask for this bundle, for registers [64*offset, 64*(offset+1)).
 
