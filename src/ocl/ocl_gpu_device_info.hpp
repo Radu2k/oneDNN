@@ -81,10 +81,6 @@ public:
     ocl_gpu_device_info_t(cl_device_id device) : device_(device) {}
 
     virtual status_t init() override {
-        CHECK(init_arch());
-        CHECK(init_extensions());
-        CHECK(init_attributes());
-
         // Device name
         size_t size_name {0};
         cl_int err = clGetDeviceInfo(
@@ -118,6 +114,10 @@ public:
             runtime_version.build = 0;
         }
         set_runtime_version(runtime_version);
+
+        CHECK(init_arch());
+        CHECK(init_extensions());
+        CHECK(init_attributes());
 
         return status::success;
     }
