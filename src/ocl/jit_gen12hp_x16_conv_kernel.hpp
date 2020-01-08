@@ -71,12 +71,10 @@ struct jit_gen12hp_x16_conv_fwd_kernel {
         dst_tag = utils::pick(jcp.ndims - 3, format_tag::NCw32n16c,
                 format_tag::NChw32n16c, format_tag::NCdhw32n16c);
         wei_tag = jcp.with_groups
-                ? utils::pick(jcp.ndims - 3, format_tag::gOIw2o2o8i8o2i,
-                        format_tag::gOIhw2o2o8i8o2i,
-                        format_tag::gOIdhw2o2o8i8o2i)
-                : utils::pick(jcp.ndims - 3, format_tag::OIw2o2o8i8o2i,
-                        format_tag::OIhw2o2o8i8o2i,
-                        format_tag::OIdhw2o2o8i8o2i);
+                ? utils::pick(jcp.ndims - 3, format_tag::gOIw4o8i8o2i,
+                        format_tag::gOIhw4o8i8o2i, format_tag::gOIdhw4o8i8o2i)
+                : utils::pick(jcp.ndims - 3, format_tag::OIw4o8i8o2i,
+                        format_tag::OIhw4o8i8o2i, format_tag::OIdhw4o8i8o2i);
         jcp.src_tag = src_tag;
         jcp.wei_tag = wei_tag;
         jcp.dst_tag = dst_tag;

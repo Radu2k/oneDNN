@@ -54,13 +54,6 @@ struct jit_memory_desc_info_t {
 
         jit_md_info.nlevels = 2;
 
-        // XXX: use 3 levels when required
-        if (mdw.matches_one_of_tag(OIdhw2o2o8i8o2i, OIhw2o2o8i8o2i,
-                    OIw2o2o8i8o2i, gOIdhw2o2o8i8o2i, gOIhw2o2o8i8o2i,
-                    gOIw2o2o8i8o2i)) {
-            jit_md_info.nlevels = 3;
-        }
-
         jit_md_info.ndims = mdw.ndims();
         jit_md_info.data_type = mdw.data_type();
         jit_md_info.offset0 = mdw.offset0();
