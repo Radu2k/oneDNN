@@ -33,7 +33,9 @@
 #define MB_OFFSET IC_BLOCK
 #define PIXEL_WIDTH_OFFSET (MB_OFFSET * MB_BLOCK)
 #define PIXEL_HEIGHT_OFFSET (PIXEL_WIDTH_OFFSET * IW)
-#define CHANNEL_BLOCK_OFFSET (PIXEL_HEIGHT_OFFSET * IH) // For NChw
+#define CHANNEL_BLOCK_OFFSET (PIXEL_HEIGHT_OFFSET * IH)
+#define DST_PIXEL_HEIGHT_OFFSET (PIXEL_WIDTH_OFFSET * OW)
+#define DST_CHANNEL_BLOCK_OFFSET (DST_PIXEL_HEIGHT_OFFSET * OH)
 
 // Weights offsets
 #define WEIGHTS_WIDTH_OFFSET (4 * 8 * 8 * 4)
@@ -60,20 +62,20 @@ gen12lp_1x1_conv_fwd_u8s8s32u8_kernel(const __global uchar *src,
     const uint sp = get_global_id(1);
     const uint ow = sp % OW;
     const uint oh = sp / OW;
-    const uint iw = ow;
-    const uint ih = oh;
+    const uint iw = SW * ow;
+    const uint ih = SH * oh;
 
     // Source (At ic = 0)
     src += (mb_group_id % 2) * MB_BLOCK / 2 * MB_OFFSET; // MB block offset
     src += (mb_group_id / 2) * CHANNEL_BLOCK_OFFSET * IC_NCHUNK; // MB offset
-    src += oh * PIXEL_HEIGHT_OFFSET; // height offset
-    src += ow * PIXEL_WIDTH_OFFSET; // width offset
+    src += ih * PIXEL_HEIGHT_OFFSET; // height offset
+    src += iw * PIXEL_WIDTH_OFFSET; // width offset
 
     // Destination
     dst += (mb_group_id % 2) * MB_BLOCK / 2 * MB_OFFSET; // MB block offset
-    dst += (mb_group_id / 2) * CHANNEL_BLOCK_OFFSET * OC_NCHUNK; // MB offset
-    dst += CHANNEL_BLOCK_OFFSET * oc_group_id; //OC offset
-    dst += oh * PIXEL_HEIGHT_OFFSET;
+    dst += (mb_group_id / 2) * DST_CHANNEL_BLOCK_OFFSET * OC_NCHUNK; // MB offset
+    dst += DST_CHANNEL_BLOCK_OFFSET * oc_group_id; //OC offset
+    dst += oh * DST_PIXEL_HEIGHT_OFFSET;
     dst += ow * PIXEL_WIDTH_OFFSET;
 
     // Weights

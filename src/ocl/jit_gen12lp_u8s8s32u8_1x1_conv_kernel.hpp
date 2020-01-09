@@ -47,8 +47,7 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
         status_t status = status::success;
 
         if (jcp.is_depthwise != false || (jcp.with_groups && jcp.ngroups > 1)
-                || jcp.kh != 1 || jcp.kw != 1 || jcp.stride_h != 1
-                || jcp.stride_w != 1 || jcp.stride_d != 1)
+                || jcp.kh != 1 || jcp.kw != 1)
             return status::unimplemented;
 
         if (jcp.oc % 32 != 0 || jcp.ic % 32 != 0) return status::unimplemented;
@@ -98,6 +97,8 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
         kernel_ctx.define_int("OW", jcp.ow);
         kernel_ctx.define_int("KH", jcp.kh);
         kernel_ctx.define_int("KW", jcp.kw);
+        kernel_ctx.define_int("SH", jcp.stride_h);
+        kernel_ctx.define_int("SW", jcp.stride_w);
 
         kernel_ctx.define_int("MB_BLOCK", jcp.mb_block);
         kernel_ctx.define_int("OC_BLOCK", jcp.oc_block);
