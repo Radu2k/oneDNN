@@ -71,7 +71,7 @@ struct jit_gen12lp_x8s8s32x_conv_fwd_kernel {
             int ow_group = 1;
             int ow_nchunk;
 
-            if (jcp.mb == 8 || jcp.mb == 16 || jcp.mb % 32 == 0) {
+            if (jcp.mb == 8 || jcp.mb % 16 == 0) {
                 jcp.ver = ver_mb_block;
                 jcp.mb_block = 32;
             } else {
@@ -89,9 +89,10 @@ struct jit_gen12lp_x8s8s32x_conv_fwd_kernel {
             int max_ow_group = max_subgroups / oc_group;
             switch (jcp.ver) {
                 case ver_mb_block:
+                    oc_group = 1;
                     jcp.ic_block = 32;
                     jcp.ow_block = 1;
-                    ow_group = 8;
+                    ow_group = 1;
                     break;
                 case ver_ow_block:
                     jcp.ic_block = 32;
