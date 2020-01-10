@@ -52,20 +52,22 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
 
         if (jcp.oc % 32 != 0 || jcp.ic % 32 != 0) return status::unimplemented;
 
+        if (!(jcp.mb == 8 || jcp.mb % 16 == 0)) return status::unimplemented;
         jcp.src_data_type = src_mdw.data_type();
         jcp.dst_data_type = dst_mdw.data_type();
 
         jcp.mb_block = 32;
         jcp.oc_block = 32;
         jcp.ic_block = 32;
+        int ow_group = (jcp.ow % 8) ? 1 : 8;
 
         jcp.sub_group_size = 8;
         jcp.lws_d[0] = jcp.sub_group_size;
-        jcp.lws_d[1] = 1;
+        jcp.lws_d[1] = ow_group;
         jcp.lws_d[2] = 1;
 
         jcp.gws_d[0] = jcp.oc / jcp.oc_block * jcp.sub_group_size;
-        jcp.gws_d[1] = jcp.ow * jcp.oh;
+        jcp.gws_d[1] = utils::rnd_up(jcp.ow, jcp.lws_d[1]) * jcp.oh;
         jcp.gws_d[2] = utils::div_up(jcp.mb, jcp.mb_block) * 2;
 
         jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
@@ -100,6 +102,8 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
         kernel_ctx.define_int("SH", jcp.stride_h);
         kernel_ctx.define_int("SW", jcp.stride_w);
 
+        kernel_ctx.define_int("OW_PADDED", utils::rnd_up(jcp.ow, jcp.lws_d[1]));
+
         kernel_ctx.define_int("MB_BLOCK", jcp.mb_block);
         kernel_ctx.define_int("OC_BLOCK", jcp.oc_block);
         kernel_ctx.define_int("IC_BLOCK", jcp.ic_block);
@@ -121,6 +125,8 @@ struct jit_gen12lp_u8s8s32u8_1x1_conv_fwd_kernel {
 
         kernel_ctx.define_int("OC_NCHUNK", jcp.oc / jcp.oc_block);
         kernel_ctx.define_int("IC_NCHUNK", jcp.ic / jcp.ic_block);
+
+        kernel_ctx.define_int("INT8_WEI_SLM", jcp.ow % 8 == 0);
 
         kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
