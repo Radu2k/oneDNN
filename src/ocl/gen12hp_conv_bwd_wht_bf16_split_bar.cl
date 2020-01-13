@@ -17,16 +17,17 @@
 #include "ocl/ocl_math_utils.h"
 #include "ocl/ocl_types.h"
 
+void __builtin_IB_thread_group_barrier_signal(void) __attribute__((convergent));
+void __builtin_IB_thread_group_barrier_wait(void) __attribute__((convergent));
+
 #define USHORT_PER_READ (16 * SUB_GROUP_SIZE)
 #define INT_PER_READ (USHORT_PER_READ / 2)
-
-#define WORKGROUP_SIZE (LWS_0 / SUB_GROUP_SIZE)
 
 #define MAX_SGID_IC (MB_BLK_WORKGROUP * IC_BLK_WORKGROUP)
 #define MAX_SGID_OC (MB_BLK_WORKGROUP * OC_BLK_WORKGROUP)
 #define MAX_SGID_COMPUTE \
-    ((OC_BLK_WORKGROUP / OC_BLK_SUBGROUP) \
-            * (IC_BLK_WORKGROUP / IC_BLK_SUBGROUP))
+    ((IC_BLK_WORKGROUP / IC_BLK_SUBGROUP) \
+            * (OC_BLK_WORKGROUP / OC_BLK_SUBGROUP))
 
 // Using hard-code strides instead of SRC_OFF/DST_OFF/WHT_OFF
 // because compiler generates ugly code for SRC_OFF
@@ -37,7 +38,6 @@
 #define SRC_C_STRIDE (ID * SRC_D_STRIDE)
 #define SRC_MB_STRIDE (G * IC / IC_BLOCK * SRC_C_STRIDE)
 
-// DST fmt is NChw32n16c
 #define DST_W_STRIDE (2 * MB_BLOCK * OC_BLOCK)
 #define DST_H_STRIDE (OW * DST_W_STRIDE)
 #define DST_D_STRIDE (OH * DST_H_STRIDE)
@@ -45,7 +45,6 @@
 #define DST_MB_STRIDE (G * OC / OC_BLOCK * DST_C_STRIDE)
 
 #if USE_DPASW == 1
-//NOTE: Dpasw can only be used when IC_BLK_WORKGROUP is multiple of 2
 #define GEMM_IC_blk(o, i) \
     do { \
         ACC[o][2 * i] \
@@ -64,8 +63,6 @@
 #endif
 
 #if USE_DPASW == 1
-
-#if OC_BLK_SUBGROUP == 2
 #define READ_DST() \
     do { \
         D[0] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
@@ -76,18 +73,7 @@
         D[3] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + 3 * INT_PER_READ]); \
     } while (0)
-#else // OC_BLK_SUBGROUP == 1
-#define READ_DST() \
-    do { \
-        D[0] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
-        D[1] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
-                + INT_PER_READ]); \
-    } while (0)
-#endif
-
-#else // use normal dpas
-
-#if OC_BLK_SUBGROUP == 2
+#else
 #define READ_DST() \
     do { \
         D[0] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
@@ -98,15 +84,7 @@
         D[3] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + 3 * INT_PER_READ]); \
     } while (0)
-#else // OC_BLK_SUBGROUP == 1
-#define READ_DST() \
-    do { \
-        D[0] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
-        D[1] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
-                + INT_PER_READ]); \
-    } while (0)
-#endif // OC_BLK_SUBGROUP
-#endif // USE DPAS_W
+#endif
 
 #define READ_SRC(i_c) \
     do { \
@@ -158,9 +136,9 @@
         BIAS_ACC[1] += CONVERT_TO_F32(Dt[0].odd.s7) \
                 + CONVERT_TO_F32(Dt[1].odd.s7); \
         vstore16((ushort16)(Dt[0].even, Dt[1].even), sg_loc_id, \
-                diff_dst_loc_write[buf_num]); \
+                diff_dst_loc_write[bn]); \
         vstore16((ushort16)(Dt[0].odd, Dt[1].odd), sg_loc_id + 8, \
-                diff_dst_loc_write[buf_num]); \
+                diff_dst_loc_write[bn]); \
     } while (0)
 
 #else //WITHOUT  BIAS
@@ -177,9 +155,9 @@
 #define WRITE_DST() \
     do { \
         vstore16((ushort16)(Dt[0].even, Dt[1].even), sg_loc_id, \
-                diff_dst_loc_write[buf_num]); \
+                diff_dst_loc_write[bn]); \
         vstore16((ushort16)(Dt[0].odd, Dt[1].odd), sg_loc_id + 8, \
-                diff_dst_loc_write[buf_num]); \
+                diff_dst_loc_write[bn]); \
     } while (0)
 
 #endif // WITH_BIAS
@@ -189,25 +167,24 @@
         src_off = (size_t)n_block * SRC_MB_STRIDE + id * SRC_D_STRIDE \
                 + ih * SRC_H_STRIDE + iw * SRC_W_STRIDE \
                 + n_block_inner * MB_BLOCK * IC_BLOCK; \
-        Dt[0] = __builtin_IB_simd_block_read_16_global_h(&src[src_off]); \
-        Dt[1] = __builtin_IB_simd_block_read_16_global_h( \
+        St[0] = __builtin_IB_simd_block_read_16_global_h(&src[src_off]); \
+        St[1] = __builtin_IB_simd_block_read_16_global_h( \
                 &src[src_off + USHORT_PER_READ]); \
     } while (0)
 #define WRITE_SRC() \
     do { \
-        WRITE_LOCAL_8(src_loc_write[buf_num], \
-                (uint8)(as_uint(Dt[0].s02), as_uint(Dt[0].s46), \
-                        as_uint(Dt[0].s8A), as_uint(Dt[0].sCE), \
-                        as_uint(Dt[1].s02), as_uint(Dt[1].s46), \
-                        as_uint(Dt[1].s8A), as_uint(Dt[1].sCE))); \
-        WRITE_LOCAL_8(&src_loc_write[buf_num][INT_PER_READ], \
-                (uint8)(as_uint(Dt[0].s13), as_uint(Dt[0].s57), \
-                        as_uint(Dt[0].s9B), as_uint(Dt[0].sDF), \
-                        as_uint(Dt[1].s13), as_uint(Dt[1].s57), \
-                        as_uint(Dt[1].s9B), as_uint(Dt[1].sDF))); \
+        WRITE_LOCAL_8(src_loc_write[bn], \
+                (uint8)(as_uint(St[0].s02), as_uint(St[0].s46), \
+                        as_uint(St[0].s8A), as_uint(St[0].sCE), \
+                        as_uint(St[1].s02), as_uint(St[1].s46), \
+                        as_uint(St[1].s8A), as_uint(St[1].sCE))); \
+        WRITE_LOCAL_8(&src_loc_write[bn][INT_PER_READ], \
+                (uint8)(as_uint(St[0].s13), as_uint(St[0].s57), \
+                        as_uint(St[0].s9B), as_uint(St[0].sDF), \
+                        as_uint(St[1].s13), as_uint(St[1].s57), \
+                        as_uint(St[1].s9B), as_uint(St[1].sDF))); \
     } while (0)
 
-// READ_SRC reads 16n block of src (block layout: 2c8n8c2n) from SLM
 #if OC_BLK_SUBGROUP == 2
 #define COMPUTE(i_c) \
     do { \
@@ -230,7 +207,7 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
+gen12hp_conv_bwd_wht_kernel_bf16_split_bar(const __global ushort *src,
         __global float *diff_wei, __global float *diff_bias,
         const __global ushort *diff_dst) {
 
@@ -238,13 +215,9 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
     const int sg_id = get_sub_group_id();
     const int sg_loc_id = get_sub_group_local_id();
 
-    // blocks which subgroup will read from global memory
-    // e.g. threads TO,T1 read the same oc_block but different mb_block
     const int sgid_n_block = sg_id % MB_BLK_WORKGROUP;
     const int sgid_c_block = sg_id / MB_BLK_WORKGROUP;
 
-    // compute blocks
-    // threads T0, T1 compute the same oc_block but different ic_block
     const int sg_oc_blk = sg_id / (IC_BLK_WORKGROUP / IC_BLK_SUBGROUP);
     const int sg_ic_blk = sg_id % (IC_BLK_WORKGROUP / IC_BLK_SUBGROUP);
 
@@ -275,18 +248,17 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
     const int total_od = od_end - od_start + 1;
     const int total_oh = oh_end - oh_start + 1;
     const int total_ow = ow_end - ow_start + 1;
-    const int mb_blk_rnd_up = (MB + MB_BLK_WORKGROUP * MB_BLOCK - 1)
-            / (MB_BLK_WORKGROUP * MB_BLOCK);
-    const int total_k_blocks = mb_blk_rnd_up * total_od * total_oh * total_ow;
+    const int total_k_blocks = (MB + MB_BLK_WORKGROUP * MB_BLOCK - 1)
+            / (MB_BLK_WORKGROUP * MB_BLOCK) * total_od * total_oh * total_ow;
 
     // last thread might do extra work if total_k_blocks % K_BLOCKS != 0
     const int max_k_blocks = ((gid[1] % K_WORKGROUPS) == K_WORKGROUPS - 1)
             ? max(0, total_k_blocks - group_k_block)
             : min(max(0, total_k_blocks - group_k_block), K_BLOCKS);
 
-#if MB_BLK_WORKGROUP == 1 && MB > 16
+#if MB_BLK_WORKGROUP == 1
     int n_block_inner = group_k_block
-            % 2; // factor 2 because fmt is 32n16c and mb_block = 16
+            % 2; // factor 2 because fmt is 32n16c and mb_bloc=16
     int od = od_start + ((group_k_block / 2 / total_ow / total_oh) % total_od);
     int oh = oh_start + ((group_k_block / 2 / total_ow) % total_oh);
     int ow = ow_start + ((group_k_block / 2) % total_ow);
@@ -308,10 +280,9 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
     int ih = group_ih;
     int iw = group_iw;
 
-    // each subgroup may read (SRC:MB_BLOCK * IC_BLOCK + DST:MB_BLOCK * OC_BLOCK)
-    // elements from global memory
+    // every subgroups reads (MB_BLOCK * IC_BLOCK + MB_BLOCK * OC_BLOCK) elements from global memory
     bool write_src_to_slm = sg_id < MAX_SGID_IC;
-#if MAX_SGID_IC < WORKGROUP_SIZE
+#if IC_BLK_WORKGROUP < 8
     if (write_src_to_slm)
 #endif
         src += sgid_n_block * MB_BLOCK * IC_BLOCK
@@ -319,21 +290,16 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
                         * SRC_C_STRIDE;
 
     bool write_dst_to_slm = sg_id < MAX_SGID_OC;
-#if MAX_SGID_OC < WORKGROUP_SIZE
+#if OC_BLK_WORKGROUP < 8
     if (write_dst_to_slm)
 #endif
         diff_dst += sgid_n_block * MB_BLOCK * OC_BLOCK
                 + (group_g * OC / OC_BLOCK + group_oc + sgid_c_block)
                         * DST_C_STRIDE;
 
-    bool compute_block = sg_id < MAX_SGID_COMPUTE;
-#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
-    if (compute_block)
-#endif
-        diff_wei += WHT_OFF(group_g,
-                (group_oc + sg_oc_blk * OC_BLK_SUBGROUP) * OC_BLOCK,
-                (group_ic + sg_ic_blk * IC_BLK_SUBGROUP) * IC_BLOCK, kd, kh,
-                kw);
+    diff_wei += WHT_OFF(group_g,
+            (group_oc + sg_oc_blk * OC_BLK_SUBGROUP) * OC_BLOCK,
+            (group_ic + sg_ic_blk * IC_BLK_SUBGROUP) * IC_BLOCK, kd, kh, kw);
 
 #if WITH_BIAS
     float2 BIAS_ACC = 0.0f;
@@ -350,10 +316,12 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
 
 #if USE_DPASW == 1
     uint4 D[4];
+    ushort16 Dt[2];
 #else
     uint8 D[4];
-#endif
     ushort16 Dt[2];
+#endif
+    ushort16 St[2];
 
     float8 ACC[4][4] = {0.0f};
 
@@ -396,38 +364,27 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
     int k_blk_iter = 0;
 
     size_t src_off, dst_off;
-    int buf_num = 0;
+    int bn = 0;
 
-    for (; buf_num < min(max_k_blocks, NUM_BUF - 1); ++buf_num) {
-#if MAX_SGID_IC < WORKGROUP_SIZE
+    for (; bn < min(max_k_blocks, NUM_BUF - 1); ++bn) {
+#if IC_BLK_WORKGROUP < 8
         if (write_src_to_slm) {
 #endif
-            // Each subgroups reads block of 16n16c from global memory
             READ_SRC_GLOBAL();
-            // Reorder the block to 2c8n8c2n before and write to SLM.
-            // If mb_blk_workgroup=2
-            // layout of a single src buffer in SLM will be 2n2Xc8n8c2n,
-            // else it will be 2Xc8n8c2n (where X = IC_BLK_WORKGROUP).
             WRITE_SRC();
-#if MAX_SGID_IC < WORKGROUP_SIZE
+#if IC_BLK_WORKGROUP < 8
         }
 #endif
-
-#if MAX_SGID_OC < WORKGROUP_SIZE
+#if OC_BLK_WORKGROUP < 8
         if (write_dst_to_slm) {
 #endif
-            // Each subgroups reads block of 16n16c from global memory
             READ_DST_GLOBAL();
-            // Transpose the block to 16c16n before and write to SLM.
-            // If mb_blk_workgroup=2,
-            // layout of a single src buffer in SLM will be 2nXc16n,
-            // else it will be Xc16n (where X = OC_BLK_WORKGROUP).
             WRITE_DST();
-#if MAX_SGID_OC < WORKGROUP_SIZE
+#if OC_BLK_WORKGROUP < 8
         }
 #endif
 
-#if MB_BLK_WORKGROUP == 1 && MB > 16
+#if MB_BLK_WORKGROUP == 1
         n_block_inner++;
         if (n_block_inner == 2) {
             n_block_inner = 0;
@@ -458,12 +415,16 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
         }
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+    __builtin_IB_thread_group_barrier_signal();
 
     __attribute__((opencl_unroll_hint(1))) // attr:no-format
     for (int k_blk = 0; k_blk < max_k_blocks; ++k_blk) {
 
-        buf_num = ((k_blk_iter % NUM_BUF) + NUM_BUF - 1) % NUM_BUF;
+        bn = ((k_blk_iter % NUM_BUF) + NUM_BUF - 1) % NUM_BUF;
+        if (k_blk < max_k_blocks - (NUM_BUF - 1)) {
+            if (write_src_to_slm) { READ_SRC_GLOBAL(); }
+            if (write_dst_to_slm) { READ_DST_GLOBAL(); }
+        }
 
         src_loc_read
                 = &src_slm[(k_blk_iter % NUM_BUF) * (SRC_SLM_SIZE / NUM_BUF)];
@@ -472,43 +433,42 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
 
         k_blk_iter++;
 
-#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
-        if (compute_block) {
+#if NUM_BUF >= 3
+        // don't use wait for last few blocks since there is only one signal at the beginning
+        // total number of waits should equal number of signals
+        if (k_blk < max_k_blocks - (NUM_BUF - 1) + 1)
+            __builtin_IB_thread_group_barrier_wait();
+#else
+        __builtin_IB_thread_group_barrier_wait();
 #endif
-            // Read first 16n block of diff_dst
-            // (block layout: Xc16c16n, X=OC_BLK_SUBGROUP) from SLM
-            READ_DST();
-            // Compute 2Xo16i (X=OC_BLK_SUBGROUP) with reduction on first block of 16n
-            COMPUTE(0);
+
+        // Read first 16n block of diff_dst (block size: 2c16n16c) from SLM
+        READ_DST();
+        // Compute 32o32i with reduction on first block of 16n
+        COMPUTE(0);
 
 #if IC_BLK_SUBGROUP == 2
-            // Compute next IC_BLOCK, i.e.2Xo16i (X=OC_BLK_SUBGROUP)
-            // with reduction on first block of 16n
-            COMPUTE(1);
+        COMPUTE(1);
 #endif
-#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
-        }
+
+#if MB_BLK_WORKGROUP == 2
+        src_loc_read += src_slm_offset;
+        diff_dst_loc_read += dst_slm_offset;
+
+        // Read second 16n block of diff_dst (block size: 2c16n16c) from SLM
+        READ_DST();
+        // Reduce on the same block(32o32i) with reduction on second block of 16n
+        COMPUTE(0);
+#if IC_BLK_SUBGROUP == 2
+        COMPUTE(1);
+#endif
 #endif
 
         if (k_blk < max_k_blocks - (NUM_BUF - 1)) {
-#if MAX_SGID_IC < WORKGROUP_SIZE
-            if (write_src_to_slm) {
-#endif
-                READ_SRC_GLOBAL();
-                WRITE_SRC();
-#if MAX_SGID_IC < WORKGROUP_SIZE
-            }
-#endif
-#if MAX_SGID_OC < WORKGROUP_SIZE
-            if (write_dst_to_slm) {
-#endif
-                READ_DST_GLOBAL();
-                WRITE_DST();
-#if MAX_SGID_OC < WORKGROUP_SIZE
-            }
-#endif
+            if (write_src_to_slm) { WRITE_SRC(); }
+            if (write_dst_to_slm) { WRITE_DST(); }
 
-#if MB_BLK_WORKGROUP == 1 && MB > 16
+#if MB_BLK_WORKGROUP == 1
             n_block_inner++;
             if (n_block_inner == 2) {
                 n_block_inner = 0;
@@ -536,29 +496,7 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
                 id = od * SD - PD + kd * (1 + DD);
                 n_block++;
             }
-        }
-
-#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
-        if (compute_block) {
-#endif
-#if MB_BLK_WORKGROUP == 2
-            src_loc_read += src_slm_offset;
-            diff_dst_loc_read += dst_slm_offset;
-
-            // Read second 16n block of diff_dst (block size: 2c16n16c) from SLM
-            READ_DST();
-            // Reduce on the same block(32o32i) with reduction on second block of 16n
-            COMPUTE(0);
-#if IC_BLK_SUBGROUP == 2
-            COMPUTE(1);
-#endif
-#endif
-#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
-        }
-#endif
-
-        if (k_blk < max_k_blocks - (NUM_BUF - 1)) {
-            barrier(CLK_LOCAL_MEM_FENCE);
+            __builtin_IB_thread_group_barrier_signal();
         }
     }
 
@@ -587,28 +525,20 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
         atomic_add_global(&diff_wei_write[112], ACC[i_o][2 * i_i + 1].s7); \
     } while (0)
 
-#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
-    if (compute_block) {
-#endif
-        if (max_k_blocks > 0) {
-            WRITE_WEI(0, 0);
-            WRITE_WEI(1, 0);
+    WRITE_WEI(0, 0);
+    WRITE_WEI(1, 0);
 #if OC_BLK_SUBGROUP == 2
-            WRITE_WEI(2, 0);
-            WRITE_WEI(3, 0);
+    WRITE_WEI(2, 0);
+    WRITE_WEI(3, 0);
 #endif
 
 #if IC_BLK_SUBGROUP == 2
-            WRITE_WEI(0, 1);
-            WRITE_WEI(1, 1);
+    WRITE_WEI(0, 1);
+    WRITE_WEI(1, 1);
 #if OC_BLK_SUBGROUP == 2
-            WRITE_WEI(2, 1);
-            WRITE_WEI(3, 1);
+    WRITE_WEI(2, 1);
+    WRITE_WEI(3, 1);
 #endif
-#endif
-        }
-#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
-    }
 #endif
 
 #if WITH_BIAS
@@ -649,36 +579,36 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
     // handle padded region for bias computation
     // first thread in spatial gws dimension, handles the left padding
     if (compute_bias && gid[1] % K_WORKGROUPS == 0) {
-        for (int n = 0; n < mb_blk_rnd_up; ++n) {
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_WORKGROUP); ++n) {
             for (od = 0; od < od_start; ++od) {
                 for (oh = 0; oh < OH; ++oh) {
                     for (ow = 0; ow < OW; ++ow) {
                         COMPUTE_BIAS(0);
-#if MB_BLK_WORKGROUP == 1 && MB > 16
+#if MB_BLK_WORKGROUP == 1
                         COMPUTE_BIAS(1);
 #endif
                     }
                 }
             }
         }
-        for (int n = 0; n < mb_blk_rnd_up; ++n) {
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_WORKGROUP); ++n) {
             for (od = od_start; od < OD; ++od) {
                 for (oh = 0; oh < oh_start; ++oh) {
                     for (ow = 0; ow < OW; ++ow) {
                         COMPUTE_BIAS(0);
-#if MB_BLK_WORKGROUP == 1 && MB > 16
+#if MB_BLK_WORKGROUP == 1
                         COMPUTE_BIAS(1);
 #endif
                     }
                 }
             }
         }
-        for (int n = 0; n < mb_blk_rnd_up; ++n) {
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_WORKGROUP); ++n) {
             for (od = od_start; od < OD; ++od) {
                 for (oh = oh_start; oh < OH; ++oh) {
                     for (ow = 0; ow < ow_start; ++ow) {
                         COMPUTE_BIAS(0);
-#if MB_BLK_WORKGROUP == 1 && MB > 16
+#if MB_BLK_WORKGROUP == 1
                         COMPUTE_BIAS(1);
 #endif
                     }
@@ -689,36 +619,36 @@ gen12hp_conv_bwd_wht_kernel_bf16(const __global ushort *src,
 
     // last thread handles the right padding
     if (compute_bias && gid[1] % K_WORKGROUPS == K_WORKGROUPS - 1) {
-        for (int n = 0; n < mb_blk_rnd_up; ++n) {
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_WORKGROUP); ++n) {
             for (od = od_start; od < OD; ++od) {
                 for (oh = oh_end + 1; oh < OH; ++oh) {
                     for (ow = ow_start; ow < OW; ++ow) {
                         COMPUTE_BIAS(0);
-#if MB_BLK_WORKGROUP == 1 && MB > 16
+#if MB_BLK_WORKGROUP == 1
                         COMPUTE_BIAS(1);
 #endif
                     }
                 }
             }
         }
-        for (int n = 0; n < mb_blk_rnd_up; ++n) {
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_WORKGROUP); ++n) {
             for (od = od_end + 1; od < OD; ++od) {
                 for (oh = oh_start; oh < oh_end + 1; ++oh) {
                     for (ow = ow_start; ow < OW; ++ow) {
                         COMPUTE_BIAS(0);
-#if MB_BLK_WORKGROUP == 1 && MB > 16
+#if MB_BLK_WORKGROUP == 1
                         COMPUTE_BIAS(1);
 #endif
                     }
                 }
             }
         }
-        for (int n = 0; n < mb_blk_rnd_up; ++n) {
+        for (int n = 0; n < MB / (MB_BLOCK * MB_BLK_WORKGROUP); ++n) {
             for (od = od_start; od < od_end + 1; ++od) {
                 for (oh = oh_start; oh < oh_end + 1; ++oh) {
                     for (ow = ow_end + 1; ow < OW; ++ow) {
                         COMPUTE_BIAS(0);
-#if MB_BLK_WORKGROUP == 1 && MB > 16
+#if MB_BLK_WORKGROUP == 1
                         COMPUTE_BIAS(1);
 #endif
                     }

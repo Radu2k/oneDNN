@@ -84,6 +84,12 @@ status_t ocl_gpu_kernel_t::parallel_for(stream_t &stream,
             }
             set_err = clSetKernelArg(ocl_kernel_, i, sizeof(cl_mem), &ocl_mem);
             sim_register_ocl_mem_object(ocl_mem);
+        } else if (arg.is_svm_pointer()) {
+#ifdef CL_VERSION_2_0
+            set_err = clSetKernelArgSVMPointer(ocl_kernel_, i, arg.value());
+#else
+            return status::runtime_error; // SVM is not supported
+#endif // CL_VERSION_2_0
         } else {
             char type[100];
             OCL_CHECK(clGetKernelArgInfo(ocl_kernel_, i,

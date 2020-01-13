@@ -153,9 +153,7 @@ struct jit_gen12hp_u8s8s32x_conv_fwd_kernel {
             def_postops(kernel_ctx, jcp.eltwise.alg);
         }
 
-        if (jcp.is_depthwise) {
-            kernel_ctx.add_option("-Dcl_intel_subgroups_char");
-        }
+        kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
         return status::success;
     }
@@ -272,6 +270,8 @@ struct jit_gen12hp_u8s8s32x_conv_bwd_data_kernel {
         kernel_ctx.define_int("LWS_2", jcp.lws_d[2]);
 
         kernel_ctx.set_data_type(jcp.dst_data_type);
+
+        kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
         return status::success;
     }

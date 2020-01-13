@@ -42,7 +42,7 @@
     (OUTPUT_PIXEL_HEIGHT_OFFSET * OH) // For NChw
 
 // Weights offsets
-#define KERNEL_BLOCK_OFFSET (8 * 8)
+#define KERNEL_BLOCK_OFFSET (4 * 8 * 8 * 2)
 #define NEXT_KERNEL_OFFSET (KERNEL_BLOCK_OFFSET * IC_NCHUNK * 2)
 
 #define OC_BLOCK_NUMBER (2)
@@ -163,7 +163,7 @@ gen12hp_1x1_conv_fwd_kernel_x16(const __global DATA_T *src,
     dst += ow * OUTPUT_PIXEL_WIDTH_OFFSET; // width offset
 
     // Weights
-    wei += oc_group_id * KERNEL_BLOCK_OFFSET * WEI_IC_NCHUNK * OC_PER_WI;
+    wei += oc_group_id * KERNEL_BLOCK_OFFSET * IC_NCHUNK;
 
 #ifdef XF16_SRC_SLM
     __local ushort src_slm[IC_BLOCK * MB_BLOCK * LWS_1];
@@ -171,14 +171,15 @@ gen12hp_1x1_conv_fwd_kernel_x16(const __global DATA_T *src,
     __global DATA_T *glob_src_ptr;
 #endif
 
-#ifdef XF16_WEI_SLM
-    __local ushort wei_slm[IC_BLOCK * OC_BLOCK * (LWS_0 / SUB_GROUP_SIZE)];
-    __local ushort *slm_wei_ptr;
-    __global DATA_T *glob_wei_ptr;
-#endif
-
 #define SLM_SRC_GR_OFFSET (sp_local_id * IC_BLOCK * MB_BLOCK)
 #define SLM_WEI_GR_OFFSET (slm_oc_group_id * IC_BLOCK * OC_BLOCK)
+
+#ifdef XF16_WEI_SLM
+    __local DATA_T wei_slm[IC_BLOCK * OC_BLOCK * (LWS_0 / SUB_GROUP_SIZE)];
+    __local DATA_T *wei_tmp = wei_slm + SLM_WEI_GR_OFFSET;
+    __local DATA_T *slm_wei_ptr;
+    const __global DATA_T *glob_wei_ptr;
+#endif
 
     // Output accumulators:
     // C00 -> 8 MB(0-7), 1 OC(sg_lid)
@@ -222,7 +223,7 @@ gen12hp_1x1_conv_fwd_kernel_x16(const __global DATA_T *src,
     // W10 -> 8 IC(0-7), 1 OC(sg_lid + 3 * sg_size)
     // W11 -> 8 IC(8-15), 1 OC(sg_lid + 3 * sg_size)
     ushort8 W30, W31;
-
+    int8 W0, W1, W2, W3;
     __attribute__((opencl_unroll_hint)) // attr:no-format
     for (uint ic_block_id = 0; ic_block_id < IC_NCHUNK; ++ic_block_id) {
 
@@ -242,13 +243,18 @@ gen12hp_1x1_conv_fwd_kernel_x16(const __global DATA_T *src,
 #endif
 
 #if XF16_WEI_SLM
-        slm_wei_ptr = SLM_WEI_GR_OFFSET + wei_slm
-                + (sp_local_id * 8 * SUB_GROUP_SIZE);
-        glob_wei_ptr = wei + ((sp_local_id % 2) * KERNEL_BLOCK_OFFSET)
-                + ((sp_local_id / 2) * NEXT_KERNEL_OFFSET);
-        WRITE_LOCAL_US_8((__local ushort *)&slm_wei_ptr[0],
-                intel_sub_group_block_read_us8(
-                        (__global ushort *)&glob_wei_ptr[0]));
+#define BLOCK_READ_WHT(data, idx) \
+    data = as_int8(READ_LOCAL_8((__local uint *)&wei_tmp[idx]));
+#else
+#define BLOCK_READ_WHT(data, idx) \
+    data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
+#endif
+
+#if XF16_WEI_SLM
+        slm_wei_ptr = wei_tmp + (sp_local_id * 8 * SUB_GROUP_SIZE);
+        glob_wei_ptr = wei + (sp_local_id * 8 * SUB_GROUP_SIZE);
+        WRITE_LOCAL_4((__local uint *)&slm_wei_ptr[0],
+                intel_sub_group_block_read4((__global uint *)&glob_wei_ptr[0]));
 #endif
 
 #if XF16_SRC_SLM || XF16_WEI_SLM
@@ -268,50 +274,35 @@ gen12hp_1x1_conv_fwd_kernel_x16(const __global DATA_T *src,
             BLOCK_READ_SRC(S3, 24 * IC_BLOCK);
 #endif
 
-#if XF16_WEI_SLM
-            BLOCK_READ_WHT_FROM_SLM(W00, SLM_WEI_GR_OFFSET);
-            BLOCK_READ_WHT_FROM_SLM(W01, SLM_WEI_GR_OFFSET + 8 * WEI_IC_BLOCK);
-            BLOCK_READ_WHT_FROM_SLM(W10, SLM_WEI_GR_OFFSET + 16 * WEI_IC_BLOCK);
-            BLOCK_READ_WHT_FROM_SLM(W11, SLM_WEI_GR_OFFSET + 24 * WEI_IC_BLOCK);
-            BLOCK_READ_WHT_FROM_SLM(W20, SLM_WEI_GR_OFFSET + 32 * WEI_IC_BLOCK);
-            BLOCK_READ_WHT_FROM_SLM(W21, SLM_WEI_GR_OFFSET + 40 * WEI_IC_BLOCK);
-            BLOCK_READ_WHT_FROM_SLM(W30, SLM_WEI_GR_OFFSET + 48 * WEI_IC_BLOCK);
-            BLOCK_READ_WHT_FROM_SLM(W31, SLM_WEI_GR_OFFSET + 56 * WEI_IC_BLOCK);
-#else
-            BLOCK_READ_WHT(W00, 0);
-            BLOCK_READ_WHT(W01, KERNEL_BLOCK_OFFSET);
-            BLOCK_READ_WHT(W10, NEXT_KERNEL_OFFSET);
-            BLOCK_READ_WHT(W11, NEXT_KERNEL_OFFSET + KERNEL_BLOCK_OFFSET);
-            BLOCK_READ_WHT(W20, NEXT_KERNEL_OFFSET * 2);
-            BLOCK_READ_WHT(W21, NEXT_KERNEL_OFFSET * 2 + KERNEL_BLOCK_OFFSET);
-            BLOCK_READ_WHT(W30, NEXT_KERNEL_OFFSET * 3);
-            BLOCK_READ_WHT(W31, NEXT_KERNEL_OFFSET * 3 + KERNEL_BLOCK_OFFSET);
-#endif
+            BLOCK_READ_WHT(W0, 0);
+            BLOCK_READ_WHT(W1, 8 * IC_BLOCK);
+            BLOCK_READ_WHT(W2, 16 * IC_BLOCK);
+            BLOCK_READ_WHT(W3, 24 * IC_BLOCK);
 
             // MB 0-7, OC sg_lid
-            C00 = MMAD8X8(S0, as_int8((ushort16)(W00, W01)), C00);
-            C10 = MMAD8X8(S0, as_int8((ushort16)(W10, W11)), C10);
-            C20 = MMAD8X8(S0, as_int8((ushort16)(W20, W21)), C20);
-            C30 = MMAD8X8(S0, as_int8((ushort16)(W30, W31)), C30);
+            C00 = MMAD8X8(S0, W0, C00);
+            C10 = MMAD8X8(S0, W1, C10);
+            C20 = MMAD8X8(S0, W2, C20);
+            C30 = MMAD8X8(S0, W3, C30);
             // MB 8-15, OC sg_lid
-            C01 = MMAD8X8(S1, as_int8((ushort16)(W00, W01)), C01);
-            C11 = MMAD8X8(S1, as_int8((ushort16)(W10, W11)), C11);
-            C21 = MMAD8X8(S1, as_int8((ushort16)(W20, W21)), C21);
-            C31 = MMAD8X8(S1, as_int8((ushort16)(W30, W31)), C31);
+            C01 = MMAD8X8(S1, W0, C01);
+            C11 = MMAD8X8(S1, W1, C11);
+            C21 = MMAD8X8(S1, W2, C21);
+            C31 = MMAD8X8(S1, W3, C31);
             // MB 16-23, OC sg_lid
-            C02 = MMAD8X8(S2, as_int8((ushort16)(W00, W01)), C02);
-            C12 = MMAD8X8(S2, as_int8((ushort16)(W10, W11)), C12);
-            C22 = MMAD8X8(S2, as_int8((ushort16)(W20, W21)), C22);
-            C32 = MMAD8X8(S2, as_int8((ushort16)(W30, W31)), C32);
+            C02 = MMAD8X8(S2, W0, C02);
+            C12 = MMAD8X8(S2, W1, C12);
+            C22 = MMAD8X8(S2, W2, C22);
+            C32 = MMAD8X8(S2, W3, C32);
             // MB 24-31, OC sg_lid
-            C03 = MMAD8X8(S3, as_int8((ushort16)(W00, W01)), C03);
-            C13 = MMAD8X8(S3, as_int8((ushort16)(W10, W11)), C13);
-            C23 = MMAD8X8(S3, as_int8((ushort16)(W20, W21)), C23);
-            C33 = MMAD8X8(S3, as_int8((ushort16)(W30, W31)), C33);
+            C03 = MMAD8X8(S3, W0, C03);
+            C13 = MMAD8X8(S3, W1, C13);
+            C23 = MMAD8X8(S3, W2, C23);
+            C33 = MMAD8X8(S3, W3, C33);
         }
 
         src += INPUT_CHANNEL_BLOCK_OFFSET;
-        wei += KERNEL_BLOCK_OFFSET * WEI_IC_BLOCK_NUMBER;
+        wei += KERNEL_BLOCK_OFFSET;
     }
 
     float8 dst_val[2];

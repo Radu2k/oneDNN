@@ -54,13 +54,6 @@ struct jit_memory_desc_info_t {
 
         jit_md_info.nlevels = 2;
 
-        // XXX: use 3 levels when required
-        if (mdw.matches_one_of_tag(OIdhw2o2o8i8o2i, OIhw2o2o8i8o2i,
-                    OIw2o2o8i8o2i, gOIdhw2o2o8i8o2i, gOIhw2o2o8i8o2i,
-                    gOIw2o2o8i8o2i)) {
-            jit_md_info.nlevels = 3;
-        }
-
         jit_md_info.ndims = mdw.ndims();
         jit_md_info.data_type = mdw.data_type();
         jit_md_info.offset0 = mdw.offset0();
@@ -96,21 +89,9 @@ struct jit_memory_desc_info_t {
         //
         // This is specific for GPU and required for the
         // implementations relying on the subgroup extension.
-        if (mdw.matches_one_of_tag(OIdhw4o8i8o4i, OIhw4o8i8o4i, OIw4o8i8o4i,
-                    OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o, gOIdhw4o8i8o4i,
-                    gOIhw4o8i8o4i, gOIw4o8i8o4i, gOIw8o16i2o, gOIhw8o16i2o,
-                    gOIdhw8o16i2o, OIhw2o8i8o2i, gOIhw2o8i8o2i, OIdhw2o2o8i8o2i,
-                    OIhw2o2o8i8o2i, OIw2o2o8i8o2i, gOIdhw2o2o8i8o2i,
-                    gOIhw2o2o8i8o2i, gOIw2o2o8i8o2i)) {
+        if (mdw.matches_one_of_tag(OIw8o16i2o, OIhw8o16i2o, OIdhw8o16i2o,
+                    gOIw8o16i2o, gOIhw8o16i2o, gOIdhw8o16i2o)) {
             int d = (levels[0] == jit_md_info.nlevels) ? 0 : 1;
-            nstl::swap(jit_md_info.blocks[d][jit_md_info.nlevels],
-                    jit_md_info.blocks[d][jit_md_info.nlevels - 1]);
-            nstl::swap(jit_md_info.strides[d][jit_md_info.nlevels],
-                    jit_md_info.strides[d][jit_md_info.nlevels - 1]);
-        } else if (mdw.matches_one_of_tag(IOw4i8o8i4o, IOhw4i8o8i4o,
-                           IOdhw4i8o8i4o, gIOw4i8o8i4o, gIOhw4i8o8i4o,
-                           gIOdhw4i8o8i4o)) {
-            int d = (levels[0] == jit_md_info.nlevels) ? 1 : 2;
             nstl::swap(jit_md_info.blocks[d][jit_md_info.nlevels],
                     jit_md_info.blocks[d][jit_md_info.nlevels - 1]);
             nstl::swap(jit_md_info.strides[d][jit_md_info.nlevels],
@@ -179,12 +160,14 @@ struct jit_conv_conf_t {
     int icb;
     int ocb;
     int oh_chunk, mb_chunk, mb_block, slm_ic;
-    int mb_blk_unroll;
-    int oc_blk_unroll, ic_blk_unroll;
+    int mb_blk_wg;
+    int max_blk_wg, ic_blk_wg, oc_blk_wg;
+    int ic_blk_sg, oc_blk_sg;
     int k_blocks, k_block_tail;
     size_t wht_slm_size, src_slm_size, dst_slm_size;
     int sub_group_size;
     int workgroups_along_k;
+    int num_buffers;
 
     size_t gws_d[3], lws_d[3];
     compute::dispatch_t dispatch;
@@ -205,6 +188,8 @@ struct jit_conv_conf_t {
     format_tag_t src_tag, dst_tag, wei_tag;
     bool is_nchw;
     bool is_nhwc;
+    bool use_dpasw;
+    bool use_split_barrier;
     data_type_t src_data_type;
     data_type_t weights_data_type;
     data_type_t bias_data_type;

@@ -52,13 +52,15 @@ public:
                 new ocl_gpu_device_info_t(adevice))
         , device_(adevice)
         , context_(nullptr)
-        , is_user_context_(false) {}
+        , is_user_context_(false)
+        , enable_ngen_kernels_(false) {}
     ocl_gpu_engine_t(cl_device_id adevice, cl_context acontext)
         : compute::compute_engine_t(engine_kind::gpu, runtime_kind::ocl,
                 new ocl_gpu_device_info_t(adevice))
         , device_(adevice)
         , context_(acontext)
-        , is_user_context_(true) {}
+        , is_user_context_(true)
+        , enable_ngen_kernels_(false) {}
     virtual ~ocl_gpu_engine_t() override {
         if (context_) { clReleaseContext(context_); }
     }
@@ -100,10 +102,15 @@ public:
 
     stream_t *service_stream() const { return service_stream_.get(); }
 
+    virtual bool mayiuse_ngen_kernels() const override {
+        return enable_ngen_kernels_;
+    }
+
 private:
     cl_device_id device_;
     cl_context context_;
     bool is_user_context_;
+    bool enable_ngen_kernels_;
 
     std::unique_ptr<stream_t> service_stream_;
 };

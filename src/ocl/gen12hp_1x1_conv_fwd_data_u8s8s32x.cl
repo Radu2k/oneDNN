@@ -29,6 +29,9 @@
 #define BLOCK_READ_WHT_FROM_SLM(data, idx) \
     data = as_int8(READ_LOCAL_8((__local uint *)&wei_slm[idx]));
 
+#define BLOCK_READ_BIA(data, idx) \
+    data = as_float4(intel_sub_group_block_read4((__global uint *)&bias[idx]));
+
 #define CHANNEL_OFFSET 1
 #define MB_OFFSET IC_BLOCK
 
@@ -165,8 +168,8 @@ gen12hp_1x1_conv_fwd_kernel_u8s8s32x(const __global uchar *src,
     uint8 D0, D1, D2, D3;
 
 #if WITH_BIAS
-    bias += oc_group_id * OC_BLOCK + get_sub_group_local_id() * 4;
-    float4 bia = (float4)(bias[0], bias[1], bias[2], bias[3]);
+    float4 bia;
+    BLOCK_READ_BIA(bia, (oc_group_id + sg_id) * OC_BLOCK);
     bia *= scales;
 #define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)scales, bia);
 #else
@@ -231,16 +234,30 @@ gen12hp_1x1_conv_fwd_kernel_u8s8s32x(const __global uchar *src,
             DO_POST_SUM_ELTWISE(); \
             CONVERT_PACK(n_i); \
         } \
-        intel_sub_group_block_write8( \
-                (__global uint *)&dst[mb_stride * OC_BLOCK], dst_pack); \
+        intel_sub_group_block_write_uc16( \
+                &dst[mb_stride * OC_BLOCK], as_uchar16(dst_pack.s0123)); \
+        intel_sub_group_block_write_uc16(&dst[mb_stride * OC_BLOCK + 16 * 8], \
+                as_uchar16(dst_pack.s4567)); \
     } while (0)
 
     if (ow < OW) {
 #if WITH_SUM
-        D0 = intel_sub_group_block_read8((__global uint *)dst);
-        D1 = intel_sub_group_block_read8((__global uint *)&dst[8 * OC_BLOCK]);
-        D2 = intel_sub_group_block_read8((__global uint *)&dst[16 * OC_BLOCK]);
-        D3 = intel_sub_group_block_read8((__global uint *)&dst[24 * OC_BLOCK]);
+        D0.s0123 = as_uint4(
+                intel_sub_group_block_read_uc16((__global uchar *)dst));
+        D0.s4567 = as_uint4(intel_sub_group_block_read_uc16(
+                (__global uchar *)&dst[4 * OC_BLOCK]));
+        D1.s0123 = as_uint4(intel_sub_group_block_read_uc16(
+                (__global uchar *)&dst[8 * OC_BLOCK]));
+        D1.s4567 = as_uint4(intel_sub_group_block_read_uc16(
+                (__global uchar *)&dst[12 * OC_BLOCK]));
+        D2.s0123 = as_uint4(intel_sub_group_block_read_uc16(
+                (__global uchar *)&dst[16 * OC_BLOCK]));
+        D2.s4567 = as_uint4(intel_sub_group_block_read_uc16(
+                (__global uchar *)&dst[20 * OC_BLOCK]));
+        D3.s0123 = as_uint4(intel_sub_group_block_read_uc16(
+                (__global uchar *)&dst[24 * OC_BLOCK]));
+        D3.s4567 = as_uint4(intel_sub_group_block_read_uc16(
+                (__global uchar *)&dst[28 * OC_BLOCK]));
 #endif
 
         STORE_DST(C00, C01, C02, C03, D0, 0);

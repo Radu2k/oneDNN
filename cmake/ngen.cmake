@@ -14,11 +14,4 @@
 # limitations under the License.
 #===============================================================================
 
-set(TEST_EXE test_api_ocl)
-
-file(GLOB TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/test_*.cpp)
-list(APPEND TEST_SOURCES ${MAIN_SRC_GTEST})
-
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../../src)
-
-register_exe(${TEST_EXE} "${TEST_SOURCES}" "test" "dnnl_gtest")
+add_definitions(-DNGEN_CPP11 -DNGEN_SAFE -DNGEN_NEO_INTERFACE -DNGEN_NO_OP_NAMES)

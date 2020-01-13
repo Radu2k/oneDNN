@@ -112,4 +112,8 @@ and conditions of the following licenses.
 Boost Software License, Version 1.0:
 * Boost C++ Libraries (https://www.boost.org/)
 
+MIT License
+* intel/compute-runtime (https://github.com/intel/compute-runtime)
+* intel/intel-graphics-compiler (https://github.com/intel/intel-graphics-compiler)
+
 See accompanying LICENSE file for full license text and copyright notices.

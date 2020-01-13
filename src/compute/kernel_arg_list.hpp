@@ -37,6 +37,7 @@ public:
         global,
         local,
         scalar,
+        svm,
     };
 
     static constexpr size_t max_size = 8;
@@ -44,6 +45,7 @@ public:
     kind_t kind() const { return kind_; }
     size_t size() const { return size_; }
     bool is_global() const { return kind_ == kind_t::global; }
+    bool is_svm_pointer() const { return kind_ == kind_t::svm; }
 
     void set_value(const memory_storage_t &storage) {
         kind_ = kind_t::global;
@@ -68,6 +70,13 @@ public:
         value_ = nullptr;
     }
 
+    void set_value(void *svm_ptr, kind_t kind) {
+        assert(kind == kind_t::svm);
+        kind_ = kind_t::svm;
+        size_ = 0;
+        value_ = svm_ptr;
+    }
+
     const void *value() const {
         assert(kind_ != kind_t::undef);
         if (kind_ == kind_t::scalar)
@@ -89,6 +98,12 @@ public:
         assert(index < max_args);
         nargs_ = nstl::max(nargs_, index + 1);
         args_[index].set_value(storage);
+    }
+
+    void set(int index, void *value, kernel_arg_t::kind_t kind) {
+        assert(index < max_args);
+        nargs_ = nstl::max(nargs_, index + 1);
+        args_[index].set_value(value, kind);
     }
 
     template <class T,

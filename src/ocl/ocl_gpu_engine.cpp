@@ -30,6 +30,7 @@
 #include "ocl/jit_gen9_common_convolution.hpp"
 #include "ocl/jit_gen9_gemm.hpp"
 #include "ocl/jit_gen9_gemm_x8x8s32.hpp"
+#include "ocl/ngen_binary_format.hpp"
 #include "ocl/ocl_kernel_list.hpp"
 #include "ocl/ocl_memory_storage.hpp"
 #include "ocl/ocl_stream.hpp"
@@ -76,6 +77,14 @@ status_t ocl_gpu_engine_t::init() {
     status = create_stream(&service_stream_ptr, stream_flags::default_flags);
     if (status != status::success) return status;
     service_stream_.reset(service_stream_ptr);
+
+    status = gpu_supports_binary_format(&enable_ngen_kernels_, this);
+    if (status != status::success) return status;
+
+    if (get_verbose())
+        printf("dnnl_verbose,info,gpu,binary_kernels:%s\n",
+                enable_ngen_kernels_ ? "enabled" : "disabled");
+
     return status::success;
 }
 

@@ -15,6 +15,7 @@
 *******************************************************************************/
 
 #include "common/utils.hpp"
+#include "ocl/ngen_gen9_simple_sum.hpp"
 #include "ocl/ocl_engine.hpp"
 #include "ocl/ocl_sum_pd.hpp"
 #include "ocl/ref_sum.hpp"
@@ -29,6 +30,7 @@ using spd_create_f = engine_t::sum_primitive_desc_create_f;
 namespace {
 #define INSTANCE(...) __VA_ARGS__::pd_t::create
 static const spd_create_f ocl_sum_impl_list[] = {
+        INSTANCE(ngen_gen9_simple_sum_t),
         INSTANCE(simple_sum_t<data_type::f32>),
         INSTANCE(ref_sum_t),
         nullptr,
