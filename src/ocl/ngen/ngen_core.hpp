@@ -1595,10 +1595,10 @@ public:
     static const bool emptyOp = false;
 #endif
 
-    constexpr14 DataType getType()         const { return type; }
-    explicit constexpr operator uint64_t() const { return payload; }
-    constexpr int getMods()                const { return 0; }
-    constexpr bool isARF()                 const { return false; }
+    constexpr14 DataType getType()           const { return type; }
+    explicit constexpr14 operator uint64_t() const { return payload; }
+    constexpr14 int getMods()                const { return 0; }
+    constexpr14 bool isARF()                 const { return false; }
 
     Immediate &setType(DataType type_)           { type = type_; return *this; }
 
