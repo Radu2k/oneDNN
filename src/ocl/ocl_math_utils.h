@@ -65,57 +65,57 @@ inline int __imad(uchar4 a, char4 b, int c) __attribute__((overloadable)) {
 #endif
 
 #ifdef cl_intel_subgroup_local_block_io
-inline uint8 subgroup_block_read_uint8(const __local uint *p)
+inline uint8 sub_group_block_read_uint8(const __local uint *p)
         __attribute__((overloadable)) {
     uint8 __builtin_IB_simd_block_read_8_local(const __local uint *p)
             __attribute__((const));
     return __builtin_IB_simd_block_read_8_local(p);
 }
 
-inline uint subgroup_block_read_uint(const __local uint *p)
+inline uint sub_group_block_read_uint(const __local uint *p)
         __attribute__((overloadable)) {
     uint __builtin_IB_simd_block_read_1_local(const __local uint *p)
             __attribute__((const));
     return __builtin_IB_simd_block_read_1_local(p);
 }
 
-void subgroup_block_write_ushort(__local ushort *p, uint v)
+void sub_group_block_write_ushort(__local ushort *p, uint v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_1_local_h(__local ushort * p, ushort v);
     __builtin_IB_simd_block_write_1_local_h(p, v);
 }
 
-void subgroup_block_write_uint(__local uint *p, uint v)
+void sub_group_block_write_uint(__local uint *p, uint v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_1_local(__local uint * p, uint v);
     __builtin_IB_simd_block_write_1_local(p, v);
 }
 
-void subgroup_block_write_uint2(__local uint *p, uint2 v)
+void sub_group_block_write_uint2(__local uint *p, uint2 v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_2_local(__local uint * p, uint2 v);
     __builtin_IB_simd_block_write_2_local(p, v);
 }
 
-void subgroup_block_write_uint4(__local uint *p, uint4 v)
+void sub_group_block_write_uint4(__local uint *p, uint4 v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_4_local(__local uint * p, uint4 v);
     __builtin_IB_simd_block_write_4_local(p, v);
 }
 
-void subgroup_block_write_uint8(__local uint *p, uint8 v)
+void sub_group_block_write_uint8(__local uint *p, uint8 v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_8_local(__local uint * p, uint8 v);
     __builtin_IB_simd_block_write_8_local(p, v);
 }
 
-#define READ_LOCAL_8(_P) subgroup_block_read_uint8(_P)
-#define READ_LOCAL_1(_P) subgroup_block_read_uint(_P)
-#define WRITE_LOCAL_8(_P, _V) subgroup_block_write_uint8(_P, _V)
-#define WRITE_LOCAL_4(_P, _V) subgroup_block_write_uint4(_P, _V)
-#define WRITE_LOCAL_2(_P, _V) subgroup_block_write_uint2(_P, _V)
-#define WRITE_LOCAL_1(_P, _V) subgroup_block_write_uint(_P, _V)
-#define WRITE_LOCAL_SHORT_1(_P, _V) subgroup_block_write_ushort(_P, _V)
+#define READ_LOCAL_8(_P) sub_group_block_read_uint8(_P)
+#define READ_LOCAL_1(_P) sub_group_block_read_uint(_P)
+#define WRITE_LOCAL_8(_P, _V) sub_group_block_write_uint8(_P, _V)
+#define WRITE_LOCAL_4(_P, _V) sub_group_block_write_uint4(_P, _V)
+#define WRITE_LOCAL_2(_P, _V) sub_group_block_write_uint2(_P, _V)
+#define WRITE_LOCAL_1(_P, _V) sub_group_block_write_uint(_P, _V)
+#define WRITE_LOCAL_SHORT_1(_P, _V) sub_group_block_write_ushort(_P, _V)
 
 #else
 
@@ -127,6 +127,7 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v)
 #define WRITE_LOCAL_1(_P, _V) subgroup_block_write_uint(_P, _V)
 #define WRITE_LOCAL_SHORT_1(_P, _V) subgroup_block_write_ushort(_P, _V)
 
+#endif
 uint subgroup_block_read_uint(const __local uint *p) {
     uint ret;
     uint idx = get_sub_group_local_id();
@@ -201,8 +202,6 @@ void subgroup_block_write_uint8(__local uint *p, uint8 v) {
     p += get_max_sub_group_size();
     p[idx] = v.s7;
 }
-
-#endif
 
 inline int mmad_4(uchar4 input, char4 weight, int acc)
         __attribute__((overloadable)) {
