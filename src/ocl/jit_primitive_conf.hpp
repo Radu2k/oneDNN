@@ -139,7 +139,8 @@ struct jit_conv_conf_t {
 
     int ndims;
     int mb;
-    int ngroups, ic, oc, oc_without_padding, ic_without_padding;
+    int ngroups, ic, oc;
+    int ngroups_without_padding, oc_without_padding, ic_without_padding;
     int id, ih, iw, od, oh, ow;
     int f_pad, l_pad, t_pad;
     int back_pad, r_pad, b_pad;
@@ -150,9 +151,10 @@ struct jit_conv_conf_t {
     int od_block, oh_block, ow_block;
     int id_block, ih_block, iw_block;
     int oc_block, ic_block, nchunk;
+    int odb, ohb, owb;
     int icb;
     int ocb;
-    int oh_chunk, mb_chunk, mb_block, slm_ic;
+    int osp_chunk, mb_chunk, mb_block, slm_ic;
     size_t wht_slm_size, src_slm_size;
     int sub_group_size;
     size_t gws_d[3], lws_d[3];
@@ -229,18 +231,21 @@ struct jit_rnn_conf_t {
     bool copy_bias;
     bool is_int8;
     bool is_testmode;
+    bool is_training;
     data_type_t src_dt;
     data_type_t wei_dt;
     data_type_t bia_dt;
     data_type_t dst_dt;
     data_type_t acc_dt;
-    data_type_t precise_dt;
+    data_type_t aux_dt;
     data_type_t input_dt;
     data_type_t output_dt;
+    data_type_t diff_dt;
 
     int n_layer;
     int n_dir;
     int n_iter;
+    int n_iter_scratch_gates;
     int n_gates;
     int n_bias;
     int n_states;
@@ -271,7 +276,7 @@ struct jit_rnn_conf_t {
     int diff_dst_iter_ndims;
     int diff_dst_iter_c_ndims;
     int diff_bias_ndims;
-    int states_ws_ld, gates_ws_ld;
+    int states_ws_ld, gates_ws_ld, diff_states_ws_ld, scratch_gates_ld;
 
     int wei_qparam_mask;
 
@@ -283,6 +288,7 @@ struct jit_rnn_conf_t {
     size_t ws_h_state_offset;
     size_t ws_c_state_offset;
     size_t ws_bias_offset;
+    size_t scratch_gates_offset;
     size_t scratchpad_size;
     size_t workspace_size;
 };
@@ -351,6 +357,8 @@ struct jit_binary_conf_t {
     data_type_t data_type;
     bool is_mul;
     bool is_add;
+    bool is_max;
+    bool is_min;
     bool is_tensor_op;
     compute::dispatch_t dispatch;
     int dim0[MAX_NDIMS];
@@ -542,6 +550,7 @@ inline void def_postops(compute::kernel_ctx_t &kernel_ctx, alg_kind_t alg) {
     kernel_ctx.define_int("SWISH", alg_kind::eltwise_swish);
     kernel_ctx.define_int("LOG", alg_kind::eltwise_log);
     kernel_ctx.define_int("CLIP", alg_kind::eltwise_clip);
+    kernel_ctx.define_int("POW", alg_kind::eltwise_pow);
     kernel_ctx.define_int("ALG_KIND", alg);
 }
 

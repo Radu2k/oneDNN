@@ -43,7 +43,7 @@ struct jit_avx512_core_bf16_fwd_kernel : public jit_generator {
         , eltwise_injector_(nullptr)
         , bf16_emu_(nullptr) {
         if (jcp.with_eltwise)
-            eltwise_injector_ = new jit_uni_eltwise_injector_f32<avx512_common>(
+            eltwise_injector_ = new jit_uni_eltwise_injector_f32<avx512_core>(
                     this, jcp.eltwise);
         if (!isa_has_bf16(jcp.isa))
             bf16_emu_ = new bf16_emulation_t(this, bf16_emu_reserv_1,
@@ -63,11 +63,9 @@ struct jit_avx512_core_bf16_fwd_kernel : public jit_generator {
 
     static bool post_ops_ok(jit_conv_conf_t &jcp, const primitive_attr_t &attr);
     static status_t init_conf(jit_conv_conf_t &jcp,
-            const convolution_desc_t &cd, const memory_desc_wrapper &src_md,
-            const memory_desc_wrapper &weights_md,
-            const memory_desc_wrapper &dst_md,
-            const memory_desc_wrapper &bias_md, const primitive_attr_t &attr,
-            int nthreads);
+            const convolution_desc_t &cd, memory_desc_t &src_md,
+            memory_desc_t &weights_md, memory_desc_t &dst_md,
+            memory_desc_t &bias_md, const primitive_attr_t &attr, int nthreads);
     static void init_scratchpad(memory_tracking::registrar_t &scratchpad,
             const jit_conv_conf_t &jcp);
 
@@ -134,7 +132,10 @@ private:
     Xbyak::Zmm bf16_emu_reserv_4 = Xbyak::Zmm(29);
     Xbyak::Zmm bf16_emu_reserv_5 = Xbyak::Zmm(30);
 
-    jit_uni_eltwise_injector_f32<avx512_common> *eltwise_injector_;
+    Xbyak::Opmask odd_load_mask = Xbyak::Opmask(1);
+    Xbyak::Opmask even_load_mask = Xbyak::Opmask(2);
+
+    jit_uni_eltwise_injector_f32<avx512_core> *eltwise_injector_;
     bf16_emulation_t *bf16_emu_;
 
     inline void prepare_output(int ur_w);
@@ -151,8 +152,8 @@ private:
 
     size_t get_input_offset(int ki, int ic, int oi, int pad_l) {
         size_t scale = 2; //bf16 vnni is used
-        size_t iw_str = jcp.ic_block;
-        size_t ic_str = 1;
+        size_t iw_str = jcp.is_1stconv ? 1 : jcp.ic_block;
+        size_t ic_str = jcp.is_1stconv ? (size_t)jcp.iw * jcp.ih * jcp.id : 1;
         return (size_t)jcp.typesize_in
                 * ((size_t)(ki * (jcp.dilate_w + 1) + oi * jcp.stride_w - pad_l)
                                 * iw_str
@@ -161,11 +162,13 @@ private:
 
     size_t get_kernel_offset(int ki, int ic, int n_oc_block, int ker_number) {
         int scale = 2; //bf16 vnni is used
+        int rnd_ic_block = utils::rnd_up(jcp.ic_block, scale);
+
         size_t oc_block_stride
-                = (size_t)jcp.nb_ic * jcp.ic_block * jcp.kh * jcp.kw * jcp.kd;
+                = (size_t)jcp.nb_ic * rnd_ic_block * jcp.kh * jcp.kw * jcp.kd;
         return jcp.typesize_in * jcp.oc_block
                 * (n_oc_block * oc_block_stride + (ic + ker_number) * scale
-                        + ki * jcp.ic_block);
+                        + ki * rnd_ic_block);
     }
 
     int get_ow_start(int ki, int pad_l) {
@@ -344,6 +347,7 @@ private:
     reg64_t reg_oj = r15;
     reg64_t reg_ih_count = rbx;
     reg64_t reg_tmp = r14;
+    reg64_t reg_ih_shift = reg_tmp;
     reg64_t reg_long_offt = r14;
 
     reg64_t ki = r11;
@@ -389,12 +393,13 @@ private:
             int &nthr_g, int &nthr_oc_b, int &nthr_ic_b);
 
     bf16_emulation_t *bf16_emu_;
-    int stack_space_needed = 296;
+    int stack_space_needed = 304;
     int kd_count_offset = 256;
     int input_d_offset = 256 + 8;
     int output_d_offset = 256 + 16;
     int d_index_offset = 256 + 24;
     int trans_tmp_offset = 256 + 32;
+    int ih_dilate_shift = 256 + 40;
 };
 
 } // namespace cpu

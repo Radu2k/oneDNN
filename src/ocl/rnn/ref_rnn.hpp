@@ -26,8 +26,7 @@
 #include "common/utils.hpp"
 #include "compute/compute.hpp"
 
-#include "ocl/jit_gen9_gemm.hpp"
-#include "ocl/jit_gen9_gemm_x8x8s32.hpp"
+#include "ocl/gemm/ocl_gemm.hpp"
 #include "ocl/ocl_memory_storage.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
@@ -46,21 +45,18 @@ namespace impl {
 namespace ocl {
 
 enum gemm_kind_t {
-    gemm_iter,
-    gemm_layer,
+    gemm_iter_fwd,
+    gemm_layer_fwd,
+    gemm_iter_bwd,
+    gemm_layer_bwd,
     gemm_diff_wei_iter,
     gemm_diff_wei_layer
 };
 
-template <prop_kind_t aprop, impl::data_type_t src_type,
-        impl::data_type_t weights_type>
+template <prop_kind_t aprop>
 struct _ref_rnn_common_t : public primitive_impl_t {
-    typedef typename prec_traits<src_type>::type src_data_t;
-    typedef typename prec_traits<weights_type>::type weights_data_t;
-    typedef typename utils::conditional3<src_type == data_type::u8, int32_t,
-            src_type == data_type::f16, float16_t, float>::type acc_data_t;
 
-    using class_name = _ref_rnn_common_t<aprop, src_type, weights_type>;
+    using class_name = _ref_rnn_common_t<aprop>;
 
     typedef elemwise_sig((class_name::*elemwise_f));
     typedef cell_execution_sig((class_name::*cell_execution_f));
@@ -110,6 +106,16 @@ struct _ref_rnn_common_t : public primitive_impl_t {
                     = this->desc()->weights_iter_desc.data_type;
             data_type_t weights_layer_dt
                     = this->desc()->weights_layer_desc.data_type;
+            bool src_is_u8 = src_layer_dt == data_type::u8;
+            bool src_is_f16 = src_layer_dt == data_type::f16;
+            if (src_is_u8 && !src_is_f16)
+                acc_data_t = data_type::s32;
+            else if (!src_is_u8 && src_is_f16)
+                acc_data_t = data_type::f16;
+            else if (!src_is_u8 && !src_is_f16)
+                acc_data_t = data_type::f32;
+            src_type = src_layer_dt;
+            weights_type = weights_layer_dt;
 
             bool ok = true
                     && one_of(cell_kind, alg_kind::vanilla_rnn,
@@ -120,6 +126,18 @@ struct _ref_rnn_common_t : public primitive_impl_t {
                     && IMPLICATION(aprop == backward,
                             one_of(this->desc()->prop_kind, backward))
                     && src_layer_dt == src_type
+                    && ((aprop == prop_kind::forward
+                                && src_layer_dt == data_type::u8
+                                && weights_layer_dt == data_type::s8)
+                            || (aprop == prop_kind::forward
+                                    && one_of(src_layer_dt, data_type::f16,
+                                            data_type::f32, data_type::bf16)
+                                    && weights_layer_dt == src_layer_dt)
+                            || (aprop == prop_kind::backward
+                                    && one_of(weights_layer_dt, data_type::f32,
+                                            data_type::bf16)
+                                    && weights_layer_dt == src_layer_dt))
+                    && weights_iter_dt == weights_layer_dt
                     && everyone_is(
                             weights_type, weights_iter_dt, weights_layer_dt)
                     && this->set_default_params() == status::success
@@ -217,8 +235,8 @@ struct _ref_rnn_common_t : public primitive_impl_t {
 
             init_scratchpad(scratchpad_sz);
 
-            rnn_conf_.acc_data_type = data_traits<acc_data_t>::data_type;
-            rnn_conf_.acc_data_type_elsz = sizeof(acc_data_t);
+            rnn_conf_.acc_data_type = acc_data_t;
+            rnn_conf_.acc_data_type_elsz = types::data_type_size(acc_data_t);
             status_t status
                     = init_jit<aprop>(jrnn_, rnn_conf_, this, this->jit_off_);
             if (status != status::success) { return status; }
@@ -233,24 +251,23 @@ struct _ref_rnn_common_t : public primitive_impl_t {
                 gemm_desc.transa = transpose::notrans;
                 gemm_desc.transb
                         = is_B_trans ? transpose::trans : transpose::notrans;
+                gemm_desc.batch = 1;
                 gemm_desc.m = m;
                 gemm_desc.n = n;
                 gemm_desc.k = k;
                 gemm_desc.lda = lda;
                 gemm_desc.ldb = ldb;
                 gemm_desc.ldc = ldc;
-                gemm_desc.alpha = 1.0;
-                gemm_desc.beta = beta;
+                gemm_desc.stride_a = lda;
+                gemm_desc.stride_b = ldb;
+                gemm_desc.stride_c = ldc;
                 gemm_desc.a_type = a_dt;
                 gemm_desc.b_type = b_dt;
                 gemm_desc.c_type = c_dt;
                 gemm_desc.acc_type = c_dt;
 
-                gemm_desc.ao = 0;
-                gemm_desc.bo = 0;
-                gemm_desc.offsetc = offsetc::fixed;
-
                 primitive_attr_t dummy_attr;
+                dummy_attr.post_ops_.append_sum(beta);
 
                 return dnnl_primitive_desc_create(gemm_pd,
                         (op_desc_t *)&gemm_desc, &dummy_attr, this->engine(),
@@ -276,14 +293,14 @@ struct _ref_rnn_common_t : public primitive_impl_t {
                 case prop_kind::forward:
                     gemm_ok = true
                             && utils::everyone_is(status::success,
-                                    create_gemm_pd(&gemm_layer_pd_,
+                                    create_gemm_pd(&gemm_layer_fwd_pd_,
                                             n_gates * dic, layer_merged_size,
                                             slc, rnn_conf_.weights_layer_ld,
                                             rnn_conf_.states_ws_ld,
                                             rnn_conf_.gates_ws_ld, weights_type,
                                             src_type, rnn_conf_.acc_data_type,
                                             false, 0.0),
-                                    create_gemm_pd(&gemm_iter_pd_,
+                                    create_gemm_pd(&gemm_iter_fwd_pd_,
                                             n_gates * dic, batch, sic,
                                             rnn_conf_.weights_iter_ld,
                                             rnn_conf_.states_ws_ld,
@@ -294,36 +311,40 @@ struct _ref_rnn_common_t : public primitive_impl_t {
                 case prop_kind::backward:
                     gemm_ok = true
                             && utils::everyone_is(status::success,
-                                    create_gemm_pd(&gemm_iter_pd_, sic, batch,
-                                            n_gates * dic,
+                                    create_gemm_pd(&gemm_iter_bwd_pd_, sic,
+                                            batch, n_gates * dic,
                                             rnn_conf_.weights_iter_ld,
-                                            rnn_conf_.gates_ws_ld,
-                                            rnn_conf_.states_ws_ld,
-                                            weights_type, src_type, src_type,
-                                            false, 0.0f),
-                                    create_gemm_pd(&gemm_layer_pd_, slc,
+                                            rnn_conf_.scratch_gates_ld,
+                                            rnn_conf_.diff_states_ws_ld,
+                                            weights_type, src_type,
+                                            rnn_conf_.acc_data_type, false,
+                                            0.0f),
+                                    create_gemm_pd(&gemm_layer_bwd_pd_, slc,
                                             layer_merged_size, n_gates * dic,
                                             rnn_conf_.weights_layer_ld,
-                                            rnn_conf_.gates_ws_ld,
-                                            rnn_conf_.states_ws_ld,
-                                            weights_type, src_type, src_type,
-                                            false, 0.0f),
+                                            rnn_conf_.scratch_gates_ld,
+                                            rnn_conf_.diff_states_ws_ld,
+                                            weights_type, src_type,
+                                            rnn_conf_.acc_data_type, false,
+                                            0.0f),
                                     create_gemm_pd(&gemm_diff_wei_layer_pd_,
                                             n_gates * dic, slc,
                                             layer_merged_size,
-                                            rnn_conf_.gates_ws_ld,
+                                            rnn_conf_.scratch_gates_ld,
                                             rnn_conf_.states_ws_ld,
                                             rnn_conf_.diff_weights_layer_ld,
-                                            src_type, src_type, weights_type,
-                                            true, 1.0f),
+                                            weights_type, src_type,
+                                            rnn_conf_.acc_data_type, true,
+                                            1.0f),
                                     create_gemm_pd(&gemm_diff_wei_iter_pd_,
                                             n_gates * dic, sic,
                                             iter_merged_size,
-                                            rnn_conf_.gates_ws_ld,
+                                            rnn_conf_.scratch_gates_ld,
                                             rnn_conf_.states_ws_ld,
                                             rnn_conf_.diff_weights_iter_ld,
-                                            src_type, src_type, weights_type,
-                                            true, 1.0f));
+                                            weights_type, src_type,
+                                            rnn_conf_.acc_data_type, true,
+                                            1.0f));
                     break;
                 default:
                     assert(!"unknown prop_kind");
@@ -337,9 +358,14 @@ struct _ref_rnn_common_t : public primitive_impl_t {
         jit_rnn_conf_t jrnn_;
         jit_rnn_offsets jit_off_;
         rnn_utils::rnn_conf_t rnn_conf_;
+        data_type_t acc_data_t;
+        data_type_t src_type;
+        data_type_t weights_type;
 
-        primitive_desc_t *gemm_iter_pd_ = nullptr;
-        primitive_desc_t *gemm_layer_pd_ = nullptr;
+        primitive_desc_t *gemm_iter_fwd_pd_ = nullptr;
+        primitive_desc_t *gemm_layer_fwd_pd_ = nullptr;
+        primitive_desc_t *gemm_iter_bwd_pd_ = nullptr;
+        primitive_desc_t *gemm_layer_bwd_pd_ = nullptr;
         primitive_desc_t *gemm_diff_wei_layer_pd_ = nullptr;
         primitive_desc_t *gemm_diff_wei_iter_pd_ = nullptr;
 
@@ -348,17 +374,28 @@ struct _ref_rnn_common_t : public primitive_impl_t {
             using namespace memory_tracking::names;
             auto scratchpad = this->scratchpad_registry().registrar();
             scratchpad.book(key_rnn_space, scratchpad_sz, 4096);
+            scratchpad.book(key_rnn_gates, rnn_conf_.scratch_gates_size, 4096);
         }
 
         void copy_from(const pd_t &other) {
             jrnn_ = other.jrnn_;
             jit_off_ = other.jit_off_;
             rnn_conf_ = other.rnn_conf_;
-            gemm_layer_pd_ = other.gemm_layer_pd_
-                    ? other.gemm_layer_pd_->clone()
+            acc_data_t = other.acc_data_t;
+            src_type = other.src_type;
+            weights_type = other.weights_type;
+            gemm_layer_fwd_pd_ = other.gemm_layer_fwd_pd_
+                    ? other.gemm_layer_fwd_pd_->clone()
                     : nullptr;
-            gemm_iter_pd_ = other.gemm_iter_pd_ ? other.gemm_iter_pd_->clone()
-                                                : nullptr;
+            gemm_iter_fwd_pd_ = other.gemm_iter_fwd_pd_
+                    ? other.gemm_iter_fwd_pd_->clone()
+                    : nullptr;
+            gemm_layer_bwd_pd_ = other.gemm_layer_bwd_pd_
+                    ? other.gemm_layer_bwd_pd_->clone()
+                    : nullptr;
+            gemm_iter_bwd_pd_ = other.gemm_iter_bwd_pd_
+                    ? other.gemm_iter_bwd_pd_->clone()
+                    : nullptr;
             gemm_diff_wei_layer_pd_ = other.gemm_diff_wei_layer_pd_
                     ? other.gemm_diff_wei_layer_pd_->clone()
                     : nullptr;
@@ -368,8 +405,10 @@ struct _ref_rnn_common_t : public primitive_impl_t {
         }
 
         void clear() {
-            delete gemm_layer_pd_;
-            delete gemm_iter_pd_;
+            delete gemm_layer_fwd_pd_;
+            delete gemm_iter_fwd_pd_;
+            delete gemm_layer_bwd_pd_;
+            delete gemm_iter_bwd_pd_;
             delete gemm_diff_wei_layer_pd_;
             delete gemm_diff_wei_iter_pd_;
         }
@@ -455,18 +494,18 @@ struct _ref_rnn_common_t : public primitive_impl_t {
             case prop_kind::forward:
                 gemm_ok = true
                         && utils::everyone_is(status::success,
-                                pd()->gemm_layer_pd_->create_primitive(
-                                        &gemm_layer_),
-                                pd()->gemm_iter_pd_->create_primitive(
-                                        &gemm_iter_));
+                                pd()->gemm_layer_fwd_pd_->create_primitive(
+                                        &gemm_layer_fwd_),
+                                pd()->gemm_iter_fwd_pd_->create_primitive(
+                                        &gemm_iter_fwd_));
                 break;
             case prop_kind::backward:
                 gemm_ok = true
                         && utils::everyone_is(status::success,
-                                pd()->gemm_iter_pd_->create_primitive(
-                                        &gemm_iter_),
-                                pd()->gemm_layer_pd_->create_primitive(
-                                        &gemm_layer_),
+                                pd()->gemm_layer_bwd_pd_->create_primitive(
+                                        &gemm_layer_bwd_),
+                                pd()->gemm_iter_bwd_pd_->create_primitive(
+                                        &gemm_iter_bwd_),
                                 pd()->gemm_diff_wei_layer_pd_->create_primitive(
                                         &gemm_diff_wei_layer_),
                                 pd()->gemm_diff_wei_iter_pd_->create_primitive(
@@ -509,7 +548,10 @@ struct _ref_rnn_common_t : public primitive_impl_t {
         switch (pd()->cell_kind()) {
             case alg_kind::vanilla_lstm:
                 cell_func = &class_name::cell_execution;
-                elemwise_func = &class_name::lstm_elemwise;
+                elemwise_func = pd()->src_type == data_type::u8
+                                && pd()->weights_type == data_type::s8
+                        ? &class_name::lstm_elemwise_u8s8
+                        : &class_name::lstm_elemwise;
                 break;
             case alg_kind::vanilla_rnn: // @todo switch on cell kind
                 cell_func = &class_name::cell_execution;
@@ -533,7 +575,7 @@ struct _ref_rnn_common_t : public primitive_impl_t {
         rnn_utils::set_offsets(pd()->rnn_conf_, ws_gates_offset_,
                 ws_states_offset_, ws_c_states_offset_, ws_diff_states_offset_,
                 ws_grid_comp_offset_, ws_cell_comp_offset_, ws_bias_offset_,
-                scratchpad_size, workspace_size);
+                scratch_gates_offset_, scratchpad_size, workspace_size);
 
         int max_nparts = (pd()->cell_kind() == alg_kind::vanilla_gru) ? 2 : 1;
         int offset_wei_sz = pd()->L() * pd()->D() * max_nparts;
@@ -549,8 +591,10 @@ struct _ref_rnn_common_t : public primitive_impl_t {
         free(offset_wei_input_);
         free(offset_wei_state_);
 
-        delete gemm_iter_;
-        delete gemm_layer_;
+        delete gemm_iter_fwd_;
+        delete gemm_layer_fwd_;
+        delete gemm_iter_bwd_;
+        delete gemm_layer_bwd_;
         delete gemm_diff_wei_layer_;
         delete gemm_diff_wei_iter_;
     }
@@ -570,6 +614,7 @@ private:
     cell_execution_sig(cell_execution_gru_lbr);
     elemwise_sig(rnn_elemwise);
     elemwise_sig(lstm_elemwise);
+    elemwise_sig(lstm_elemwise_u8s8);
     elemwise_sig(gru_lbr_elemwise);
     gemm_sig(gemm_primitive);
     gemm_sig(packed_gemm);
@@ -632,8 +677,10 @@ private:
     compute::kernel_t gates_reduction_kernel_;
 
     /* GEMM primitives */
-    primitive_t *gemm_layer_ = nullptr;
-    primitive_t *gemm_iter_ = nullptr;
+    primitive_t *gemm_layer_fwd_ = nullptr;
+    primitive_t *gemm_iter_fwd_ = nullptr;
+    primitive_t *gemm_layer_bwd_ = nullptr;
+    primitive_t *gemm_iter_bwd_ = nullptr;
     primitive_t *gemm_diff_wei_layer_ = nullptr;
     primitive_t *gemm_diff_wei_iter_ = nullptr;
 
@@ -647,6 +694,7 @@ private:
     cl_ulong ws_grid_comp_offset_;
     cl_ulong ws_cell_comp_offset_;
     cl_ulong ws_bias_offset_;
+    cl_ulong scratch_gates_offset_;
 
     size_t *offset_wei_input_;
     size_t *offset_wei_state_;
@@ -664,18 +712,8 @@ private:
     free_packed_t weights_input_free_packed_func;
     free_packed_t weights_state_free_packed_func;
 };
-using ref_rnn_fwd_u8s8_t
-        = _ref_rnn_common_t<prop_kind::forward, data_type::u8, data_type::s8>;
-using ref_rnn_fwd_f16_t
-        = _ref_rnn_common_t<prop_kind::forward, data_type::f16, data_type::f16>;
-using ref_rnn_fwd_f32_t
-        = _ref_rnn_common_t<prop_kind::forward, data_type::f32, data_type::f32>;
-using ref_rnn_bwd_f32_t = _ref_rnn_common_t<prop_kind::backward, data_type::f32,
-        data_type::f32>;
-using ref_rnn_fwd_bf16_t = _ref_rnn_common_t<prop_kind::forward,
-        data_type::bf16, data_type::bf16>;
-using ref_rnn_bwd_bf16_t = _ref_rnn_common_t<prop_kind::backward,
-        data_type::bf16, data_type::bf16>;
+using ref_rnn_fwd_t = _ref_rnn_common_t<prop_kind::forward>;
+using ref_rnn_bwd_t = _ref_rnn_common_t<prop_kind::backward>;
 } // namespace ocl
 } // namespace impl
 } // namespace dnnl

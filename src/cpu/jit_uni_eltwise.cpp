@@ -272,7 +272,7 @@ struct jit_uni_relu_kernel_float : public jit_uni_eltwise_kernel,
         mov(reg_work_amount, ptr[param + GET_OFF(work_amount)]);
 
         mov(imm_addr64, float2int(desc.alpha));
-        movq(xmm_ns, imm_addr64);
+        uni_vmovq(xmm_ns, imm_addr64);
         uni_vbroadcastss(vmm_ns, xmm_ns);
 
         uni_vpxor(vmm_zero, vmm_zero, vmm_zero);
@@ -380,7 +380,7 @@ struct jit_uni_relu_kernel_int : public jit_uni_eltwise_kernel,
         mov(reg_work_amount, ptr[param + GET_OFF(work_amount)]);
 
         mov(imm_addr64, float2int(desc.alpha));
-        movq(xmm_ns, imm_addr64);
+        uni_vmovq(xmm_ns, imm_addr64);
         uni_vbroadcastss(vmm_ns, xmm_ns);
 
         uni_vpxor(vmm_zero, vmm_zero, vmm_zero);
@@ -466,7 +466,7 @@ private:
             // load exactly one data item
             mov(reg_s8.cvt8(), mem_from);
             movsx(reg_s8.cvt32(), reg_s8.cvt8());
-            movq(Xmm(vr_from.getIdx()), reg_s8);
+            uni_vmovq(Xmm(vr_from.getIdx()), reg_s8);
         }
     };
 
@@ -613,7 +613,7 @@ void jit_uni_relu_kernel_int<avx2>::store_8bit(
 
         // s16 -> s8 : {16 x s16}{16 x 0} -> {32 x s8}
         vpacksswb(vr_to, vr_to, vmm_zero);
-        vmovq(mem_to, Xmm(vr_to.getIdx()));
+        uni_vmovq(mem_to, Xmm(vr_to.getIdx()));
     } else {
         // store exactly one data item
         // s32 save as s8
@@ -667,7 +667,7 @@ struct jit_uni_kernel_fwd : public jit_uni_eltwise_kernel,
                 eltwise_square, eltwise_abs, eltwise_sqrt, eltwise_linear,
                 eltwise_bounded_relu, eltwise_soft_relu, eltwise_logistic,
                 eltwise_exp, eltwise_gelu, eltwise_swish, eltwise_log,
-                eltwise_clip));
+                eltwise_clip, eltwise_pow));
 
         preamble();
 
@@ -801,17 +801,18 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::pd_t::init() {
     using namespace alg_kind;
     using namespace data_type;
 
+    const auto alg = desc()->alg_kind;
     // relu supports bf16, f32, s32 and s8
-    bool relu_ok = true && desc()->alg_kind == eltwise_relu
+    bool relu_ok = true && alg == eltwise_relu
             && utils::one_of(d_type, bf16, f32, s32, s8);
 
     // others supports bf16 and f32
     bool non_relu_ok = true
-            && utils::one_of(desc()->alg_kind, eltwise_tanh, eltwise_elu,
-                    eltwise_square, eltwise_abs, eltwise_sqrt, eltwise_linear,
+            && utils::one_of(alg, eltwise_tanh, eltwise_elu, eltwise_square,
+                    eltwise_abs, eltwise_sqrt, eltwise_linear,
                     eltwise_bounded_relu, eltwise_soft_relu, eltwise_logistic,
                     eltwise_exp, eltwise_gelu, eltwise_swish, eltwise_log,
-                    eltwise_clip)
+                    eltwise_clip, eltwise_pow)
             && utils::one_of(d_type, bf16, f32);
 
     bool ok = true && mayiuse(isa) && is_fwd()

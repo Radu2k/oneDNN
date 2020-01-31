@@ -71,7 +71,8 @@ struct jit_ref_rnn_kernel {
         jrnn.src_dt = src_layer_d.data_type();
         jrnn.wei_dt = weights_layer_d.data_type();
         jrnn.acc_dt = rnn.acc_data_type;
-        jrnn.precise_dt = rnn.precise_data_type;
+        jrnn.aux_dt = rnn.aux_data_type;
+        jrnn.diff_dt = rnn.diff_data_type;
         jrnn.input_dt = rnn.input_data_type;
         jrnn.output_dt = rnn.output_data_type;
         jrnn.dst_dt = rnn.dst_data_type;
@@ -80,6 +81,7 @@ struct jit_ref_rnn_kernel {
         jrnn.n_layer = rnn.n_layer;
         jrnn.n_dir = rnn.n_dir;
         jrnn.n_iter = rnn.n_iter;
+        jrnn.n_iter_scratch_gates = rnn.n_iter_scratch_gates;
         jrnn.n_gates = rnn.n_gates;
         jrnn.n_bias = rnn.n_bias;
         jrnn.n_states = rnn.n_states;
@@ -103,9 +105,12 @@ struct jit_ref_rnn_kernel {
         jrnn.is_lbr = rnn.is_lbr;
         jrnn.copy_bias = rnn.copy_bias;
         jrnn.is_int8 = rnn.is_int8;
+        jrnn.is_training = rnn.is_training;
 
         jrnn.states_ws_ld = rnn.states_ws_ld;
+        jrnn.diff_states_ws_ld = rnn.diff_states_ws_ld;
         jrnn.gates_ws_ld = rnn.gates_ws_ld;
+        jrnn.scratch_gates_ld = rnn.scratch_gates_ld;
 
         jrnn.src_layer_ndims = src_layer_d.ndims();
         jrnn.src_iter_ndims = src_iter_d.ndims();
@@ -158,7 +163,8 @@ struct jit_ref_rnn_kernel {
         rnn_utils::set_offsets(rnn, jrnn.ws_gates_offset, jrnn.ws_states_offset,
                 jrnn.ws_c_state_offset, jrnn.ws_diff_states_offset,
                 jrnn.ws_grid_comp_offset, jrnn.ws_cell_comp_offset,
-                jrnn.ws_bias_offset, jrnn.scratchpad_size, jrnn.workspace_size);
+                jrnn.ws_bias_offset, jrnn.scratch_gates_offset,
+                jrnn.scratchpad_size, jrnn.workspace_size);
 
         jrnn.cell_kind = rnn_pd->cell_kind();
         jrnn.activation_kind = rnn_pd->activation_kind();
@@ -174,6 +180,7 @@ struct jit_ref_rnn_kernel {
             const jit_rnn_conf_t &jrnn, const jit_rnn_offsets &jit_off) {
 
         kernel_ctx.define_int("IS_FWD", jrnn.is_fwd);
+        kernel_ctx.define_int("IS_TRAINING", jrnn.is_training);
         kernel_ctx.define_int("WITH_BIAS", jrnn.with_bias);
         kernel_ctx.define_int("WITH_SRC_ITER", jrnn.with_src_iter);
         kernel_ctx.define_int("WITH_SRC_ITER_C", jrnn.with_src_iter_c);
@@ -209,6 +216,8 @@ struct jit_ref_rnn_kernel {
         kernel_ctx.define_int("N_DIR", jrnn.n_dir);
         kernel_ctx.define_int("N_LAYER", jrnn.n_layer);
         kernel_ctx.define_int("N_ITER", jrnn.n_iter);
+        kernel_ctx.define_int(
+                "N_ITER_SCRATCH_GATES", jrnn.n_iter_scratch_gates);
         kernel_ctx.define_int("N_GATES", jrnn.n_gates);
         kernel_ctx.define_int("N_BIAS", jrnn.n_bias);
         kernel_ctx.define_int("N_STATES", jrnn.n_states);
@@ -272,21 +281,27 @@ struct jit_ref_rnn_kernel {
         kernel_ctx.define_int("WS_GRID_COMP_OFFSET", jrnn.ws_grid_comp_offset);
         kernel_ctx.define_int("WS_CELL_COMP_OFFSET", jrnn.ws_cell_comp_offset);
         kernel_ctx.define_int("WS_BIAS_OFFSET", jrnn.ws_bias_offset);
+        kernel_ctx.define_int(
+                "SCRATCH_GATES_OFFSET", jrnn.scratch_gates_offset);
         kernel_ctx.define_int("STATES_WS_LD", jrnn.states_ws_ld);
+        kernel_ctx.define_int("DIFF_STATES_WS_LD", jrnn.diff_states_ws_ld);
         kernel_ctx.define_int("GATES_WS_LD", jrnn.gates_ws_ld);
+        kernel_ctx.define_int("SCRATCH_GATES_LD", jrnn.scratch_gates_ld);
 
         if (jrnn.src_dt == data_type::f16) {
             kernel_ctx.set_data_type(data_type::f16);
         } else
             kernel_ctx.set_data_type(data_type::f32);
 
+        def_data_type(kernel_ctx, jrnn.src_dt, "WS_STATE");
         def_data_type(kernel_ctx, jrnn.src_dt, "SRC");
         def_data_type(kernel_ctx, jrnn.wei_dt, "WEI");
         def_data_type(kernel_ctx, jrnn.acc_dt, "ACC");
-        def_data_type(kernel_ctx, jrnn.precise_dt, "PRECISE");
+        def_data_type(kernel_ctx, jrnn.aux_dt, "AUX");
         def_data_type(kernel_ctx, jrnn.dst_dt, "DST");
         def_data_type(kernel_ctx, jrnn.input_dt, "INPUT");
         def_data_type(kernel_ctx, jrnn.output_dt, "OUTPUT");
+        def_data_type(kernel_ctx, jrnn.diff_dt, "DIFF");
 
         kernel_ctx.define_int("IS_INT8", jrnn.is_int8);
         kernel_ctx.define_int("COPY_BIAS", jrnn.copy_bias);

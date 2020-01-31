@@ -18,7 +18,7 @@
 #include "common/dnnl_traits.hpp"
 #include "common/type_helpers.hpp"
 
-#include "ocl/jit_gen9_gemm_x8x8s32.hpp"
+#include "ocl/gemm/jit_gen9_gemm_x8x8s32.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -38,8 +38,8 @@ status_t jit_gen9_gemm_x8x8s32_t::launch_x8x8s32(
         compute::compute_stream_t *compute_stream, const memory_storage_t &a,
         const memory_storage_t &b, const memory_storage_t &c, int64_t offset_a,
         int64_t offset_b, int64_t offset_c, int64_t lda, int64_t ldb,
-        int64_t ldc, int64_t m, int64_t n, int64_t k, int64_t beta, int64_t ao,
-        int64_t bo, const memory_storage_t &co, int64_t offset_co,
+        int64_t ldc, int64_t m, int64_t n, int64_t k, int64_t beta, int32_t ao,
+        int32_t bo, const memory_storage_t &co, int64_t offset_co,
         bool apply_co, bool apply_eltwise, float eltwise_alpha,
         float eltwise_beta) const {
 
@@ -147,15 +147,16 @@ status_t jit_gen9_gemm_x8x8s32_t::launch_scale_x8x8s32(
     return compute_stream->parallel_for(nd_range, kernel, arg_list);
 }
 
-status_t jit_gen9_gemm_x8x8s32_t::execute(const exec_ctx_t &ctx) const {
+status_t jit_gen9_gemm_x8x8s32_t::execute(const gemm_exec_ctx_t &ctx) const {
     return execute_standard(ctx);
 }
 
 status_t jit_gen9_gemm_x8x8s32_t::execute_standard(
-        const exec_ctx_t &ctx) const {
+        const gemm_exec_ctx_t &ctx) const {
     auto a_type = pd()->desc()->a_type;
     auto b_type = pd()->desc()->b_type;
     auto c_type = pd()->desc()->c_type;
+
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
@@ -166,11 +167,14 @@ status_t jit_gen9_gemm_x8x8s32_t::execute_standard(
     bool transa = (pd()->desc()->transa == dnnl_trans);
     bool transb = (pd()->desc()->transb == dnnl_trans);
 
+    int cmask = 0;
+    pd()->attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
+
     char offsetc_char;
 
-    if (pd()->desc()->offsetc == dnnl_column)
+    if (1 << 1 == cmask)
         offsetc_char = 'C';
-    else if (pd()->desc()->offsetc == dnnl_row)
+    else if (1 << 0 == cmask)
         offsetc_char = 'R';
     else
         offsetc_char = 'F';
@@ -179,28 +183,32 @@ status_t jit_gen9_gemm_x8x8s32_t::execute_standard(
     auto ldb = pd()->desc()->ldb;
     auto ldc = pd()->desc()->ldc;
 
-    auto ao = pd()->desc()->ao;
-    auto bo = pd()->desc()->bo;
+    const int *ao_i32 = nullptr;
+    const int *bo_i32 = nullptr;
+    pd()->attr()->zero_points_.get(DNNL_ARG_SRC, nullptr, nullptr, &ao_i32);
+    pd()->attr()->zero_points_.get(DNNL_ARG_WEIGHTS, nullptr, nullptr, &bo_i32);
+    auto ao = *ao_i32;
+    auto bo = *bo_i32;
 
-    auto alpha = pd()->desc()->alpha;
-    auto beta = pd()->desc()->beta;
+    auto alpha = pd()->alpha();
+    auto beta = pd()->beta();
 
     auto eltwise_alpha = pd()->eltwise_alpha();
     auto eltwise_beta = pd()->eltwise_beta();
 
-    auto &a = CTX_IN_STORAGE(DNNL_ARG_SRC_0);
-    auto &b = CTX_IN_STORAGE(DNNL_ARG_SRC_1);
-    auto &co = CTX_IN_STORAGE(DNNL_ARG_SRC_2);
-    auto &c = CTX_OUT_STORAGE(DNNL_ARG_DST);
+    auto &a = GEMM_CTX_ARG_STORAGE(a);
+    auto &b = GEMM_CTX_ARG_STORAGE(b);
+    auto &c = GEMM_CTX_ARG_STORAGE(c);
+    auto &co = GEMM_CTX_ARG_STORAGE(c_zero_point);
 
-    size_t off_a0 = a.get_offset() / types::data_type_size(a_type)
-            + pd()->dyn_offset_a;
-    size_t off_b0 = b.get_offset() / types::data_type_size(b_type)
-            + pd()->dyn_offset_b;
-    size_t off_c0 = c.get_offset() / types::data_type_size(c_type)
-            + pd()->dyn_offset_c;
-    size_t offset_co = co.get_offset() / types::data_type_size(c_type)
-            + pd()->dyn_offset_co;
+    size_t off_a0
+            = a.offset() / types::data_type_size(a_type) + pd()->dyn_offset_a;
+    size_t off_b0
+            = b.offset() / types::data_type_size(b_type) + pd()->dyn_offset_b;
+    size_t off_c0
+            = c.offset() / types::data_type_size(c_type) + pd()->dyn_offset_c;
+    size_t offset_co
+            = co.offset() / types::data_type_size(c_type) + pd()->dyn_offset_co;
 
     bool do_compute = ((k > 0) && (alpha != 0.0f));
     bool do_scale = !(

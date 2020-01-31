@@ -24,9 +24,9 @@
 #include "common/memory_storage.hpp"
 #include "common/nstl.hpp"
 #include "common/primitive_desc.hpp"
-#include "ocl/jit_gen12lp_gemm.hpp"
-#include "ocl/jit_gen9_gemm.hpp"
-#include "ocl/jit_gen9_gemm_x8x8s32.hpp"
+#include "ocl/gemm/jit_gen12lp_gemm.hpp"
+#include "ocl/gemm/jit_gen9_gemm.hpp"
+#include "ocl/gemm/jit_gen9_gemm_x8x8s32.hpp"
 #include "ocl/ocl_engine.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
@@ -89,14 +89,16 @@ dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
                                                         : transpose::trans;
     op_desc.transb = (*transb == 'n' || *transb == 'N') ? transpose::notrans
                                                         : transpose::trans;
+    op_desc.batch = 1;
     op_desc.m = m;
     op_desc.n = n;
     op_desc.k = k;
+    op_desc.stride_a = lda;
+    op_desc.stride_b = ldb;
+    op_desc.stride_c = ldc;
     op_desc.lda = lda;
     op_desc.ldb = ldb;
     op_desc.ldc = ldc;
-    op_desc.alpha = alpha;
-    op_desc.beta = beta;
     op_desc.a_type = a_type;
     op_desc.b_type = b_type;
     op_desc.c_type = c_type;
@@ -113,6 +115,9 @@ dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
 
     std::unique_ptr<primitive_desc_t> pd;
     primitive_attr_t attr;
+    if (alpha != 1.0f) attr.output_scales_.set(alpha);
+    if (beta != 0.0f) attr.post_ops_.append_sum(beta);
+
     primitive_desc_t *pd_ptr;
     status = primitive_desc_t::create<pd_type>(&pd_ptr,
             reinterpret_cast<const op_desc_t *>(&op_desc), &attr, engine.get(),
@@ -144,8 +149,8 @@ dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
     gemm_prim.reset(gemm_prim_ptr);
 
     exec_args_t args = {
-            {DNNL_ARG_SRC_0, {a_mem.get(), true}},
-            {DNNL_ARG_SRC_1, {b_mem.get(), true}},
+            {DNNL_ARG_SRC, {a_mem.get(), true}},
+            {DNNL_ARG_WEIGHTS, {b_mem.get(), true}},
             {DNNL_ARG_DST, {c_mem.get(), false}},
     };
 
@@ -201,20 +206,16 @@ dnnl_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
                                                         : transpose::trans;
     op_desc.transb = (*transb == 'n' || *transb == 'N') ? transpose::notrans
                                                         : transpose::trans;
-    op_desc.offsetc = (*offsetc == 'f' || *offsetc == 'F')
-            ? offsetc::fixed
-            : ((*offsetc == 'c' || *offsetc == 'C') ? offsetc::column
-                                                    : offsetc::row);
+    op_desc.batch = 1;
     op_desc.m = m;
     op_desc.n = n;
     op_desc.k = k;
     op_desc.lda = lda;
     op_desc.ldb = ldb;
     op_desc.ldc = ldc;
-    op_desc.ao = ao;
-    op_desc.bo = bo;
-    op_desc.alpha = alpha;
-    op_desc.beta = beta;
+    op_desc.stride_a = lda;
+    op_desc.stride_b = ldb;
+    op_desc.stride_c = ldc;
     op_desc.a_type = a_type;
     op_desc.b_type = b_type;
     op_desc.c_type = c_type;
@@ -234,6 +235,35 @@ dnnl_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
     // Create primitive descriptor
     std::unique_ptr<primitive_desc_t> pd;
     primitive_attr_t attr;
+
+    auto &zp = attr.zero_points_;
+    switch (*offsetc) {
+        case 'f':
+        case 'F': status = zp.set(DNNL_ARG_DST, DNNL_RUNTIME_S32_VAL); break;
+        case 'c':
+        case 'C':
+            status = zp.set(DNNL_ARG_DST, 1, 1 << 1, &DNNL_RUNTIME_S32_VAL);
+            break;
+        case 'r':
+        case 'R':
+            status = zp.set(DNNL_ARG_DST, 1, 1 << 0, &DNNL_RUNTIME_S32_VAL);
+            break;
+        default: status = status::invalid_arguments;
+    }
+    if (status != status::success) return status;
+
+    if (ao != 0) {
+        status = zp.set(DNNL_ARG_SRC, ao);
+        if (status != status::success) return status;
+    }
+    if (bo != 0) {
+        zp.set(DNNL_ARG_WEIGHTS, bo);
+        if (status != status::success) return status;
+    }
+
+    if (alpha != 1.0f) attr.output_scales_.set(alpha);
+    if (beta != 0.0f) attr.post_ops_.append_sum(beta);
+
     primitive_desc_t *pd_ptr;
     status = dnnl_primitive_desc_create(
             &pd_ptr, &op_desc, &attr, engine.get(), nullptr);
@@ -269,9 +299,9 @@ dnnl_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
     gemm_prim.reset(gemm_prim_ptr);
 
     exec_args_t args = {
-            {DNNL_ARG_SRC_0, {a_mem.get(), true}},
-            {DNNL_ARG_SRC_1, {b_mem.get(), true}},
-            {DNNL_ARG_SRC_2, {co_mem.get(), true}},
+            {DNNL_ARG_SRC, {a_mem.get(), true}},
+            {DNNL_ARG_WEIGHTS, {b_mem.get(), true}},
+            {DNNL_ARG_DST | DNNL_ARG_ATTR_ZERO_POINTS, {co_mem.get(), true}},
             {DNNL_ARG_DST, {c_mem.get(), false}},
     };
 

@@ -78,20 +78,20 @@ static int init_pd(const prb_t *p, dnnl_eltwise_desc_t &ed,
     return OK;
 }
 
-// check that on a given input specific alg may return NaN or inf
-static bool check_extreme_values(
-        const prb_t *p, const float &src, const float &library_output) {
-    switch (p->alg) {
+// Check that on a given input specific alg may return NaN or inf.
+// Used in other drivers supporting eltwise post_ops.
+bool check_extreme_values(const float &a, const float &b, alg_t alg) {
+    switch (alg) {
         case alg_t::SQRT:
-            if ((p->dir & FLAG_FWD) && src < 0) return true;
-            if ((p->dir & FLAG_BWD) && src <= 0) return true;
         case alg_t::LOG:
-            if ((p->dir & FLAG_FWD) && src < 0) return true;
-            if ((p->dir & FLAG_FWD) && src == 0 && library_output == logf(src))
+        case alg_t::POW:
+            if (std::isnan(a) && std::isnan(b)) return true;
+            if (std::isinf(a) && std::isinf(b)
+                    && std::signbit(a) == std::signbit(b))
                 return true;
-            if ((p->dir & FLAG_BWD) && src <= 0) return true;
-        default: return false;
+        default: break;
     }
+    return false;
 }
 
 static bool check_abs_err(const prb_t *p, const float &s, const float &trh) {
@@ -136,8 +136,7 @@ static int compare(const prb_t *p, const dnn_mem_t &mem_src_fp,
     // Tolerate ~3 ulp of relative error for fp32.
     float trh = 2e-6;
     // Tolerate only rounding error(~1/2 ulp) for reduced precision.
-    if (p->dt == dnnl_f16) trh = 1e-3;
-    if (p->dt == dnnl_bf16) trh = 8e-3;
+    if (p->dt == dnnl_f16 || p->dt == dnnl_bf16) trh = epsilon_dt(p->dt);
 
     // Tolerate ~7ulp for complex primitives in fp32.
     if (p->dt == dnnl_f32
@@ -161,7 +160,7 @@ static int compare(const prb_t *p, const dnn_mem_t &mem_src_fp,
 
         bool ok = (fabsf(fp) > 1e-5 ? rel_diff : diff) <= trh;
 
-        if (!ok) ok = check_extreme_values(p, src, dt);
+        if (!ok) ok = check_extreme_values(fp, dt, p->alg);
 
         if (!ok && check_abs_err(p, src, trh)) ok = diff <= trh;
 

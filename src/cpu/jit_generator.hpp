@@ -19,7 +19,6 @@
 
 #include <limits.h>
 
-#include "dnnl_thread.hpp"
 #include "utils.hpp"
 
 #include "cpu_isa_traits.hpp"
@@ -108,29 +107,6 @@ static const Xbyak::Reg64 abi_param1(Xbyak::Operand::RDI),
         abi_param6(Xbyak::Operand::R9), abi_not_param1(Xbyak::Operand::RCX);
 #endif
 #endif
-
-inline unsigned int get_cache_size(int level, bool per_core = true) {
-    unsigned int l = level - 1;
-    // Currently, if XByak is not able to fetch the cache topology
-    // we default to 32KB of L1, 512KB of L2 and 1MB of L3 per core.
-    if (cpu.getDataCacheLevels() == 0) {
-        const int L1_cache_per_core = 32000;
-        const int L2_cache_per_core = 512000;
-        const int L3_cache_per_core = 1024000;
-        int num_cores = per_core ? 1 : dnnl_get_max_threads();
-        switch (l) {
-            case (0): return L1_cache_per_core * num_cores;
-            case (1): return L2_cache_per_core * num_cores;
-            case (2): return L3_cache_per_core * num_cores;
-            default: return 0;
-        }
-    }
-    if (l < cpu.getDataCacheLevels()) {
-        return cpu.getDataCacheSize(l)
-                / (per_core ? cpu.getCoresSharingDataCache(l) : 1);
-    } else
-        return 0;
-}
 
 } // namespace
 
@@ -849,6 +825,19 @@ public:
     }
     void uni_vmovmskps(const Xbyak::Reg &x1, const Xbyak::Ymm &x2) {
         vmovmskps(x1, x2);
+    }
+
+    void uni_vmovq(const Xbyak::Xmm &x, const Xbyak::Reg64 &r) {
+        if (mayiuse(avx))
+            vmovq(x, r);
+        else
+            movq(x, r);
+    }
+    void uni_vmovq(const Xbyak::Address &addr, const Xbyak::Xmm &x) {
+        if (mayiuse(avx))
+            vmovq(addr, x);
+        else
+            movq(addr, x);
     }
 
     void uni_vpackssdw(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,

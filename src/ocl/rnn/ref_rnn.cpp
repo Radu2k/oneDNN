@@ -29,10 +29,13 @@
 
  */
 #include "ocl/rnn/ref_rnn.hpp"
+
 #include "c_types_map.hpp"
 #include "dnnl_thread.hpp"
 #include "dnnl_traits.hpp"
 #include "math_utils.hpp"
+#include "ocl/gemm/ocl_gemm.hpp"
+#include "ocl/gemm/ocl_gemm_utils.hpp"
 #include "type_helpers.hpp"
 
 namespace dnnl {
@@ -48,8 +51,8 @@ using namespace dnnl::impl::memory_tracking::names;
 
 #define AOC array_offset_calculator
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-gemm_sig((_ref_rnn_common_t<aprop, src_type, weights_type>::packed_gemm)) {
+template <prop_kind_t aprop>
+gemm_sig((_ref_rnn_common_t<aprop>::packed_gemm)) {
 #if USE_MKL_PACKED_GEMM
 // TBD
 #else
@@ -61,107 +64,120 @@ gemm_sig((_ref_rnn_common_t<aprop, src_type, weights_type>::packed_gemm)) {
 #endif
 }
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-gemm_sig((_ref_rnn_common_t<aprop, src_type, weights_type>::gemm_primitive)) {
+template <prop_kind_t aprop>
+gemm_sig((_ref_rnn_common_t<aprop>::gemm_primitive)) {
+    using namespace gemm_utils;
 
     // FIXME: This should be created once per execute() instead of creating
     // memory before each gemm call. Each cell type (+prop kind) might have
     // different number of GEMMs.
 
-    memory_desc_t scratchpad_md;
-
-    size_t scratchpad_sz {0}, ws_sz {0};
-    get_scratchpad_and_workspace_sizes(pd()->rnn_conf_, scratchpad_sz, ws_sz);
-    dims_t scratchpad_dims = {(int)scratchpad_sz};
-    dnnl_memory_desc_init_by_tag(
-            &scratchpad_md, 1, scratchpad_dims, data_type::u8, format_tag::x);
-
-    void *mem_storage_scratchpad = nullptr;
+    void *scratchpad_ptr {nullptr}, *scratchpad_gates_ptr {nullptr};
 
     memory_t *workspace = (aprop == prop_kind::forward)
             ? ctx.output(DNNL_ARG_WORKSPACE)
             : ctx.input(DNNL_ARG_WORKSPACE);
 
     if (pd()->rnn_conf_.use_workspace) {
-        workspace->memory_storage()->get_data_handle(&mem_storage_scratchpad);
+        workspace->memory_storage()->get_data_handle(&scratchpad_ptr);
     } else {
         auto scratchpad = ctx.get_scratchpad_grantor().get_memory_storage(
                 key_rnn_space);
-        scratchpad->get_data_handle(&mem_storage_scratchpad);
+        scratchpad->get_data_handle(&scratchpad_ptr);
     }
-    void *mem_storage_weights = nullptr;
-    memory_t *weights = nullptr;
-    exec_args_t gemm_args;
 
-    std::shared_ptr<memory_t> gemm_mem_A;
-    std::shared_ptr<memory_t> gemm_mem_B;
-    std::shared_ptr<memory_t> gemm_mem_C;
+    auto scratchpad_gates
+            = ctx.get_scratchpad_grantor().get_memory_storage(key_rnn_gates);
+    scratchpad_gates->get_data_handle(&scratchpad_gates_ptr);
 
-    // offsets (off_a, off_b and off_c) come by bytes
+    void *weights_ptr {nullptr};
+    memory_t *weights {nullptr};
+
+    // These memory storages provide a mechanism to reuse existing memory
+    // storage with an offset. These memory storages don't own attached memory
+    memory_storage_t *gemm_A_ = nullptr;
+    memory_storage_t *gemm_B_ = nullptr;
+    memory_storage_t *gemm_C_ = nullptr;
+
+    engine()->create_memory_storage(&gemm_A_, use_runtime_ptr, 0, nullptr);
+    engine()->create_memory_storage(&gemm_B_, use_runtime_ptr, 0, nullptr);
+    engine()->create_memory_storage(&gemm_C_, use_runtime_ptr, 0, nullptr);
+
     switch (gemm_kind) {
-        case gemm_iter:
-        case gemm_layer:
-            weights = (gemm_kind == gemm_layer)
+        case gemm_iter_fwd:
+        case gemm_layer_fwd:
+            weights = (gemm_kind == gemm_layer_fwd)
                     ? ctx.input(DNNL_ARG_WEIGHTS_LAYER)
                     : ctx.input(DNNL_ARG_WEIGHTS_ITER);
-            weights->memory_storage()->get_data_handle(&mem_storage_weights);
+            weights->memory_storage()->get_data_handle(&weights_ptr);
 
-            gemm_mem_A.reset(new memory_t(engine(), weights->md(),
-                    memory_flags_t::use_runtime_ptr, nullptr));
-            gemm_mem_B.reset(new memory_t(engine(), &scratchpad_md,
-                    memory_flags_t::use_runtime_ptr, nullptr));
-            gemm_mem_C.reset(new memory_t(engine(), &scratchpad_md,
-                    memory_flags_t::use_runtime_ptr, nullptr));
-            gemm_mem_A->set_data_handle(mem_storage_weights);
-            gemm_mem_B->set_data_handle(mem_storage_scratchpad);
-            gemm_mem_C->set_data_handle(mem_storage_scratchpad);
-            gemm_mem_A->memory_storage()->set_offset(off_a);
-            gemm_mem_B->memory_storage()->set_offset(off_b);
-            gemm_mem_C->memory_storage()->set_offset(off_c);
+            gemm_A_->set_data_handle(weights_ptr);
+            gemm_B_->set_data_handle(scratchpad_ptr);
+            gemm_C_->set_data_handle(scratchpad_gates_ptr);
+            break;
+        case gemm_iter_bwd:
+        case gemm_layer_bwd:
+            weights = (gemm_kind == gemm_layer_bwd)
+                    ? ctx.input(DNNL_ARG_WEIGHTS_LAYER)
+                    : ctx.input(DNNL_ARG_WEIGHTS_ITER);
+            weights->memory_storage()->get_data_handle(&weights_ptr);
+
+            gemm_A_->set_data_handle(weights_ptr);
+            gemm_B_->set_data_handle(scratchpad_gates_ptr);
+            gemm_C_->set_data_handle(scratchpad_ptr);
             break;
         case gemm_diff_wei_iter:
         case gemm_diff_wei_layer:
             weights = (gemm_kind == gemm_diff_wei_iter)
                     ? ctx.output(DNNL_ARG_DIFF_WEIGHTS_ITER)
                     : ctx.output(DNNL_ARG_DIFF_WEIGHTS_LAYER);
-            weights->memory_storage()->get_data_handle(&mem_storage_weights);
-            gemm_mem_A.reset(new memory_t(engine(), &scratchpad_md,
-                    memory_flags_t::use_runtime_ptr, nullptr));
-            gemm_mem_B.reset(new memory_t(engine(), &scratchpad_md,
-                    memory_flags_t::use_runtime_ptr, nullptr));
-            gemm_mem_C.reset(new memory_t(engine(), weights->md(),
-                    memory_flags_t::use_runtime_ptr, nullptr));
-            gemm_mem_A->set_data_handle(mem_storage_scratchpad);
-            gemm_mem_B->set_data_handle(mem_storage_scratchpad);
-            gemm_mem_C->set_data_handle(mem_storage_weights);
-            gemm_mem_A->memory_storage()->set_offset(off_a);
-            gemm_mem_B->memory_storage()->set_offset(off_b);
-            gemm_mem_C->memory_storage()->set_offset(off_c);
+            weights->memory_storage()->get_data_handle(&weights_ptr);
+
+            gemm_A_->set_data_handle(scratchpad_gates_ptr);
+            gemm_B_->set_data_handle(scratchpad_ptr);
+            gemm_C_->set_data_handle(weights_ptr);
             break;
         default: assert(!"unknown gemm_kind");
     }
 
-    gemm_args[DNNL_ARG_SRC_0] = {gemm_mem_A.get(), true};
-    gemm_args[DNNL_ARG_SRC_1] = {gemm_mem_B.get(), true};
-    gemm_args[DNNL_ARG_DST] = {gemm_mem_C.get(), false};
+    gemm_A_->set_offset(off_a);
+    gemm_B_->set_offset(off_b);
+    gemm_C_->set_offset(off_c);
 
-    auto gemm_ctx = exec_ctx_t(ctx.stream(), std::move(gemm_args));
+    gemm_exec_args_t gemm_args;
+    gemm_args.a = gemm_A_;
+    gemm_args.b = gemm_B_;
+    gemm_args.c = gemm_C_;
+
+    auto gemm_ctx = gemm_exec_ctx_t(ctx.stream(), gemm_args);
 
     switch (gemm_kind) {
-        case gemm_iter: gemm_iter_->execute(gemm_ctx); break;
-        case gemm_layer: gemm_layer_->execute(gemm_ctx); break;
-        case gemm_diff_wei_iter: gemm_diff_wei_iter_->execute(gemm_ctx); break;
+        case gemm_iter_fwd: gemm_impl(gemm_iter_fwd_)->execute(gemm_ctx); break;
+        case gemm_layer_fwd:
+            gemm_impl(gemm_layer_fwd_)->execute(gemm_ctx);
+            break;
+        case gemm_iter_bwd: gemm_impl(gemm_iter_bwd_)->execute(gemm_ctx); break;
+        case gemm_layer_bwd:
+            gemm_impl(gemm_layer_bwd_)->execute(gemm_ctx);
+            break;
+        case gemm_diff_wei_iter:
+            gemm_impl(gemm_diff_wei_iter_)->execute(gemm_ctx);
+            break;
         case gemm_diff_wei_layer:
-            gemm_diff_wei_layer_->execute(gemm_ctx);
+            gemm_impl(gemm_diff_wei_layer_)->execute(gemm_ctx);
             break;
         default: assert(!"unknown gemm_kind");
     }
+
+    delete gemm_A_;
+    delete gemm_B_;
+    delete gemm_C_;
 }
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-void _ref_rnn_common_t<aprop, src_type, weights_type>::gates_reduction(
-        const exec_ctx_t &ctx, int dir, int lay, int iter, int n_gates, int dic,
-        int batch, const memory_storage_t &ws,
+template <prop_kind_t aprop>
+void _ref_rnn_common_t<aprop>::gates_reduction(const exec_ctx_t &ctx, int dir,
+        int lay, int iter, int n_gates, int dic, int batch,
+        const memory_storage_t &scratch_gates,
         const memory_storage_t &diff_bias) const {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
@@ -171,19 +187,18 @@ void _ref_rnn_common_t<aprop, src_type, weights_type>::gates_reduction(
     arg_list.set(1, lay);
     arg_list.set(2, iter);
     arg_list.set(3, diff_bias);
-    arg_list.set(4, ws);
+    arg_list.set(4, scratch_gates);
 
     auto nd_range = compute::nd_range_t({n_gates, dic});
     compute_stream->parallel_for(nd_range, gates_reduction_kernel_, arg_list);
 }
 
 //*************** Grid computations strategy: linear ***************//
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-grid_execution_sig(
-        (_ref_rnn_common_t<aprop, src_type, weights_type>::linear_execution)) {
+template <prop_kind_t aprop>
+grid_execution_sig((_ref_rnn_common_t<aprop>::linear_execution)) {
 
-    using src_t = typename prec_traits<src_type>::type;
-    using wei_t = typename prec_traits<weights_type>::type;
+    data_type_t src_t = pd()->src_type;
+    data_type_t wei_t = pd()->weights_type;
 
     // We run the grid of computation
     for (int dir = 0; dir < n_dir; dir++) {
@@ -196,19 +211,15 @@ grid_execution_sig(
                         = OFF3(lay, n_layer, dir, n_dir, 0,
                                   pd()->rnn_conf_.weights_layer_nld
                                           * pd()->rnn_conf_.weights_layer_ld)
-                        * sizeof(wei_t);
+                        * types::data_type_size(wei_t);
 
                 cl_ulong offset_input = (cl_ulong)(ws_states_offset_
                         + OFF4(lay, n_layer + 1, dir, n_dir, 1, n_iter + 1, 0,
                                   batch * pd()->rnn_conf_.states_ws_ld)
-                                * sizeof(src_t));
-                cl_ulong offset_gates = (cl_ulong)(ws_gates_offset_
-                        + OFF4(lay, n_layer, dir, n_dir, 0, n_iter, 0,
-                                  batch * pd()->rnn_conf_.gates_ws_ld)
-                                * pd()->rnn_conf_.acc_data_type_elsz);
+                                * types::data_type_size(src_t));
 
                 gemm_primitive(ctx, w_input, wei_offset, workspace,
-                        offset_input, workspace, offset_gates, gemm_layer);
+                        offset_input, scratch_gates, 0, gemm_layer_fwd);
             }
 
             for (int i = 0; i < n_iter; i++) {
@@ -217,8 +228,9 @@ grid_execution_sig(
                         batch, n_layer, n_dir, n_iter, n_gates, n_states,
                         n_bias, offset_wei_input_, n_parts_weights_layer,
                         offset_wei_state_, n_parts_weights_iter, bias,
-                        workspace, w_input, w_state, diff_weights_layer,
-                        diff_weights_iter, diff_bias, scales, tm_scales);
+                        workspace, scratch_gates, w_input, w_state,
+                        diff_weights_layer, diff_weights_iter, diff_bias,
+                        scales, tm_scales);
             }
 
             if (aprop == prop_kind::backward
@@ -226,63 +238,46 @@ grid_execution_sig(
                 AOC<size_t, 3> off_weights_i(
                         weights_input, n_layer, n_dir, n_parts_weights_layer);
                 cl_ulong offset_w_input = (cl_ulong)(off_weights_i(lay, dir, 0))
-                        * sizeof(wei_t);
+                        * types::data_type_size(wei_t);
+                cl_ulong offset_ws_states = ws_states_offset_
+                        + OFF4(lay, n_layer + 1, dir, n_dir, 1, n_iter + 1, 0,
+                                  batch * pd()->rnn_conf_.states_ws_ld)
+                                * types::data_type_size(src_t);
+                cl_ulong offset_workspace_layer = ws_diff_states_offset_
+                        + OFF5(lay, n_layer + 1, dir, n_dir, n_states,
+                                  n_states + 1, 0, n_iter + 1, 0,
+                                  pd()->rnn_conf_.states_nld
+                                          * pd()->rnn_conf_.diff_states_ws_ld)
+                                * sizeof(float);
+                cl_ulong offset_weights_layer
+                        = OFF3(lay, n_layer, dir, n_dir, 0,
+                                  pd()->rnn_conf_.diff_weights_layer_nld
+                                          * pd()->rnn_conf_
+                                                    .diff_weights_layer_ld)
+                        * sizeof(float);
 
-                gemm_primitive(ctx, w_input, offset_w_input, workspace,
-                        ws_gates_offset_
-                                + OFF3(lay, n_layer, dir, n_dir, 0,
-                                          n_iter * pd()->rnn_conf_.gates_nld
-                                                  * pd()->rnn_conf_.gates_ws_ld)
-                                        * pd()->rnn_conf_.acc_data_type_elsz,
-                        workspace,
-                        ws_diff_states_offset_
-                                + OFF5(lay, n_layer + 1, dir, n_dir, n_states,
-                                          n_states + 1, 0, n_iter + 1, 0,
-                                          pd()->rnn_conf_.states_nld
-                                                  * pd()->rnn_conf_
-                                                            .states_ws_ld)
-                                        * sizeof(src_t),
-                        gemm_layer);
-                gemm_primitive(ctx, workspace,
-                        ws_gates_offset_
-                                + OFF3(lay, n_layer, dir, n_dir, 0,
-                                          n_iter * pd()->rnn_conf_.gates_nld
-                                                  * pd()->rnn_conf_.gates_ws_ld)
-                                        * pd()->rnn_conf_.acc_data_type_elsz,
-                        workspace,
-                        ws_states_offset_
-                                + OFF4(lay, n_layer + 1, dir, n_dir, 1,
-                                          n_iter + 1, 0,
-                                          batch * pd()->rnn_conf_.states_ws_ld)
-                                        * sizeof(src_t),
-                        diff_weights_layer,
-                        OFF3(lay, n_layer, dir, n_dir, 0,
-                                pd()->rnn_conf_.diff_weights_layer_nld
-                                        * pd()->rnn_conf_.diff_weights_layer_ld)
-                                * sizeof(wei_t),
-                        gemm_diff_wei_layer);
+                gemm_primitive(ctx, w_input, offset_w_input, scratch_gates, 0,
+                        workspace, offset_workspace_layer, gemm_layer_bwd);
+                gemm_primitive(ctx, scratch_gates, 0, workspace,
+                        offset_ws_states, diff_weights_layer,
+                        offset_weights_layer, gemm_diff_wei_layer);
             }
 
             if (aprop == prop_kind::backward
                     && pd()->rnn_conf_.merge_gemm_iter) {
-
-                gemm_primitive(ctx, workspace,
-                        ws_gates_offset_
-                                + OFF4(lay, n_layer, dir, n_dir, 0, n_iter, 0,
-                                          batch * pd()->rnn_conf_.gates_ws_ld)
-                                        * pd()->rnn_conf_.acc_data_type_elsz,
-                        workspace,
-                        ws_states_offset_
-                                + OFF4(lay + 1, n_layer + 1, dir, n_dir, 0,
-                                          n_iter + 1, 0,
-                                          batch * pd()->rnn_conf_.states_ws_ld)
-                                        * sizeof(src_t),
-                        diff_weights_iter,
-                        OFF3(lay, n_layer, dir, n_dir, 0,
-                                pd()->rnn_conf_.diff_weights_iter_nld
-                                        * pd()->rnn_conf_.diff_weights_iter_ld)
-                                * sizeof(wei_t),
-                        gemm_diff_wei_iter);
+                cl_ulong offset_workspace_iter = ws_states_offset_
+                        + OFF4(lay + 1, n_layer + 1, dir, n_dir, 0, n_iter + 1,
+                                  0, batch * pd()->rnn_conf_.states_ws_ld)
+                                * types::data_type_size(src_t);
+                cl_ulong offset_weights_iter
+                        = OFF3(lay, n_layer, dir, n_dir, 0,
+                                  pd()->rnn_conf_.diff_weights_iter_nld
+                                          * pd()->rnn_conf_
+                                                    .diff_weights_iter_ld)
+                        * sizeof(float);
+                gemm_primitive(ctx, scratch_gates, 0, workspace,
+                        offset_workspace_iter, diff_weights_iter,
+                        offset_weights_iter, gemm_diff_wei_iter);
             }
         }
     }
@@ -290,8 +285,8 @@ grid_execution_sig(
 
 //********* GRID computations strategy: utility functions **********//
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-void _ref_rnn_common_t<aprop, src_type, weights_type>::bias_prepare(
+template <prop_kind_t aprop>
+void _ref_rnn_common_t<aprop>::bias_prepare(
         compute::compute_stream_t *compute_stream, int n_layer, int n_dir,
         int n_bias, int n_gates, int dic, const memory_storage_t &ws,
         const memory_storage_t &scales, const memory_storage_t &wei_layer,
@@ -313,8 +308,8 @@ void _ref_rnn_common_t<aprop, src_type, weights_type>::bias_prepare(
             bias_prepare_kernel_, arg_list);
 }
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-void _ref_rnn_common_t<aprop, src_type, weights_type>::copy_init_layer(
+template <prop_kind_t aprop>
+void _ref_rnn_common_t<aprop>::copy_init_layer(
         compute::compute_stream_t *compute_stream, bool lr, bool rl, int n_iter,
         int batch, int slc, const memory_storage_t &ws,
         const memory_storage_t &input,
@@ -339,8 +334,8 @@ void _ref_rnn_common_t<aprop, src_type, weights_type>::copy_init_layer(
     }
 }
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-void _ref_rnn_common_t<aprop, src_type, weights_type>::copy_init_iter(
+template <prop_kind_t aprop>
+void _ref_rnn_common_t<aprop>::copy_init_iter(
         compute::compute_stream_t *compute_stream, int n_layer, int n_dir,
         int batch, int sic, int dic, const memory_storage_t &ws,
         const memory_storage_t &firstit_states,
@@ -371,8 +366,8 @@ void _ref_rnn_common_t<aprop, src_type, weights_type>::copy_init_iter(
     }
 }
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-void _ref_rnn_common_t<aprop, src_type, weights_type>::copy_res_layer(
+template <prop_kind_t aprop>
+void _ref_rnn_common_t<aprop>::copy_res_layer(
         compute::compute_stream_t *compute_stream, bool lr, bool rl, int n_iter,
         int batch, int slc, int dic, const memory_storage_t &dst_last_layer,
         const memory_storage_t &diff_src_layer, const memory_storage_t &ws,
@@ -400,8 +395,8 @@ void _ref_rnn_common_t<aprop, src_type, weights_type>::copy_res_layer(
     }
 }
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-void _ref_rnn_common_t<aprop, src_type, weights_type>::copy_res_iter(
+template <prop_kind_t aprop>
+void _ref_rnn_common_t<aprop>::copy_res_iter(
         compute::compute_stream_t *compute_stream, int n_layer, int n_dir,
         int batch, int sic, int dic, const memory_storage_t &dst_last_iter,
         const memory_storage_t &dst_last_iter_c,
@@ -431,9 +426,8 @@ void _ref_rnn_common_t<aprop, src_type, weights_type>::copy_res_iter(
     }
 }
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-void _ref_rnn_common_t<aprop, src_type, weights_type>::ws_set(
-        compute::compute_stream_t *compute_stream,
+template <prop_kind_t aprop>
+void _ref_rnn_common_t<aprop>::ws_set(compute::compute_stream_t *compute_stream,
         const memory_storage_t &workspace_, const cl_ulong ws_offset,
         const int ws_part, const float val, const size_t size) const {
 
@@ -447,8 +441,8 @@ void _ref_rnn_common_t<aprop, src_type, weights_type>::ws_set(
 }
 
 #if DEBUGPRINT
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-void _ref_rnn_common_t<aprop, src_type, weights_type>::ws_print(
+template <prop_kind_t aprop>
+void _ref_rnn_common_t<aprop>::ws_print(
         compute::compute_stream_t *compute_stream,
         const memory_storage_t &workspace_) const {
 
@@ -459,8 +453,8 @@ void _ref_rnn_common_t<aprop, src_type, weights_type>::ws_print(
 }
 #endif
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-packing_sig((_ref_rnn_common_t<aprop, src_type, weights_type>::pack_weights)) {
+template <prop_kind_t aprop>
+packing_sig((_ref_rnn_common_t<aprop>::pack_weights)) {
 #if USE_MKL_PACKED_GEMM
 // TBD
 #else
@@ -479,9 +473,8 @@ packing_sig((_ref_rnn_common_t<aprop, src_type, weights_type>::pack_weights)) {
 #endif
 }
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-packing_sig(
-        (_ref_rnn_common_t<aprop, src_type, weights_type>::no_pack_weights)) {
+template <prop_kind_t aprop>
+packing_sig((_ref_rnn_common_t<aprop>::no_pack_weights)) {
     AOC<size_t, 3> weights(weights_, n_layer, n_dir, n_parts);
 
     for (int i = 0; i < n_layer; i++) {
@@ -495,9 +488,8 @@ packing_sig(
         }
     }
 }
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-free_packed_sig((_ref_rnn_common_t<aprop, src_type,
-        weights_type>::free_packed_weights)) {
+template <prop_kind_t aprop>
+free_packed_sig((_ref_rnn_common_t<aprop>::free_packed_weights)) {
 #if USE_MKL_PACKED_GEMM
 // TBD
 #else
@@ -508,9 +500,8 @@ free_packed_sig((_ref_rnn_common_t<aprop, src_type,
     assert(!"packed gemm is disabled");
 #endif
 }
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-free_packed_sig((_ref_rnn_common_t<aprop, src_type,
-        weights_type>::free_no_packed_weights)) {
+template <prop_kind_t aprop>
+free_packed_sig((_ref_rnn_common_t<aprop>::free_no_packed_weights)) {
     UNUSED(n_layer);
     UNUSED(n_dir);
     UNUSED(n_parts);
@@ -519,9 +510,8 @@ free_packed_sig((_ref_rnn_common_t<aprop, src_type,
 
 //********************* Execution function *********************//
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-status_t _ref_rnn_common_t<aprop, src_type, weights_type>::execute_(
-        const exec_ctx_t &ctx) const {
+template <prop_kind_t aprop>
+status_t _ref_rnn_common_t<aprop>::execute_(const exec_ctx_t &ctx) const {
 
     status_t status = status::success;
 
@@ -578,6 +568,10 @@ status_t _ref_rnn_common_t<aprop, src_type, weights_type>::execute_(
                     ? CTX_OUT_STORAGE(DNNL_ARG_WORKSPACE)
                     : CTX_IN_STORAGE(DNNL_ARG_WORKSPACE)
                                        : *scratchpad.get();
+
+    auto scratchpad_gates
+            = ctx.get_scratchpad_grantor().get_memory_storage(key_rnn_gates);
+    auto &scratch_gates = *scratchpad_gates.get();
 
     auto &diff_src_layer_native_ = CTX_OUT_STORAGE(DNNL_ARG_DIFF_SRC_LAYER);
     auto &diff_src_iter_native_ = CTX_OUT_STORAGE(DNNL_ARG_DIFF_SRC_ITER);
@@ -716,9 +710,10 @@ status_t _ref_rnn_common_t<aprop, src_type, weights_type>::execute_(
     (this->*grid_computation)(ctx, dic, slc, sic, wic, batch, n_layer, n_dir,
             n_iter, n_gates, n_states, n_bias, offset_wei_input_,
             n_parts_weights_layer, offset_wei_state_, n_parts_weights_iter,
-            bias_native_, workspace_, w_input_native_, w_state_native_,
-            diff_weights_layer_native_, diff_weights_iter_native_,
-            diff_bias_native_, *scales_buf_, *tm_scales_buf_);
+            bias_native_, workspace_, scratch_gates, w_input_native_,
+            w_state_native_, diff_weights_layer_native_,
+            diff_weights_iter_native_, diff_bias_native_, *scales_buf_,
+            *tm_scales_buf_);
 
     DPRINT("\n%s(%d) WS before copy res\n\n", __FUNCTION__, __LINE__);
     WS_PRINT(compute_stream, workspace_);
@@ -752,90 +747,37 @@ status_t _ref_rnn_common_t<aprop, src_type, weights_type>::execute_(
 
 /* Fix for MSVS warning C4661 */
 template <>
-cell_execution_sig(ref_rnn_fwd_f32_t::cell_execution);
+cell_execution_sig(ref_rnn_fwd_t::cell_execution);
 template <>
-cell_execution_sig(ref_rnn_bwd_f32_t::cell_execution);
+cell_execution_sig(ref_rnn_bwd_t::cell_execution);
 template <>
-cell_execution_sig(ref_rnn_fwd_f32_t::cell_execution_gru);
+cell_execution_sig(ref_rnn_fwd_t::cell_execution_gru);
 template <>
-cell_execution_sig(ref_rnn_bwd_f32_t::cell_execution_gru);
+cell_execution_sig(ref_rnn_bwd_t::cell_execution_gru);
 template <>
-cell_execution_sig(ref_rnn_fwd_bf16_t::cell_execution_gru);
+cell_execution_sig(ref_rnn_fwd_t::cell_execution_gru_lbr);
 template <>
-cell_execution_sig(ref_rnn_bwd_bf16_t::cell_execution_gru);
+cell_execution_sig(ref_rnn_bwd_t::cell_execution_gru_lbr);
 template <>
-cell_execution_sig(ref_rnn_fwd_f32_t::cell_execution_gru_lbr);
+elemwise_sig(ref_rnn_fwd_t::rnn_elemwise);
 template <>
-cell_execution_sig(ref_rnn_bwd_f32_t::cell_execution_gru_lbr);
+elemwise_sig(ref_rnn_bwd_t::rnn_elemwise);
 template <>
-cell_execution_sig(ref_rnn_fwd_bf16_t::cell_execution_gru_lbr);
+elemwise_sig(ref_rnn_fwd_t::lstm_elemwise);
 template <>
-cell_execution_sig(ref_rnn_bwd_bf16_t::cell_execution_gru_lbr);
+elemwise_sig(ref_rnn_bwd_t::lstm_elemwise);
 template <>
-cell_execution_sig(ref_rnn_fwd_bf16_t::cell_execution);
+elemwise_sig(ref_rnn_fwd_t::lstm_elemwise_u8s8);
 template <>
-cell_execution_sig(ref_rnn_bwd_bf16_t::cell_execution);
+elemwise_sig(ref_rnn_bwd_t::lstm_elemwise_u8s8);
 template <>
-cell_execution_sig(ref_rnn_fwd_u8s8_t::cell_execution);
+elemwise_sig(ref_rnn_fwd_t::gru_lbr_elemwise);
 template <>
-cell_execution_sig(ref_rnn_fwd_u8s8_t::cell_execution_gru);
-template <>
-cell_execution_sig(ref_rnn_fwd_u8s8_t::cell_execution_gru_lbr);
-template <>
-cell_execution_sig(ref_rnn_fwd_f16_t::cell_execution);
-template <>
-cell_execution_sig(ref_rnn_fwd_f16_t::cell_execution_gru);
-template <>
-cell_execution_sig(ref_rnn_fwd_f16_t::cell_execution_gru_lbr);
-template <>
-elemwise_sig(ref_rnn_fwd_u8s8_t::rnn_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_f16_t::rnn_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_f32_t::rnn_elemwise);
-template <>
-elemwise_sig(ref_rnn_bwd_f32_t::rnn_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_bf16_t::rnn_elemwise);
-template <>
-elemwise_sig(ref_rnn_bwd_bf16_t::rnn_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_u8s8_t::lstm_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_f16_t::lstm_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_f32_t::lstm_elemwise);
-template <>
-elemwise_sig(ref_rnn_bwd_f32_t::lstm_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_bf16_t::lstm_elemwise);
-template <>
-elemwise_sig(ref_rnn_bwd_bf16_t::lstm_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_u8s8_t::gru_lbr_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_f16_t::gru_lbr_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_f32_t::gru_lbr_elemwise);
-template <>
-elemwise_sig(ref_rnn_bwd_f32_t::gru_lbr_elemwise);
-template <>
-elemwise_sig(ref_rnn_fwd_bf16_t::gru_lbr_elemwise);
-template <>
-elemwise_sig(ref_rnn_bwd_bf16_t::gru_lbr_elemwise);
+elemwise_sig(ref_rnn_bwd_t::gru_lbr_elemwise);
 
-template struct _ref_rnn_common_t<prop_kind::forward, data_type::u8,
-        data_type::s8>;
-template struct _ref_rnn_common_t<prop_kind::forward, data_type::f16,
-        data_type::f16>;
-template struct _ref_rnn_common_t<prop_kind::forward, data_type::f32,
-        data_type::f32>;
-template struct _ref_rnn_common_t<prop_kind::backward, data_type::f32,
-        data_type::f32>;
-template struct _ref_rnn_common_t<prop_kind::forward, data_type::bf16,
-        data_type::bf16>;
-template struct _ref_rnn_common_t<prop_kind::backward, data_type::bf16,
-        data_type::bf16>;
+template struct _ref_rnn_common_t<prop_kind::forward>;
+template struct _ref_rnn_common_t<prop_kind::backward>;
+
 } // namespace ocl
 } // namespace impl
 } // namespace dnnl
