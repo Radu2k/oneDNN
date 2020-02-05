@@ -59,7 +59,7 @@ status_t gen12lp_u8s8s32u8_1x1_convolution_fwd_t::pd_t::init_conf() {
 
     conf.gws_d[0] = conf.oc / conf.oc_block * conf.sub_group_size;
     conf.gws_d[1] = utils::rnd_up(conf.ow, conf.lws_d[1]) * conf.oh;
-    conf.gws_d[2] = utils::div_up(conf.mb, conf.mb_block) * 2;
+    conf.gws_d[2] = utils::div_up(conf.mb, utils::div_up(conf.mb_block, 2));
 
     conf.with_bias = cd.bias_desc.format_kind != format_kind::undef;
 
