@@ -23,8 +23,9 @@
 #include "common/c_types_map.hpp"
 #include "common/gemm_utils.hpp"
 #include "compute/compute.hpp"
-#include "ocl/jit_gen9_gemm_kernel.hpp"
-#include "ocl/ocl_gemm_pd.hpp"
+#include "ocl/gemm/jit_gen9_gemm_kernel.hpp"
+#include "ocl/gemm/ocl_gemm.hpp"
+#include "ocl/gemm/ocl_gemm_pd.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
@@ -32,7 +33,7 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-struct jit_gen9_gemm_t : public primitive_impl_t {
+struct jit_gen9_gemm_t : public ocl_gemm_t {
 
     enum class type {
         copy_based,
@@ -42,11 +43,7 @@ struct jit_gen9_gemm_t : public primitive_impl_t {
     };
 
     struct pd_t : public ocl_gemm_pd_t {
-        using hint_class = void;
-
-        pd_t(engine_t *engine, const gemm_desc_t *adesc,
-                const primitive_attr_t *attr, const hint_class *)
-            : ocl_gemm_pd_t(engine, adesc, attr) {}
+        using ocl_gemm_pd_t::ocl_gemm_pd_t;
 
         DECLARE_COMMON_PD_T("ocl:gemm:any", jit_gen9_gemm_t);
 
@@ -54,22 +51,34 @@ struct jit_gen9_gemm_t : public primitive_impl_t {
             using namespace prop_kind;
             using namespace data_type;
             using namespace primitive_kind;
+            using smask_t = primitive_attr_t::skip_mask_t;
 
             assert(this->engine()->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine());
 
-            const auto attr_skip_mask = primitive_attr_t::skip_mask_t::post_ops;
+            const auto attr_skip_mask = smask_t::oscale | smask_t::post_ops;
 
-            bool ok = true
-                    && utils::one_of(desc()->a_type, data_type::f32,
-                            data_type::bf16, data_type::f16)
-                    && utils::one_of(desc()->b_type, data_type::f32,
-                            data_type::bf16, data_type::f16)
-                    && utils::one_of(desc()->c_type, data_type::f32,
-                            data_type::bf16, data_type::f16)
+            const auto d = desc();
+
+            // LIMITATIONS:
+            // - batch is not supported
+            // - runtime dims are not supported
+            // - bias is not supported
+            bool limits_ok = d->batch == 1
+                    && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m, d->n, d->k,
+                            d->lda, d->ldb, d->ldc)
+                    && d->bias_type == data_type::undef;
+
+            bool ok = true && limits_ok
+                    && utils::one_of(d->a_type, data_type::f32, data_type::bf16,
+                            data_type::f16)
+                    && utils::one_of(d->b_type, data_type::f32, data_type::bf16,
+                            data_type::f16)
+                    && utils::one_of(d->c_type, data_type::f32, data_type::bf16,
+                            data_type::f16)
                     && utils::one_of(
-                            desc()->acc_type, data_type::f32, data_type::f16)
+                            d->acc_type, data_type::f32, data_type::f16)
                     && compute_engine->mayiuse(
                             compute::device_ext_t::intel_subgroups)
                     && IMPLICATION(desc()->c_type == data_type::f16,
@@ -80,9 +89,14 @@ struct jit_gen9_gemm_t : public primitive_impl_t {
                                             compute::device_ext_t::
                                                     intel_subgroups_short))
                     && attr()->has_default_values(attr_skip_mask)
-                    && attr()->post_ops_.len_ <= 1
+                    && attr()->output_scales_.mask_ == 0
+                    && attr()->post_ops_.len_ <= 2
                     && IMPLICATION(attr()->post_ops_.len_ == 1,
-                            attr()->post_ops_.find(eltwise) != -1);
+                            attr()->post_ops_.find(eltwise) != -1
+                                    || attr()->post_ops_.find(sum) != -1)
+                    && IMPLICATION(attr()->post_ops_.len_ == 2,
+                            attr()->post_ops_.find(sum) == 0
+                                    && attr()->post_ops_.find(eltwise) == 1);
             if (!ok) return status::unimplemented;
             return status::success;
         }
@@ -105,6 +119,14 @@ struct jit_gen9_gemm_t : public primitive_impl_t {
             return with_eltwise()
                     ? attr()->post_ops_.entry_[eltwise_idx].eltwise.beta
                     : 0.0f;
+        }
+
+        float alpha() const { return attr()->output_scales_.scales_[0]; }
+
+        float beta() const {
+            using namespace primitive_kind;
+            const auto &p = attr()->post_ops_;
+            return p.contain(sum, 0) ? p.entry_[0].sum.scale : 0.f;
         }
 
         alg_kind_t eltwise_alg_kind() const {
@@ -153,7 +175,7 @@ struct jit_gen9_gemm_t : public primitive_impl_t {
         temp_buf_.reset(temp_buf_ptr);
 
         for (bool beta0 : {false, true}) {
-            if (beta0 && pd()->desc()->beta != 0) continue;
+            if (beta0 && pd()->beta() != 0) continue;
 
             compute::kernel_ctx_t kernel_ctx;
             auto status = jit_gen9_gemm_compute_kernel::init_const_def(
@@ -251,9 +273,9 @@ struct jit_gen9_gemm_t : public primitive_impl_t {
         return init_superkernel_plan();
     }
 
-    jit_gen9_gemm_t(const pd_t *apd) : primitive_impl_t(apd) {}
+    jit_gen9_gemm_t(const pd_t *apd) : ocl_gemm_t(apd) {}
 
-    virtual status_t execute(const exec_ctx_t &ctx) const override;
+    virtual status_t execute(const gemm_exec_ctx_t &ctx) const override;
 
 protected:
 #ifdef _WIN32
@@ -296,8 +318,8 @@ private:
     size_t max_plan_size() const;
     status_t init_superkernel_plan();
 
-    virtual status_t execute_standard(const exec_ctx_t &ctx) const;
-    virtual status_t execute_superkernel(const exec_ctx_t &ctx) const;
+    virtual status_t execute_standard(const gemm_exec_ctx_t &ctx) const;
+    virtual status_t execute_superkernel(const gemm_exec_ctx_t &ctx) const;
 
     compute::kernel_t compute_kernel_[2];
     compute::kernel_t copy_kernel_[2][2];

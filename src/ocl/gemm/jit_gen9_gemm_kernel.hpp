@@ -19,7 +19,7 @@
 
 #include "common/c_types_map.hpp"
 #include "compute/compute.hpp"
-#include "ocl/jit_gen9_gemm.hpp"
+#include "ocl/gemm/jit_gen9_gemm.hpp"
 #include "ocl/jit_primitive_conf.hpp"
 
 namespace dnnl {

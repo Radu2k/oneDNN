@@ -19,7 +19,7 @@
 #include "common/float16.hpp"
 #include "common/type_helpers.hpp"
 
-#include "ocl/jit_gen9_gemm.hpp"
+#include "ocl/gemm/jit_gen9_gemm.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -366,14 +366,14 @@ status_t jit_gen9_gemm_t::init_superkernel_plan() {
     return status::success;
 }
 
-status_t jit_gen9_gemm_t::execute(const exec_ctx_t &ctx) const {
+status_t jit_gen9_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     if (gemm_type_ == type::no_copy_superkernel)
         return execute_superkernel(ctx);
     else
         return execute_standard(ctx);
 }
 
-status_t jit_gen9_gemm_t::execute_standard(const exec_ctx_t &ctx) const {
+status_t jit_gen9_gemm_t::execute_standard(const gemm_exec_ctx_t &ctx) const {
     auto a_type = pd()->desc()->a_type;
     auto b_type = pd()->desc()->b_type;
     auto c_type = pd()->desc()->c_type;
@@ -392,8 +392,8 @@ status_t jit_gen9_gemm_t::execute_standard(const exec_ctx_t &ctx) const {
     auto ldb = pd()->desc()->ldb;
     auto ldc = pd()->desc()->ldc;
 
-    auto alpha = pd()->desc()->alpha;
-    auto beta = pd()->desc()->beta;
+    auto alpha = pd()->alpha();
+    auto beta = pd()->beta();
 
     auto eltwise_alpha = pd()->eltwise_alpha();
     auto eltwise_beta = pd()->eltwise_beta();
@@ -402,16 +402,16 @@ status_t jit_gen9_gemm_t::execute_standard(const exec_ctx_t &ctx) const {
     auto beta_native = beta;
     auto one_native = 1.0f;
 
-    auto &a = CTX_IN_STORAGE(DNNL_ARG_SRC_0);
-    auto &b = CTX_IN_STORAGE(DNNL_ARG_SRC_1);
-    auto &c = CTX_OUT_STORAGE(DNNL_ARG_DST);
+    auto &a = GEMM_CTX_ARG_STORAGE(a);
+    auto &b = GEMM_CTX_ARG_STORAGE(b);
+    auto &c = GEMM_CTX_ARG_STORAGE(c);
 
-    size_t off_a0 = a.get_offset() / types::data_type_size(a_type)
-            + pd()->dyn_offset_a;
-    size_t off_b0 = b.get_offset() / types::data_type_size(b_type)
-            + pd()->dyn_offset_b;
-    size_t off_c0 = c.get_offset() / types::data_type_size(c_type)
-            + pd()->dyn_offset_c;
+    size_t off_a0
+            = a.offset() / types::data_type_size(a_type) + pd()->dyn_offset_a;
+    size_t off_b0
+            = b.offset() / types::data_type_size(b_type) + pd()->dyn_offset_b;
+    size_t off_c0
+            = c.offset() / types::data_type_size(c_type) + pd()->dyn_offset_c;
 
     bool nocopy = (gemm_type_ == type::no_copy)
             || (gemm_type_ == type::no_copy_if_even_off && !(off_a0 & 1)
@@ -501,7 +501,8 @@ status_t jit_gen9_gemm_t::execute_standard(const exec_ctx_t &ctx) const {
     return status::success;
 }
 
-status_t jit_gen9_gemm_t::execute_superkernel(const exec_ctx_t &ctx) const {
+status_t jit_gen9_gemm_t::execute_superkernel(
+        const gemm_exec_ctx_t &ctx) const {
     auto a_type = pd()->desc()->a_type;
     auto b_type = pd()->desc()->b_type;
     auto c_type = pd()->desc()->c_type;
@@ -520,22 +521,22 @@ status_t jit_gen9_gemm_t::execute_superkernel(const exec_ctx_t &ctx) const {
     auto ldb = pd()->desc()->ldb;
     auto ldc = pd()->desc()->ldc;
 
-    auto alpha = pd()->desc()->alpha;
-    auto beta = pd()->desc()->beta;
+    auto alpha = pd()->alpha();
+    auto beta = pd()->beta();
 
     auto eltwise_alpha = pd()->eltwise_alpha();
     auto eltwise_beta = pd()->eltwise_beta();
 
-    auto &a = CTX_IN_STORAGE(DNNL_ARG_SRC_0);
-    auto &b = CTX_IN_STORAGE(DNNL_ARG_SRC_1);
-    auto &c = CTX_OUT_STORAGE(DNNL_ARG_DST);
+    auto &a = GEMM_CTX_ARG_STORAGE(a);
+    auto &b = GEMM_CTX_ARG_STORAGE(b);
+    auto &c = GEMM_CTX_ARG_STORAGE(c);
 
-    size_t off_a0 = a.get_offset() / types::data_type_size(a_type)
-            + pd()->dyn_offset_a;
-    size_t off_b0 = b.get_offset() / types::data_type_size(b_type)
-            + pd()->dyn_offset_b;
-    size_t off_c = c.get_offset() / types::data_type_size(c_type)
-            + pd()->dyn_offset_c;
+    size_t off_a0
+            = a.offset() / types::data_type_size(a_type) + pd()->dyn_offset_a;
+    size_t off_b0
+            = b.offset() / types::data_type_size(b_type) + pd()->dyn_offset_b;
+    size_t off_c
+            = c.offset() / types::data_type_size(c_type) + pd()->dyn_offset_c;
 
     status_t status;
     auto block_k = driver_params_f32_nocopy::block_k;

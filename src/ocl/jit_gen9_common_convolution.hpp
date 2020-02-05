@@ -239,6 +239,8 @@ struct jit_gen9_common_convolution_bwd_weights_t : public primitive_impl_t {
                     && expect_data_types(f32, f32, f32, f32, f32)
                     && compute_engine->mayiuse(
                             compute::device_ext_t::intel_subgroups)
+                    && compute_engine->mayiuse(
+                            compute::device_ext_t::khr_int64_base_atomics)
                     && !has_zero_dim_memory() && attr()->has_default_values();
             if (!ok) return status::unimplemented;
 
@@ -250,10 +252,6 @@ struct jit_gen9_common_convolution_bwd_weights_t : public primitive_impl_t {
 
             ok = set_default_formats_common(
                     jcp_.src_tag, jcp_.wei_tag, jcp_.dst_tag);
-
-            auto scratchpad = scratchpad_registry().registrar();
-            jit_gen9_common_conv_bwd_weights_kernel::init_scratchpad(
-                    scratchpad, jcp_);
 
             return ok ? status::success : status::unimplemented;
         }
@@ -269,26 +267,9 @@ struct jit_gen9_common_convolution_bwd_weights_t : public primitive_impl_t {
                 kernel_ctx, pd()->jcp_);
         if (status != status::success) return status;
 
-        std::vector<const char *> kernel_names(3);
-
-        kernel_names[0] = "gen9_common_conv_bwd_weights";
-
-        if (pd()->jcp_.ver == ver_16mb16c || pd()->jcp_.ver == ver_8ow16c
-                || pd()->jcp_.ver == ver_1stconv) {
-            kernel_names[1] = "gen9_reduce_bwd_weights";
-        }
-        if (pd()->jcp_.ver == ver_8ow16c) {
-            kernel_names[2] = "gen9_load_tails_bwd_weights";
-        }
-
-        std::vector<compute::kernel_t> kernels;
-        status = compute_engine->create_kernels(
-                &kernels, kernel_names, kernel_ctx);
-        CHECK(status);
-
-        kernel_ = kernels[0];
-        reduce_kernel_ = kernels[1];
-        load_tails_ = kernels[2];
+        compute_engine->create_kernel(
+                &kernel_, "gen9_common_conv_bwd_weights", kernel_ctx);
+        if (!kernel_) return status::runtime_error;
 
         return status::success;
     }
@@ -309,8 +290,6 @@ private:
     const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
     jit_gen9_common_conv_bwd_weights_kernel *ker_;
     compute::kernel_t kernel_;
-    compute::kernel_t reduce_kernel_;
-    compute::kernel_t load_tails_;
 };
 
 } // namespace ocl

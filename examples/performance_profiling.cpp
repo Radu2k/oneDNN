@@ -105,10 +105,8 @@ const memory::dims padding = {0, 0};
 // function to init data
 void init_data(memory &m, float v) {
     size_t size = m.get_desc().get_size() / sizeof(float);
-    std::vector<float> data(size);
-    read_from_dnnl_memory(data.data(), m);
-    for (size_t i = 0; i < size; ++i)
-        data[i] = v;
+    std::vector<float> data(size, v);
+    write_to_dnnl_memory(data.data(), m);
 }
 
 // function to execute non-fused relu
@@ -516,7 +514,7 @@ void performance_profiling(engine::kind engine_kind, int argc, char **argv) {
     stream s(eng);
     // [Set dimensions]
     // set dimensions for synthetic data and weights
-    const memory::dim BATCH = 1000;
+    const memory::dim BATCH = (engine_kind == engine::kind::cpu ? 1000 : 100);
     const memory::dim IC = 3, OC = 96;
     const memory::dim IH = 227, KH = 11, OH = 55;
     const memory::dim IW = 227, KW = 11, OW = 55;

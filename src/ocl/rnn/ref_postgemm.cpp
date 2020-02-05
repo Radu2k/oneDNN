@@ -20,8 +20,8 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-elemwise_sig((_ref_rnn_common_t<aprop, src_type, weights_type>::rnn_elemwise)) {
+template <prop_kind_t aprop>
+elemwise_sig((_ref_rnn_common_t<aprop>::rnn_elemwise)) {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
     auto nd_range = compute::nd_range_t({dic, batch});
@@ -33,26 +33,22 @@ elemwise_sig((_ref_rnn_common_t<aprop, src_type, weights_type>::rnn_elemwise)) {
     arg_list.set(1, lay);
     arg_list.set(2, iter);
     arg_list.set(3, workspace);
-    arg_list.set(4, bias);
-    arg_list.set(5, pd()->desc()->alpha);
+    arg_list.set(4, scratch_gates);
+    arg_list.set(5, bias);
+    arg_list.set(6, pd()->desc()->alpha);
     // for test mode
-    arg_list.set(6,
+    arg_list.set(7,
             pd()->rnn_conf_.is_testmode ? tm_scales
                                         : memory_storage_t::empty_storage());
     arg_list.set(
-            7, pd()->rnn_conf_.is_testmode ? pd()->rnn_conf_.tm_cscale : 0.0f);
+            8, pd()->rnn_conf_.is_testmode ? pd()->rnn_conf_.tm_cscale : 0.0f);
     compute_stream->parallel_for(nd_range, kernel, arg_list);
 }
-template elemwise_sig(ref_rnn_fwd_u8s8_t::rnn_elemwise);
-template elemwise_sig(ref_rnn_fwd_f16_t::rnn_elemwise);
-template elemwise_sig(ref_rnn_fwd_f32_t::rnn_elemwise);
-template elemwise_sig(ref_rnn_bwd_f32_t::rnn_elemwise);
-template elemwise_sig(ref_rnn_fwd_bf16_t::rnn_elemwise);
-template elemwise_sig(ref_rnn_bwd_bf16_t::rnn_elemwise);
+template elemwise_sig(ref_rnn_fwd_t::rnn_elemwise);
+template elemwise_sig(ref_rnn_bwd_t::rnn_elemwise);
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-elemwise_sig(
-        (_ref_rnn_common_t<aprop, src_type, weights_type>::lstm_elemwise)) {
+template <prop_kind_t aprop>
+elemwise_sig((_ref_rnn_common_t<aprop>::lstm_elemwise)) {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
     auto nd_range = compute::nd_range_t({dic, batch});
@@ -64,24 +60,22 @@ elemwise_sig(
     arg_list.set(1, lay);
     arg_list.set(2, iter);
     arg_list.set(3, workspace);
-    arg_list.set(4, bias);
-    arg_list.set(5, pd()->desc()->alpha);
+    arg_list.set(4, scratch_gates);
+    arg_list.set(5, bias);
+    arg_list.set(6, pd()->desc()->alpha);
     // for test mode
-    arg_list.set(6,
+    arg_list.set(7,
             pd()->rnn_conf_.is_testmode ? tm_scales
                                         : memory_storage_t::empty_storage());
     arg_list.set(
-            7, pd()->rnn_conf_.is_testmode ? pd()->rnn_conf_.tm_cscale : 0.0f);
+            8, pd()->rnn_conf_.is_testmode ? pd()->rnn_conf_.tm_cscale : 0.0f);
     compute_stream->parallel_for(nd_range, kernel, arg_list);
 }
-template elemwise_sig(ref_rnn_fwd_f16_t::lstm_elemwise);
-template elemwise_sig(ref_rnn_fwd_f32_t::lstm_elemwise);
-template elemwise_sig(ref_rnn_bwd_f32_t::lstm_elemwise);
-template elemwise_sig(ref_rnn_fwd_bf16_t::lstm_elemwise);
-template elemwise_sig(ref_rnn_bwd_bf16_t::lstm_elemwise);
+template elemwise_sig(ref_rnn_fwd_t::lstm_elemwise);
+template elemwise_sig(ref_rnn_bwd_t::lstm_elemwise);
 
-template <>
-elemwise_sig(ref_rnn_fwd_u8s8_t::lstm_elemwise) {
+template <prop_kind_t aprop>
+elemwise_sig((_ref_rnn_common_t<aprop>::lstm_elemwise_u8s8)) {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
     auto nd_range = compute::nd_range_t({dic, batch});
@@ -95,32 +89,29 @@ elemwise_sig(ref_rnn_fwd_u8s8_t::lstm_elemwise) {
     arg_list.set(1, lay);
     arg_list.set(2, iter);
     arg_list.set(3, workspace);
-    arg_list.set(4, scales);
-    arg_list.set(5, bias);
-    arg_list.set(6, pd()->desc()->alpha);
-    arg_list.set(7, data_shift);
-    arg_list.set(8, data_scale);
+    arg_list.set(4, scratch_gates);
+    arg_list.set(5, scales);
+    arg_list.set(6, bias);
+    arg_list.set(7, pd()->desc()->alpha);
+    arg_list.set(8, data_shift);
+    arg_list.set(9, data_scale);
     // for test mode
-    arg_list.set(9,
+    arg_list.set(10,
             pd()->rnn_conf_.is_testmode ? tm_scales
                                         : memory_storage_t::empty_storage());
     arg_list.set(
-            10, pd()->rnn_conf_.is_testmode ? pd()->rnn_conf_.tm_cscale : 0.0f);
+            11, pd()->rnn_conf_.is_testmode ? pd()->rnn_conf_.tm_cscale : 0.0f);
     compute_stream->parallel_for(nd_range, kernel, arg_list);
 }
+template elemwise_sig(ref_rnn_fwd_t::lstm_elemwise_u8s8);
+template elemwise_sig(ref_rnn_bwd_t::lstm_elemwise_u8s8);
 
-template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type>
-elemwise_sig(
-        (_ref_rnn_common_t<aprop, src_type, weights_type>::gru_lbr_elemwise)) {
+template <prop_kind_t aprop>
+elemwise_sig((_ref_rnn_common_t<aprop>::gru_lbr_elemwise)) {
     assert(!"unimplemented");
 }
-template elemwise_sig(ref_rnn_fwd_u8s8_t::gru_lbr_elemwise);
-template elemwise_sig(ref_rnn_fwd_f16_t::gru_lbr_elemwise);
-template elemwise_sig(ref_rnn_fwd_f32_t::gru_lbr_elemwise);
-template elemwise_sig(ref_rnn_bwd_f32_t::gru_lbr_elemwise);
-template elemwise_sig(ref_rnn_fwd_bf16_t::gru_lbr_elemwise);
-template elemwise_sig(ref_rnn_bwd_bf16_t::gru_lbr_elemwise);
-
+template elemwise_sig(ref_rnn_fwd_t::gru_lbr_elemwise);
+template elemwise_sig(ref_rnn_bwd_t::gru_lbr_elemwise);
 } // namespace ocl
 } // namespace impl
 } // namespace dnnl

@@ -27,7 +27,7 @@ void __attribute__((overloadable))
 intel_sub_group_block_write_uc16(__global uchar *p, uchar16 data);
 
 uchar16 __attribute__((overloadable))
-intel_sub_group_block_read_uc16(__global uchar *p);
+intel_sub_group_block_read_uc16(const __global uchar *p);
 #endif
 
 #ifdef cl_intel_dot_accumulate
@@ -430,93 +430,93 @@ inline float8 mmad8x8(uint8 A_vectors, int8 B_vectors, float8 acc)
 #endif
 
 #ifdef cl_intel_subgroup_local_block_io
-inline uint8 subgroup_block_read_uint8(const __local uint *p)
+inline uint8 sub_group_block_read_uint8(const __local uint *p)
         __attribute__((overloadable)) {
     uint8 __builtin_IB_simd_block_read_8_local(const __local uint *p)
             __attribute__((const));
     return __builtin_IB_simd_block_read_8_local(p);
 }
-inline uint4 subgroup_block_read_uint4(const __local uint *p)
+inline uint4 sub_group_block_read_uint4(const __local uint *p)
         __attribute__((overloadable)) {
     uint4 __builtin_IB_simd_block_read_4_local(const __local uint *p)
             __attribute__((const));
     return __builtin_IB_simd_block_read_4_local(p);
 }
 
-inline uint subgroup_block_read_uint(const __local uint *p)
+inline uint sub_group_block_read_uint(const __local uint *p)
         __attribute__((overloadable)) {
     uint __builtin_IB_simd_block_read_1_local(const __local uint *p)
             __attribute__((const));
     return __builtin_IB_simd_block_read_1_local(p);
 }
 
-void subgroup_block_write_ushort(__local ushort *p, uint v)
+void sub_group_block_write_ushort(__local ushort *p, uint v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_1_local_h(__local ushort * p, ushort v);
     __builtin_IB_simd_block_write_1_local_h(p, v);
 }
 
-void subgroup_block_write_uint(__local uint *p, uint v)
+void sub_group_block_write_uint(__local uint *p, uint v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_1_local(__local uint * p, uint v);
     __builtin_IB_simd_block_write_1_local(p, v);
 }
 
-void subgroup_block_write_uint2(__local uint *p, uint2 v)
+void sub_group_block_write_uint2(__local uint *p, uint2 v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_2_local(__local uint * p, uint2 v);
     __builtin_IB_simd_block_write_2_local(p, v);
 }
 
-void subgroup_block_write_uint4(__local uint *p, uint4 v)
+void sub_group_block_write_uint4(__local uint *p, uint4 v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_4_local(__local uint * p, uint4 v);
     __builtin_IB_simd_block_write_4_local(p, v);
 }
 
-void subgroup_block_write_uint8(__local uint *p, uint8 v)
+void sub_group_block_write_uint8(__local uint *p, uint8 v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_8_local(__local uint * p, uint8 v);
     __builtin_IB_simd_block_write_8_local(p, v);
 }
 
-inline ushort8 subgroup_block_read_ushort8(const __local ushort *p)
+inline ushort8 sub_group_block_read_ushort8(const __local ushort *p)
         __attribute__((overloadable)) {
     ushort8 __builtin_IB_simd_block_read_8_local_h(const __local ushort *p);
     return __builtin_IB_simd_block_read_8_local_h(p);
 }
 
-void subgroup_block_write_ushort8(__local ushort *p, ushort8 v)
+void sub_group_block_write_ushort8(__local ushort *p, ushort8 v)
         __attribute__((overloadable)) {
     void __builtin_IB_simd_block_write_8_local_h(__local ushort * p, ushort8);
     __builtin_IB_simd_block_write_8_local_h(p, v);
 }
 
-#define READ_LOCAL_US_8(_P) subgroup_block_read_ushort8(_P)
-#define READ_LOCAL_8(_P) subgroup_block_read_uint8(_P)
-#define READ_LOCAL_4(_P) subgroup_block_read_uint4(_P)
-#define READ_LOCAL_1(_P) subgroup_block_read_uint(_P)
-#define WRITE_LOCAL_US_8(_P, _V) subgroup_block_write_ushort8(_P, _V)
-#define WRITE_LOCAL_8(_P, _V) subgroup_block_write_uint8(_P, _V)
-#define WRITE_LOCAL_4(_P, _V) subgroup_block_write_uint4(_P, _V)
-#define WRITE_LOCAL_2(_P, _V) subgroup_block_write_uint2(_P, _V)
-#define WRITE_LOCAL_1(_P, _V) subgroup_block_write_uint(_P, _V)
-#define WRITE_LOCAL_SHORT_1(_P, _V) subgroup_block_write_ushort(_P, _V)
+#define READ_LOCAL_US_8(_P) sub_group_block_read_ushort8(_P)
+#define READ_LOCAL_8(_P) sub_group_block_read_uint8(_P)
+#define READ_LOCAL_4(_P) sub_group_block_read_uint4(_P)
+#define READ_LOCAL_1(_P) sub_group_block_read_uint(_P)
+#define WRITE_LOCAL_US_8(_P, _V) sub_group_block_write_ushort8(_P, _V)
+#define WRITE_LOCAL_8(_P, _V) sub_group_block_write_uint8(_P, _V)
+#define WRITE_LOCAL_4(_P, _V) sub_group_block_write_uint4(_P, _V)
+#define WRITE_LOCAL_2(_P, _V) sub_group_block_write_uint2(_P, _V)
+#define WRITE_LOCAL_1(_P, _V) sub_group_block_write_uint(_P, _V)
+#define WRITE_LOCAL_SHORT_1(_P, _V) sub_group_block_write_ushort(_P, _V)
 
 #else // cl_intel_subgroup_local_block_io
 
-#define READ_LOCAL_US_8(_P) subgroup_block_read_ushort8(_P)
-#define READ_LOCAL_8(_P) subgroup_block_read_uint8(_P)
-#define READ_LOCAL_4(_P) subgroup_block_read_uint4(_P)
-#define READ_LOCAL_1(_P) subgroup_block_read_uint(_P)
-#define WRITE_LOCAL_US_8(_P, _V) subgroup_block_write_ushort8(_P, _V)
-#define WRITE_LOCAL_8(_P, _V) subgroup_block_write_uint8(_P, _V)
-#define WRITE_LOCAL_4(_P, _V) subgroup_block_write_uint4(_P, _V)
-#define WRITE_LOCAL_2(_P, _V) subgroup_block_write_uint2(_P, _V)
-#define WRITE_LOCAL_1(_P, _V) subgroup_block_write_uint(_P, _V)
-#define WRITE_LOCAL_SHORT_1(_P, _V) subgroup_block_write_ushort(_P, _V)
+#define READ_LOCAL_US_8(_P) sub_group_block_read_ushort8(_P)
+#define READ_LOCAL_8(_P) sub_group_block_read_uint8(_P)
+#define READ_LOCAL_4(_P) sub_group_block_read_uint4(_P)
+#define READ_LOCAL_1(_P) sub_group_block_read_uint(_P)
+#define WRITE_LOCAL_US_8(_P, _V) sub_group_block_write_ushort8(_P, _V)
+#define WRITE_LOCAL_8(_P, _V) sub_group_block_write_uint8(_P, _V)
+#define WRITE_LOCAL_4(_P, _V) sub_group_block_write_uint4(_P, _V)
+#define WRITE_LOCAL_2(_P, _V) sub_group_block_write_uint2(_P, _V)
+#define WRITE_LOCAL_1(_P, _V) sub_group_block_write_uint(_P, _V)
+#define WRITE_LOCAL_SHORT_1(_P, _V) sub_group_block_write_ushort(_P, _V)
 
-ushort8 subgroup_block_read_ushort8(const __local ushort *p) {
+ushort8 sub_group_block_read_ushort8(const __local ushort *p) {
     ushort8 ret;
     uint idx = get_sub_group_local_id();
     ret.s0 = p[idx];
@@ -537,7 +537,7 @@ ushort8 subgroup_block_read_ushort8(const __local ushort *p) {
     return ret;
 }
 
-void subgroup_block_write_ushort8(__local ushort *p, ushort8 v) {
+void sub_group_block_write_ushort8(__local ushort *p, ushort8 v) {
     uint idx = get_sub_group_local_id();
     p[idx] = v.s0;
     p += get_max_sub_group_size();
@@ -556,14 +556,14 @@ void subgroup_block_write_ushort8(__local ushort *p, ushort8 v) {
     p[idx] = v.s7;
 }
 
-uint subgroup_block_read_uint(const __local uint *p) {
+uint sub_group_block_read_uint(const __local uint *p) {
     uint ret;
     uint idx = get_sub_group_local_id();
     ret = p[idx];
     return ret;
 }
 
-uint8 subgroup_block_read_uint8(const __local uint *p) {
+uint8 sub_group_block_read_uint8(const __local uint *p) {
     uint8 ret;
     uint idx = get_sub_group_local_id();
     ret.s0 = p[idx];
@@ -584,7 +584,7 @@ uint8 subgroup_block_read_uint8(const __local uint *p) {
     return ret;
 }
 
-uint4 subgroup_block_read_uint4(const __local uint *p) {
+uint4 sub_group_block_read_uint4(const __local uint *p) {
     uint4 ret;
     uint idx = get_sub_group_local_id();
     ret.s0 = p[idx];
@@ -597,24 +597,24 @@ uint4 subgroup_block_read_uint4(const __local uint *p) {
     return ret;
 }
 
-void subgroup_block_write_ushort(__local ushort *p, ushort v) {
+void sub_group_block_write_ushort(__local ushort *p, ushort v) {
     uint idx = get_sub_group_local_id();
     p[idx] = v;
 }
 
-void subgroup_block_write_uint(__local uint *p, uint v) {
+void sub_group_block_write_uint(__local uint *p, uint v) {
     uint idx = get_sub_group_local_id();
     p[idx] = v;
 }
 
-void subgroup_block_write_uint2(__local uint *p, uint2 v) {
+void sub_group_block_write_uint2(__local uint *p, uint2 v) {
     uint idx = get_sub_group_local_id();
     p[idx] = v.s0;
     p += get_max_sub_group_size();
     p[idx] = v.s1;
 }
 
-void subgroup_block_write_uint4(__local uint *p, uint4 v) {
+void sub_group_block_write_uint4(__local uint *p, uint4 v) {
     uint idx = get_sub_group_local_id();
     p[idx] = v.s0;
     p += get_max_sub_group_size();
@@ -625,7 +625,7 @@ void subgroup_block_write_uint4(__local uint *p, uint4 v) {
     p[idx] = v.s3;
 }
 
-void subgroup_block_write_uint8(__local uint *p, uint8 v) {
+void sub_group_block_write_uint8(__local uint *p, uint8 v) {
     uint idx = get_sub_group_local_id();
     p[idx] = v.s0;
     p += get_max_sub_group_size();

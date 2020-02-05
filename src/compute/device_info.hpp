@@ -29,14 +29,15 @@ namespace impl {
 namespace compute {
 
 enum class device_ext_t : int64_t {
-    khr_fp16 = 1 << 0,
-    intel_subgroups = 1 << 1,
-    intel_subgroups_short = 1 << 2,
-    intel_dot_accumulate = 1 << 3,
-    intel_subgroup_local_block_io = 1 << 4,
-    intel_subgroup_matrix_multiply_accumulate = 1 << 5,
-    intel_subgroup_split_matrix_multiply_accumulate = 1 << 6,
-    intel_global_float_atomics = 1 << 7,
+    intel_subgroups = 1 << 0,
+    intel_subgroups_short = 1 << 1,
+    khr_fp16 = 1 << 2,
+    khr_int64_base_atomics = 1 << 3,
+    intel_dot_accumulate = 1 << 4,
+    intel_subgroup_local_block_io = 1 << 5,
+    intel_subgroup_matrix_multiply_accumulate = 1 << 6,
+    intel_subgroup_split_matrix_multiply_accumulate = 1 << 7,
+    intel_global_float_atomics = 1 << 8,
     last
 };
 
@@ -44,7 +45,6 @@ static inline const char *ext2cl_str(compute::device_ext_t ext) {
 #define CASE(x) \
     case compute::device_ext_t::x: return STRINGIFY(CONCAT2(cl_, x));
     switch (ext) {
-        CASE(khr_fp16);
         CASE(intel_subgroups);
         CASE(intel_subgroups_short);
         CASE(intel_dot_accumulate);
@@ -52,6 +52,8 @@ static inline const char *ext2cl_str(compute::device_ext_t ext) {
         CASE(intel_subgroup_matrix_multiply_accumulate);
         CASE(intel_subgroup_split_matrix_multiply_accumulate);
         CASE(intel_global_float_atomics);
+        CASE(khr_fp16);
+        CASE(khr_int64_base_atomics);
         default: return nullptr;
     }
 #undef CASE
@@ -128,6 +130,7 @@ public:
 
     virtual int eu_count() const = 0;
     virtual int hw_threads() const = 0;
+    virtual size_t llc_cache_size() const = 0;
 
     const runtime_version_t &runtime_version() const {
         return runtime_version_;

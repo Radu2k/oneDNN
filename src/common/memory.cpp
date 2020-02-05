@@ -74,8 +74,8 @@ dnnl_memory::dnnl_memory(dnnl::impl::engine_t *engine,
     memory_storage_t *memory_storage_ptr;
     status_t status = engine->create_memory_storage(
             &memory_storage_ptr, flags, size, handle);
-    assert(status == status::success);
-    if (status != status::success) return;
+    assert(status == success);
+    if (status != success) return;
 
     memory_storage_.reset(memory_storage_ptr);
     if (!(flags & omit_zero_pad)) zero_pad();
@@ -161,7 +161,7 @@ status_t dnnl_memory_desc_init_by_strides(memory_desc_t *memory_desc, int ndims,
 
     *memory_desc = md;
 
-    return status::success;
+    return success;
 }
 
 status_t dnnl_memory_desc_init_submemory(memory_desc_t *md,
@@ -287,7 +287,8 @@ status_t dnnl_memory_create(memory_t **memory, const memory_desc_t *md,
     unsigned flags = (handle == DNNL_MEMORY_ALLOCATE)
             ? memory_flags_t::alloc
             : memory_flags_t::use_runtime_ptr;
-    auto _memory = new memory_t(engine, md, flags, handle);
+    void *handle_ptr = (handle == DNNL_MEMORY_ALLOCATE) ? nullptr : handle;
+    auto _memory = new memory_t(engine, md, flags, handle_ptr);
     if (_memory == nullptr) return out_of_memory;
     if (_memory->memory_storage() == nullptr) {
         delete _memory;

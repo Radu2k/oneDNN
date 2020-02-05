@@ -22,6 +22,14 @@
 
 #define KDHW_SIZE (KH * KW * KD)
 
+#if PW % 4 == 0
+#define WRITE_SLM_BLOCK(_P, _V) WRITE_LOCAL_1(_P, _V)
+#define WRITE_SLM_BLOCK_SHORT(_P, _V) WRITE_LOCAL_SHORT_1(_P, _V)
+#else
+#define WRITE_SLM_BLOCK(_P, _V) subgroup_block_write_uint(_P, _V)
+#define WRITE_SLM_BLOCK_SHORT(_P, _V) subgroup_block_write_ushort(_P, _V)
+#endif
+
 #define GET_INT_BLOCK(SRC_SLM, SLM_INDEX, SRC_GLOBAL, GLOBAL_INDEX) \
     uchar4 res = 0; \
     for (int j = 0; j < IC; j++) { \
@@ -135,7 +143,7 @@ conv_fwd_first_x8s8s32x_kernel(const __global uchar *src,
             if (empty) {
                 for (int i = 0; i < SW * OW_BLOCK + (KW - 1) * (1 + DW) - PW;
                         i++) {
-                    WRITE_LOCAL_1(S_part + i * 8, 0);
+                    WRITE_SLM_BLOCK(S_part + i * 8, 0);
                 }
             }
 #endif
@@ -198,9 +206,9 @@ conv_fwd_first_x8s8s32x_kernel(const __global uchar *src,
                                 res[j] = intel_sub_group_block_read_uc(
                                         src + i + j * IH * IW * ID);
                             }
-                            WRITE_LOCAL_1(S_part + i, as_int(res));
+                            WRITE_SLM_BLOCK(S_part + i, as_int(res));
 #else
-                            WRITE_LOCAL_1(S_part + i,
+                            WRITE_SLM_BLOCK(S_part + i,
                                     intel_sub_group_block_read((
                                             const __global uint
                                                     *)(&src[i * IC_BLOCK])));
@@ -209,7 +217,7 @@ conv_fwd_first_x8s8s32x_kernel(const __global uchar *src,
 #elif (SW * OW_BLOCK) % 4 == 0 && NCHW == 0
     __attribute__((opencl_unroll_hint)) for (int i = 0; i < SW * OW_BLOCK;
                                              i += 4) {
-        WRITE_LOCAL_SHORT_1(S_part + i,
+        WRITE_SLM_BLOCK_SHORT(S_part + i,
                 intel_sub_group_block_read_us(
                         (const __global ushort *)(&src[i * IC_BLOCK])));
     }

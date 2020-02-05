@@ -18,17 +18,19 @@
 
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
+#include "ocl/gemm/jit_gen12lp_gemm.hpp"
+#include "ocl/gemm/jit_gen9_gemm.hpp"
+#include "ocl/gemm/jit_gen9_gemm_x8x8s32.hpp"
+#include "ocl/gemm/ref_gemm.hpp"
 #include "ocl/gemm_inner_product.hpp"
+#include "ocl/gemm_matmul.hpp"
 #include "ocl/gemm_x8s8s32x_inner_product.hpp"
 #include "ocl/jit_gen12hp_1x1_convolution.hpp"
 #include "ocl/jit_gen12hp_bf16_convolution.hpp"
 #include "ocl/jit_gen12hp_convolution.hpp"
-#include "ocl/jit_gen12lp_gemm.hpp"
 #include "ocl/jit_gen12lp_u8s8s32u8_1x1_convolution.hpp"
 #include "ocl/jit_gen12lp_x8s8s32x_convolution.hpp"
 #include "ocl/jit_gen9_common_convolution.hpp"
-#include "ocl/jit_gen9_gemm.hpp"
-#include "ocl/jit_gen9_gemm_x8x8s32.hpp"
 #include "ocl/ngen_binary_format.hpp"
 #include "ocl/ngen_gen12hp_systolic_gemm.hpp"
 #include "ocl/ocl_kernel_list.hpp"
@@ -45,6 +47,7 @@
 #include "ocl/ref_lrn.hpp"
 #include "ocl/ref_matmul.hpp"
 #include "ocl/ref_pooling.hpp"
+#include "ocl/ref_resampling.hpp"
 #include "ocl/ref_shuffle.hpp"
 #include "ocl/ref_softmax.hpp"
 #include "ocl/rnn/ref_rnn.hpp"
@@ -242,13 +245,10 @@ static const pd_create_f ocl_impl_list[] = {
         INSTANCE(jit_gen12lp_gemm_t),
         INSTANCE(jit_gen9_gemm_x8x8s32_t),
         INSTANCE(jit_gen9_gemm_t),
+        INSTANCE(ref_gemm_t),
         /*rnn*/
-        INSTANCE(ref_rnn_fwd_u8s8_t),
-        INSTANCE(ref_rnn_fwd_f16_t),
-        INSTANCE(ref_rnn_fwd_f32_t),
-        INSTANCE(ref_rnn_bwd_f32_t),
-        INSTANCE(ref_rnn_fwd_bf16_t),
-        INSTANCE(ref_rnn_bwd_bf16_t),
+        INSTANCE(ref_rnn_fwd_t),
+        INSTANCE(ref_rnn_bwd_t),
         /* shuffle */
         INSTANCE(ref_shuffle_t),
         /*layer normalization */
@@ -257,7 +257,11 @@ static const pd_create_f ocl_impl_list[] = {
         /* binary */
         INSTANCE(ref_binary_t),
         /* matmul */
+        INSTANCE(gemm_matmul_t),
         INSTANCE(ref_matmul_t),
+        /*resampling*/
+        INSTANCE(ref_resampling_fwd_t),
+        INSTANCE(ref_resampling_bwd_t),
         nullptr,
 };
 

@@ -23,6 +23,7 @@
 
 #include "common/z_magic.hpp"
 #include "compute/device_info.hpp"
+#include "cpu/cpu_isa_traits.hpp"
 #include "ocl/ocl_utils.hpp"
 
 namespace dnnl {
@@ -164,6 +165,7 @@ public:
 
     virtual int eu_count() const override { return eu_count_; }
     virtual int hw_threads() const override { return hw_threads_; }
+    virtual size_t llc_cache_size() const override { return llc_cache_size_; }
 
 private:
     status_t init_arch() {
@@ -253,6 +255,10 @@ private:
         }
 
         hw_threads_ = eu_count_ * threads_per_eu;
+
+        // Integrated GPUs share LLC with CPU which is L3 cache on CPU.
+        size_t cache_size = cpu::get_cache_size(3, false);
+        llc_cache_size_ = (size_t)cache_size;
         return status::success;
     }
 
@@ -264,6 +270,7 @@ private:
 
     int32_t eu_count_ = 0;
     int32_t hw_threads_ = 0;
+    size_t llc_cache_size_ = 0;
 
     // extensions_ and gpu_arch_ describe effective extensions and GPU architecutre.
     // real_extensions_ and real_gpu_arch_ describe real extensions and GPU architecutre.

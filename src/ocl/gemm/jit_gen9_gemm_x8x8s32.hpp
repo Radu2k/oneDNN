@@ -23,8 +23,9 @@
 #include "common/c_types_map.hpp"
 #include "common/gemm_utils.hpp"
 #include "compute/compute.hpp"
-#include "ocl/jit_gen9_gemm_kernel_x8x8s32.hpp"
-#include "ocl/ocl_gemm_pd.hpp"
+#include "ocl/gemm/jit_gen9_gemm_kernel_x8x8s32.hpp"
+#include "ocl/gemm/ocl_gemm.hpp"
+#include "ocl/gemm/ocl_gemm_pd.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
@@ -32,15 +33,11 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-struct jit_gen9_gemm_x8x8s32_t : public primitive_impl_t {
+struct jit_gen9_gemm_x8x8s32_t : public ocl_gemm_t {
     enum class type { no_copy };
 
     struct pd_t : public ocl_gemm_pd_t {
-        using hint_class = void;
-
-        pd_t(engine_t *engine, const gemm_desc_t *adesc,
-                const primitive_attr_t *attr, const hint_class *)
-            : ocl_gemm_pd_t(engine, adesc, attr) {}
+        using ocl_gemm_pd_t::ocl_gemm_pd_t;
 
         DECLARE_COMMON_PD_T("ocl:gemm:any", jit_gen9_gemm_x8x8s32_t);
 
@@ -48,20 +45,30 @@ struct jit_gen9_gemm_x8x8s32_t : public primitive_impl_t {
             using namespace prop_kind;
             using namespace data_type;
             using namespace primitive_kind;
+            using smask_t = primitive_attr_t::skip_mask_t;
 
             assert(this->engine()->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine());
 
-            const auto attr_skip_mask = primitive_attr_t::skip_mask_t::post_ops;
+            const auto attr_skip_mask = smask_t::oscale | smask_t::post_ops
+                    | smask_t::zero_points_runtime;
 
-            bool ok = true
-                    && utils::one_of(
-                            desc()->a_type, data_type::u8, data_type::s8)
-                    && utils::one_of(
-                            desc()->b_type, data_type::u8, data_type::s8)
-                    && utils::one_of(desc()->c_type, data_type::s32)
-                    && desc()->acc_type == desc()->c_type
+            const auto d = desc();
+            // LIMITATIONS:
+            // - batch is not supported
+            // - runtime dims are not supported
+            // - bias is not supported
+            bool limits_ok = true && d->batch == 1
+                    && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m, d->n, d->k,
+                            d->lda, d->ldb, d->ldc)
+                    && d->bias_type == data_type::undef;
+
+            bool ok = true && limits_ok
+                    && utils::one_of(d->a_type, data_type::u8, data_type::s8)
+                    && utils::one_of(d->b_type, data_type::u8, data_type::s8)
+                    && utils::one_of(d->c_type, data_type::s32)
+                    && d->acc_type == d->c_type
                     && compute_engine->mayiuse(
                             compute::device_ext_t::intel_subgroups)
                     && IMPLICATION(desc()->c_type == data_type::s32,
@@ -70,9 +77,14 @@ struct jit_gen9_gemm_x8x8s32_t : public primitive_impl_t {
                                             compute::device_ext_t::
                                                     intel_subgroups_short))
                     && attr()->has_default_values(attr_skip_mask)
-                    && attr()->post_ops_.len_ <= 1
+                    && attr()->output_scales_.mask_ == 0
+                    && attr()->post_ops_.len_ <= 2
                     && IMPLICATION(attr()->post_ops_.len_ == 1,
-                            attr()->post_ops_.find(eltwise) != -1);
+                            attr()->post_ops_.find(eltwise) != -1
+                                    || attr()->post_ops_.find(sum) != -1)
+                    && IMPLICATION(attr()->post_ops_.len_ == 2,
+                            attr()->post_ops_.find(sum) == 0
+                                    && attr()->post_ops_.find(eltwise) == 1);
             if (!ok) return status::unimplemented;
             return status::success;
         }
@@ -103,6 +115,14 @@ struct jit_gen9_gemm_x8x8s32_t : public primitive_impl_t {
             return with_eltwise()
                     ? attr()->post_ops_.entry_[eltwise_idx].eltwise.alg
                     : dnnl_alg_kind_undef;
+        }
+
+        float alpha() const { return attr()->output_scales_.scales_[0]; }
+
+        float beta() const {
+            using namespace primitive_kind;
+            const auto &p = attr()->post_ops_;
+            return p.contain(sum, 0) ? p.entry_[0].sum.scale : 0.f;
         }
 
         size_t dyn_offset_a = 0;
@@ -149,9 +169,11 @@ struct jit_gen9_gemm_x8x8s32_t : public primitive_impl_t {
                 &temp_buf_ptr, pd()->desc()->m * pd()->desc()->n * sizeof(int));
         temp_buf_.reset(temp_buf_ptr);
 
-        bool fixed_c = (pd()->desc()->offsetc == dnnl_fixed);
-        bool column_c = (pd()->desc()->offsetc == dnnl_column);
-        bool row_c = (pd()->desc()->offsetc == dnnl_row);
+        int cmask = 0;
+        pd()->attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
+        bool fixed_c = (0 == cmask);
+        bool column_c = (1 << 0 == cmask);
+        bool row_c = (1 << 1 == cmask);
 
         auto status = jit_gen9_gemm_x8x8s32_kernel::init_const_def(kernel_ctx,
                 pd()->desc()->transa, pd()->desc()->transb, fixed_c, column_c,
@@ -180,16 +202,16 @@ struct jit_gen9_gemm_x8x8s32_t : public primitive_impl_t {
         return status::success;
     }
 
-    jit_gen9_gemm_x8x8s32_t(const pd_t *apd) : primitive_impl_t(apd) {}
+    jit_gen9_gemm_x8x8s32_t(const pd_t *apd) : ocl_gemm_t(apd) {}
 
-    virtual status_t execute(const exec_ctx_t &ctx) const override;
+    virtual status_t execute(const gemm_exec_ctx_t &ctx) const override;
 
 private:
     status_t launch_x8x8s32(compute::compute_stream_t *s,
             const memory_storage_t &a, const memory_storage_t &b,
             const memory_storage_t &c, int64_t offset_a, int64_t offset_b,
             int64_t offset_c, int64_t lda, int64_t ldb, int64_t ldc, int64_t m,
-            int64_t n, int64_t k, int64_t beta, int64_t ao, int64_t bo,
+            int64_t n, int64_t k, int64_t beta, int32_t ao, int32_t bo,
             const memory_storage_t &co, int64_t offset_co, bool apply_co,
             bool apply_eltwise, float eltwise_alpha, float eltwise_beta) const;
 
@@ -200,7 +222,7 @@ private:
             int64_t offset_co, bool alpha_is_zero, bool apply_eltwise,
             float eltwise_alpha, float eltwise_beta) const;
 
-    virtual status_t execute_standard(const exec_ctx_t &ctx) const;
+    virtual status_t execute_standard(const gemm_exec_ctx_t &ctx) const;
 
     compute::kernel_t compute_x8x8s32_kernel_;
     compute::kernel_t scale_x8x8s32_kernel_;

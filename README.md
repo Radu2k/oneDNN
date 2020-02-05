@@ -77,8 +77,8 @@ If the configuration you need is not available, you can
 
 # System Requirements
 
-DNNL supports systems based on Intel 64 architecture or
-compatible processors.
+DNNL supports systems based on
+[Intel 64 or AMD64 architecture](https://en.wikipedia.org/wiki/X86-64).
 
 The library is optimized for the following CPUs:
 * Intel Atom processor with Intel SSE4.1 support
@@ -261,11 +261,11 @@ contributors are expected to adhere to the
 
 # License
 
-DNNL is licensed under
-[Apache License Version 2.0](http://www.apache.org/licenses/LICENSE-2.0).  This
-software includes components with separate copyright notices and license
-terms. Your use of the source code for these components is subject to the terms
-and conditions of the following licenses.
+DNNL is licensed under [Apache License Version 2.0](LICENSE). Refer to the
+"[LICENSE](LICENSE)" file for the full license text and copyright notice.
+
+This distribution includes third party software governed by separate license
+terms.
 
 3-clause BSD license:
 * [Xbyak](https://github.com/herumi/xbyak)
@@ -279,7 +279,12 @@ Apache License Version 2.0:
 Boost Software License, Version 1.0:
 * [Boost C++ Libraries](https://www.boost.org/)
 
-See accompanying [LICENSE](LICENSE) file for full license text and copyright notices.
+This third party software, even if included with the distribution of
+the Intel software, may be governed by separate license terms, including
+without limitation, third party license terms, other Intel software license
+terms, and open source software license terms. These separate license terms
+govern your use of the third party programs as set forth in the
+"[THIRD-PARTY-PROGRAMS](THIRD-PARTY-PROGRAMS)" file.
 
 --------
 
