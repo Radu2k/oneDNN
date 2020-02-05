@@ -14,7 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "gpu/ocl/gen12lp_u8s8s32u8_1x1_convolution.hpp"
+#include "gpu/ocl/gen12lp_x8s8s32x_1x1_convolution.hpp"
 
 #include "gpu/ocl/ocl_stream.hpp"
 
@@ -23,7 +23,7 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-status_t gen12lp_u8s8s32u8_1x1_convolution_fwd_t::pd_t::init_conf() {
+status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
     using namespace format_tag;
 
     const convolution_desc_t &cd = *desc();
@@ -78,9 +78,8 @@ status_t gen12lp_u8s8s32u8_1x1_convolution_fwd_t::pd_t::init_conf() {
     return status;
 }
 
-status_t gen12lp_u8s8s32u8_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
+status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
         compute::kernel_ctx_t &kernel_ctx) const {
-    kernel_ctx.set_data_type(conf.dst_data_type);
     kernel_ctx.define_int("MB", conf.mb);
     kernel_ctx.define_int("IC", conf.ic_without_padding);
     kernel_ctx.define_int("IH", conf.ih);
@@ -118,12 +117,15 @@ status_t gen12lp_u8s8s32u8_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
 
     kernel_ctx.define_int("INT8_WEI_SLM", conf.ow % 8 == 0);
 
+    kernel_ctx.set_data_type(conf.dst_data_type);
+    def_data_type(kernel_ctx, conf.src_data_type, "SRC");
+
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
     return status::success;
 }
 
-status_t gen12lp_u8s8s32u8_1x1_convolution_fwd_t::execute_forward(
+status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::execute_forward(
         const exec_ctx_t &ctx) const {
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);

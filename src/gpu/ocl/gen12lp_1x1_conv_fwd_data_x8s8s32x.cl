@@ -21,7 +21,8 @@
 #endif
 
 #define BLOCK_READ_SRC(data, idx) \
-    data = intel_sub_group_block_read8((__global uint *)&src[idx]);
+    data = AS_MMAD_DATA8_T( \
+            intel_sub_group_block_read8((__global uint *)&src[idx]));
 
 #if INT8_WEI_SLM
 #define BLOCK_READ_WHT(data, idx) \
@@ -51,9 +52,9 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12lp_1x1_conv_fwd_u8s8s32u8(const __global uchar *src,
+gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
         const __global char *wei, const __global float *bias,
-        __global uchar *dst, float alpha, float beta, float sum_scale,
+        __global DATA_T *dst, float alpha, float beta, float sum_scale,
         float scales) {
 
     // Groups:
@@ -109,15 +110,16 @@ gen12lp_1x1_conv_fwd_u8s8s32u8(const __global uchar *src,
 
     __local char wei_slm[KERNEL_BLOCK_OFFSET];
 #endif // INT8_WEI_SLM
-
-    for (uint ic_block_id = 0; ic_block_id < IC_NCHUNK; ++ic_block_id) {
+    __attribute__((opencl_unroll_hint)) for (uint ic_block_id = 0;
+                                             ic_block_id < IC_NCHUNK;
+                                             ++ic_block_id) {
 #if INT8_WEI_SLM
         READ_SLM()
 #if OW_TAIL
         if (ow < OW) {
 #endif
 #endif
-            uint8 S0, S1;
+            MMAD_DATA8_T S0, S1;
             int8 W0, W1, W2, W3;
 
             BLOCK_READ_SRC(S0, 0 * IC_BLOCK);
