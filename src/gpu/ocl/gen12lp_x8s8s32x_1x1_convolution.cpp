@@ -37,8 +37,9 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
 
     status_t status = status::success;
 
-    if (conf.is_depthwise != false || (conf.with_groups && conf.ngroups > 1)
-            || conf.kh != 1 || conf.kw != 1)
+    if (conf.is_depthwise || conf.kh != 1 || conf.kw != 1
+            || (conf.with_groups && conf.ngroups > 1
+                    && (conf.oc % 32 != 0 || conf.ic % 32 != 0)))
         return status::unimplemented;
 
     if (conf.oc % 32 != 0 || conf.ic % 32 != 0) return status::unimplemented;
@@ -50,6 +51,7 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
     conf.mb_block = 32;
     conf.oc_block = 32;
     conf.ic_block = 32;
+    conf.nchunk = utils::div_up(conf.oc * conf.ngroups, conf.oc_block);
     int ow_group = (conf.ow % 8) ? 1 : 8;
 
     conf.sub_group_size = 8;
@@ -57,7 +59,7 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
     conf.lws_d[1] = ow_group;
     conf.lws_d[2] = 1;
 
-    conf.gws_d[0] = conf.oc / conf.oc_block * conf.sub_group_size;
+    conf.gws_d[0] = utils::rnd_up(conf.nchunk * 8, conf.lws_d[0]);
     conf.gws_d[1] = utils::rnd_up(conf.ow, conf.lws_d[1]) * conf.oh;
     conf.gws_d[2] = utils::div_up(conf.mb, utils::div_up(conf.mb_block, 2));
 
@@ -80,6 +82,7 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
 
 status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
         compute::kernel_ctx_t &kernel_ctx) const {
+    kernel_ctx.define_int("G", conf.ngroups);
     kernel_ctx.define_int("MB", conf.mb);
     kernel_ctx.define_int("IC", conf.ic_without_padding);
     kernel_ctx.define_int("IH", conf.ih);

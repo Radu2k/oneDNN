@@ -61,6 +61,7 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
     const uint oc_group_id = get_group_id(0);
     const uint sp_group_id = get_group_id(1);
     const uint mb_group_id = get_group_id(2);
+    const uint ic_group_id = oc_group_id / OC_NCHUNK * IC_NCHUNK;
 
     // SIMD
     const uint sg_local_id = get_sub_group_local_id();
@@ -76,15 +77,17 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
 
     // Source (At ic = 0)
     src += (mb_group_id % 2) * MB_BLOCK / 2 * MB_OFFSET; // MB block offset
-    src += (mb_group_id / 2) * CHANNEL_BLOCK_OFFSET * IC_NCHUNK; // MB offset
+    src += (mb_group_id / 2) * CHANNEL_BLOCK_OFFSET * IC_NCHUNK
+            * G; // MB offset
+    src += CHANNEL_BLOCK_OFFSET * ic_group_id; // IC offset
     src += ih * PIXEL_HEIGHT_OFFSET; // height offset
     src += iw * PIXEL_WIDTH_OFFSET; // width offset
 
     // Destination
     dst += (mb_group_id % 2) * MB_BLOCK / 2 * MB_OFFSET; // MB block offset
-    dst += (mb_group_id / 2) * DST_CHANNEL_BLOCK_OFFSET
-            * OC_NCHUNK; // MB offset
-    dst += DST_CHANNEL_BLOCK_OFFSET * oc_group_id; //OC offset
+    dst += (mb_group_id / 2) * DST_CHANNEL_BLOCK_OFFSET * OC_NCHUNK
+            * G; // MB offset
+    dst += DST_CHANNEL_BLOCK_OFFSET * oc_group_id; // OC offset
     dst += oh * DST_PIXEL_HEIGHT_OFFSET;
     dst += ow * PIXEL_WIDTH_OFFSET;
 
