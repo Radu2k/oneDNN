@@ -23,7 +23,6 @@
 
 #include "common/z_magic.hpp"
 #include "compute/device_info.hpp"
-#include "cpu/cpu_isa_traits.hpp"
 #include "ocl/ocl_utils.hpp"
 
 namespace dnnl {
@@ -256,15 +255,15 @@ private:
 
         hw_threads_ = eu_count_ * threads_per_eu;
 
-        // Integrated GPUs share LLC with CPU which is L3 cache on CPU.
-        size_t cache_size = cpu::get_cache_size(3, false);
-        llc_cache_size_ = (size_t)cache_size;
+        llc_cache_size_ = get_llc_cache_size();
         return status::success;
     }
 
     bool has(uint64_t extensions, compute::device_ext_t ext) const {
         return extensions & (uint64_t)ext;
     }
+
+    size_t get_llc_cache_size() const;
 
     cl_device_id device_ = nullptr;
 

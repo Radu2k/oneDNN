@@ -236,7 +236,8 @@ struct _ref_rnn_common_t : public primitive_impl_t {
             init_scratchpad(scratchpad_sz);
 
             rnn_conf_.acc_data_type = acc_data_t;
-            rnn_conf_.acc_data_type_elsz = types::data_type_size(acc_data_t);
+            rnn_conf_.acc_data_type_elsz
+                    = int(types::data_type_size(acc_data_t));
             status_t status
                     = init_jit<aprop>(jrnn_, rnn_conf_, this, this->jit_off_);
             if (status != status::success) { return status; }
