@@ -19,7 +19,7 @@
 #include "common/float16.hpp"
 #include "common/type_helpers.hpp"
 
-#include "ocl/ngen_gen12hp_systolic_gemm.hpp"
+#include "ocl/gemm/ngen_gen12hp_systolic_gemm.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -182,7 +182,8 @@ status_t ngen_gen12hp_systolic_gemm_t::launch_compute(
     return compute_stream->parallel_for(nd_range, kernel, arg_list);
 }
 
-status_t ngen_gen12hp_systolic_gemm_t::execute(const exec_ctx_t &ctx) const {
+status_t ngen_gen12hp_systolic_gemm_t::execute(
+        const gemm_exec_ctx_t &ctx) const {
 
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
@@ -202,19 +203,19 @@ status_t ngen_gen12hp_systolic_gemm_t::execute(const exec_ctx_t &ctx) const {
     auto ldb = pd()->desc()->ldb;
     auto ldc = pd()->desc()->ldc;
 
-    auto alpha = pd()->desc()->alpha;
-    auto beta = pd()->desc()->beta;
+    auto alpha = pd()->alpha();
+    auto beta = pd()->beta();
 
-    auto &a = CTX_IN_STORAGE(DNNL_ARG_SRC_0);
-    auto &b = CTX_IN_STORAGE(DNNL_ARG_SRC_1);
-    auto &c = CTX_OUT_STORAGE(DNNL_ARG_DST);
+    auto &a = GEMM_CTX_ARG_STORAGE(a);
+    auto &b = GEMM_CTX_ARG_STORAGE(b);
+    auto &c = GEMM_CTX_ARG_STORAGE(c);
 
-    size_t off_a0 = a.get_offset() / types::data_type_size(a_type)
-            + pd()->dyn_offset_a;
-    size_t off_b0 = b.get_offset() / types::data_type_size(b_type)
-            + pd()->dyn_offset_b;
-    size_t off_c0 = c.get_offset() / types::data_type_size(c_type)
-            + pd()->dyn_offset_c;
+    size_t off_a0
+            = a.offset() / types::data_type_size(a_type) + pd()->dyn_offset_a;
+    size_t off_b0
+            = b.offset() / types::data_type_size(b_type) + pd()->dyn_offset_b;
+    size_t off_c0
+            = c.offset() / types::data_type_size(c_type) + pd()->dyn_offset_c;
 
     int64_t block_m = 0, block_n = 0, block_k = 0;
     std::tie(block_m, block_n, block_k) = get_blocking();

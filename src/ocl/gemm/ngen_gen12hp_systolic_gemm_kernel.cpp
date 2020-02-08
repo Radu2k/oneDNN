@@ -17,7 +17,7 @@
 
 #include <assert.h>
 
-#include "ngen_gen12hp_systolic_gemm_kernel.hpp"
+#include "ocl/gemm/ngen_gen12hp_systolic_gemm_kernel.hpp"
 
 using namespace ngen;
 

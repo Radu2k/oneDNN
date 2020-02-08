@@ -26,10 +26,11 @@
 #include "common/memory_storage.hpp"
 #include "common/utils.hpp"
 #include "compute/compute.hpp"
-#include "ocl/jit_gen12hp_systolic_gemm_copy_kernel.hpp"
-#include "ocl/ngen_gen12hp_systolic_gemm_kernel.hpp"
+#include "ocl/gemm/jit_gen12hp_systolic_gemm_copy_kernel.hpp"
+#include "ocl/gemm/ngen_gen12hp_systolic_gemm_kernel.hpp"
+#include "ocl/gemm/ocl_gemm.hpp"
+#include "ocl/gemm/ocl_gemm_pd.hpp"
 #include "ocl/ngen_type_bridge.hpp"
-#include "ocl/ocl_gemm_pd.hpp"
 #include "ocl/ocl_stream.hpp"
 #include "ocl/ocl_utils.hpp"
 
@@ -37,13 +38,13 @@ namespace dnnl {
 namespace impl {
 namespace ocl {
 
-struct ngen_gen12hp_systolic_gemm_t : public primitive_impl_t {
+struct ngen_gen12hp_systolic_gemm_t : public ocl_gemm_t {
     struct pd_t : public ocl_gemm_pd_t {
         using hint_class = void;
 
         pd_t(engine_t *engine, const gemm_desc_t *adesc,
                 const primitive_attr_t *attr, const hint_class *)
-            : ocl_gemm_pd_t(engine, adesc, attr) {}
+            : ocl_gemm_pd_t(engine, adesc, attr, nullptr) {}
 
         DECLARE_COMMON_PD_T(
                 "ngen:gen12hp:gemm:any", ngen_gen12hp_systolic_gemm_t);
@@ -57,9 +58,20 @@ struct ngen_gen12hp_systolic_gemm_t : public primitive_impl_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine());
 
-            bool ok = true && desc()->a_type == desc()->b_type
-                    && utils::one_of(desc()->a_type, bf16, f16)
-                    && utils::one_of(desc()->c_type, f32, desc()->a_type)
+            const auto d = desc();
+
+            // LIMITATIONS:
+            // - batch is not supported
+            // - runtime dims are not supported
+            // - bias is not supported
+            bool limits_ok = d->batch == 1
+                    && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m, d->n, d->k,
+                            d->lda, d->ldb, d->ldc)
+                    && d->bias_type == data_type::undef;
+
+            bool ok = true && limits_ok && d->a_type == d->b_type
+                    && utils::one_of(d->a_type, bf16, f16)
+                    && utils::one_of(d->c_type, f32, d->a_type)
                     && compute_engine->mayiuse(compute::device_ext_t::
                                     intel_subgroup_split_matrix_multiply_accumulate)
                     && attr()->has_default_values();
@@ -89,6 +101,13 @@ struct ngen_gen12hp_systolic_gemm_t : public primitive_impl_t {
         size_t dyn_offset_a = 0;
         size_t dyn_offset_b = 0;
         size_t dyn_offset_c = 0;
+        float alpha() const { return attr()->output_scales_.scales_[0]; }
+
+        float beta() const {
+            using namespace primitive_kind;
+            const auto &p = attr()->post_ops_;
+            return p.contain(sum, 0) ? p.entry_[0].sum.scale : 0.f;
+        }
     };
 
     status_t init() override {
@@ -123,9 +142,9 @@ struct ngen_gen12hp_systolic_gemm_t : public primitive_impl_t {
         cfg.b_type = convert_dnnl_type_to_ngen(b_type);
         cfg.c_type = convert_dnnl_type_to_ngen(c_type);
         cfg.acc_type = convert_dnnl_type_to_ngen(acc_type);
-        cfg.alpha1 = (pd()->desc()->alpha == 1.0f);
-        cfg.beta0 = (pd()->desc()->beta == 0.0f);
-        cfg.beta1 = (pd()->desc()->beta == 1.0f);
+        cfg.alpha1 = (pd()->alpha() == 1.0f);
+        cfg.beta0 = (pd()->beta() == 0.0f);
+        cfg.beta1 = (pd()->beta() == 1.0f);
 
         if (!cfg.beta1) {
             auto ngen_kernel = ngen_gen12hp_systolic_gemm_kernel_t(cfg);
@@ -159,9 +178,9 @@ struct ngen_gen12hp_systolic_gemm_t : public primitive_impl_t {
     }
 
 public:
-    ngen_gen12hp_systolic_gemm_t(const pd_t *apd) : primitive_impl_t(apd) {}
+    ngen_gen12hp_systolic_gemm_t(const pd_t *apd) : ocl_gemm_t(apd) {}
 
-    virtual status_t execute(const exec_ctx_t &ctx) const override;
+    virtual status_t execute(const gemm_exec_ctx_t &ctx) const override;
 
 private:
     std::tuple<int64_t, int64_t, int64_t> get_blocking() const;
