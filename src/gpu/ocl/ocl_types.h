@@ -266,6 +266,8 @@
 #define MMAD_DATA8_T int8
 #endif
 #define AS_SRC_DATA4_T CONCAT2(as_, SRC_DATA4_T)
+#define AS_MMAD_DATA_T CONCAT2(as_, MMAD_DATA_T)
+#define AS_MMAD_DATA4_T CONCAT2(as_, MMAD_DATA4_T)
 #define AS_MMAD_DATA8_T CONCAT2(as_, MMAD_DATA8_T)
 #if SRC_DT_BF16
 #define SRC_TO_REF(x) convert_bf16_to_f32(x)

@@ -13,9 +13,8 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 *******************************************************************************/
-
+#include <algorithm>
 #include "gpu/ocl/gen12lp_x8s8s32x_1x1_convolution.hpp"
-
 #include "gpu/ocl/ocl_stream.hpp"
 
 namespace dnnl {
@@ -31,6 +30,8 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
     const memory_desc_wrapper weights_mdw(weights_md());
     const memory_desc_wrapper dst_mdw(dst_md());
     const memory_desc_wrapper bias_mdw(weights_md(1));
+    auto dev_info = utils::downcast<compute::compute_engine_t *>(engine())
+                            ->device_info();
 
     set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
             *weights_md(1), *attr());
@@ -52,7 +53,38 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
     conf.oc_block = 32;
     conf.ic_block = 32;
     conf.nchunk = utils::div_up(conf.oc * conf.ngroups, conf.oc_block);
-    int ow_group = (conf.ow % 8) ? 1 : 8;
+
+    if (conf.mb == 8 || conf.mb % 16 == 0) {
+        conf.mb_block = 32;
+        conf.sp_block = 1;
+    } else {
+        if (conf.stride_w != 1 || conf.stride_w != 1)
+            return status::unimplemented;
+        conf.mb_block = 1;
+        conf.sp_block = 4;
+        auto approx_clocks = [&](const int block) {
+            int ic_chunks = utils::div_up(conf.ic, conf.ic_block);
+            bool use_slm = (utils::div_up(conf.ow * conf.oh, block)) % 8 == 0;
+            int mem_clocks = ic_chunks * (16 - use_slm * 6)
+                    + block / 2 * (ic_chunks + 1);
+            int compute_clocks = 32 * block * ic_chunks;
+            return utils::div_up(conf.nchunk * conf.mb
+                                   * utils::div_up(conf.ow * conf.oh, block),
+                           dev_info->hw_threads())
+                    * (compute_clocks + mem_clocks);
+        };
+        auto clock_compare = [&](const int &block1, const int &block2) {
+            return approx_clocks(block1) < approx_clocks(block2);
+        };
+        std::vector<int> sorted_blocks = {4, 8, 12, 16};
+        std::sort(sorted_blocks.begin(), sorted_blocks.end(), clock_compare);
+        conf.sp_block = sorted_blocks[0];
+    }
+    conf.src_data_type = src_mdw.data_type();
+    conf.dst_data_type = dst_mdw.data_type();
+
+    int ow_group
+            = ((utils::div_up(conf.ow * conf.oh, conf.sp_block)) % 8) ? 1 : 8;
 
     conf.sub_group_size = 8;
     conf.lws_d[0] = conf.sub_group_size;
@@ -60,15 +92,23 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
     conf.lws_d[2] = 1;
 
     conf.gws_d[0] = utils::rnd_up(conf.nchunk * 8, conf.lws_d[0]);
-    conf.gws_d[1] = utils::rnd_up(conf.ow, conf.lws_d[1]) * conf.oh;
+    conf.gws_d[1] = utils::rnd_up(
+            utils::div_up(conf.ow * conf.oh, conf.sp_block), conf.lws_d[1]);
+
     conf.gws_d[2] = utils::div_up(conf.mb, utils::div_up(conf.mb_block, 2));
 
     conf.with_bias = cd.bias_desc.format_kind != format_kind::undef;
 
     format_tag_t src_tag, dst_tag, wei_tag;
 
-    src_tag = utils::pick(conf.ndims - 3, NCw32n32c, NChw32n32c);
-    dst_tag = utils::pick(conf.ndims - 3, NCw32n32c, NChw32n32c);
+    if (conf.mb_block == 32) {
+        src_tag = utils::pick(conf.ndims - 3, NCw32n32c, NChw32n32c);
+        dst_tag = utils::pick(conf.ndims - 3, NCw32n32c, NChw32n32c);
+    } else {
+        src_tag = utils::pick(conf.ndims - 3, nCw32c, nChw32c);
+        dst_tag = utils::pick(conf.ndims - 3, nCw32c, nChw32c);
+    }
+
     wei_tag = conf.with_groups
             ? utils::pick(conf.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i)
             : utils::pick(conf.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i);
@@ -95,8 +135,7 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("SH", conf.stride_h);
     kernel_ctx.define_int("SW", conf.stride_w);
 
-    kernel_ctx.define_int("OW_PADDED", utils::rnd_up(conf.ow, conf.lws_d[1]));
-
+    kernel_ctx.define_int("SP_BLOCK", conf.sp_block);
     kernel_ctx.define_int("MB_BLOCK", conf.mb_block);
     kernel_ctx.define_int("OC_BLOCK", conf.oc_block);
     kernel_ctx.define_int("IC_BLOCK", conf.ic_block);
@@ -115,10 +154,15 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);
     kernel_ctx.define_int("LWS_2", conf.lws_d[2]);
 
-    kernel_ctx.define_int("OC_NCHUNK", conf.oc / conf.oc_block);
-    kernel_ctx.define_int("IC_NCHUNK", conf.ic / conf.ic_block);
+    kernel_ctx.define_int("OC_NCHUNK", utils::div_up(conf.oc, conf.oc_block));
+    kernel_ctx.define_int("IC_NCHUNK", utils::div_up(conf.ic, conf.ic_block));
 
-    kernel_ctx.define_int("INT8_WEI_SLM", conf.ow % 8 == 0);
+    kernel_ctx.define_int("INT8_WEI_SLM",
+            utils::div_up(conf.ow * conf.oh, conf.sp_block) % 8 == 0);
+    kernel_ctx.define_int("SP_TAIL",
+            utils::div_up(conf.ow * conf.oh, conf.sp_block) % conf.lws_d[1]
+                    == 0);
+    kernel_ctx.define_int("OUT_SP_TAIL", (conf.ow * conf.oh) % conf.sp_block);
 
     kernel_ctx.set_data_type(conf.dst_data_type);
     def_data_type(kernel_ctx, conf.src_data_type, "SRC");
