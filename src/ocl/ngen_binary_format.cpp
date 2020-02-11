@@ -15,6 +15,8 @@
 *******************************************************************************/
 
 #include "ocl/ngen_binary_format.hpp"
+
+#include "common/utils.hpp"
 #include "ocl/ocl_gpu_engine.hpp"
 #include "ocl/ocl_stream.hpp"
 
@@ -182,6 +184,13 @@ public:
 };
 
 status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
+    // Skip binary kernel check during simulation to avoid spurious kernel runs.
+    static bool is_gpu_sim = (bool)dnnl::impl::getenv_int("DNNL_GPU_SIM", 0);
+    if (is_gpu_sim) {
+        *ok = true;
+        return status::success;
+    }
+
     *ok = false;
 
     auto *gpu_engine = utils::downcast<ocl_gpu_engine_t *>(engine);

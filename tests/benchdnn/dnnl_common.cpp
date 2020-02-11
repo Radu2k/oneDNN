@@ -165,23 +165,24 @@ dnnl_status_t execute_and_wait(
                 // Keep unique memory objects
                 std::set<dnnl_memory_t> uniq_mems;
                 for (int i = 0; i < nargs; ++i)
-                    uniq_mems.insert(dnnl_args[i].memory);
+                    if (dnnl_args[i].memory)
+                        uniq_mems.insert(dnnl_args[i].memory);
 
-                // Sort memory objects according to their "simulation" IDs
-                std::map<int, dnnl_memory_t> sorted_mems;
-                for (auto mem : uniq_mems)
-                    sorted_mems[dnnl_memory_get_sim_id(mem)] = mem;
+                // Fill "simulation" IDs for memory objects
+                std::map<dnnl_memory_t, int> mem_ids;
+                for (auto mem : uniq_mems) {
+                    mem_ids[mem] = dnnl_memory_get_sim_id(mem);
+                }
 
                 // Load memory contents from binaries
                 const char *sim_aub_file = getenv("DNNL_GPU_SIM_AUB_FILE");
                 std::string aub_file(!sim_aub_file ? "out.aub" : sim_aub_file);
                 aub_file.resize(aub_file.length() - strlen(".aub"));
-                int ctr = 0;
-                for (auto &kv : sorted_mems) {
-                    dnnl_memory_t mem = kv.second;
+                for (auto &kv : mem_ids) {
+                    dnnl_memory_t mem = kv.first;
                     std::ostringstream fname;
                     fname << aub_file << std::setfill('0') << std::setw(3)
-                          << ctr << ".bin";
+                          << kv.second << ".bin";
                     std::ifstream in(fname.str(), std::ios::binary);
                     assert(in.good());
                     {
@@ -200,7 +201,6 @@ dnnl_status_t execute_and_wait(
                         in.read((char *)ptr, sz);
                         dnnl_memory_unmap_data(mem, ptr);
                     }
-                    ++ctr;
                 }
             }
         }
