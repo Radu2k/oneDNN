@@ -82,7 +82,10 @@ struct gen12lp_x8s8s32x_convolution_fwd_t : public primitive_impl_t {
     status_t init() override {
         const char *kernel_name = nullptr;
         if (pd()->conf.is_depthwise) {
-            kernel_name = "conv_dw_fwd_x8s8s32x";
+            if (pd()->conf.mb_block == 32)
+                kernel_name = "conv_dw_fwd_mb_block_x8s8s32x";
+            else
+                kernel_name = "conv_dw_fwd_ow_block_x8s8s32x";
         } else {
             if (pd()->conf.ic > 4) {
                 if (pd()->conf.mb_block == 32)

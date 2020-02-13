@@ -24,9 +24,10 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-conv_dw_fwd_x8s8s32x(const __global uchar *src, const __global char *wei,
-        const __global float *bias, __global DATA_T *dst, float alpha,
-        float beta, float sum_scale, float scales) {
+conv_dw_fwd_mb_block_x8s8s32x(const __global uchar *src,
+        const __global char *wei, const __global float *bias,
+        __global DATA_T *dst, float alpha, float beta, float sum_scale,
+        float scales) {
 
     const int osp = get_global_id(1);
     const int od = osp / (OW * OH);

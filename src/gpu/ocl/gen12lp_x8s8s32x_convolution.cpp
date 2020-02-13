@@ -50,17 +50,37 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_conf() {
     conf.oc_block = 32;
     if (conf.is_depthwise) {
         conf.sub_group_size = 16;
-        conf.mb_block = 32;
         conf.ic_block = 32;
-        conf.ow_block = 1;
+
+        if (conf.mb == 8 || conf.mb % 16 == 0
+                || !(conf.kw == 3 && conf.stride_w <= 2
+                        && conf.dilate_w == 0)) {
+            conf.ver = ver_mb_block;
+            conf.mb_block = 32;
+            conf.ow_block = 1;
+        } else {
+            conf.ver = ver_ow_block;
+            conf.mb_block = 1;
+            conf.ow_block = 1;
+            if (conf.ow < 15) {
+                conf.ow_block = conf.ow;
+            } else {
+                for (int i = 0; i < 7; ++i) {
+                    conf.ow_block = utils::max_div(conf.ow + i, 14);
+                    if (conf.ow_block > 4) break;
+                }
+            }
+        }
 
         conf.lws_d[0] = 16;
         conf.lws_d[1] = 1;
         conf.lws_d[2] = 1;
 
         conf.gws_d[0] = utils::div_up(conf.ngroups, 32) * conf.lws_d[0];
-        conf.gws_d[1] = conf.od * conf.oh * conf.ow;
-        conf.gws_d[2] = utils::div_up(conf.mb, conf.mb_block / 4);
+        conf.gws_d[1]
+                = conf.od * conf.oh * utils::div_up(conf.ow, conf.ow_block);
+        conf.gws_d[2] = utils::div_up(conf.mb, utils::div_up(conf.mb_block, 4));
+
     } else {
         conf.sub_group_size = 8;
         int ow_group = 1;
@@ -204,6 +224,7 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("OW_PADDED",
             utils::rnd_up(
                     utils::div_up(conf.ow, conf.ow_block), conf.lws_d[1]));
+    kernel_ctx.define_int("OWB", utils::div_up(conf.ow, conf.ow_block));
 
     kernel_ctx.define_int("MB_BLOCK", conf.mb_block);
     kernel_ctx.define_int("OC_BLOCK", conf.oc_block);
@@ -222,8 +243,7 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_kernel_ctx(
                     utils::div_up(conf.iw, conf.ow_block * conf.stride_w)));
 
     kernel_ctx.define_int("OW_TAIL", conf.ow % conf.ow_block);
-    kernel_ctx.define_int(
-            "IW_TAIL", abs(conf.kw - 1) * (1 + conf.dilate_w) - conf.stride_w);
+    kernel_ctx.define_int("IW_TAIL", conf.iw % (conf.stride_w * conf.ow_block));
     kernel_ctx.define_int("OW_SLM_TAIL",
             conf.iw
                     - conf.stride_w * conf.ow_block
@@ -254,7 +274,10 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_kernel_ctx(
 
     kernel_ctx.set_data_type(conf.dst_data_type);
     def_data_type(kernel_ctx, conf.src_data_type, "SRC");
+    def_data_type(kernel_ctx, conf.dst_data_type, "DST");
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
+    kernel_ctx.add_option("-Dcl_intel_subgroups_long");
+
     return status::success;
 }
 
