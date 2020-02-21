@@ -82,9 +82,10 @@ static int init_pd(const prb_t *p, dnnl_eltwise_desc_t &ed,
 // Used in other drivers supporting eltwise post_ops.
 bool check_extreme_values(const float &a, const float &b, alg_t alg) {
     switch (alg) {
-        case alg_t::SQRT:
         case alg_t::LOG:
         case alg_t::POW:
+        case alg_t::SQRT:
+        case alg_t::SQRT_DST:
             if (std::isnan(a) && std::isnan(b)) return true;
             if (std::isinf(a) && std::isinf(b)
                     && std::signbit(a) == std::signbit(b))
@@ -95,30 +96,41 @@ bool check_extreme_values(const float &a, const float &b, alg_t alg) {
 }
 
 static bool check_abs_err(const prb_t *p, const float &s, const float &trh) {
-    float approx_machine_eps = 2e-7;
+    const float approx_machine_eps = 2 * epsilon_dt(dnnl_f32);
+    const float comp_err = approx_machine_eps / trh;
 
     switch (p->alg) {
-        case alg_t::GELU: {
+        case alg_t::GELU_TANH: {
             // catch catastrophic cancellation
             const float sqrt_2_over_pi = 0.797884;
             const float fitting_const = 0.044715;
             float v = tanhf(sqrt_2_over_pi * s * (1 + fitting_const * s * s));
             float dg = sqrt_2_over_pi * (1 + 3 * fitting_const * s * s);
             if (p->dir & FLAG_FWD)
-                return fabsf(1.f + v) <= (approx_machine_eps / trh);
+                return fabsf(1.f + v) <= comp_err;
             else
-                return fabsf(1.f + v) <= (approx_machine_eps / trh)
+                return fabsf(1.f + v) <= comp_err
                         || (std::signbit(s)
-                                && fabsf(1.f + s * (1.f - v) * dg)
-                                        <= (approx_machine_eps / trh));
+                                && fabsf(1.f + s * (1.f - v) * dg) <= comp_err);
         }
+        case alg_t::GELU_ERF: {
+            // catch catastrophic cancellation
+            // which occurs at large negative s
+            const float sqrt_2_over_2 = 0.707106769084930419921875f;
+            const float two_over_sqrt_pi = 1.12837922573089599609375f;
+            float v = s * sqrt_2_over_2;
+            if (p->dir & FLAG_FWD)
+                return fabsf(1.f + erff(v)) <= comp_err;
+            else
+                return fabsf(1.f + erff(v)
+                               + v * two_over_sqrt_pi * expf(-v * v))
+                        <= comp_err;
+        }
+
         case alg_t::TANH:
-            // catch catastrophic cancellation,
-            // which occurs when err in tanh(s) is high
-            // and tanh(s) is close to 1.
-            return (p->dir & FLAG_BWD)
-                    && fabsf(1.f - tanhf(fabsf(s)))
-                    <= (approx_machine_eps / trh);
+            // catch catastrophic cancellation, which occurs when err in tanh(s)
+            // is high and tanh(s) is close to 1.
+            return (p->dir & FLAG_BWD) && (1.f - tanhf(fabsf(s))) <= comp_err;
         case alg_t::SRELU:
             // when s is negative, expf(s) -> 0 rapidly
             // which leads to log1pf(expf(s)) -> 0
@@ -126,24 +138,24 @@ static bool check_abs_err(const prb_t *p, const float &s, const float &trh) {
             // while abs error is still low.
             // (10.f is magic scale for bf16)
             return (p->dir & FLAG_FWD) && std::signbit(s)
-                    && log1pf(expf(s)) <= 10.f * (approx_machine_eps / trh);
+                    && log1pf(expf(s)) <= 10.f * comp_err;
         default: return false;
     }
 }
 
-static int compare(const prb_t *p, const dnn_mem_t &mem_src_fp,
+static int compare(const prb_t *p, const dnn_mem_t &mem_arg_fp,
         const dnn_mem_t &mem_fp, const dnn_mem_t &mem_dt, res_t *r) {
-    // Tolerate ~3 ulp of relative error for fp32.
-    float trh = 2e-6;
-    // Tolerate only rounding error(~1/2 ulp) for reduced precision.
-    if (p->dt == dnnl_f16 || p->dt == dnnl_bf16) trh = epsilon_dt(p->dt);
-
-    // Tolerate ~7ulp for complex primitives in fp32.
-    if (p->dt == dnnl_f32
-            && (p->alg == alg_t::GELU || p->alg == alg_t::ELU
-                    || p->alg == alg_t::SWISH || p->alg == alg_t::TANH
-                    || p->alg == alg_t::SRELU || p->alg == alg_t::LOG))
-        trh = 3e-5;
+    // Tolerate only rounding error (1 ulp) for other than fp32 precisions.
+    float trh = epsilon_dt(p->dt);
+    if (p->dt == dnnl_f32) {
+        // Tolerate bigger compute errors for complex algorithms.
+        if (p->alg == alg_t::GELU_TANH || p->alg == alg_t::ELU
+                || p->alg == alg_t::SWISH || p->alg == alg_t::TANH
+                || p->alg == alg_t::SRELU || p->alg == alg_t::LOG)
+            trh *= 300; // 3e-5
+        else
+            trh *= 20; // 2e-6
+    }
 
     const auto nelems = mem_dt.nelems();
     r->errors = 0;
@@ -151,7 +163,7 @@ static int compare(const prb_t *p, const dnn_mem_t &mem_src_fp,
 
     for (int64_t i = 0; i < nelems; i++) {
         const float dt = mem_dt.get_elem(i);
-        const float src = mem_src_fp.get_elem(i);
+        const float src = mem_arg_fp.get_elem(i);
         const float fp0 = mem_fp.get_elem(i);
         const float fp = maybe_saturate(p->dt, fp0);
 
@@ -313,10 +325,12 @@ int doit(const prb_t *p, res_t *r) {
     dnn_mem_t d_dst_fp, d_dst_dt;
     dnn_mem_t d_src_fp, d_src_dt;
 
+    dnn_mem_t placeholder_d_src_dt;
+
     args_t args;
-    args.set(DNNL_ARG_SRC, src_dt);
 
     if (p->dir & FLAG_FWD) {
+        args.set(DNNL_ARG_SRC, src_dt);
         args.set(DNNL_ARG_DST, dst_dt);
 
         DNN_SAFE(execute_and_wait(e, stream_tgt, args), WARN);
@@ -337,7 +351,6 @@ int doit(const prb_t *p, res_t *r) {
         d_dst_dt = dnn_mem_t(d_data_desc, engine_tgt);
 
         d_src_fp = dnn_mem_t(d_data_desc, fp, tag, engine_tgt);
-        dnn_mem_t placeholder_d_src_dt;
         if (!p->inplace) {
             placeholder_d_src_dt = dnn_mem_t(d_data_desc, engine_tgt);
             SAFE(placeholder_d_src_dt.reorder(d_src_fp), WARN);
@@ -349,12 +362,24 @@ int doit(const prb_t *p, res_t *r) {
         args.set(DNNL_ARG_DIFF_DST, d_dst_dt);
         args.set(DNNL_ARG_DIFF_SRC, d_src_dt);
 
+        if (p->use_dst()) {
+            if (bench_mode & CORR) compute_ref_fwd(p, src_fp, dst_fp);
+            SAFE(dst_dt.reorder(dst_fp), WARN);
+            // make dst_fp of same values as for bf16, otherwise there are high
+            // relative and absolute errors due to initial difference in source
+            // values which become worse particularly when (1 - x) is used.
+            SAFE(dst_fp.reorder(dst_dt), WARN);
+            args.set(DNNL_ARG_DST, dst_dt);
+        } else {
+            args.set(DNNL_ARG_SRC, src_dt);
+        }
         DNN_SAFE(execute_and_wait(e, stream_tgt, args), WARN);
 
         if (bench_mode & CORR) {
-            compute_ref_bwd(p, src_fp, d_dst_fp, d_src_fp);
+            dnn_mem_t &arg_fp = p->use_dst() ? dst_fp : src_fp;
+            compute_ref_bwd(p, arg_fp, d_dst_fp, d_src_fp);
             dnn_mem_t d_src(d_src_dt, fp, tag, engine_tgt);
-            SAFE(compare(p, src_fp, d_src_fp, d_src, r), WARN);
+            SAFE(compare(p, arg_fp, d_src_fp, d_src, r), WARN);
         }
     }
 

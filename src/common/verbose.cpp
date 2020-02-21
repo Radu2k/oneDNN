@@ -47,7 +47,7 @@
 #include "sum_pd.hpp"
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-#include "ocl/verbose.hpp"
+#include "gpu/ocl/verbose.hpp"
 #endif
 
 /* DNNL CPU ISA info */
@@ -89,7 +89,7 @@ int get_verbose() {
         printf("dnnl_verbose,info,gpu,runtime:%s\n",
                 dnnl_runtime2str(dnnl_version()->gpu_runtime));
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-        ocl::print_verbose_header();
+        gpu::ocl::print_verbose_header();
 #endif
         version_printed = true;
     }
@@ -785,8 +785,14 @@ static void init_info_rnn(pd_t *s, char *buffer) {
         DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " wei_layer_");
         MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
     }
+    if (s->is_lstm_peephole()) { // wei_peephole
+        auto md = s->arg_md(s->is_fwd() ? DNNL_ARG_WEIGHTS_PEEPHOLE
+                                        : DNNL_ARG_DIFF_WEIGHTS_PEEPHOLE);
+        DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " wei_peephole_");
+        MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
+    }
     { // bias
-        auto md = s->is_fwd() ? s->weights_md(2) : s->diff_weights_md(2);
+        auto md = s->arg_md(s->is_fwd() ? DNNL_ARG_BIAS : DNNL_ARG_DIFF_BIAS);
         DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " bias_");
         MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
     }
