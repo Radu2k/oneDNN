@@ -146,6 +146,7 @@ dnnl_format_tag_t str2fmt_tag(const char *str) {
     CASE(Abcde8a);
     CASE(ABcde8a8b);
     CASE(BAcde16b16a);
+    CASE(BAcde16a16b);
     CASE(aBcde8b);
     CASE(ABcde8b16a2b);
     CASE(aBCde8b16c2b);
@@ -203,6 +204,7 @@ dnnl_format_tag_t str2fmt_tag(const char *str) {
     CASE(aBdefc16b);
     CASE(aBdefC16b2c);
     CASE(aCBdef16c16b);
+    CASE(aCBdef16b16c);
     CASE(aBdefc4b);
     CASE(aBdefc8b);
     CASE(Abcdef16a);
@@ -418,6 +420,7 @@ dnnl_format_tag_t str2fmt_tag(const char *str) {
     CASE(gIOhw4i8o8i2o);
     CASE(gIOw4i8o8i2o);
     CASE(gIOdhw16i16o);
+    CASE(gIOdhw16o16i);
     CASE(gOdhwi16o);
     CASE(gOdhwI16o2i);
     CASE(gOdhwi4o);

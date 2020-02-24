@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 #include <string>
 #include <CL/cl.h>
 
-#include "compute/compute_engine.hpp"
+#include "gpu/compute/compute_engine.hpp"
 
 namespace dnnl {
 namespace {
@@ -194,7 +194,7 @@ TEST_P(ocl_engine_test, BinaryKernels) {
     ASSERT_EQ(s, p.expected_status);
 
     if (s == dnnl_success) {
-        using namespace dnnl::impl::compute;
+        using namespace dnnl::impl::gpu::compute;
         auto handle = reinterpret_cast<compute_engine_t *>(eng);
         ASSERT_EQ(handle->mayiuse_ngen_kernels(), true);
     }

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2017-2019 Intel Corporation
+* Copyright 2017-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -1202,7 +1202,7 @@ struct driver_t : public c_compatible {
             size_t working_set_size
                     = dt_size_ * (N * D * H * W * simd_w) * num_tensors;
             bnorm_utils::cache_balance(
-                    working_set_size, C_blks, C_blks_per_iter, iters);
+                    working_set_size, C_blks, N, nthr, C_blks_per_iter, iters);
         }
 
         bool spatial_thr_allowed = bnorm_utils::thread_balance(do_blocking_,

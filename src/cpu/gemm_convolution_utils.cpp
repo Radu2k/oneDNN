@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2019 Intel Corporation
+* Copyright 2016-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -126,10 +126,6 @@ template void im2col_3d(
 
 template void im2col_3d(const jit_gemm_conv_conf_t &jcp, const bfloat16_t *im,
         bfloat16_t *col, int od);
-
-inline int saturate(int low, int upper, int value) {
-    return nstl::max(low, nstl::min(upper, value));
-}
 
 /* imtr[ic][od][oh][ow] <-- im[id][ih][iw][ic]*/
 template <typename T>

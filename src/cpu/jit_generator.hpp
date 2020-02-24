@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2019 Intel Corporation
+* Copyright 2016-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 
 #include <limits.h>
 
+#include "bit_cast.hpp"
 #include "utils.hpp"
 
 #include "cpu_isa_traits.hpp"
@@ -57,12 +58,7 @@ typedef enum {
 // TODO: move this somewhere else? Although this is only used by jit kernels
 // (Roma)
 static inline int float2int(float x) {
-    union {
-        float vfloat;
-        int vint;
-    } cvt;
-    cvt.vfloat = x;
-    return cvt.vint;
+    return utils::bit_cast<int>(x);
 }
 
 // TODO: A GPR class that hides ABI details from the JIT kernels and allows

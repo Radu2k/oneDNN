@@ -159,6 +159,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_ABcde8a8b) return "ABcde8a8b";
     if (v == dnnl_ABcde8a4b) return "ABcde8a4b";
     if (v == dnnl_BAcde16b16a) return "BAcde16b16a";
+    if (v == dnnl_BAcde16a16b) return "BAcde16a16b";
     if (v == dnnl_aBcde8b) return "aBcde8b";
     if (v == dnnl_ABcde8b16a2b) return "ABcde8b16a2b";
     if (v == dnnl_aBCde8b16c2b) return "aBCde8b16c2b";
@@ -218,6 +219,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_aBdefc16b) return "aBdefc16b";
     if (v == dnnl_aBdefC16b2c) return "aBdefC16b2c";
     if (v == dnnl_aCBdef16c16b) return "aCBdef16c16b";
+    if (v == dnnl_aCBdef16b16c) return "aCBdef16b16c";
     if (v == dnnl_aBdefc4b) return "aBdefc4b";
     if (v == dnnl_aBdefc8b) return "aBdefc8b";
     if (v == dnnl_Abcdef16a) return "Abcdef16a";
@@ -363,6 +365,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_OIdhw8o4i) return "OIdhw8o4i";
     if (v == dnnl_IOdhw16i16o) return "IOdhw16i16o";
     if (v == dnnl_OIdhw4o8i8o4i) return "OIdhw4o8i8o4i";
+    if (v == dnnl_IOdhw16o16i) return "IOdhw16o16i";
     if (v == dnnl_Goiw16g) return "Goiw16g";
     if (v == dnnl_Goiw8g) return "Goiw8g";
     if (v == dnnl_gIOw16o16i) return "gIOw16o16i";
@@ -436,6 +439,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_gIOhw4i8o8i2o) return "gIOhw4i8o8i2o";
     if (v == dnnl_gIOw4i8o8i2o) return "gIOw4i8o8i2o";
     if (v == dnnl_gIOdhw16i16o) return "gIOdhw16i16o";
+    if (v == dnnl_gIOdhw16o16i) return "gIOdhw16o16i";
     if (v == dnnl_gOdhwi16o) return "gOdhwi16o";
     if (v == dnnl_gOdhwI16o2i) return "gOdhwI16o2i";
     if (v == dnnl_gOdhwi4o) return "gOdhwi4o";
@@ -522,6 +526,12 @@ const char *dnnl_alg_kind2str(dnnl_alg_kind_t v) {
     if (v == dnnl_eltwise_log) return "eltwise_log";
     if (v == dnnl_eltwise_clip) return "eltwise_clip";
     if (v == dnnl_eltwise_pow) return "eltwise_pow";
+    if (v == dnnl_eltwise_relu_use_dst_for_bwd) return "eltwise_relu_use_dst_for_bwd";
+    if (v == dnnl_eltwise_tanh_use_dst_for_bwd) return "eltwise_tanh_use_dst_for_bwd";
+    if (v == dnnl_eltwise_elu_use_dst_for_bwd) return "eltwise_elu_use_dst_for_bwd";
+    if (v == dnnl_eltwise_sqrt_use_dst_for_bwd) return "eltwise_sqrt_use_dst_for_bwd";
+    if (v == dnnl_eltwise_logistic_use_dst_for_bwd) return "eltwise_logistic_use_dst_for_bwd";
+    if (v == dnnl_eltwise_exp_use_dst_for_bwd) return "eltwise_exp_use_dst_for_bwd";
     if (v == dnnl_pooling_max) return "pooling_max";
     if (v == dnnl_pooling_avg_include_padding) return "pooling_avg_include_padding";
     if (v == dnnl_pooling_avg_exclude_padding) return "pooling_avg_exclude_padding";

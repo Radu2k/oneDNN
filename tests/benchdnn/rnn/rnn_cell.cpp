@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -30,7 +30,9 @@ float activation(const prb_t &p, float x, bool is_fwd = true) {
         result = p.linear_scales[0] * x;
     else
         switch (p.activation) {
-            case RELU: result = is_fwd ? relu(x) : drelu(x); break;
+            case RELU:
+                result = is_fwd ? relu(x, p.alpha) : drelu(x, p.alpha);
+                break;
             case LOGISTIC: result = is_fwd ? logistic(x) : x_m_square(x); break;
             case TANH: result = is_fwd ? tanhf(x) : one_m_square(x); break;
             default: assert(!"unknown activation");

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -147,7 +147,7 @@ void memory_format_propagation_tutorial(engine::kind engine_kind) {
     /// Next, we pass the memory descriptors to primitive descriptors
     /// constructors.
     ///
-    // @snippet memory_format_propagation.cpp Create convolution and pooling primitive descriptors
+    /// @snippet memory_format_propagation.cpp Create convolution and pooling primitive descriptors
     // [Create convolution and pooling primitive descriptors]
     auto conv_pd = convolution_forward::primitive_desc(
             {prop_kind::forward_inference, algorithm::convolution_auto,

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2019 Intel Corporation
+* Copyright 2016-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -270,6 +270,11 @@ inline void simultaneous_sort(
 
         if (swapped == false) break;
     }
+}
+
+template <typename T>
+inline const T &saturate(const T &low, const T &upper, const T &a) {
+    return nstl::max(low, nstl::min(upper, a));
 }
 
 template <typename T, typename U>
