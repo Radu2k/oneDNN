@@ -15,14 +15,9 @@
 #===============================================================================
 
 file(GLOB_RECURSE SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/*.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
     )
-
-#set(_ngen_flags "-DNGEN_CPP11 -DNGEN_SAFE -DNGEN_NEO_INTERFACE -DNGEN_NO_OP_NAMES")
-#set_source_files_properties(${SOURCES} PROPERTIES COMPILE_FLAGS "${_ngen_flags}")
 
 set(OBJ_LIB ${LIB_NAME}_gpu_jit)
 add_library(${OBJ_LIB} OBJECT ${SOURCES})

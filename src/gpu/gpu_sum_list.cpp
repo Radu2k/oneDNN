@@ -14,36 +14,35 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "common/engine.hpp"
-#include "gpu/gpu_reorder_pd.hpp"
-#include "gpu/ocl/cross_engine_reorder.hpp"
-#include "gpu/ocl/ocl_engine.hpp"
-#include "gpu/ocl/rnn/rnn_reorders.hpp"
-#include "gpu/ocl/simple_reorder.hpp"
+#include "gpu/gpu_impl_list.hpp"
+
+#include "common/utils.hpp"
+#include "gpu/gpu_sum_pd.hpp"
+#include "gpu/jit/gen9_simple_sum.hpp"
+#include "gpu/ocl/ref_sum.hpp"
+#include "gpu/ocl/simple_sum.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace gpu {
-namespace ocl {
 
-using rpd_create_f = engine_t::reorder_primitive_desc_create_f;
+using spd_create_f = engine_t::sum_primitive_desc_create_f;
 
 namespace {
-
-using namespace dnnl::impl::data_type;
-
-static const rpd_create_f ocl_ce_reorder_impl_list[]
-        = {rnn_weights_reorder_t::pd_t::create,
-                cross_engine_reorder_t::pd_t::create,
-                simple_reorder_t::pd_t::create, nullptr};
+#define INSTANCE(...) __VA_ARGS__::pd_t::create
+static const spd_create_f sum_impl_list[] = {
+        INSTANCE(jit::gen9_simple_sum_t),
+        INSTANCE(ocl::simple_sum_t<data_type::f32>),
+        INSTANCE(ocl::ref_sum_t),
+        nullptr,
+};
+#undef INSTANCE
 } // namespace
 
-const rpd_create_f *ocl_gpu_engine_impl_list_t::get_reorder_implementation_list(
-        const memory_desc_t *, const memory_desc_t *) {
-    return ocl_ce_reorder_impl_list;
+const spd_create_f *gpu_impl_list_t::get_sum_implementation_list() {
+    return sum_impl_list;
 }
 
-} // namespace ocl
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl

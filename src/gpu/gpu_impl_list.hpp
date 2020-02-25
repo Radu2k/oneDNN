@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,36 +14,29 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "common/utils.hpp"
-#include "gpu/gpu_sum_pd.hpp"
-#include "gpu/jit/gen9_simple_sum.hpp"
-#include "gpu/ocl/ocl_engine.hpp"
-#include "gpu/ocl/ref_sum.hpp"
-#include "gpu/ocl/simple_sum.hpp"
+#ifndef GPU_GPU_IMPL_LIST_HPP
+#define GPU_GPU_IMPL_LIST_HPP
+
+#include "common/engine.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace gpu {
-namespace ocl {
 
-using spd_create_f = engine_t::sum_primitive_desc_create_f;
-
-namespace {
-#define INSTANCE(...) __VA_ARGS__::pd_t::create
-static const spd_create_f ocl_sum_impl_list[] = {
-        INSTANCE(jit::gen9_simple_sum_t),
-        INSTANCE(simple_sum_t<data_type::f32>),
-        INSTANCE(ref_sum_t),
-        nullptr,
+class gpu_impl_list_t {
+public:
+    static const engine_t::concat_primitive_desc_create_f *
+    get_concat_implementation_list();
+    static const engine_t::reorder_primitive_desc_create_f *
+    get_reorder_implementation_list(
+            const memory_desc_t *src_md, const memory_desc_t *dst_md);
+    static const engine_t::sum_primitive_desc_create_f *
+    get_sum_implementation_list();
+    static const engine_t::primitive_desc_create_f *get_implementation_list();
 };
-#undef INSTANCE
-} // namespace
 
-const spd_create_f *ocl_gpu_engine_impl_list_t::get_sum_implementation_list() {
-    return ocl_sum_impl_list;
-}
-
-} // namespace ocl
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
+
+#endif // GPU_GPU_IMPL_LIST_HPP
