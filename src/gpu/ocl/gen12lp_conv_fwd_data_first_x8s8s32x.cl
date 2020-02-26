@@ -22,7 +22,7 @@
 
 #define KDHW_SIZE (KH * KW * KD)
 
-#if PW % 4 == 0
+#if (PW % 4 == 0) && (SRC_SLM_SIZE % 4 == 0)
 #define WRITE_SLM_BLOCK(_P, _V) WRITE_LOCAL_1(_P, _V)
 #define WRITE_SLM_BLOCK_SHORT(_P, _V) WRITE_LOCAL_SHORT_1(_P, _V)
 #else
