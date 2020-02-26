@@ -296,8 +296,7 @@ status_t gen12hp_systolic_gemm_t::launch_compute(
     return compute_stream->parallel_for(nd_range, kernel, arg_list);
 }
 
-status_t gen12hp_systolic_gemm_t::execute(
-        const ocl::gemm_exec_ctx_t &ctx) const {
+status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
 
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());

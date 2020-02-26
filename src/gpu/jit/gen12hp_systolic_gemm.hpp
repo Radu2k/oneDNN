@@ -26,15 +26,15 @@
 #include "common/memory_storage.hpp"
 #include "common/utils.hpp"
 #include "gpu/compute/compute.hpp"
+#include "gpu/gemm/gpu_gemm.hpp"
 #include "gpu/gpu_gemm_pd.hpp"
-#include "gpu/ocl/gemm/ocl_gemm.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace jit {
 
-struct gen12hp_systolic_gemm_t : public ocl::ocl_gemm_t {
+struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
     struct pd_t : public gpu_gemm_pd_t {
         using hint_class = void;
 
@@ -65,9 +65,9 @@ struct gen12hp_systolic_gemm_t : public ocl::ocl_gemm_t {
     status_t init() override;
 
 public:
-    gen12hp_systolic_gemm_t(const pd_t *apd) : ocl::ocl_gemm_t(apd) {}
+    gen12hp_systolic_gemm_t(const pd_t *apd) : gpu_gemm_t(apd) {}
 
-    virtual status_t execute(const ocl::gemm_exec_ctx_t &ctx) const override;
+    virtual status_t execute(const gemm_exec_ctx_t &ctx) const override;
 
 private:
     std::tuple<int64_t, int64_t, int64_t> get_blocking() const;
