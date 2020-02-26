@@ -62,7 +62,11 @@ struct gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
                             expect_data_types(f16, f16, f16,
                                     desc()->dst_desc.data_type, f16))
                     && attr()->has_default_values(attr_skip_mask)
-                    && post_ops_ok(attr());
+                    && post_ops_ok(attr())
+                    && IMPLICATION(!attr()->output_scales_.has_default_values(),
+                            utils::one_of(src_md_.data_type, s8, u8)
+                                    && attr()->output_scales_.mask_ == 0);
+
             if (!ok) return status::unimplemented;
 
             status_t status = init_conf();
