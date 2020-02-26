@@ -27,12 +27,7 @@
 #include "common/utils.hpp"
 #include "gpu/compute/compute.hpp"
 #include "gpu/gpu_gemm_pd.hpp"
-#include "gpu/jit/gen12hp_systolic_gemm_kernel.hpp"
-#include "gpu/jit/ngen_type_bridge.hpp"
-#include "gpu/ocl/gemm/gen12hp_systolic_gemm_copy_kernel.hpp"
 #include "gpu/ocl/gemm/ocl_gemm.hpp"
-#include "gpu/ocl/ocl_stream.hpp"
-#include "gpu/ocl/ocl_utils.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -49,53 +44,11 @@ struct gen12hp_systolic_gemm_t : public ocl::ocl_gemm_t {
 
         DECLARE_COMMON_PD_T("ngen:gen12hp:gemm:any", gen12hp_systolic_gemm_t);
 
-        status_t init() {
-            using namespace prop_kind;
-            using namespace data_type;
-            using namespace primitive_kind;
+        status_t init();
 
-            assert(this->engine()->kind() == engine_kind::gpu);
-            auto *compute_engine
-                    = utils::downcast<compute::compute_engine_t *>(engine());
-
-            const auto d = desc();
-
-            // LIMITATIONS:
-            // - batch is not supported
-            // - runtime dims are not supported
-            // - bias is not supported
-            bool limits_ok = d->batch == 1
-                    && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m, d->n, d->k,
-                            d->lda, d->ldb, d->ldc)
-                    && d->bias_type == data_type::undef;
-
-            bool ok = true && limits_ok && d->a_type == d->b_type
-                    && utils::one_of(d->a_type, bf16, f16)
-                    && utils::one_of(d->c_type, f32, d->a_type)
-                    && compute_engine->mayiuse(compute::device_ext_t::
-                                    intel_subgroup_split_matrix_multiply_accumulate)
-                    && attr()->has_default_values();
-            if (!ok) return status::unimplemented;
-
-            return status::success;
-        }
-
-        dim_t m_aligned() const {
-            using kernel_t = gen12hp_systolic_gemm_kernel_t;
-            return utils::rnd_up(
-                    desc()->m, kernel_t::unroll_m * kernel_t::thread_group_m);
-        }
-
-        dim_t n_aligned() const {
-            using kernel_t = gen12hp_systolic_gemm_kernel_t;
-            return utils::rnd_up(
-                    desc()->n, kernel_t::unroll_n * kernel_t::thread_group_n);
-        }
-
-        dim_t k_aligned() const {
-            return utils::rnd_up(desc()->k,
-                    gen12hp_systolic_gemm_kernel_t::unroll_k(desc()->a_type));
-        }
+        dim_t m_aligned() const;
+        dim_t n_aligned() const;
+        dim_t k_aligned() const;
 
         size_t dyn_offset_a = 0;
         size_t dyn_offset_b = 0;
@@ -109,73 +62,7 @@ struct gen12hp_systolic_gemm_t : public ocl::ocl_gemm_t {
         }
     };
 
-    status_t init() override {
-        using namespace data_type;
-
-        auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine());
-        if (!gpu_engine) return status::out_of_memory;
-
-        auto a_type = pd()->desc()->a_type;
-        auto b_type = pd()->desc()->b_type;
-        auto c_type = pd()->desc()->c_type;
-        auto acc_type = pd()->desc()->acc_type;
-
-        if (utils::one_of(acc_type, f16, bf16)) acc_type = f32;
-
-        int64_t block_m = 0, block_n = 0, block_k = 0;
-        std::tie(block_m, block_n, block_k) = get_blocking();
-
-        memory_storage_t *a_packed_ptr, *b_packed_ptr;
-        this->engine()->create_memory_storage(&a_packed_ptr,
-                block_m * block_k * types::data_type_size(a_type));
-        this->engine()->create_memory_storage(&b_packed_ptr,
-                block_n * block_k * types::data_type_size(b_type));
-        if (!a_packed_ptr || !b_packed_ptr) return status::runtime_error;
-        a_packed_.reset(a_packed_ptr);
-        b_packed_.reset(b_packed_ptr);
-
-        // Initialize compute kernels (assembly)
-        gen12hp_systolic_gemm_kernel_t::config_t cfg;
-
-        cfg.a_type = convert_dnnl_type_to_ngen(a_type);
-        cfg.b_type = convert_dnnl_type_to_ngen(b_type);
-        cfg.c_type = convert_dnnl_type_to_ngen(c_type);
-        cfg.acc_type = convert_dnnl_type_to_ngen(acc_type);
-        cfg.alpha1 = (pd()->alpha() == 1.0f);
-        cfg.beta0 = (pd()->beta() == 0.0f);
-        cfg.beta1 = (pd()->beta() == 1.0f);
-
-        if (!cfg.beta1) {
-            auto kernel = gen12hp_systolic_gemm_kernel_t(cfg);
-            kernel_ = compute::kernel_t(
-                    new ocl::ocl_gpu_kernel_t(kernel.getKernel(
-                            gpu_engine->context(), gpu_engine->device())));
-        }
-
-        cfg.beta0 = false;
-        cfg.beta1 = true;
-        auto kernel_b1 = gen12hp_systolic_gemm_kernel_t(cfg);
-        kernel_b1_ = compute::kernel_t(
-                new ocl::ocl_gpu_kernel_t(kernel_b1.getKernel(
-                        gpu_engine->context(), gpu_engine->device())));
-
-        // Initialize copy kernels (OpenCL)
-        for (bool copy_b : {false, true}) {
-            compute::kernel_ctx_t kernel_ctx;
-
-            auto trans = !copy_b ? pd()->desc()->transa : pd()->desc()->transb;
-            auto status
-                    = ocl::gen12hp_systolic_gemm_copy_kernel_t::init_kernel_ctx(
-                            kernel_ctx, copy_b, trans);
-            if (status != status::success) return status;
-
-            gpu_engine->create_kernel(&copy_kernel_[copy_b],
-                    "gen12hp_systolic_gemm_copy", kernel_ctx);
-            if (!copy_kernel_[copy_b]) return status::runtime_error;
-        }
-
-        return status::success;
-    }
+    status_t init() override;
 
 public:
     gen12hp_systolic_gemm_t(const pd_t *apd) : ocl::ocl_gemm_t(apd) {}

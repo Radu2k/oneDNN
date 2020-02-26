@@ -17,15 +17,9 @@
 #ifndef GPU_JIT_GEN9_SIMPLE_SUM_HPP
 #define GPU_JIT_GEN9_SIMPLE_SUM_HPP
 
-#include <assert.h>
-
 #include "common/c_types_map.hpp"
 #include "gpu/compute/compute.hpp"
 #include "gpu/gpu_sum_pd.hpp"
-#include "gpu/jit/gen9_simple_sum_kernel_f32.hpp"
-#include "gpu/ocl/ocl_engine.hpp"
-#include "gpu/ocl/ocl_stream.hpp"
-#include "gpu/ocl/ocl_utils.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -64,22 +58,9 @@ struct gen9_simple_sum_t : public primitive_impl_t {
         }
     };
 
-    gen9_simple_sum_t(const pd_t *apd) : primitive_impl_t(apd) {
-        generator_.reset(new gen9_simple_sum_kernel_f32_t());
-    }
+    gen9_simple_sum_t(const pd_t *apd) : primitive_impl_t(apd) {}
 
-    virtual status_t init() override {
-        compute::kernel_ctx_t kernel_ctx;
-
-        auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine());
-        if (!gpu_engine) return status::runtime_error;
-        if (!generator_) return status::runtime_error;
-
-        kernel_ = compute::kernel_t(
-                new ocl::ocl_gpu_kernel_t(generator_->getKernel(
-                        gpu_engine->context(), gpu_engine->device())));
-        return status::success;
-    }
+    virtual status_t init() override;
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
         compute::compute_stream_t *compute_stream
@@ -112,7 +93,6 @@ struct gen9_simple_sum_t : public primitive_impl_t {
 
 private:
     const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
-    std::unique_ptr<gen9_simple_sum_kernel_f32_t> generator_;
 
     compute::kernel_t kernel_;
 };
