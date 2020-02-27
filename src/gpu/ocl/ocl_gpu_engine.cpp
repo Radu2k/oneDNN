@@ -16,11 +16,12 @@
 
 #include <CL/cl.h>
 
+#include "gpu/ocl/ocl_gpu_engine.hpp"
+
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
 #include "gpu/jit/binary_format.hpp"
-#include "gpu/ocl/ocl_gpu_engine.hpp"
-#include "gpu/ocl/ocl_kernel_list.hpp"
+#include "gpu/ocl/kernel_utils.hpp"
 #include "gpu/ocl/ocl_memory_storage.hpp"
 #include "gpu/ocl/ocl_stream.hpp"
 #include "gpu/ocl/ocl_utils.hpp"
@@ -84,12 +85,11 @@ status_t ocl_gpu_engine_t::create_stream(
     return ocl_stream_t::create_stream(stream, this, queue);
 }
 
-cl_uint count_lines(const char *code[]) {
+cl_uint count_lines(const char **code) {
     cl_uint i = 0;
-    const char *code_line = code[i];
-    while (strcmp("END_OF_KERNEL", code_line)) {
-        ++i;
-        code_line = code[i];
+    while (*code) {
+        i++;
+        code++;
     }
     return i;
 }
@@ -97,6 +97,21 @@ cl_uint count_lines(const char *code[]) {
 status_t ocl_gpu_engine_t::create_kernels(
         std::vector<compute::kernel_t> *kernels,
         const std::vector<const char *> &kernel_names,
+        const compute::kernel_ctx_t &kernel_ctx) const {
+
+    *kernels = std::vector<compute::kernel_t>(kernel_names.size());
+    compute::kernel_list_t kernel_list;
+    for (size_t i = 0; i < kernels->size(); ++i) {
+        if (kernel_names[i]) kernel_list.add(kernel_names[i], &(*kernels)[i]);
+    }
+
+    return ocl::create_kernels(this, kernel_list, kernel_ctx);
+}
+
+status_t ocl_gpu_engine_t::create_kernels_from_ocl_source(
+        std::vector<compute::kernel_t> *kernels,
+        const std::vector<const char *> &kernel_names,
+        const char **code_strings,
         const compute::kernel_ctx_t &kernel_ctx) const {
     std::string options = kernel_ctx.options();
 
@@ -106,57 +121,39 @@ status_t ocl_gpu_engine_t::create_kernels(
             = utils::downcast<const ocl_gpu_device_info_t *>(device_info());
     options += " " + dev_info->get_cl_ext_options();
 
-    std::vector<const char **> code_strings;
-    code_strings.reserve(kernel_names.size());
-    for (auto *kernel_name : kernel_names) {
-        const char **code = get_ocl_kernel_source(kernel_name);
-        code_strings.push_back(code);
+    cl_int err;
+    cl_program program = clCreateProgramWithSource(
+            context(), count_lines(code_strings), code_strings, nullptr, &err);
+    OCL_CHECK(err);
+
+    cl_device_id dev = device();
+    err = clBuildProgram(program, 1, &dev, options.c_str(), nullptr, nullptr);
+#ifndef NDEBUG
+    if (err != CL_SUCCESS) {
+        size_t log_length = 0;
+        err = clGetProgramBuildInfo(
+                program, dev, CL_PROGRAM_BUILD_LOG, 0, nullptr, &log_length);
+        assert(err == CL_SUCCESS);
+
+        std::vector<char> log_buf(log_length);
+        err = clGetProgramBuildInfo(program, dev, CL_PROGRAM_BUILD_LOG,
+                log_length, log_buf.data(), 0);
+        assert(err == CL_SUCCESS);
+        printf("Error during the build of OpenCL program.\nBuild "
+               "log:\n%s\n",
+                log_buf.data());
+        OCL_CHECK(err);
     }
+#endif
 
     *kernels = std::vector<compute::kernel_t>(kernel_names.size());
     for (size_t i = 0; i < kernel_names.size(); ++i) {
-        if (!kernel_names[i] || (*kernels)[i]) continue;
-
-        const char **code = code_strings[i];
-
-        cl_uint count = count_lines(code);
-        cl_int err;
-        cl_program program = clCreateProgramWithSource(
-                context(), count, code, nullptr, &err);
+        cl_kernel ocl_kernel = clCreateKernel(program, kernel_names[i], &err);
         OCL_CHECK(err);
-
-        cl_device_id dev = device();
-        err = clBuildProgram(
-                program, 1, &dev, options.c_str(), nullptr, nullptr);
-#ifndef NDEBUG
-        if (err != CL_SUCCESS) {
-            size_t log_length = 0;
-            err = clGetProgramBuildInfo(program, dev, CL_PROGRAM_BUILD_LOG, 0,
-                    nullptr, &log_length);
-            assert(err == CL_SUCCESS);
-
-            std::vector<char> log_buf(log_length);
-            err = clGetProgramBuildInfo(program, dev, CL_PROGRAM_BUILD_LOG,
-                    log_length, log_buf.data(), 0);
-            assert(err == CL_SUCCESS);
-            printf("Error during the build of OpenCL program.\nBuild "
-                   "log:\n%s\n",
-                    log_buf.data());
-            OCL_CHECK(err);
-        }
-#endif
-        for (size_t j = i; j < kernel_names.size(); ++j) {
-            if (code_strings[j] == code_strings[i]) {
-                cl_kernel ocl_kernel
-                        = clCreateKernel(program, kernel_names[j], &err);
-                OCL_CHECK(err);
-                (*kernels)[j]
-                        = compute::kernel_t(new ocl_gpu_kernel_t(ocl_kernel));
-            }
-        }
-
-        OCL_CHECK(clReleaseProgram(program));
+        (*kernels)[i] = compute::kernel_t(new ocl_gpu_kernel_t(ocl_kernel));
     }
+
+    OCL_CHECK(clReleaseProgram(program));
     return status::success;
 }
 

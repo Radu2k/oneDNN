@@ -30,8 +30,8 @@
 #include <unordered_set>
 
 #include "common/c_types_map.hpp"
-#include "common/engine.hpp"
 #include "common/utils.hpp"
+#include "common/verbose.hpp"
 
 namespace dnnl {
 namespace impl {
