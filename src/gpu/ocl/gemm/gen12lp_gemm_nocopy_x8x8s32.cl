@@ -444,11 +444,11 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
     co += offsetCO;
     c_offset_type = 0;
 #endif
-#ifdef CC
+#ifdef RR
     co += offsetCO + i0 + lid;
     c_offset_type = 1;
 #endif
-#ifdef RR
+#ifdef CC
     co += offsetCO + (j0);
     c_offset_type = 2;
 #endif
@@ -643,11 +643,11 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
     co += offsetCO;
     c_offset_type = 0;
 #endif
-#ifdef CC
+#ifdef RR
     co += offsetCO + i0 + lid;
     c_offset_type = 1;
 #endif
-#ifdef RR
+#ifdef CC
     co += offsetCO + (j0);
     c_offset_type = 2;
 #endif
@@ -871,11 +871,11 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
     co += offsetCO;
     c_offset_type = 0;
 #endif
-#ifdef CC
+#ifdef RR
     co += offsetCO + i0 + lid;
     c_offset_type = 1;
 #endif
-#ifdef RR
+#ifdef CC
     co += offsetCO + (j0);
     c_offset_type = 2;
 #endif
@@ -1131,11 +1131,11 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
     co += offsetCO;
     c_offset_type = 0;
 #endif
-#ifdef CC
+#ifdef RR
     co += offsetCO + i0 + lid;
     c_offset_type = 1;
 #endif
-#ifdef RR
+#ifdef CC
     co += offsetCO + (j0);
     c_offset_type = 2;
 #endif
