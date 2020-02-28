@@ -54,13 +54,17 @@ struct gen12lp_gemm_t : public ocl_gemm_t {
             assert(this->engine()->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine());
-            const auto attr_skip_mask = smask_t::oscale | smask_t::post_ops;
-            const auto d = desc();
 
+            const auto attr_skip_mask = smask_t::oscale | smask_t::post_ops
+                    | smask_t::zero_points_runtime;
+
+            const auto d = desc();
             // LIMITATIONS:
             // - batch is not supported
             // - runtime dims are not supported
             // - bias is not supported
+            // - runtime zero points are supported for dst only
+            // - attribute zero points are supported for src and weights only
             bool limits_ok = d->batch == 1
                     && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m, d->n, d->k,
                             d->lda, d->ldb, d->ldc)
@@ -70,7 +74,7 @@ struct gen12lp_gemm_t : public ocl_gemm_t {
                     && utils::one_of(d->b_type, data_type::u8, data_type::s8)
                     && utils::one_of(d->c_type, data_type::s32)
                     && attr()->has_default_values(attr_skip_mask)
-                    && attr()->output_scales_.mask_ == 0
+                    && zero_points_ok() && attr()->output_scales_.mask_ == 0
                     && IMPLICATION(attr()->post_ops_.len_ == 1,
                             attr()->post_ops_.find(eltwise) != -1
                                     || attr()->post_ops_.find(sum) != -1)
@@ -82,6 +86,13 @@ struct gen12lp_gemm_t : public ocl_gemm_t {
 
             if (!ok) return status::unimplemented;
             return status::success;
+        }
+
+        bool zero_points_ok() const {
+            return attr()->zero_points_.defined(DNNL_ARG_SRC)
+                    && attr()->zero_points_.defined(DNNL_ARG_WEIGHTS)
+                    && (attr()->zero_points_.has_default_values(DNNL_ARG_DST)
+                            || !attr()->zero_points_.defined(DNNL_ARG_DST));
         }
 
         bool with_eltwise() const {
