@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -21,6 +21,15 @@
 
 // Pseudo-instructions and macros.
 template <typename DT = void>
+void min_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
+    sel(mod | lt | f0[0], dst, src0, src1);
+}
+template <typename DT = void>
+void min_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
+    sel(mod | lt | f0[0], dst, src0, src1);
+}
+#ifndef NGEN_WINDOWS_COMPAT
+template <typename DT = void>
 void min(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
     sel(mod | lt | f0[0], dst, src0, src1);
 }
@@ -28,6 +37,16 @@ template <typename DT = void>
 void min(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
     sel(mod | lt | f0[0], dst, src0, src1);
 }
+#endif
+template <typename DT = void>
+void max_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
+    sel(mod | ge | f0[0], dst, src0, src1);
+}
+template <typename DT = void>
+void max_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
+    sel(mod | ge | f0[0], dst, src0, src1);
+}
+#ifndef NGEN_WINDOWS_COMPAT
 template <typename DT = void>
 void max(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
     sel(mod | ge | f0[0], dst, src0, src1);
@@ -36,10 +55,28 @@ template <typename DT = void>
 void max(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
     sel(mod | ge | f0[0], dst, src0, src1);
 }
+#endif
+
 template <typename DT = void>
 void bfi(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2, const RegData &src3) {
     bfi1(mod, dst, src0, src1);
     bfi2(mod, dst, dst, src2, src3);
+}
+
+// Brief compare instructions.
+template <typename DT = void>
+void cmp(const InstructionModifier &mod, const RegData &src0, const RegData &src1) {
+    auto dt = getDataType<DT>();
+    if (dt == DataType::invalid)
+        dt = src0.getType();
+    cmp<DT>(mod, null.retype(dt), src0, src1);
+}
+template <typename DT = void>
+void cmp(const InstructionModifier &mod, const RegData &src0, const Immediate &src1) {
+    auto dt = getDataType<DT>();
+    if (dt == DataType::invalid)
+        dt = src0.getType();
+    cmp<DT>(mod, null.retype(dt), src0, src1);
 }
 
 // Brief math instructions.
@@ -293,9 +330,9 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
 // Thread spawner messages.
 void threadend(const InstructionModifier &mod, const RegData &r0_info) {
     auto dmSave = defaultModifier;
-    defaultModifier = InstructionModifier();
+    defaultModifier |= NoMask;
 
-    send(NoMask | 8 | EOT | mod, null, r0_info, 0x27, 0x2000010);
+    send(8 | EOT | mod, null, r0_info, 0x27, 0x2000010);
 
     defaultModifier = dmSave;
 }
@@ -306,9 +343,9 @@ void threadend(const RegData &r0_info) { threadend(InstructionModifier(), r0_inf
 void barriermsg(const InstructionModifier &mod, const GRF &header)
 {
     auto dmSave = defaultModifier;
-    defaultModifier = InstructionModifier();
+    defaultModifier |= NoMask;
 
-    send(NoMask | 1 | mod, null, header, 0x3, 0x2000004);
+    send(1 | mod, null, header, 0x3, 0x2000004);
 
     defaultModifier = dmSave;
 }
@@ -319,9 +356,9 @@ void barriermsg(const GRF &header) { barriermsg(InstructionModifier(), header); 
 void barriersignal(const InstructionModifier &mod, const GRF &temp, const GRF &r0_info = r0)
 {
     auto dmSave = defaultModifier;
-    defaultModifier = InstructionModifier();
+    defaultModifier |= NoMask;
 
-    and_(NoMask | 8, temp.ud(), r0_info.ud(2), uint32_t((hardware >= HW::Gen11) ? 0x7F000000 : 0x8F000000));
+    and_(8, temp.ud(), r0_info.ud(2), uint32_t((hardware >= HW::Gen11) ? 0x7F000000 : 0x8F000000));
     barriermsg(mod, temp);
 
     defaultModifier = dmSave;
@@ -331,16 +368,15 @@ void barriersignal(const GRF &temp, const GRF &r0_info = r0) { barriersignal(Ins
 
 void barrierwait()
 {
+    auto dmSave = defaultModifier;
+    defaultModifier |= NoMask;
+
     if (isGen12)
-        sync(SyncFunction::bar, NoMask);
-    else {
-        auto dmSave = defaultModifier;
-        defaultModifier = InstructionModifier();
+        sync.bar();
+    else
+        wait(InstructionModifier(), n0[0]);
 
-        wait(NoMask, n0[0]);
-
-        defaultModifier = dmSave;
-    }
+    defaultModifier = dmSave;
 }
 
 void barrier(const GRF &temp, const GRF &r0_info = r0)
@@ -388,9 +424,9 @@ void atomic(AtomicOp op, const InstructionModifier &mod, const RegData &dst, con
 void memfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
     auto dmSave = defaultModifier;
-    defaultModifier = InstructionModifier();
+    defaultModifier |= NoMask;
 
-    send(NoMask | 8 | mod, dst, header, 0xA, 0x219E000);
+    send(8 | mod, dst, header, 0xA, 0x219E000);
 
     defaultModifier = dmSave;
 }
@@ -401,11 +437,65 @@ void memfence(const RegData &dst, const RegData &header = GRF(0)) { memfence(Ins
 void slmfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
     auto dmSave = defaultModifier;
-    defaultModifier = InstructionModifier();
+    defaultModifier |= NoMask;
 
-    send(NoMask | 8 | mod, dst, header, 0xA, 0x219E0FE);
+    send(8 | mod, dst, header, 0xA, 0x219E0FE);
 
     defaultModifier = dmSave;
 }
 
 void slmfence(const RegData &dst, const RegData &header = GRF(0)) { slmfence(InstructionModifier(), dst, header); }
+
+// ATS prologues.
+void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127), bool pad = false)
+{
+    if (hardware >= HW::Gen12HP) {
+        int simdGRFs = (simd > 16) ? 2 : 1;
+
+        if (dims > 0) {
+            auto dmSave = defaultModifier;
+            defaultModifier |= NoMask | AutoSWSB;
+
+            mov<uint32_t>(8, temp, uint16_t(0));
+            and_<uint32_t>(1, temp[2], r0[0], uint32_t(~0x1F));
+            and_<uint16_t>(1, temp[0], r0[4], uint16_t(0xFF));
+            add<uint32_t>(1, temp[2], temp[2], uint16_t(argGRFs * 0x20));
+            mad<uint32_t>(1, temp[2], temp[2], temp.uw(0), uint16_t(0x60));
+            load(8, r1, aligned_block_oword(simdGRFs * ((dims == 1) ? 2 : 4)), A32NC, temp);
+            if (dims == 3) {
+                add<uint32_t>(1, temp[2], temp[2], uint16_t(0x40));
+                load(8, GRF(1 + 2 * simdGRFs), aligned_block_oword(2 * simdGRFs), A32NC, temp);
+            } else if (pad) {
+                sync.nop();
+                sync.nop();
+            }
+
+            defaultModifier = dmSave;
+        } else if (pad) {
+            for (int i = 0; i < 8; i++)
+                sync.nop();
+        }
+    }
+}
+
+void loadargs(const GRF &base, int argGRFs, const GRF &temp = GRF(127))
+{
+    if (hardware >= HW::Gen12HP) {
+        auto dst = base;
+        auto dmSave = defaultModifier;
+        defaultModifier |= NoMask | AutoSWSB;
+
+        mov<uint32_t>(8, temp, uint16_t(0));
+        and_<uint32_t>(1, temp[2], r0[0], uint32_t(~0x1F));
+        while (argGRFs > 0) {
+            int nload = std::min(utils::rounddown_pow2(argGRFs), 4);
+            load(8, dst, aligned_block_oword(2 * nload), A32NC, temp);
+            argGRFs -= nload;
+            dst += nload;
+            if (argGRFs > 0)
+                add<uint32_t>(1, temp[2], temp[2], uint32_t(0x20 * nload));
+        }
+
+        defaultModifier = dmSave;
+    }
+}

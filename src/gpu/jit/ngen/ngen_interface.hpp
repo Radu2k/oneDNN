@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@
 
 
 namespace ngen {
-
 
 enum class ExternalArgumentType { Scalar, GlobalPtr, LocalPtr, Hidden };
 
@@ -133,14 +132,20 @@ int InterfaceHandler::getArgumentSurface(const std::string &name) const
 {
     for (auto &assignment : assignments) {
         if (assignment.name == name) {
+#ifdef NGEN_SAFE
             if (assignment.exttype != ExternalArgumentType::GlobalPtr)
                 throw unknown_argument_exception();
+#endif
 
             return assignment.surface;
         }
     }
 
+#ifdef NGEN_SAFE
     throw unknown_argument_exception();
+#else
+    return 0x80;
+#endif
 }
 
 GRF InterfaceHandler::getLocalID(int dim) const
@@ -158,11 +163,17 @@ GRF InterfaceHandler::getLocalID(int dim) const
 
 #ifdef NGEN_NEO_INTERFACE
 
+template <HW hw> class OpenCLCodeGenerator;
+
 class NEOInterfaceHandler : public InterfaceHandler
 {
+    template <HW hw> friend class OpenCLCodeGenerator;
 public:
+    NEOInterfaceHandler(HW hw_) : hw(hw_)       {}
+
     void requireBarrier()                       { needBarrier = true; }
     void requireDPAS()                          { needDPAS = true; }
+    void requireGRF(int grfs)                   { needGRF = grfs; }
     void requireLocalSize()                     { needLocalSize = true; }
     void requireScratch(size_t bytes = 1)       { scratchSize = bytes; }
     void requireSLM(size_t bytes)               { slmSize = bytes; }
@@ -175,6 +186,9 @@ public:
 
     inline void generateDummyCL(std::ostream &stream) const;
 
+    template <typename CodeGenerator>
+    inline void generatePrologue(CodeGenerator &generator, const GRF &temp = GRF(127)) const;
+
 #ifdef NGEN_ASM
     inline void dumpAssignments(std::ostream &stream) const;
 #endif
@@ -183,11 +197,18 @@ protected:
     bool finalized = false;
     bool needBarrier = false;
     bool needDPAS = false;
+    int32_t needGRF = 128;
     bool needLocalSize = false;
     bool needHalf = false;
     bool needDouble = false;
     size_t scratchSize = 0;
     size_t slmSize = 0;
+
+    int crossthreadGRFs = 0;
+    inline int getCrossthreadGRFs() const;
+    inline GRF getCrossthreadBase() const;
+
+    HW hw;
 };
 
 void NEOInterfaceHandler::requireType(DataType type)
@@ -274,9 +295,7 @@ void NEOInterfaceHandler::finalize()
     static const std::string localSizeArgs[3] = {"__local_size0", "__local_size1", "__local_size2"};
     static const std::string scratchSizeArg = "__scratch_size";
 
-    GRF base = !needLocalID ? GRF(3) :
-               (simd <= 16) ? GRF(5) :
-                              GRF(8);
+    GRF base = getCrossthreadBase() + 1;
     int offset = 0;
     int nextSurface = 0;
 
@@ -327,7 +346,31 @@ void NEOInterfaceHandler::finalize()
 
     assignArgsOfType(ExternalArgumentType::Hidden);
 
+    crossthreadGRFs = base.getBase() - getCrossthreadBase().getBase() + 1;
     finalized = true;
+}
+
+GRF NEOInterfaceHandler::getCrossthreadBase() const
+{
+    if (!needLocalID)
+        return GRF((hw >= HW::Gen12HP) ? 1 : 2);
+    else
+        return GRF((simd <= 16) ? 4 : 7);
+}
+
+int NEOInterfaceHandler::getCrossthreadGRFs() const
+{
+#ifdef NGEN_SAFE
+    if (!finalized) throw interface_not_finalized();
+#endif
+    return crossthreadGRFs;
+}
+
+template <typename CodeGenerator>
+void NEOInterfaceHandler::generatePrologue(CodeGenerator &generator, const GRF &temp) const
+{
+    generator.loadlid(getCrossthreadGRFs(), needLocalID, simd, temp, true);
+    generator.loadargs(getCrossthreadBase(), getCrossthreadGRFs(), temp);
 }
 
 #ifdef NGEN_ASM

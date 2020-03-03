@@ -23,6 +23,7 @@ add_definitions(-DNGEN_CPP11)
 add_definitions(-DNGEN_SAFE)
 add_definitions(-DNGEN_NEO_INTERFACE)
 add_definitions(-DNGEN_NO_OP_NAMES)
+add_definitions(-DNGEN_WINDOWS_COMPAT)
 
 set(OBJ_LIB ${LIB_NAME}_gpu_jit)
 add_library(${OBJ_LIB} OBJECT ${SOURCES})

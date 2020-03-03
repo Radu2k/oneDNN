@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -1090,7 +1090,7 @@ enum class ConditionModifier {
 #ifdef NGEN_ASM
 static inline std::ostream &operator<<(std::ostream &str, ConditionModifier cmod)
 {
-    static const char *names[16] = {"", "eq", "ne", "gt", "ge", "lt", "le", "ov", "un", "", "", "", "", "", "", "eo"};
+    static const char *names[16] = {"", "eq", "ne", "gt", "ge", "lt", "le", "", "ov", "un", "", "", "", "", "", "eo"};
     str << names[static_cast<uint8_t>(cmod) & 0xF];
     return str;
 }
@@ -1249,6 +1249,25 @@ enum class Opcode {
     nop = 0x7E,
 };
 
+static inline bool isVariableLatency(Opcode op)
+{
+    switch (op) {
+        case Opcode::send:
+        case Opcode::sendc:
+        case Opcode::dpas:
+        case Opcode::dpasw:
+        case Opcode::math:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static inline bool isBranch(Opcode op)
+{
+    return (static_cast<int>(op) >> 4) == 2;
+}
+
 #ifdef NGEN_ASM
 static const char *getMnemonic(Opcode op, HW hw)
 {
@@ -1305,15 +1324,13 @@ public:
 
 class SBID
 {
-protected:
-    SBInfo def;
-
 public:
+    SBInfo set;
     SBInfo src;
     SBInfo dst;
 
-    constexpr SBID(int id) : def(id), src(id, true, false), dst(id, false, true) {}
-    constexpr operator SBInfo() const { return def; }
+    constexpr SBID(int id) : set(id), src(id, true, false), dst(id, false, true) {}
+    constexpr operator SBInfo() const { return set; }
 };
 
 class AllPipes {};
@@ -1341,6 +1358,7 @@ static inline std::ostream &operator<<(std::ostream &str, Pipe pipe)
 
 class SWSBInfo
 {
+    friend class InstructionModifier;
 protected:
     union {
         struct {
@@ -1361,14 +1379,14 @@ protected:
         uint8_t all;
     };
 
-    constexpr SWSBInfo(uint8_t all_, bool dummy) : all(all_) {}
-    friend class InstructionModifier;
+    constexpr SWSBInfo(uint8_t all_, bool dummy) : all{all_} {}
 
     constexpr bool isPipeline() const {
         return !combined.combined && ((scoreboard.mode < 2) || (scoreboard.mode > 4));
     }
 
 public:
+    constexpr SWSBInfo() : all{0} {}
     constexpr SWSBInfo(SBInfo info) : scoreboard{info.getID(), info.getMode(), false} {}
     constexpr SWSBInfo(Pipe pipe, unsigned dist) : pipeline{dist,static_cast<unsigned>(pipe),false} {}
     constexpr SWSBInfo(SBInfo info, unsigned dist) : combined{info.getID(), dist, true} {}
@@ -1397,12 +1415,14 @@ public:
         else
             return Pipe::Default;
     }
+
+    constexpr uint8_t raw() const { return all; }
+    static constexpr14 SWSBInfo createFromRaw(uint8_t all_) { return SWSBInfo(all_, false); }
 };
 
 constexpr SWSBInfo SWSB(SBInfo info)                             { return SWSBInfo(info); }
 template <typename T = void> constexpr SWSBInfo SWSB(int dist)   { return SWSBInfo(getPipe<T>(), dist); }
 constexpr SWSBInfo SWSB(SBInfo info, int dist)                   { return SWSBInfo(info, dist); }
-
 
 class InstructionModifier {
 protected:
@@ -1425,7 +1445,8 @@ protected:
             unsigned flagSubRegNum : 1;
             unsigned flagRegNum : 1;
             unsigned maskCtrl : 1;
-            unsigned _zeros_: 19;
+            unsigned _zeros_: 18;
+            unsigned autoSWSB : 1;
             unsigned fusionCtrl : 1;        // Gen12
             unsigned eot : 1;
             unsigned swsb : 8;
@@ -1453,14 +1474,20 @@ public:
     constexpr bool isSaturate()            const { return parts.saturate; }
     constexpr14 FlagRegister getFlagReg()  const { return FlagRegister(parts.flagRegNum, parts.flagSubRegNum); }
     constexpr bool isWrEn()                const { return parts.maskCtrl; }
+    constexpr bool isAutoSWSB()            const { return parts.autoSWSB; }
     constexpr bool isSerialized()          const { return parts.fusionCtrl; }
     constexpr bool isEOT()                 const { return parts.eot; }
     constexpr SWSBInfo getSWSB()           const { return SWSBInfo(parts.swsb, false); }
     constexpr uint64_t getAll()            const { return all; }
 
-    void setExecSize(int execSize_)                   { parts.execSize = execSize_; }
-    void setCMod(const ConditionModifier &cmod_)      { parts.cmod = static_cast<unsigned>(cmod_); }
-    void setBranchCtrl(bool branchCtrl)               { parts.accWrCtrl = branchCtrl; }
+    constexpr14 void setExecSize(int execSize_)              { parts.execSize = execSize_; parts.eSizeField = utils::log2(execSize_); }
+    constexpr14 void setPredInv(bool predInv_)               { parts.predInv = predInv_; }
+    constexpr14 void setCMod(const ConditionModifier &cmod_) { parts.cmod = static_cast<unsigned>(cmod_); }
+    constexpr14 void setBranchCtrl(bool branchCtrl)          { parts.accWrCtrl = branchCtrl; }
+    constexpr14 void setWrEn(bool maskCtrl_)                 { parts.maskCtrl = maskCtrl_; }
+    constexpr14 void setAutoSWSB(bool autoSWSB_)             { parts.autoSWSB = autoSWSB_; }
+    constexpr14 void setSWSB(SWSBInfo swsb_)                 { parts.swsb = swsb_.raw(); }
+    constexpr14 void setSWSB(uint8_t swsb_)                  { parts.swsb = swsb_; }
 
     constexpr InstructionModifier() : all(0) {}
 
@@ -1475,8 +1502,7 @@ public:
         : all{static_cast<uint64_t>(cmod_) << 24} {}
 
     constexpr14 /* implicit */ InstructionModifier(const int &execSize_) : InstructionModifier() {
-        parts.execSize = execSize_;
-        parts.eSizeField = utils::log2(execSize_);
+        setExecSize(execSize_);
     }
     constexpr14 /* implicit */ InstructionModifier(const SWSBInfo &swsb) : InstructionModifier() {
         parts.swsb = swsb.all;
@@ -1486,41 +1512,44 @@ public:
 
 protected:
     constexpr InstructionModifier(bool accessMode_, bool noDDClr_, bool noDDChk_, unsigned chanOff_, bool accWrCtrl_,
-                                  bool debugCtrl_, bool saturate_, bool maskCtrl_, bool fusionCtrl_, bool eot_)
+                                  bool debugCtrl_, bool saturate_, bool maskCtrl_, bool autoSWSB_, bool fusionCtrl_, bool eot_)
         : all{(uint64_t(accessMode_) << 8) | (uint64_t(noDDClr_) << 9) | (uint64_t(noDDChk_) << 10) | (uint64_t(chanOff_ >> 2) << 11)
             | (uint64_t(accWrCtrl_) << 28) | (uint64_t(debugCtrl_) << 30) | (uint64_t(saturate_) << 31)
-            | (uint64_t(maskCtrl_) << 34) | (uint64_t(fusionCtrl_) << 54) | (uint64_t(eot_) << 55)} {}
+            | (uint64_t(maskCtrl_) << 34) | (uint64_t(autoSWSB_) << 53) | (uint64_t(fusionCtrl_) << 54) | (uint64_t(eot_) << 55)} {}
 
 public:
     static constexpr InstructionModifier createAccessMode(int accessMode_) {
-        return InstructionModifier(accessMode_, false, false, 0, false, false, false, false, false, false);
+        return InstructionModifier(accessMode_, false, false, 0, false, false, false, false, false, false, false);
     }
     static constexpr InstructionModifier createNoDDClr() {
-        return InstructionModifier(false, true, false, 0, false, false, false, false, false, false);
+        return InstructionModifier(false, true, false, 0, false, false, false, false, false, false, false);
     }
     static constexpr InstructionModifier createNoDDChk() {
-        return InstructionModifier(false, false, true, 0, false, false, false, false, false, false);
+        return InstructionModifier(false, false, true, 0, false, false, false, false, false, false, false);
     }
     static constexpr InstructionModifier createChanOff(int offset) {
-        return InstructionModifier(false, false, false, offset, false, false, false, false, false, false);
+        return InstructionModifier(false, false, false, offset, false, false, false, false, false, false, false);
     }
     static constexpr InstructionModifier createAccWrCtrl() {
-        return InstructionModifier(false, false, false, 0, true, false, false, false, false, false);
+        return InstructionModifier(false, false, false, 0, true, false, false, false, false, false, false);
     }
     static constexpr InstructionModifier createDebugCtrl() {
-        return InstructionModifier(false, false, false, 0, false, true, false, false, false, false);
+        return InstructionModifier(false, false, false, 0, false, true, false, false, false, false, false);
     }
     static constexpr InstructionModifier createSaturate() {
-        return InstructionModifier(false, false, false, 0, false, false, true, false, false, false);
+        return InstructionModifier(false, false, false, 0, false, false, true, false, false, false, false);
     }
     static constexpr InstructionModifier createMaskCtrl(bool maskCtrl_) {
-        return InstructionModifier(false, false, false, 0, false, false, false, maskCtrl_, false, false);
+        return InstructionModifier(false, false, false, 0, false, false, false, maskCtrl_, false, false, false);
+    }
+    static constexpr InstructionModifier createAutoSWSB() {
+        return InstructionModifier(false, false, false, 0, false, false, false, false, true, false, false);
     }
     static constexpr InstructionModifier createSerialized() {
-        return InstructionModifier(false, false, false, 0, false, false, false, false, true, false);
+        return InstructionModifier(false, false, false, 0, false, false, false, false, false, true, false);
     }
     static constexpr InstructionModifier createEOT() {
-        return InstructionModifier(false, false, false, 0, false, false, false, false, false, true);
+        return InstructionModifier(false, false, false, 0, false, false, false, false, false, false, true);
     }
 
     friend constexpr14 InstructionModifier operator|(const InstructionModifier &mod1, const InstructionModifier &mod2);
@@ -1986,9 +2015,9 @@ public:
         int dataGRFCount = (count + 1) >> 1;
 
         base.checkModel(ModelA32 | ModelA64 | ModelBTS | ModelCC | ModelSLM);
-        exdesc = (base.getModel() == ModelCC) ? SharedFunction::dcro :
-                 (base.getModel() == ModelA64)   ? SharedFunction::dc1  :
-                                              SharedFunction::dc0;
+        exdesc = (base.getModel() == ModelCC)  ? SharedFunction::dcro :
+                 (base.getModel() == ModelA64) ? SharedFunction::dc1  :
+                                                 SharedFunction::dc0;
 
         desc.all = 0;
         desc.parts.header = true;
@@ -2253,7 +2282,7 @@ public:
 
         int dataGRFCount = 0;
         if (width > 0) {
-            int lg2_rows_per_2grf = std::min(4, 6 - utils::bsr(width));
+            int lg2_rows_per_2grf = std::min<int>(4, 6 - utils::bsr(width));
             dataGRFCount = utils::roundup_pow2((height + (1 << lg2_rows_per_2grf) - 1) >> lg2_rows_per_2grf);
         }
 

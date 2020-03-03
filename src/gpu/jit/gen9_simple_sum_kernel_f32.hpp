@@ -33,12 +33,12 @@ public:
         constexpr auto GlobalPtr = ExternalArgumentType::GlobalPtr;
         constexpr auto Scalar = ExternalArgumentType::Scalar;
 
-        interface.newArgument("input", GlobalPtr);
-        interface.newArgument("output", GlobalPtr);
-        interface.newArgument("scale", DataType::f, Scalar);
-        interface.newArgument("a", DataType::d, Scalar);
-        interface.externalName("ngen_gen9_simple_sum");
-        interface.finalize();
+        newArgument("input", GlobalPtr);
+        newArgument("output", GlobalPtr);
+        newArgument("scale", DataType::f, Scalar);
+        newArgument("a", DataType::d, Scalar);
+        externalName("ngen_gen9_simple_sum");
+        finalizeInterface();
 
         setDefaultNoMask();
 
@@ -55,9 +55,9 @@ public:
         auto sum = r43;
 
         mov<uint32_t>(1, global_id, global_id0_arg);
-        mov<uint64_t>(1, src_ptr, interface.getArgument("input"));
-        mov<uint64_t>(1, dst_ptr, interface.getArgument("output"));
-        mov<float>(1, factor, interface.getArgument("scale"));
+        mov<uint64_t>(1, src_ptr, getArgument("input"));
+        mov<uint64_t>(1, dst_ptr, getArgument("output"));
+        mov<float>(1, factor, getArgument("scale"));
 
         mul<uint32_t>(1, global_id, global_id, 4);
         add<uint32_t>(1, src_ptr, src_ptr, global_id);
@@ -66,7 +66,7 @@ public:
         load(1, src, scattered_dword(), A64, src_ptr);
         mul<float>(1, sum, factor, src);
 
-        cmp(1 | eq | f0[0], null.ud(), interface.getArgument("a"), 0);
+        cmp(1 | eq | f0[0], null.ud(), getArgument("a"), 0);
         jmpi(1 | ~f0[0], append);
         store(1, scattered_dword(), A64, dst_ptr, sum);
         jmpi(1, done);

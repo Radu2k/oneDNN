@@ -42,8 +42,7 @@ using namespace ngen;
 
 template <HW hw>
 class binary_format_kernel_t : public ngen::OpenCLCodeGenerator<hw> {
-    NGEN_FORWARD(hw);
-    using OpenCLCodeGenerator<hw>::interface;
+    NGEN_FORWARD_OPENCL(hw);
 
 public:
     binary_format_kernel_t() : ngen::OpenCLCodeGenerator<hw>() {
@@ -51,30 +50,30 @@ public:
         auto low_half = [](uint64_t q) -> uint32_t { return q & 0xFFFFFFFF; };
         auto high_half = [](uint64_t q) -> uint32_t { return q >> 32; };
 
-        interface.newArgument("src0", DataType::ud); // r5.4:ud
-        interface.newArgument("src1", DataType::uq); // r5.3:uq
-        interface.newArgument("src2", DataType::uw); // r6.0:uw
-        interface.newArgument("src3", DataType::uw); // r6.2:uw
-        interface.newArgument("src4", DataType::uq); // r6.1:uq
-        interface.newArgument("src5", DataType::uq); // r6.2:uq
-        interface.newArgument("src_ptr", ExternalArgumentType::GlobalPtr);
-        interface.newArgument("ok", ExternalArgumentType::GlobalPtr);
+        newArgument("src0", DataType::ud); // r5.4:ud
+        newArgument("src1", DataType::uq); // r5.3:uq
+        newArgument("src2", DataType::uw); // r6.0:uw
+        newArgument("src3", DataType::uw); // r6.2:uw
+        newArgument("src4", DataType::uq); // r6.1:uq
+        newArgument("src5", DataType::uq); // r6.2:uq
+        newArgument("src_ptr", ExternalArgumentType::GlobalPtr);
+        newArgument("ok", ExternalArgumentType::GlobalPtr);
 
-        interface.requireSIMD(8);
-        interface.requireLocalID(3); // r1-r3
-        interface.requireLocalSize(); // r7.0-2:ud
-        interface.finalize();
+        requireSIMD(8);
+        requireLocalID(3); // r1-r3
+        requireLocalSize(); // r7.0-2:ud
+        finalizeInterface();
 
         Label doWrite;
 
-        auto src0 = interface.getArgument("src0");
-        auto src1 = interface.getArgument("src1");
-        auto src2 = interface.getArgument("src2");
-        auto src3 = interface.getArgument("src3");
-        auto src4 = interface.getArgument("src4");
-        auto src5 = interface.getArgument("src5");
-        auto src_ptr = interface.getArgument("src_ptr");
-        auto ok_surface = Surface(interface.getArgumentSurface("ok"));
+        auto src0 = getArgument("src0");
+        auto src1 = getArgument("src1");
+        auto src2 = getArgument("src2");
+        auto src3 = getArgument("src3");
+        auto src4 = getArgument("src4");
+        auto src5 = getArgument("src5");
+        auto src_ptr = getArgument("src_ptr");
+        auto ok_surface = Surface(getArgumentSurface("ok"));
 
         auto data = r30;
         auto data2 = r31;
@@ -126,14 +125,11 @@ public:
         jmpi(1 | ~f0[0], doWrite);
 
         // Validate OCL local size arguments
-        cmp(1 | eq | f0[0], null.ud(), interface.getLocalSize(0),
-                uint32_t(MAGICSIZEX));
+        cmp(1 | eq | f0[0], null.ud(), getLocalSize(0), uint32_t(MAGICSIZEX));
         jmpi(1 | ~f0[0], doWrite);
-        cmp(1 | eq | f0[0], null.ud(), interface.getLocalSize(1),
-                uint32_t(MAGICSIZEY));
+        cmp(1 | eq | f0[0], null.ud(), getLocalSize(1), uint32_t(MAGICSIZEY));
         jmpi(1 | ~f0[0], doWrite);
-        cmp(1 | eq | f0[0], null.ud(), interface.getLocalSize(2),
-                uint32_t(MAGICSIZEZ));
+        cmp(1 | eq | f0[0], null.ud(), getLocalSize(2), uint32_t(MAGICSIZEZ));
         jmpi(1 | ~f0[0], doWrite);
 
         // Test passed.

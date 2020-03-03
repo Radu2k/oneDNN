@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -332,7 +332,8 @@ PREFIX constexpr ngen::InstructionModifier CG::sat; \
 PREFIX constexpr ngen::InstructionModifier CG::NoMask; \
 PREFIX constexpr ngen::InstructionModifier CG::Mask; \
 PREFIX constexpr ngen::InstructionModifier CG::ForceMask; \
-PREFIX constexpr ngen::InstructionModifier CG::Serialized; \
+PREFIX constexpr ngen::InstructionModifier CG::AutoSWSB; \
+PREFIX constexpr ngen::InstructionModifier CG::Serialize; \
 PREFIX constexpr ngen::InstructionModifier CG::EOT; \
 PREFIX constexpr ngen::InstructionModifier CG::Align1; \
 PREFIX constexpr ngen::InstructionModifier CG::Align16; \

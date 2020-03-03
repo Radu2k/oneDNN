@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -55,7 +55,7 @@ union TernaryOperand12 {
 
 union Instruction12 {
     struct {                            // Lower 35 bits are essentially common.
-        unsigned opcode : 8;
+        unsigned opcode : 8;            // High bit reserved, will use for auto-SWSB flag.
         unsigned swsb : 8;
         unsigned execSize : 3;
         unsigned execOffset : 3;
@@ -101,7 +101,8 @@ union Instruction12 {
     } imm32;
     struct {
         uint64_t _;
-        uint64_t value;
+        uint32_t high;
+        uint32_t low;
     } imm64;
     struct {
         unsigned : 32;                  // common
@@ -196,12 +197,38 @@ union Instruction12 {
         unsigned : 1;
         unsigned branchCtrl : 1;
         unsigned : 30;
-        unsigned uip : 32;
-        unsigned jip : 32;
+        int32_t uip;
+        int32_t jip;
     } branches;
     uint64_t qword[2];
 
     constexpr Instruction12() : qword{0,0} {};
+
+    // Decoding routines for auto-SWSB.
+    bool autoSWSB() const        { return (common.opcode & 0x80); }
+    SWSBInfo swsb() const        { return SWSBInfo::createFromRaw(common.swsb); }
+    void setSWSB(SWSBInfo swsb)  { common.swsb = swsb.raw(); }
+    void clearAutoSWSB()         { common.opcode &= 0x7F; }
+    Opcode opcode() const        { return static_cast<Opcode>(common.opcode & 0x7F); }
+    SyncFunction syncFC() const  { return static_cast<SyncFunction>(binary.cmod); }
+    SharedFunction sfid() const  { return static_cast<SharedFunction>(send.sfid); }
+    bool eot() const             { return (opcode() == Opcode::send || opcode() == Opcode::sendc) && send.eot; }
+    bool predicated() const      { return !common.maskCtrl || (static_cast<PredCtrl>(common.predCtrl) != PredCtrl::None); }
+    unsigned dstTypecode() const { return binary.dstType; }
+    void shiftJIP(int32_t shift) { branches.jip += shift * sizeof(Instruction12); }
+    void shiftUIP(int32_t shift) { branches.uip += shift * sizeof(Instruction12); }
+
+    inline autoswsb::DestinationMask destinations(int &jip, int &uip) const;
+    inline bool getOperandRegion(autoswsb::DependencyRegion &region, int opNum) const;
+    inline bool getImm32(uint32_t &imm) const;
+    inline bool getSendDesc(MessageDescriptor &desc) const;
+    inline bool getARFType(ARFType &arfType, int opNum) const;
+
+    bool isMathMacro() const {
+        if (opcode() != Opcode::math) return false;
+        auto fc = static_cast<MathFunction>(binary.cmod);
+        return (fc == MathFunction::invm || fc == MathFunction::rsqtm);
+    }
 };
 
 static_assert(sizeof(Instruction12) == 16, "Internal error: Instruction12 has been padded by the compiler.");
@@ -230,8 +257,8 @@ static inline constexpr14 BinaryOperand12 encodeBinaryOperand12(const RegData &r
         op.indirect.addrMode = 1;
         if (!dest) {
             op.indirect.vs = (rd.isVxIndirect()) ? 0xFFFF :
-                                   (rd.getVS() == 0) ? 0 :
-                                                       (1 + utils::log2(rd.getVS()));
+                               (rd.getVS() == 0) ? 0 :
+                                                   (1 + utils::log2(rd.getVS()));
         }
     } else {
         op.direct.regFile = getRegFile(rd);
@@ -294,7 +321,7 @@ static inline constexpr14 TernaryOperand12 encodeTernaryOperand12(const Extended
 
 static inline void encodeCommon12(Instruction12 &i, Opcode opcode, const InstructionModifier &mod)
 {
-    i.common.opcode = static_cast<unsigned>(opcode);
+    i.common.opcode = static_cast<unsigned>(opcode) | (mod.parts.autoSWSB << 7);
     i.common.swsb = mod.parts.swsb;
     i.common.execSize = mod.parts.eSizeField;
     i.common.execOffset = mod.parts.chanOff;
@@ -372,10 +399,10 @@ template <typename S1>
 static inline void encodeTernarySrc1(Instruction12 &i, S1 src1)
 {
     i.ternary.src1 = encodeTernaryOperand12<false>(src1).bits;
-
     i.ternary.src1Mods = src1.getMods();
 
     auto vs1 = encodeTernaryVS01(src1);
+
     i.ternary.src1VS0 = vs1;
     i.ternary.src1VS1 = vs1 >> 1;
 }
@@ -431,4 +458,272 @@ static inline void encodeSendDesc(Instruction12 &i, RegData desc)
         throw invalid_arf_exception();
 #endif
     i.send.descIsReg = true;
+}
+
+/*********************/
+/* Decoding Routines */
+/*********************/
+
+static inline DataType decodeRegTypecode12(unsigned dt)
+{
+    static const DataType conversionTable[16] = {
+        DataType::ub,      DataType::uw,      DataType::ud,      DataType::uq,
+        DataType::b,       DataType::w,       DataType::d,       DataType::q,
+        DataType::invalid, DataType::hf,      DataType::f,       DataType::df,
+        DataType::invalid, DataType::bf,      DataType::invalid, DataType::invalid
+    };
+    return conversionTable[dt & 0xF];
+}
+
+bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opNum) const
+{
+    using namespace autoswsb;
+
+    auto op = opcode();
+    RegData rd;
+
+    switch (op) {
+        case Opcode::nop:
+        case Opcode::illegal:
+            return false;
+        case Opcode::dpas:
+        case Opcode::dpasw: {
+            unsigned sdepth = 1 << dpas.sdepth;
+            unsigned rcount = 1 + dpas.rcount;
+            unsigned len;
+            TernaryOperand12 o;
+
+            switch (opNum) {
+                case -1: len = rcount; o.bits = ternary.dst; break;
+                case 0:  len = rcount; o.bits = ternary.src0; break;
+                case 1:  len = sdepth; o.bits = ternary.src1; break;
+                case 2:
+                    if (op == Opcode::dpasw) rcount = (rcount + 1) >> 1;
+                    o.bits = ternary.src2;
+                    len = (o.direct.subRegNum + sdepth * rcount * 4 + 31) >> 5;
+                    break;
+                default: return false;
+            }
+
+            region = DependencyRegion(GRFRange(o.direct.regNum, len));
+            return true;
+        }
+        case Opcode::send:
+        case Opcode::sendc: {
+            int base = 0, len = 0;
+            switch (opNum) {
+                case -1:
+                    if (send.dstRegFile == RegFileARF) return false;
+                    base = send.dstReg;
+                    len = send.descIsReg ? -1 : send.desc20_24;
+                    break;
+                case 0:
+                    if (send.src0RegFile == RegFileARF) return false;
+                    base = send.src0Reg;
+                    len = send.descIsReg ? -1 : (send.desc25_29 & 0xF);
+                    break;
+                case 1:
+                    if (send.src1RegFile == RegFileARF) return false;
+                    base = send.src1Reg;
+                    len = send.exDescIsReg ? -1 : send.exDesc6_10;
+                    break;
+                default: return false;
+            }
+
+            if (len == 0)
+                return false;
+            else if (len == -1)
+                region = DependencyRegion();
+            else
+                region = DependencyRegion(GRFRange(base, len));
+            return true;
+        }
+        case Opcode::add3:
+        case Opcode::bfe:
+        case Opcode::bfi2:
+        case Opcode::bfn:
+        case Opcode::csel:
+        case Opcode::dp4a:
+        case Opcode::mad:
+        case Opcode::madm: {  // ternary
+            TernaryOperand12 o;
+            unsigned dt = 0, vs = 0;
+            switch (opNum) {
+                case -1:
+                    o.bits = ternary.dst;
+                    dt = ternary.dstType;
+                    break;
+                case 0:
+                    if (ternary.src0Imm) return false;
+                    o.bits = ternary.src0;
+                    dt = ternary.src0Type;
+                    vs = ternary.src0VS0 + (ternary.src0VS1 * 3);
+                    break;
+                case 1:
+                    o.bits = ternary.src1;
+                    dt = ternary.src1Type;
+                    vs = ternary.src1VS0 + (ternary.src1VS1 * 3);
+                    break;
+                case 2:
+                    if (ternary.src2Imm) return false;
+                    o.bits = ternary.src2;
+                    dt = ternary.src2Type;
+                    break;
+                default: return false;
+            }
+            dt |= (ternary.execType << 3);
+            if (o.direct.regFile == RegFileARF) return false;
+            if (op == Opcode::madm) o.direct.subRegNum = 0;
+            auto base = GRF(o.direct.regNum).retype(decodeRegTypecode12(dt));
+            auto sub = base[o.direct.subRegNum / getBytes(base.getType())];
+            auto hs = (1 << o.direct.hs);
+            if (opNum >= 0) hs >>= 1;
+            if ((opNum < 0) || (opNum == 2))
+                rd = sub(hs);
+            else
+                rd = sub((1 << vs) >> 1, hs);
+            break;
+        }
+        default: {    // unary/binary
+            BinaryOperand12 o;
+            unsigned dt;
+            switch (opNum) {
+                case -1:
+                    o.bits = binary.dst;
+                    dt = binary.dstType;
+                    break;
+                case 0:
+                    if (binary.src0Imm) return false;
+                    o.bits = binary.src0;
+                    dt = binary.src0Type;
+                    break;
+                case 1:
+                    if (binary.src0Imm || binary.src1Imm) return false;
+                    o.bits = binary.src1;
+                    dt = binary.src1Type;
+                    break;
+                default: return false;
+            }
+            if (o.direct.addrMode) { region = DependencyRegion(); return true; } // indirect
+            if (o.direct.regFile == RegFileARF) return false;
+            if (isMathMacro())
+                o.direct.subRegNum = 0;
+            auto base = GRF(o.direct.regNum).retype(decodeRegTypecode12(dt));
+            auto sub = base[o.direct.subRegNum / getBytes(base.getType())];
+            auto hs = (1 << o.direct.hs) >> 1;
+            if (opNum < 0)
+                rd = sub(hs);
+            else
+                rd = sub((1 << o.direct.vs) >> 1, 1 << o.direct.width, hs);
+            break;
+        }
+    }
+
+    auto esize = 1 << common.execSize;
+    rd.fixup(esize, DataType::invalid, opNum < 0);
+    region = DependencyRegion(esize, rd);
+    return true;
+}
+
+bool Instruction12::getImm32(uint32_t &imm) const
+{
+    // Only need to support sync.allrd/wr.
+    if (binary.src0Imm)
+        imm = imm32.value;
+    return binary.src0Imm;
+}
+
+bool Instruction12::getSendDesc(MessageDescriptor &desc) const
+{
+    if (!send.descIsReg)
+        desc.all = send.desc0_10 | (send.desc11_19 << 11) | (send.desc20_24 << 20)
+                                 | (send.desc25_29 << 25) | (send.desc30_31 << 30);
+    return !send.descIsReg;
+}
+
+bool Instruction12::getARFType(ARFType &arfType, int opNum) const
+{
+    if (opNum > 1) return false;
+
+    // Only need to support unary/binary, for detecting ce/cr/sr usage.
+    switch (opcode()) {
+        case Opcode::nop:
+        case Opcode::illegal:
+        case Opcode::dpas:
+        case Opcode::dpasw:
+        case Opcode::send:
+        case Opcode::sendc:
+        case Opcode::add3:
+        case Opcode::bfe:
+        case Opcode::bfi2:
+        case Opcode::bfn:
+        case Opcode::csel:
+        case Opcode::dp4a:
+        case Opcode::mad:
+        case Opcode::madm:
+            return false;
+        default: {
+            BinaryOperand12 o;
+            switch (opNum) {
+                case -1:
+                    o.bits = binary.dst;
+                    break;
+                case 0:
+                    if (binary.src0Imm) return false;
+                    o.bits = binary.src0;
+                    break;
+                case 1:
+                    if (binary.src0Imm || binary.src1Imm) return false;
+                    o.bits = binary.src1;
+                    break;
+                default: return false;
+            }
+            if (o.direct.addrMode) return false;
+            if (o.direct.regFile != RegFileARF) return false;
+            arfType = static_cast<ARFType>(o.direct.regNum >> 4);
+            return true;
+        }
+    }
+}
+
+autoswsb::DestinationMask Instruction12::destinations(int &jip, int &uip) const
+{
+    using namespace autoswsb;
+
+    if (!isBranch(opcode())) {
+        if (opcode() == Opcode::send || opcode() == Opcode::sendc)
+            if (send.eot)
+                return DestNone;
+        return DestNextIP;
+    }
+
+    DestinationMask mask = DestNextIP;
+    switch (opcode()) {
+        case Opcode::ret:
+        case Opcode::endif:
+        case Opcode::while_:
+        case Opcode::call:
+        case Opcode::calla:
+        case Opcode::join:
+        case Opcode::jmpi:
+        case Opcode::brd:
+            mask = binary.src0Imm ? (DestNextIP | DestJIP) : DestUnknown; break;
+        case Opcode::goto_:
+        case Opcode::if_:
+        case Opcode::else_:
+        case Opcode::break_:
+        case Opcode::cont:
+        case Opcode::halt:
+        case Opcode::brc:
+            mask = binary.src0Imm ? (DestNextIP | DestJIP | DestUIP) : DestUnknown; break;
+        default: break;
+    }
+
+    if ((opcode() == Opcode::jmpi) && !predicated())
+        mask &= ~DestNextIP;
+
+    if (mask & DestJIP) jip = branches.jip / sizeof(Instruction12);
+    if (mask & DestUIP) uip = branches.uip / sizeof(Instruction12);
+
+    return mask;
 }

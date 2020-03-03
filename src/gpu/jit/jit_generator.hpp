@@ -69,15 +69,15 @@ constexpr gpu_gen_t gpu_gen12hp = ngen::HW::Gen12HP;
 //  }
 //
 //  ngen_kernel_t() : jit_generator<...>() {
-//      interface.externalName("ngen_kernel");
-//      interface.newArgument("src", GlobalPtr);
-//      interface.newArgument("dst", GlobalPtr);
-//      interface.newArgument("dbg_mem", GlobalPtr);
-//      interface.finalize();
+//      externalName("ngen_kernel");
+//      newArgument("src", GlobalPtr);
+//      newArgument("dst", GlobalPtr);
+//      newArgument("dbg_mem", GlobalPtr);
+//      finalizeInterface();
 //      ...
 //      auto header = r32;
 //      auto data = r64;
-//      mov<uint64_t>(1, r64, interface.getArgument("dbg_mem"));
+//      mov<uint64_t>(1, r64, getArgument("dbg_mem"));
 //      store(1, scattered_dword(), A64, header, data);
 //      ...
 //  }

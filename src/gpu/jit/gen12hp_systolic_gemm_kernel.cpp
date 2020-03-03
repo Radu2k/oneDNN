@@ -787,47 +787,47 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     //                           float alpha, float beta,
     //                           int lda, int ldb)
 
-    interface.externalName("gen12hp_systolic_gemm_kernel");
-    interface.newArgument("ap", ExternalArgumentType::GlobalPtr);
-    interface.newArgument("bp", ExternalArgumentType::GlobalPtr);
-    interface.newArgument("c", ExternalArgumentType::GlobalPtr);
-    interface.newArgument("k", DataType::d);
-    interface.newArgument("ldc", DataType::d);
-    interface.newArgument("offset_a", DataType::q);
-    interface.newArgument("offset_b", DataType::q);
-    interface.newArgument("offset_c", DataType::q);
-    interface.newArgument("m", DataType::d);
-    interface.newArgument("n", DataType::d);
-    interface.newArgument("alpha", DataType::f);
-    interface.newArgument("beta", DataType::f);
-    interface.newArgument("lda", DataType::d);
-    interface.newArgument("ldb", DataType::d);
-    interface.requireBarrier();
-    interface.requireDPAS();
-    interface.requireLocalID(2);
-    interface.requireSIMD(8);
-    interface.requireSLM(slm_buf_size() * 3);
-    interface.finalize();
+    externalName("gen12hp_systolic_gemm_kernel");
+    newArgument("ap", ExternalArgumentType::GlobalPtr);
+    newArgument("bp", ExternalArgumentType::GlobalPtr);
+    newArgument("c", ExternalArgumentType::GlobalPtr);
+    newArgument("k", DataType::d);
+    newArgument("ldc", DataType::d);
+    newArgument("offset_a", DataType::q);
+    newArgument("offset_b", DataType::q);
+    newArgument("offset_c", DataType::q);
+    newArgument("m", DataType::d);
+    newArgument("n", DataType::d);
+    newArgument("alpha", DataType::f);
+    newArgument("beta", DataType::f);
+    newArgument("lda", DataType::d);
+    newArgument("ldb", DataType::d);
+    requireBarrier();
+    requireDPAS();
+    requireLocalID(2);
+    requireSIMD(8);
+    requireSLM(slm_buf_size() * 3);
+    finalizeInterface();
 
     // Inputs.
     auto global_id_x = r0.ud(1);
     auto global_id_y = r0.ud(6);
     auto local_id_x = r1.uw(0);
     auto local_id_y = r2.uw(0);
-    auto ap = interface.getArgument("ap");
-    auto bp = interface.getArgument("bp");
-    auto c_ptr = interface.getArgument("c");
-    auto in_offset_a = interface.getArgument("offset_a");
-    auto in_offset_b = interface.getArgument("offset_b");
-    auto in_offset_c = interface.getArgument("offset_c");
-    auto k = interface.getArgument("k");
-    auto ldc = interface.getArgument("ldc");
-    auto m = interface.getArgument("m");
-    auto n = interface.getArgument("n");
-    auto alpha = interface.getArgument("alpha");
-    auto beta = interface.getArgument("beta");
-    auto lda = interface.getArgument("lda");
-    auto ldb = interface.getArgument("ldb");
+    auto ap = getArgument("ap");
+    auto bp = getArgument("bp");
+    auto c_ptr = getArgument("c");
+    auto in_offset_a = getArgument("offset_a");
+    auto in_offset_b = getArgument("offset_b");
+    auto in_offset_c = getArgument("offset_c");
+    auto k = getArgument("k");
+    auto ldc = getArgument("ldc");
+    auto m = getArgument("m");
+    auto n = getArgument("n");
+    auto alpha = getArgument("alpha");
+    auto beta = getArgument("beta");
+    auto lda = getArgument("lda");
+    auto ldb = getArgument("ldb");
 
     // Temporaries
     auto n0 = r10.ud(0);
