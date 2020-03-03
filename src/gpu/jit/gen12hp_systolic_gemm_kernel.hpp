@@ -122,7 +122,7 @@ private:
     ngen::Subregister ualpha_regs[2] = {r28.f(6), r30.f(6)};
     ngen::Subregister ubeta_regs[2] = {r28.f(7), r30.f(7)};
 
-    constexpr int slm_buf_size() const {
+    int slm_buf_size() const {
         return cfg.pad_a
                 ? 10752 // 4.5k A (128x32 + 4*128 padding) + 6k B (192x32)
                 : 10240; // 4k A (128x32) + 6k B (192x32)

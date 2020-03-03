@@ -804,6 +804,7 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     newArgument("ldb", DataType::d);
     requireBarrier();
     requireDPAS();
+    requireGRF(256);
     requireLocalID(2);
     requireSIMD(8);
     requireSLM(slm_buf_size() * 3);
