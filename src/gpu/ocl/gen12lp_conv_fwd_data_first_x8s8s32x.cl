@@ -26,8 +26,8 @@
 #define WRITE_SLM_BLOCK(_P, _V) WRITE_LOCAL_1(_P, _V)
 #define WRITE_SLM_BLOCK_SHORT(_P, _V) WRITE_LOCAL_SHORT_1(_P, _V)
 #else
-#define WRITE_SLM_BLOCK(_P, _V) subgroup_block_write_uint(_P, _V)
-#define WRITE_SLM_BLOCK_SHORT(_P, _V) subgroup_block_write_ushort(_P, _V)
+#define WRITE_SLM_BLOCK(_P, _V) sub_group_block_write_uint(_P, _V)
+#define WRITE_SLM_BLOCK_SHORT(_P, _V) sub_group_block_write_ushort(_P, _V)
 #endif
 
 #define GET_INT_BLOCK(SRC_SLM, SLM_INDEX, SRC_GLOBAL, GLOBAL_INDEX) \

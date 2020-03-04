@@ -24,21 +24,6 @@
 
 #include "dnn_types.hpp"
 
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-// All formats with 2+ levels of blocking on GPU are assumed permuted
-static bool is_gpu_permuted_format(const dnnl_memory_desc_t &md) {
-    if (md.format_kind == dnnl_blocked) {
-        int nlevels[DNNL_MAX_NDIMS] = {0};
-        auto &blocking = md.format_desc.blocking;
-        for (int i = 0; i < blocking.inner_nblks; ++i)
-            nlevels[blocking.inner_idxs[i]]++;
-        for (int i = 0; i < DNNL_MAX_NDIMS; ++i)
-            if (nlevels[i] >= 2) return true;
-    }
-    return false;
-}
-#endif
-
 int execute_reorder(const dnn_mem_t &src, dnn_mem_t &dst,
         const attr_bundle_t *attr_bundle) {
     const_dnnl_primitive_attr_t attr
@@ -66,18 +51,13 @@ int execute_reorder(const dnn_mem_t &src, dnn_mem_t &dst,
     // source and destination and execute CPU reorder. If CPU reorder can't be
     // create, then just execute a regular GPU reorder.
     //
-    // This optimization is skipped:
-    // 1) When testing reorder, sum and concat primitives because they are used
-    //    specifically to test GPU reorders.
-    // 2) When reordering to/from formats with 2+ levels of blocking. On GPU
-    //    they are assumed to have permutations and hence not compatible with
-    //    CPU.
+    // This optimization is skipped when testing reorder, sum and concat
+    // primitives because they are used specifically to test GPU reorders.
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
     std::string driver = std::string(driver_name);
     bool is_reorder_related_driver = (driver == std::string("reorder")
             || driver == std::string("sum") || driver == std::string("concat"));
-    if (!is_reorder_related_driver && !is_gpu_permuted_format(src.md_)
-            && !is_gpu_permuted_format(dst.md_)
+    if (!is_reorder_related_driver
             && (src.engine_kind() == dnnl_gpu
                     || dst.engine_kind() == dnnl_gpu)) {
 

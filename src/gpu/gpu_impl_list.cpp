@@ -72,8 +72,7 @@ static const pd_create_f gpu_impl_list[] = {
         INSTANCE(ocl::gen12hp_convolution_fwd_t),
         INSTANCE(ocl::gen12hp_convolution_bwd_data_t),
         INSTANCE(ocl::gen12lp_u8s8s32u8_1x1_convolution_fwd_t),
-        // TODO: turn it ON once permuted formats support implemented
-        // INSTANCE(ocl::gen12lp_x8s8s32x_convolution_fwd_t),
+        INSTANCE(ocl::gen12lp_x8s8s32x_convolution_fwd_t),
         INSTANCE(ocl::gen12lp_x8s8s32x_convolution_bwd_data_t),
         INSTANCE(ocl::gen9_convolution_fwd_t),
         INSTANCE(ocl::gen9_convolution_bwd_data_t),
