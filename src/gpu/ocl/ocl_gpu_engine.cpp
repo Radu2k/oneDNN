@@ -91,7 +91,7 @@ status_t ocl_gpu_engine_t::create_kernels(
         const compute::kernel_ctx_t &kernel_ctx) const {
     std::string options = kernel_ctx.options();
 
-
+    std::vector<const char **> code_strings;
     code_strings.reserve(kernel_names.size());
     for (auto *kernel_name : kernel_names) {
         const char **code = get_ocl_kernel_source(kernel_name);
@@ -143,7 +143,6 @@ status_t ocl_gpu_engine_t::create_kernels(
         OCL_CHECK(clReleaseProgram(program));
     }
     return status::success;
-
 }
 
 } // namespace ocl
