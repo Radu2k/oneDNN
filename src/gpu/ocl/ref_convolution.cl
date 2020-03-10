@@ -21,10 +21,10 @@
 
 #if IS_FWD
 KERNEL_ATTR
-__kernel void ref_convolution_fwd(
-        const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
-        const __global BIA_DATA_T *bias, __global DST_DATA_T *dst,
-        float eltwise_alpha, float eltwise_beta, float sum_scale
+__kernel void ref_convolution_fwd(const __global SRC_DATA_T *src,
+        const __global WEI_DATA_T *wei, const __global BIA_DATA_T *bias,
+        __global DST_DATA_T *dst, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale, float sum_scale
 #if SRC_DT_S8 == 1 || SRC_DT_U8 == 1
 #if SCALES_PER_OC
         ,
@@ -35,6 +35,7 @@ __kernel void ref_convolution_fwd(
 #endif
 #endif
 ) {
+
     const int n = GWS_GET_MB();
     const int oc = GWS_GET_OC();
     const int g = GWS_GET_G();
@@ -74,7 +75,7 @@ __kernel void ref_convolution_fwd(
 #endif
 
 #if WITH_ELTWISE == 1
-    tmp = fwd_eltwise(tmp, eltwise_alpha, eltwise_beta);
+    tmp = fwd_eltwise(tmp, eltwise_alpha, eltwise_beta, eltwise_scale);
 #endif
 
 #if WITH_SUM == 1
@@ -86,7 +87,7 @@ __kernel void ref_convolution_fwd(
 #endif
 
 #if WITH_POST_SUM_ELTWISE == 1
-    tmp = fwd_eltwise(tmp, eltwise_alpha, eltwise_beta);
+    tmp = fwd_eltwise(tmp, eltwise_alpha, eltwise_beta, eltwise_scale);
 #endif
 
     dst[DST_OFF(n, g * OC + oc, od, oh, ow)] = TO_DST(tmp);
@@ -157,6 +158,7 @@ __kernel void ref_convolution_bwd_weights(const __global SRC_DATA_T *src,
         diff_bias[g * OC + oc] = TO_BIA(d);
     }
 #endif
+
     ACC_DATA_T dw = 0.0;
     for (int n = 0; n < MB; ++n)
         for (int od = 0; od < OD; ++od)

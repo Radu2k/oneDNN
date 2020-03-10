@@ -55,7 +55,7 @@ endif()
 
 set(PROJECT_NAME "DNNL")
 set(PROJECT_FULL_NAME "Deep Neural Network Library (DNNL)")
-set(PROJECT_VERSION "1.2.0")
+set(PROJECT_VERSION "1.3.0")
 
 set(LIB_NAME dnnl)
 
@@ -68,6 +68,13 @@ endif()
 
 if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "DNNL supports 64 bit platforms only")
+endif()
+
+# Set the target architecture.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64.*|AARCH64.*|arm64.*|ARM64.*)")
+    set(TARGET_ARCH "AARCH64")
+else()
+    set(TARGET_ARCH "X86_64")
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")

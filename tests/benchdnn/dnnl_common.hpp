@@ -194,6 +194,7 @@ extern dnnl_engine_kind_t engine_tgt_kind;
 
 extern dnnl_engine_t engine_tgt;
 extern dnnl_stream_t stream_tgt;
+extern dnnl_scratchpad_mode_t scratchpad_mode;
 
 struct dnn_mem_t;
 
@@ -262,6 +263,6 @@ void maybe_prepare_runtime_zero_points(dnn_mem_t &zero_points_m,
         const attr_t &attr, int arg, dnnl_engine_t engine);
 
 bool check_md_consistency_with_tag(
-        const dnnl_memory_desc_t &md, dnnl_format_tag_t tag);
+        const dnnl_memory_desc_t &md, const std::string &tag);
 
 #endif

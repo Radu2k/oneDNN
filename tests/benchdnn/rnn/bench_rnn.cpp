@@ -34,7 +34,7 @@ std::vector<dir_t> prop {FWD_D};
 std::vector<const dt_conf_t *> cfg {conf_f32};
 std::vector<alg_t> alg {VANILLA_RNN};
 std::vector<dnnl_rnn_direction_t> direction {dnnl_unidirectional_left2right};
-std::vector<activation_t> activation {RELU};
+std::vector<activation_t> activation {UNDEF};
 std::vector<bool> skip_nonlinear {false};
 std::vector<bool> with_peephole {false};
 std::vector<int64_t> mb {0};
@@ -58,7 +58,7 @@ void reset_parameters() {
     cfg = {conf_f32};
     alg = {VANILLA_RNN};
     direction = {dnnl_unidirectional_left2right};
-    activation = {RELU};
+    activation = {UNDEF};
     skip_nonlinear = {false};
     with_peephole = {false};
     mb = {0};
@@ -73,11 +73,11 @@ void check_correctness(const desc_t *c) {
     for_(const auto &i_prop : prop)
     for_(const auto &i_cfg : cfg)
     for_(const auto &i_alg : alg)
-    for_(const auto &i_with_peephole : with_peephole)
+    for_(auto i_with_peephole : with_peephole)
     for_(const auto &i_scale_policy : scale_policy)
     for_(const auto &i_direction : direction)
     for_(const auto &i_activation : activation)
-    for_(const auto &i_skip_nonlinear : skip_nonlinear)
+    for_(auto i_skip_nonlinear : skip_nonlinear)
     for (const auto &i_mb : mb) {
         if (i_with_peephole && i_alg != VANILLA_LSTM) continue;
 

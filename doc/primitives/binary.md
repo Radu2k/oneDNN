@@ -6,7 +6,8 @@ Binary {#dev_guide_binary}
 >
 
 The binary primitive computes an operation between source 0 and source 1
-element-wise:
+element-wise (the variable names follow the standard @ref
+dev_guide_conventions):
 
 \f[
     \dst(\overline{x}) =
@@ -21,11 +22,11 @@ The binary primitive does not have a notion of forward or backward propagations.
 ## Execution Arguments
 When executed, the inputs and outputs should be mapped to an execution
 argument index as specified by the following table.
-| Primitive intput/output | Execution argument index |
-| ---                     | ---                      |
-| \f$\src_0\f$            | DNNL_ARG_SRC0            |
-| \f$\src_1\f$            | DNNL_ARG_SRC1            |
-| \dst                    | DNNL_ARG_DST             |
+| Primitive input/output | Execution argument index |
+| ---                    | ---                      |
+| \f$\src_0\f$           | DNNL_ARG_SRC_0           |
+| \f$\src_1\f$           | DNNL_ARG_SRC_1           |
+| \dst                   | DNNL_ARG_DST             |
 
 ## Implementation Details
 
@@ -50,16 +51,15 @@ argument index as specified by the following table.
    tensor may be used as the destination, in which case its data will
    be overwritten.
 
-
 ### Post-ops and Attributes
 
 The following attributes are supported:
 
-| Type      | Operation     | Restrictions       | Description
+| Type      | Operation     | Description        | Restrictions
 | :--       | :--           | :--                | :--
-| Attribute | [Scales](@ref dnnl::primitive_attr::set_scales) | The corresponding tensor has integer data type. Only one scale per tensor is supported. Input tensors only. | Scales the corresponding input tensor by the given scale factor(s).
-| Post-op   | [Sum](@ref dnnl::post_ops::append_sum)          | Must precede eltwise post-op. | Adds the operation result to the destination tensor instead of overwriting it. |
-| Post-op   | [Eltwise](@ref dnnl::post_ops::append_eltwise)  |                               | Applies an @ref dnnl_api_eltwise operation to the result. |
+| Attribute | [Scales](@ref dnnl::primitive_attr::set_scales) | Scales the corresponding input tensor by the given scale factor(s).            | The corresponding tensor has integer data type. Only one scale per tensor is supported. Input tensors only. |
+| Post-op   | [Sum](@ref dnnl::post_ops::append_sum)          | Adds the operation result to the destination tensor instead of overwriting it. | Must precede eltwise post-op. |
+| Post-op   | [Eltwise](@ref dnnl::post_ops::append_eltwise)  | Applies an @ref dnnl_api_eltwise operation to the result.                      |                               |
 
 ### Data Types Support
 
@@ -72,7 +72,6 @@ See @ref dev_guide_data_types page for more details.
 
 The binary primitive works with arbitrary data tensors. There is no special
 meaning associated with any of tensors dimensions.
-
 
 ## Implementation Limitations
 

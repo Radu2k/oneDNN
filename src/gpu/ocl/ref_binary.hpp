@@ -22,7 +22,7 @@
 #include "gpu/gpu_binary_pd.hpp"
 #include "gpu/ocl/ocl_stream.hpp"
 #include "gpu/ocl/ocl_utils.hpp"
-#include "gpu/ocl/primitive_conf.hpp"
+#include "gpu/primitive_conf.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -37,15 +37,22 @@ struct ref_binary_t : public primitive_impl_t {
 
         status_t init() {
             using namespace data_type;
+            using sm = primitive_attr_t::skip_mask_t;
 
-            const auto attr_skip_mask = primitive_attr_t::skip_mask_t::post_ops;
+            const auto attr_skip_mask = sm::post_ops | sm::scales;
             bool ok = set_default_params() == status::success
                     && (utils::everyone_is(f32, src_md(0)->data_type,
                                 src_md(1)->data_type, dst_md()->data_type)
                             || utils::everyone_is(bf16, src_md(0)->data_type,
                                     src_md(1)->data_type, dst_md()->data_type)
                             || utils::everyone_is(f16, src_md(0)->data_type,
-                                    src_md(1)->data_type, dst_md()->data_type))
+                                    src_md(1)->data_type, dst_md()->data_type)
+                            || utils::one_of(src_md(0)->data_type, s8, u8))
+                    && IMPLICATION(!attr()->scales_.has_default_values(),
+                            utils::one_of(src_md(0)->data_type, s8, u8)
+                                    && utils::one_of(
+                                            attr()->output_scales_.mask_, 0,
+                                            1 << 1))
                     && attr()->has_default_values(attr_skip_mask)
                     && attr_post_ops_ok();
 
@@ -56,6 +63,18 @@ struct ref_binary_t : public primitive_impl_t {
 
         status_t init_conf();
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
+
+        bool with_scales(int position) const {
+            return !attr()->scales_.get(position).has_default_values();
+        }
+
+        bool with_scales() const {
+            return with_scales(DNNL_ARG_SRC_0) || with_scales(DNNL_ARG_SRC_1);
+        }
+
+        float get_scale(int position) const {
+            return *attr()->scales_.get(position).scales_;
+        }
 
         bool with_eltwise(int position) const {
             return attr()->post_ops_.contain(primitive_kind::eltwise, position);
@@ -68,7 +87,7 @@ struct ref_binary_t : public primitive_impl_t {
         float eltwise_alpha() const {
             const int eltwise_idx
                     = attr()->post_ops_.find(primitive_kind::eltwise);
-            return with_eltwise(0) || with_eltwise(1)
+            return eltwise_idx != -1
                     ? attr()->post_ops_.entry_[eltwise_idx].eltwise.alpha
                     : 1.0f;
         }
@@ -76,21 +95,29 @@ struct ref_binary_t : public primitive_impl_t {
         float eltwise_beta() const {
             const int eltwise_idx
                     = attr()->post_ops_.find(primitive_kind::eltwise);
-            return with_eltwise(0) || with_eltwise(1)
+            return eltwise_idx != -1
                     ? attr()->post_ops_.entry_[eltwise_idx].eltwise.beta
                     : 0.0f;
         }
 
+        float eltwise_scale() const {
+            const int eltwise_idx
+                    = attr()->post_ops_.find(primitive_kind::eltwise);
+            return eltwise_idx != -1
+                    ? attr()->post_ops_.entry_[eltwise_idx].eltwise.scale
+                    : 1.0f;
+        }
+
         float sum_scale() const {
             const int sum_idx = attr()->post_ops_.find(primitive_kind::sum);
-            return with_sum() ? attr()->post_ops_.entry_[sum_idx].sum.scale
-                              : 0.0f;
+            return sum_idx != -1 ? attr()->post_ops_.entry_[sum_idx].sum.scale
+                                 : 0.0f;
         }
 
         alg_kind_t eltwise_alg_kind() const {
             const int eltwise_idx
                     = attr()->post_ops_.find(primitive_kind::eltwise);
-            return with_eltwise(0) || with_eltwise(1)
+            return eltwise_idx != -1
                     ? attr()->post_ops_.entry_[eltwise_idx].eltwise.alg
                     : dnnl_alg_kind_undef;
         }

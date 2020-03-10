@@ -24,9 +24,57 @@ ushort convert_f32_to_bf16(float f) {
     return r[1];
 }
 
+ushort2 convert_f32_to_bf16_vec2(float2 f) {
+    ushort2 r;
+    for (int i = 0; i < 2; i++) {
+        r[i] = convert_f32_to_bf16(f[i]);
+    }
+    return r;
+}
+
+ushort4 convert_f32_to_bf16_vec4(float4 f) {
+    ushort4 r;
+    for (int i = 0; i < 4; i++) {
+        r[i] = convert_f32_to_bf16(f[i]);
+    }
+    return r;
+}
+
+ushort8 convert_f32_to_bf16_vec8(float8 f) {
+    ushort8 r;
+    for (int i = 0; i < 8; i++) {
+        r[i] = convert_f32_to_bf16(f[i]);
+    }
+    return r;
+}
+
 float convert_bf16_to_f32(ushort b) {
     ushort2 r = {0, b};
     float f = as_float(r);
+    return f;
+}
+
+float2 convert_bf16_to_f32_vec2(ushort2 b) {
+    float2 f;
+    for (int i = 0; i < 2; i++) {
+        f[i] = convert_bf16_to_f32(b[i]);
+    }
+    return f;
+}
+
+float4 convert_bf16_to_f32_vec4(ushort4 b) {
+    float4 f;
+    for (int i = 0; i < 4; i++) {
+        f[i] = convert_bf16_to_f32(b[i]);
+    }
+    return f;
+}
+
+float8 convert_bf16_to_f32_vec8(ushort8 b) {
+    float8 f;
+    for (int i = 0; i < 8; i++) {
+        f[i] = convert_bf16_to_f32(b[i]);
+    }
     return f;
 }
 
@@ -335,22 +383,6 @@ inline int8 mmad8x8(int8 A_vectors, int8 B_vectors, int8 acc)
         ret[i] = mmad8(A_scalars, B_vectors, acc[i]);
     }
     return ret;
-}
-
-ushort8 convert_f32_to_bf16_vec8(float8 f) {
-    ushort8 r;
-    for (int i = 0; i < 8; i++) {
-        r[i] = convert_f32_to_bf16(f[i]);
-    }
-    return r;
-}
-
-float8 convert_bf16_to_f32_vec8(ushort8 b) {
-    float8 f;
-    for (int i = 0; i < 8; i++) {
-        f[i] = convert_bf16_to_f32(b[i]);
-    }
-    return f;
 }
 
 #endif

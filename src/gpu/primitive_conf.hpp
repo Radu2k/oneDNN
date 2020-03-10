@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GPU_OCL_PRIMITIVE_CONF_HPP
-#define GPU_OCL_PRIMITIVE_CONF_HPP
+#ifndef GPU_PRIMITIVE_CONF_HPP
+#define GPU_PRIMITIVE_CONF_HPP
 
 #include <stdint.h>
 
@@ -24,12 +24,10 @@
 #include "common/primitive_attr.hpp"
 #include "common/utils.hpp"
 #include "gpu/compute/compute.hpp"
-#include "gpu/ocl/ocl_utils.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace gpu {
-namespace ocl {
 
 #define MAX_NDIMS 6
 
@@ -131,6 +129,7 @@ enum conv_version_t {
     ver_1stconv,
     ver_16mb16c,
     ver_8ow16c,
+    ver_nhwc,
     ver_mb_block,
     ver_ow_block
 };
@@ -318,7 +317,7 @@ struct bnorm_conf_t {
     int mb, ic, mb_block, ic_block;
     int reduce_stat_nblocks;
     int id, ih, iw;
-    bool with_relu;
+    bool with_relu, use_16mb_unroll, use_nhwc;
     bool is_forward, is_backward;
     bool use_scaleshift, save_stats, is_training;
     bool fuse_norm_relu, calculate_stats, calculate_diff_stats;
@@ -354,21 +353,28 @@ struct lnorm_conf_t {
 // Binary
 struct binary_conf_t {
     int ndims;
-    data_type_t data_type;
+    data_type_t src0_data_type;
+    data_type_t src1_data_type;
+    data_type_t dst_data_type;
     bool is_mul;
     bool is_add;
     bool is_max;
     bool is_min;
     bool is_tensor_op;
+    bool use_unroll_16b, src0_unroll_16b;
     compute::dispatch_t dispatch;
     int dim0[MAX_NDIMS];
     int bcast_dims[MAX_NDIMS];
     bool is_dense;
     bool is_same_md;
+    bool same_src_dt;
     bool with_eltwise;
+    bool with_src0_scale;
+    bool with_src1_scale;
     post_ops_t::entry_t::eltwise_t eltwise;
     bool with_sum;
     float sum_scale;
+    float eltwise_scale;
     memory_desc_info_t src0_md_info;
     memory_desc_info_t src1_md_info;
     memory_desc_info_t dst_md_info;
@@ -642,7 +648,6 @@ inline void def_dispatch(compute::kernel_ctx_t &kernel_ctx,
     dispatch.def_kernel_macros(kernel_ctx);
 }
 
-} // namespace ocl
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl

@@ -44,6 +44,9 @@ dnnl_engine_t engine_tgt;
 // Stream for target engine
 dnnl_stream_t stream_tgt;
 
+// Scratchpad mode for DNNL
+dnnl_scratchpad_mode_t scratchpad_mode;
+
 args_t &args_t::set(int arg, const dnn_mem_t &mem) {
     args_.push_back(std::make_pair(arg, &mem));
     return *this;
@@ -318,10 +321,10 @@ void maybe_prepare_runtime_zero_points(dnn_mem_t &zero_points_m,
 }
 
 bool check_md_consistency_with_tag(
-        const dnnl_memory_desc_t &md, dnnl_format_tag_t tag) {
+        const dnnl_memory_desc_t &md, const std::string &tag) {
     dnnl_memory_desc_t md_new_tag;
-    DNN_SAFE(dnnl_memory_desc_init_by_tag(
-                     &md_new_tag, md.ndims, md.dims, md.data_type, tag),
+    DNN_SAFE(dnnl_memory_desc_init_by_tag(&md_new_tag, md.ndims, md.dims,
+                     md.data_type, convert_tag(tag, md.ndims)),
             WARN);
     return dnnl_memory_desc_equal(&md_new_tag, &md);
 }

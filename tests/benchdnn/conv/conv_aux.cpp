@@ -257,16 +257,16 @@ void prb_t::count_ops() {
     ops = 2 * this->mb * this->oc * this->ic / this->g * sp_ops;
 }
 
-void prb_t::generate_oscales() {
-    if (attr.oscale.policy != attr_t::scale_t::policy_t::PER_OC) return;
+float *generate_oscales(const attr_t::scale_t &oscale, int N) {
+    if (oscale.policy != policy_t::PER_OC) return NULL;
 
-    scales = (float *)zmalloc(sizeof(float) * oc, 64);
+    float *scales = (float *)zmalloc(sizeof(float) * N, 64);
     SAFE_V(scales != NULL ? OK : FAIL);
 
     const float K = 32;
     /* scale in [1/K .. K], with starting point at oscale.scale */
-    float s[2] = {attr.oscale.scale, attr.oscale.scale / 2};
-    for (int64_t i = 0; i < oc; ++i) {
+    float s[2] = {oscale.scale, oscale.scale / 2};
+    for (int64_t i = 0; i < N; ++i) {
         int64_t si = i % 2; // 0 -> left, 1 -> right
         scales[i] = s[si];
         if (si == 0) {
@@ -277,6 +277,7 @@ void prb_t::generate_oscales() {
             if (s[si] > K) s[si] /= K * K; // turn around to become ~K
         }
     }
+    return scales;
 }
 
 std::ostream &operator<<(std::ostream &s, const prb_t &p) {
@@ -284,12 +285,9 @@ std::ostream &operator<<(std::ostream &s, const prb_t &p) {
 
     if (canonical || p.dir != FWD_B) s << "--dir=" << dir2str(p.dir) << " ";
     if (canonical || p.cfg != conf_f32) s << "--cfg=" << cfg2str(p.cfg) << " ";
-    if (canonical || p.stag != dnnl_format_tag_any)
-        s << "--stag=" << fmt_tag2str(p.stag) << " ";
-    if (canonical || p.wtag != dnnl_format_tag_any)
-        s << "--wtag=" << fmt_tag2str(p.wtag) << " ";
-    if (canonical || p.dtag != dnnl_format_tag_any)
-        s << "--dtag=" << fmt_tag2str(p.dtag) << " ";
+    if (canonical || p.stag != tag::any) s << "--stag=" << p.stag << " ";
+    if (canonical || p.wtag != tag::any) s << "--wtag=" << p.wtag << " ";
+    if (canonical || p.dtag != tag::any) s << "--dtag=" << p.dtag << " ";
     if (canonical || p.alg != DIRECT) s << "--alg=" << alg2str(p.alg) << " ";
     if (canonical || !p.attr.is_def()) s << "--attr=\"" << p.attr << "\" ";
 
