@@ -252,7 +252,8 @@
 #define POST_OP(val) \
     do { \
         if (apply_eltwise) \
-            val = fwd_eltwise(val, eltwise_alpha, eltwise_beta); \
+            val = fwd_eltwise( \
+                    val, eltwise_alpha, eltwise_beta, eltwise_scale); \
     } while (0)
 #else
 #define POST_OP(val)
@@ -403,7 +404,8 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
         int n, int k, int beta, A_TYPE ao, B_TYPE bo, global int *co,
         int offsetCO, int apply_co, local A_TYPE *sa, local B_TYPE *sb,
-        int apply_eltwise, float eltwise_alpha, float eltwise_beta) {
+        int apply_eltwise, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale) {
 
     // clang-format off
     A_TYPE4 ai[2];  // 32x4 block of A, 2x 16x4 scattered access
@@ -596,7 +598,7 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
         int n, int k, int beta, int ao, int bo, global int *co, int offsetCO,
         int apply_co, local A_TYPE *sa, local B_TYPE *sb, int apply_eltwise,
-        float eltwise_alpha, float eltwise_beta) {
+        float eltwise_alpha, float eltwise_beta, float eltwise_scale) {
 
     // clang-format off
     A_TYPE2 ai[4];  // 32x4 block of A, 4x 32x1 block access
@@ -818,7 +820,8 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
         int n, int k, int beta, A_TYPE ao, B_TYPE bo, global int *co,
         int offsetCO, int apply_co, local A_TYPE *sa, local B_TYPE *sb,
-        int apply_eltwise, float eltwise_alpha, float eltwise_beta) {
+        int apply_eltwise, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale) {
 
     // clang-format off
     A_TYPE2 ai[4];   // 32x4 block of A, 4x 32x1 block access
@@ -1083,7 +1086,8 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
         int n, int k, int beta, A_TYPE ao, B_TYPE bo, global int *co,
         int offsetCO, int apply_co, local A_TYPE *sa, local B_TYPE *sb,
-        int apply_eltwise, float eltwise_alpha, float eltwise_beta) {
+        int apply_eltwise, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale) {
 
     // clang-format off
     A_TYPE4 ai[2];  // 32x4 block of A, 2x 16x4 scattered access

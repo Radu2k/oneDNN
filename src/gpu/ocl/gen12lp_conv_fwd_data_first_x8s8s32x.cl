@@ -49,8 +49,9 @@
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
-        const __global float *bias, __global DATA_T *dst, float alpha,
-        float beta, float sum_scale, float scales) {
+        const __global float *bias, __global DATA_T *dst, float eltwise_alpha,
+        float eltwise_beta, float eltwise_scale, float sum_scale,
+        float scales) {
 
     const int group_oc = get_group_id(0) * OC_GROUP;
     const int group_mb = get_group_id(2) * MB_GROUP;
@@ -556,31 +557,51 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
 
 #define ELTWISE() \
     do { \
-        tmp[0] = fwd_eltwise(tmp[0], alpha, beta); \
-        tmp[1] = fwd_eltwise(tmp[1], alpha, beta); \
-        tmp[2] = fwd_eltwise(tmp[2], alpha, beta); \
-        tmp[3] = fwd_eltwise(tmp[3], alpha, beta); \
+        tmp[0] = fwd_eltwise( \
+                tmp[0], eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp[1] = fwd_eltwise( \
+                tmp[1], eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp[2] = fwd_eltwise( \
+                tmp[2], eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp[3] = fwd_eltwise( \
+                tmp[3], eltwise_alpha, eltwise_beta, eltwise_scale); \
     } while (0)
 
 #define ELTWISE_4() \
     do { \
-        tmp0.s0 = fwd_eltwise(tmp0.s0, alpha, beta); \
-        tmp0.s1 = fwd_eltwise(tmp0.s1, alpha, beta); \
-        tmp0.s2 = fwd_eltwise(tmp0.s2, alpha, beta); \
-        tmp0.s3 = fwd_eltwise(tmp0.s3, alpha, beta); \
-        tmp0.s4 = fwd_eltwise(tmp0.s4, alpha, beta); \
-        tmp0.s5 = fwd_eltwise(tmp0.s5, alpha, beta); \
-        tmp0.s6 = fwd_eltwise(tmp0.s6, alpha, beta); \
-        tmp0.s7 = fwd_eltwise(tmp0.s7, alpha, beta); \
+        tmp0.s0 = fwd_eltwise( \
+                tmp0.s0, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp0.s1 = fwd_eltwise( \
+                tmp0.s1, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp0.s2 = fwd_eltwise( \
+                tmp0.s2, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp0.s3 = fwd_eltwise( \
+                tmp0.s3, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp0.s4 = fwd_eltwise( \
+                tmp0.s4, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp0.s5 = fwd_eltwise( \
+                tmp0.s5, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp0.s6 = fwd_eltwise( \
+                tmp0.s6, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp0.s7 = fwd_eltwise( \
+                tmp0.s7, eltwise_alpha, eltwise_beta, eltwise_scale); \
 \
-        tmp1.s0 = fwd_eltwise(tmp1.s0, alpha, beta); \
-        tmp1.s1 = fwd_eltwise(tmp1.s1, alpha, beta); \
-        tmp1.s2 = fwd_eltwise(tmp1.s2, alpha, beta); \
-        tmp1.s3 = fwd_eltwise(tmp1.s3, alpha, beta); \
-        tmp1.s4 = fwd_eltwise(tmp1.s4, alpha, beta); \
-        tmp1.s5 = fwd_eltwise(tmp1.s5, alpha, beta); \
-        tmp1.s6 = fwd_eltwise(tmp1.s6, alpha, beta); \
-        tmp1.s7 = fwd_eltwise(tmp1.s7, alpha, beta); \
+        tmp1.s0 = fwd_eltwise( \
+                tmp1.s0, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp1.s1 = fwd_eltwise( \
+                tmp1.s1, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp1.s2 = fwd_eltwise( \
+                tmp1.s2, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp1.s3 = fwd_eltwise( \
+                tmp1.s3, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp1.s4 = fwd_eltwise( \
+                tmp1.s4, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp1.s5 = fwd_eltwise( \
+                tmp1.s5, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp1.s6 = fwd_eltwise( \
+                tmp1.s6, eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp1.s7 = fwd_eltwise( \
+                tmp1.s7, eltwise_alpha, eltwise_beta, eltwise_scale); \
     } while (0)
 
 #if WITH_ELTWISE

@@ -115,6 +115,14 @@ struct gen12lp_gemm_t : public gpu_gemm_t {
                     : 0.0f;
         }
 
+        float eltwise_scale() const {
+            const int eltwise_idx
+                    = attr()->post_ops_.find(primitive_kind::eltwise);
+            return with_eltwise()
+                    ? attr()->post_ops_.entry_[eltwise_idx].eltwise.scale
+                    : 1.0f;
+        }
+
         alg_kind_t eltwise_alg_kind() const {
             const int eltwise_idx
                     = attr()->post_ops_.find(primitive_kind::eltwise);
@@ -229,14 +237,14 @@ private:
             int64_t n, int64_t k, int64_t beta, int64_t ao, int64_t bo,
             const memory_storage_t &co, int64_t offset_co, bool apply_co,
             bool apply_eltwise, float eltwise_alpha, float eltwise_beta,
-            bool aligned) const;
+            float eltwise_scale, bool aligned) const;
 
     status_t launch_scale_x8x8s32(compute::compute_stream_t *s,
             const memory_storage_t &c_temp, const memory_storage_t &c,
             char offsetc, int64_t offset_c, int64_t m, int64_t n, int64_t ldc,
             float alpha, float beta, const memory_storage_t &co,
             int64_t offset_co, bool alpha_is_zero, bool apply_eltwise,
-            float eltwise_alpha, float eltwise_beta) const;
+            float eltwise_alpha, float eltwise_beta, float eltwise_scale) const;
 
     virtual status_t execute_standard(const gemm_exec_ctx_t &ctx) const;
 

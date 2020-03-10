@@ -190,10 +190,11 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::execute_forward(
     arg_list.set(3, dst);
     arg_list.set(4, conf.eltwise.alpha);
     arg_list.set(5, conf.eltwise.beta);
-    arg_list.set(6, conf.sum_scale);
+    arg_list.set(6, conf.eltwise.scale);
+    arg_list.set(7, conf.sum_scale);
 
     float scales = pd()->attr()->output_scales_.scales_[0];
-    arg_list.set(7, scales);
+    arg_list.set(8, scales);
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
     status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);

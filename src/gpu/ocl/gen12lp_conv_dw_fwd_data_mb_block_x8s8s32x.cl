@@ -26,8 +26,8 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_dw_fwd_mb_block_x8s8s32x(const __global uchar *src,
         const __global char *wei, const __global float *bias,
-        __global DATA_T *dst, float alpha, float beta, float sum_scale,
-        float scales) {
+        __global DATA_T *dst, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale, float sum_scale, float scales) {
 
     const int osp = get_global_id(1);
     const int od = osp / (OW * OH);
@@ -175,8 +175,10 @@ conv_dw_fwd_mb_block_x8s8s32x(const __global uchar *src,
 #define DO_ELTWISE() \
     do { \
         for (uint i = 0; i < 8; i++) { \
-            tmp00[i] = fwd_eltwise(tmp00[i], alpha, beta); \
-            tmp01[i] = fwd_eltwise(tmp01[i], alpha, beta); \
+            tmp00[i] = fwd_eltwise( \
+                    tmp00[i], eltwise_alpha, eltwise_beta, eltwise_scale); \
+            tmp01[i] = fwd_eltwise( \
+                    tmp01[i], eltwise_alpha, eltwise_beta, eltwise_scale); \
         } \
     } while (0)
 
