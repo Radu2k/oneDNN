@@ -14,8 +14,10 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include <assert.h>
 #include "dnnl.h"
+
+#include <cassert>
+#include <cstdlib>
 #include <unordered_set>
 
 #include "dnnl_common.hpp"
@@ -72,15 +74,11 @@ void execute_map_args(const args_t &args) {
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
 static bool is_gpu_sim() {
-    static const char *sim_env = getenv("DNNL_GPU_SIM");
-    static bool _is_sim = sim_env && atoi(sim_env) == 1;
-    return _is_sim;
+    return getenv_int("DNNL_GPU_SIM", 0) != 0;
 }
 
 static bool is_gpu_perf_sim() {
-    static const char *sim_perf_env = getenv("DNNL_GPU_PERF_SIM");
-    static bool _is_perf_sim = sim_perf_env && atoi(sim_perf_env) == 1;
-    return _is_perf_sim;
+    return getenv_int("DNNL_GPU_PERF_SIM", 0) != 0;
 }
 
 static std::unordered_set<dnn_mem_t *> dnn_mem_objects;
@@ -138,11 +136,8 @@ dnnl_status_t execute_and_wait(
         // Assume that simulation should be done for this primitive.
         if (prim_kind != dnnl_reorder) {
             // Query the run number and verbosity level
-            const char *sim_run_env = getenv("DNNL_GPU_SIM_RUN");
-            const char *sim_verbose_env = getenv("DNNL_GPU_SIM_VERBOSE");
-            const int sim_run = !sim_run_env ? -1 : atoi(sim_run_env);
-            const int sim_verbose
-                    = !sim_verbose_env ? 0 : atoi(sim_verbose_env);
+            const int sim_run = getenv_int("DNNL_GPU_SIM_RUN", -1);
+            const int sim_verbose = getenv_int("DNNL_GPU_SIM_VERBOSE", 0);
 
             // Destroy library objects and exit from benchdnn for the following cases:
             // - Performance simulation
@@ -173,8 +168,8 @@ dnnl_status_t execute_and_wait(
                     sorted_mems[dnnl_memory_get_sim_id(mem)] = mem;
 
                 // Load memory contents from binaries
-                const char *sim_aub_file = getenv("DNNL_GPU_SIM_AUB_FILE");
-                std::string aub_file(!sim_aub_file ? "out.aub" : sim_aub_file);
+                std::string aub_file = getenv_str(
+                        "DNNL_GPU_SIM_AUB_FILE", std::string("out.aub"));
                 aub_file.resize(aub_file.length() - strlen(".aub"));
                 int ctr = 0;
                 for (auto &kv : sorted_mems) {
