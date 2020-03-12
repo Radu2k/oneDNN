@@ -78,7 +78,7 @@
 #endif
 
 inline float8 POST_OPS_PASS(float8 val, float2 bias, float sum_scale,
-        float alpha, float beta, __global DST_DATA_T *dst) {
+        float alpha, float beta, float scale, __global DST_DATA_T *dst) {
 #if WITH_BIAS
     val[0] += bias[0];
     val[2] += bias[0];
@@ -91,14 +91,14 @@ inline float8 POST_OPS_PASS(float8 val, float2 bias, float sum_scale,
 #endif // WITH_BIAS
 
 #if WITH_ELTWISE == 1
-    val[0] = fwd_eltwise(val[0], alpha, beta);
-    val[1] = fwd_eltwise(val[1], alpha, beta);
-    val[2] = fwd_eltwise(val[2], alpha, beta);
-    val[3] = fwd_eltwise(val[3], alpha, beta);
-    val[4] = fwd_eltwise(val[4], alpha, beta);
-    val[5] = fwd_eltwise(val[5], alpha, beta);
-    val[6] = fwd_eltwise(val[6], alpha, beta);
-    val[7] = fwd_eltwise(val[7], alpha, beta);
+    val[0] = fwd_eltwise(val[0], alpha, beta, scale);
+    val[1] = fwd_eltwise(val[1], alpha, beta, scale);
+    val[2] = fwd_eltwise(val[2], alpha, beta, scale);
+    val[3] = fwd_eltwise(val[3], alpha, beta, scale);
+    val[4] = fwd_eltwise(val[4], alpha, beta, scale);
+    val[5] = fwd_eltwise(val[5], alpha, beta, scale);
+    val[6] = fwd_eltwise(val[6], alpha, beta, scale);
+    val[7] = fwd_eltwise(val[7], alpha, beta, scale);
 #endif // WITH_ELTWISE
 
 #if DT_F16
@@ -117,14 +117,14 @@ inline float8 POST_OPS_PASS(float8 val, float2 bias, float sum_scale,
 #endif // WITH_SUM
 
 #if WITH_POST_SUM_ELTWISE
-    val[0] = fwd_eltwise(val[0], alpha, beta);
-    val[1] = fwd_eltwise(val[1], alpha, beta);
-    val[2] = fwd_eltwise(val[2], alpha, beta);
-    val[3] = fwd_eltwise(val[3], alpha, beta);
-    val[4] = fwd_eltwise(val[4], alpha, beta);
-    val[5] = fwd_eltwise(val[5], alpha, beta);
-    val[6] = fwd_eltwise(val[6], alpha, beta);
-    val[7] = fwd_eltwise(val[7], alpha, beta);
+    val[0] = fwd_eltwise(val[0], alpha, beta, scale);
+    val[1] = fwd_eltwise(val[1], alpha, beta, scale);
+    val[2] = fwd_eltwise(val[2], alpha, beta, scale);
+    val[3] = fwd_eltwise(val[3], alpha, beta, scale);
+    val[4] = fwd_eltwise(val[4], alpha, beta, scale);
+    val[5] = fwd_eltwise(val[5], alpha, beta, scale);
+    val[6] = fwd_eltwise(val[6], alpha, beta, scale);
+    val[7] = fwd_eltwise(val[7], alpha, beta, scale);
 #endif // WITH_SUM_ELTWISE
 
     return val;
@@ -134,7 +134,8 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) // attr:no-format
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
         const __global BIA_DATA_T *bias, __global DST_DATA_T *dst,
-        float eltwise_alpha, float eltwise_beta, float sum_scale) {
+        float eltwise_alpha, float eltwise_beta, float eltwise_scale,
+        float sum_scale) {
 
     // Groups:
     const uint oc_group_id = get_global_id(0) / 8;
@@ -330,9 +331,10 @@ gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
             _acc1[6], _acc0[7], _acc1[7]); \
 \
     dst_val[0] = POST_OPS_PASS(dst_val[0], CONVERT_BIAS(_bias_val), sum_scale, \
-            eltwise_alpha, eltwise_beta, dst + _dst_offset); \
+            eltwise_alpha, eltwise_beta, eltwise_scale, dst + _dst_offset); \
     dst_val[1] = POST_OPS_PASS(dst_val[1], CONVERT_BIAS(_bias_val), sum_scale, \
-            eltwise_alpha, eltwise_beta, dst + _dst_offset + 64); \
+            eltwise_alpha, eltwise_beta, eltwise_scale, \
+            dst + _dst_offset + 64); \
 \
     DST_BLOCK_WRITE_8( \
             (__global DST_BLOCK_TYPE *)&dst[_dst_offset], TO_DST(dst_val[0])); \

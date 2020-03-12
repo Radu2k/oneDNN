@@ -53,8 +53,8 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 gen12hp_1x1_conv_fwd_u8s8s32x(const __global uchar *src,
         const __global char *wei, const __global float *bias,
-        __global DATA_T *dst, float alpha, float beta, float sum_scale,
-        float scales) {
+        __global DATA_T *dst, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale, float sum_scale, float scales) {
 
     // Groups:
     const uint oc_group_id = get_group_id(0);
@@ -190,10 +190,14 @@ gen12hp_1x1_conv_fwd_u8s8s32x(const __global uchar *src,
 
 #define ELTWISE() \
     do { \
-        tmp[0] = fwd_eltwise(tmp[0], alpha, beta); \
-        tmp[1] = fwd_eltwise(tmp[1], alpha, beta); \
-        tmp[2] = fwd_eltwise(tmp[2], alpha, beta); \
-        tmp[3] = fwd_eltwise(tmp[3], alpha, beta); \
+        tmp[0] = fwd_eltwise( \
+                tmp[0], eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp[1] = fwd_eltwise( \
+                tmp[1], eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp[2] = fwd_eltwise( \
+                tmp[2], eltwise_alpha, eltwise_beta, eltwise_scale); \
+        tmp[3] = fwd_eltwise( \
+                tmp[3], eltwise_alpha, eltwise_beta, eltwise_scale); \
     } while (0)
 
 #if WITH_ELTWISE
