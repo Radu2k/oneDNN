@@ -6,7 +6,8 @@ Local Response Normalization (LRN) {#dev_guide_lrn}
 >
 
 The LRN primitive performs a forward or backward local response normalization
-operation defined by the following formulas:
+operation defined by the following formulas (the variable names follow the
+standard @ref dev_guide_conventions):
 
 ### Forward
 
@@ -46,12 +47,13 @@ The backward propagation computes \f$\diffsrc(n, c, h, w)\f$, based on
 ## Execution Arguments
 When executed, the inputs and outputs should be mapped to an execution
 argument index as specified by the following table.
-| Primitive intput/output | Execution argument index |
-| ---                     | ---                      |
-| \src                    | DNNL_ARG_SRC             |
-| \dst                    | DNNL_ARG_DST             |
-| \diffsrc                | DNNL_ARG_DIFF_SRC        |
-| \diffdst                | DNNL_ARG_DIFF_DST        |
+| Primitive input/output | Execution argument index |
+| ---                    | ---                      |
+| \src                   | DNNL_ARG_SRC             |
+| \dst                   | DNNL_ARG_DST             |
+| workspace              | DNNL_ARG_WORKSPACE       |
+| \diffsrc               | DNNL_ARG_DIFF_SRC        |
+| \diffdst               | DNNL_ARG_DIFF_DST        |
 
 
 ## Implementation Details

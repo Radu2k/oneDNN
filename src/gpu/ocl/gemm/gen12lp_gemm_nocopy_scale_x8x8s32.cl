@@ -23,23 +23,17 @@
 #define POST_OP(val) \
     do { \
         if (apply_eltwise) \
-            val = fwd_eltwise(val, eltwise_alpha, eltwise_beta); \
+            val = fwd_eltwise( \
+                    val, eltwise_alpha, eltwise_beta, eltwise_scale); \
     } while (0)
 #else
 #define POST_OP(val)
 #endif
 
-#define UPDATE_ELEM_C(X) \
-    do { \
-        float val = c[X]; \
-        POST_OP(val); \
-        c[X] = val; \
-    } while (0)
-
 kernel void gen12lp_gemm_scale_x8x8s32(global int *cc, global int *c, char trc,
         int offset_c, int m, int n, int ldc, float alpha, float beta,
         global int *co, int offset_co, int alpha_is_zero, int apply_eltwise,
-        float eltwise_alpha, float eltwise_beta) {
+        float eltwise_alpha, float eltwise_beta, float eltwise_scale) {
 
     int idx = get_group_id(0);
     int idy = get_group_id(1);
@@ -61,29 +55,19 @@ kernel void gen12lp_gemm_scale_x8x8s32(global int *cc, global int *c, char trc,
     if (trc == 'R') offset_co += 16 * idy;
     for (j = 0; j < n; j++) {
         if (m > 0) {
-            if (!alpha_is_zero) {
-                c[offset_c + 0]
-                        = (int)((float)alpha * cc[offset_cc + 0]
-                                  + (float)beta * c[offset_c + 0] + (0.0))
-                        + co[offset_co + offset_x];
-            } else {
-                c[offset_c + 0] = (int)((float)beta * c[offset_c + 0] + (0.0))
-                        + co[offset_co + offset_x];
-            }
+            float val = (alpha_is_zero ? 0 : alpha) * cc[offset_cc + 0]
+                    + beta * c[offset_c + 0];
+            POST_OP(val);
+            c[offset_c] = convert_int_sat_rte(
+                    val + (co ? co[offset_co + offset_x] : 0));
             if (trc == 'C') { offset_x++; }
-            if (apply_eltwise) UPDATE_ELEM_C(offset_c + 0);
         }
         if (m > 1) {
-            if (!alpha_is_zero) {
-                c[offset_c + 1]
-                        = (int)((float)alpha * cc[offset_cc + 1]
-                                  + (float)beta * c[offset_c + 1] + (0.0))
-                        + co[offset_co + offset_x];
-            } else {
-                c[offset_c + 1] = (int)((float)beta * c[offset_c + 1] + (0.0))
-                        + co[offset_co + offset_x];
-            }
-            if (apply_eltwise) UPDATE_ELEM_C(offset_c + 1);
+            float val = (alpha_is_zero ? 0 : alpha) * cc[offset_cc + 1]
+                    + beta * c[offset_c + 1];
+            POST_OP(val);
+            c[offset_c + 1] = convert_int_sat_rte(
+                    val + (co ? co[offset_co + offset_x] : 0));
         }
 
         offset_cc += ldcc;

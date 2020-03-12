@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GPU_OCL_GEN12LP_U8S8S32U8_1X1_CONVOLUTION_HPP
-#define GPU_OCL_GEN12LP_U8S8S32U8_1X1_CONVOLUTION_HPP
+#ifndef GPU_GEN12LP_X8S8S32X_1X1_CONVOLUTION_HPP
+#define GPU_GEN12LP_X8S8S32X_1X1_CONVOLUTION_HPP
 
 #include "common/c_types_map.hpp"
 #include "gpu/compute/compute.hpp"
@@ -29,7 +29,7 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-struct gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
+struct gen12lp_x8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
     struct pd_t : public gpu_convolution_fwd_pd_t {
         pd_t(engine_t *engine, const convolution_desc_t *adesc,
                 const primitive_attr_t *attr,
@@ -37,7 +37,7 @@ struct gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
             : gpu_convolution_fwd_pd_t(engine, adesc, attr, hint_fwd_pd) {}
 
         DECLARE_COMMON_PD_T(
-                "ocl:gen12lp:1x1", gen12lp_u8s8s32u8_1x1_convolution_fwd_t);
+                "ocl:gen12lp:1x1", gen12lp_x8s8s32x_1x1_convolution_fwd_t);
 
         status_t init() {
             using namespace prop_kind;
@@ -51,12 +51,10 @@ struct gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
             bool ok = utils::one_of(this->desc()->prop_kind, forward_training,
                               forward_inference)
                     && this->desc()->alg_kind == alg_kind::convolution_direct
-                    && this->desc()->src_desc.data_type == data_type::u8
-                    && this->desc()->weights_desc.data_type == data_type::s8
-                    && this->desc()->accum_data_type == data_type::s32
-                    && this->desc()->dst_desc.data_type == data_type::u8
-                    && IMPLICATION(this->with_bias(),
-                            this->desc()->bias_desc.data_type == f32)
+                    && utils::one_of(desc()->src_desc.data_type, u8, s8)
+                    && utils::one_of(desc()->dst_desc.data_type, u8, s8)
+                    && expect_data_types(desc()->src_desc.data_type, s8, f32,
+                            desc()->dst_desc.data_type, s32)
                     && compute_engine->mayiuse(
                             compute::device_ext_t::intel_subgroups)
                     && attr()->has_default_values(attr_skip_mask)
@@ -81,7 +79,7 @@ struct gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
     };
 
     status_t init() override {
-        const char *kernel_name = "gen12lp_1x1_conv_fwd_u8s8s32u8";
+        const char *kernel_name = "gen12lp_1x1_conv_fwd_x8s8s32x";
 
         compute::kernel_ctx_t kernel_ctx;
         auto status = pd()->init_kernel_ctx(kernel_ctx);
@@ -95,7 +93,7 @@ struct gen12lp_u8s8s32u8_1x1_convolution_fwd_t : public primitive_impl_t {
         return status::success;
     }
 
-    gen12lp_u8s8s32u8_1x1_convolution_fwd_t(const pd_t *apd)
+    gen12lp_x8s8s32x_1x1_convolution_fwd_t(const pd_t *apd)
         : primitive_impl_t(apd) {}
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {

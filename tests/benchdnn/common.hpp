@@ -27,6 +27,7 @@
 
 #include <cinttypes>
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "src/common/z_magic.hpp"
@@ -98,6 +99,7 @@ enum { CRIT = 1, WARN = 2 };
 
 extern int verbose;
 extern bool canonical;
+extern bool mem_check;
 
 #define print(v, fmt, ...) \
     do { \
@@ -241,5 +243,9 @@ int sanitize_desc(int &ndims, std::vector<std::reference_wrapper<int64_t>> d,
 void print_dhw(bool &print_d, bool &print_h, bool &print_w, int ndims,
         const std::vector<int64_t> &d, const std::vector<int64_t> &h,
         const std::vector<int64_t> &w);
+
+int getenv(const char *name, char *buffer, int buffer_size);
+int getenv_int(const char *name, int default_value);
+std::string getenv_str(const char *name, const std::string &default_value);
 
 #endif

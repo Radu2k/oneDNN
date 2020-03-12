@@ -146,7 +146,6 @@ dnnl_format_tag_t str2fmt_tag(const char *str) {
     CASE(Abcde8a);
     CASE(ABcde8a8b);
     CASE(BAcde16b16a);
-    CASE(BAcde16a16b);
     CASE(aBcde8b);
     CASE(ABcde8b16a2b);
     CASE(aBCde8b16c2b);
@@ -204,7 +203,6 @@ dnnl_format_tag_t str2fmt_tag(const char *str) {
     CASE(aBdefc16b);
     CASE(aBdefC16b2c);
     CASE(aCBdef16c16b);
-    CASE(aCBdef16b16c);
     CASE(aBdefc4b);
     CASE(aBdefc8b);
     CASE(Abcdef16a);
@@ -230,6 +228,8 @@ dnnl_format_tag_t str2fmt_tag(const char *str) {
     CASE(BAc16b16a);
     CASE(BAcd16a16b);
     CASE(BAcd16b16a);
+    CASE(BAcde16a16b);
+    CASE(aCBdef16b16c);
     CASE(aCBd4c8b8c4b);
     CASE(aCBde4c8b8c4b);
     CASE(aCBdef4c8b8c4b);
@@ -459,6 +459,10 @@ const char *dt2str(dnnl_data_type_t dt) {
     return dnnl_dt2str(dt);
 }
 
-const char *fmt_tag2str(dnnl_format_tag_t tag) {
-    return dnnl_fmt_tag2str(tag);
+const char *engine_kind2str(dnnl_engine_kind_t kind) {
+    return dnnl_engine_kind2str(kind);
+}
+
+const char *scratchpad_mode2str(dnnl_scratchpad_mode_t mode) {
+    return dnnl_scratchpad_mode2str(mode);
 }

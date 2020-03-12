@@ -252,7 +252,8 @@
 #define POST_OP(val) \
     do { \
         if (apply_eltwise) \
-            val = fwd_eltwise(val, eltwise_alpha, eltwise_beta); \
+            val = fwd_eltwise( \
+                    val, eltwise_alpha, eltwise_beta, eltwise_scale); \
     } while (0)
 #else
 #define POST_OP(val)
@@ -337,42 +338,39 @@
         if (jrem > i) { \
             if (irem > 0) { \
                 if (c_offset_type == 0) { \
-                    int val = ((betaZero) ? 0 : *c) \
-                            + ((!apply_co) ? 0 : co[0]) + ci[0][i]; \
+                    float val = ((betaZero) ? 0 : *c) + ci[0][i]; \
                     POST_OP(val); \
-                    *c = val; \
+                    *c = convert_int_sat_rte(val + ((!apply_co) ? 0 : co[0])); \
                 } \
                 if (c_offset_type == 1) { \
-                    int val = ((betaZero) ? 0 : *c) \
-                            + ((!apply_co) ? 0 : co[0]) + ci[0][i]; \
+                    float val = ((betaZero) ? 0 : *c) + ci[0][i]; \
                     POST_OP(val); \
-                    *c = val; \
+                    *c = convert_int_sat_rte(val + ((!apply_co) ? 0 : co[0])); \
                 } \
                 if (c_offset_type == 2) { \
-                    int val = ((betaZero) ? 0 : *c) \
-                            + ((!apply_co) ? 0 : co[i]) + ci[0][i]; \
+                    float val = ((betaZero) ? 0 : *c) + ci[0][i]; \
                     POST_OP(val); \
-                    *c = val; \
+                    *c = convert_int_sat_rte(val + ((!apply_co) ? 0 : co[i])); \
                 } \
             } \
             if (irem > 16) { \
                 if (c_offset_type == 0) { \
-                    int val = ((betaZero) ? 0 : *c2) \
-                            + ((!apply_co) ? 0 : co[0]) + ci[1][i]; \
+                    float val = ((betaZero) ? 0 : *c2) + ci[1][i]; \
                     POST_OP(val); \
-                    *c2 = val; \
+                    *c2 = convert_int_sat_rte( \
+                            val + ((!apply_co) ? 0 : co[0])); \
                 } \
                 if (c_offset_type == 1) { \
-                    int val = ((betaZero) ? 0 : *c2) \
-                            + ((!apply_co) ? 0 : co[16]) + ci[1][i]; \
+                    float val = ((betaZero) ? 0 : *c2) + ci[1][i]; \
                     POST_OP(val); \
-                    *c2 = val; \
+                    *c2 = convert_int_sat_rte( \
+                            val + ((!apply_co) ? 0 : co[16])); \
                 } \
                 if (c_offset_type == 2) { \
-                    int val = ((betaZero) ? 0 : *c2) \
-                            + ((!apply_co) ? 0 : co[i]) + ci[1][i]; \
+                    float val = ((betaZero) ? 0 : *c2) + ci[1][i]; \
                     POST_OP(val); \
-                    *c2 = val; \
+                    *c2 = convert_int_sat_rte( \
+                            val + ((!apply_co) ? 0 : co[i])); \
                 } \
             } \
         } \
@@ -406,7 +404,8 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
         int n, int k, int beta, A_TYPE ao, B_TYPE bo, global int *co,
         int offsetCO, int apply_co, local A_TYPE *sa, local B_TYPE *sb,
-        int apply_eltwise, float eltwise_alpha, float eltwise_beta) {
+        int apply_eltwise, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale) {
 
     // clang-format off
     A_TYPE4 ai[2];  // 32x4 block of A, 2x 16x4 scattered access
@@ -447,11 +446,11 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
     co += offsetCO;
     c_offset_type = 0;
 #endif
-#ifdef CC
+#ifdef RR
     co += offsetCO + i0 + lid;
     c_offset_type = 1;
 #endif
-#ifdef RR
+#ifdef CC
     co += offsetCO + (j0);
     c_offset_type = 2;
 #endif
@@ -597,9 +596,9 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
 __attribute__((intel_reqd_sub_group_size(16))) kernel void
 gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
-        int n, int k, int beta, A_TYPE ao, B_TYPE bo, global int *co,
-        int offsetCO, int apply_co, local A_TYPE *sa, local B_TYPE *sb,
-        int apply_eltwise, float eltwise_alpha, float eltwise_beta) {
+        int n, int k, int beta, int ao, int bo, global int *co, int offsetCO,
+        int apply_co, local A_TYPE *sa, local B_TYPE *sb, int apply_eltwise,
+        float eltwise_alpha, float eltwise_beta, float eltwise_scale) {
 
     // clang-format off
     A_TYPE2 ai[4];  // 32x4 block of A, 4x 32x1 block access
@@ -646,11 +645,11 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
     co += offsetCO;
     c_offset_type = 0;
 #endif
-#ifdef CC
+#ifdef RR
     co += offsetCO + i0 + lid;
     c_offset_type = 1;
 #endif
-#ifdef RR
+#ifdef CC
     co += offsetCO + (j0);
     c_offset_type = 2;
 #endif
@@ -821,7 +820,8 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
         int n, int k, int beta, A_TYPE ao, B_TYPE bo, global int *co,
         int offsetCO, int apply_co, local A_TYPE *sa, local B_TYPE *sb,
-        int apply_eltwise, float eltwise_alpha, float eltwise_beta) {
+        int apply_eltwise, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale) {
 
     // clang-format off
     A_TYPE2 ai[4];   // 32x4 block of A, 4x 32x1 block access
@@ -874,11 +874,11 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
     co += offsetCO;
     c_offset_type = 0;
 #endif
-#ifdef CC
+#ifdef RR
     co += offsetCO + i0 + lid;
     c_offset_type = 1;
 #endif
-#ifdef RR
+#ifdef CC
     co += offsetCO + (j0);
     c_offset_type = 2;
 #endif
@@ -1086,7 +1086,8 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
         int n, int k, int beta, A_TYPE ao, B_TYPE bo, global int *co,
         int offsetCO, int apply_co, local A_TYPE *sa, local B_TYPE *sb,
-        int apply_eltwise, float eltwise_alpha, float eltwise_beta) {
+        int apply_eltwise, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale) {
 
     // clang-format off
     A_TYPE4 ai[2];  // 32x4 block of A, 2x 16x4 scattered access
@@ -1134,11 +1135,11 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
     co += offsetCO;
     c_offset_type = 0;
 #endif
-#ifdef CC
+#ifdef RR
     co += offsetCO + i0 + lid;
     c_offset_type = 1;
 #endif
-#ifdef RR
+#ifdef CC
     co += offsetCO + (j0);
     c_offset_type = 2;
 #endif

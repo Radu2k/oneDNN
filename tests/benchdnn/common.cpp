@@ -626,3 +626,55 @@ void print_dhw(bool &print_d, bool &print_h, bool &print_w, int ndims,
     print_w = ndims == 3 || (ndims == 5 && (!cubic_shape || canonical))
             || (ndims == 4 && (!square_shape || canonical));
 }
+
+int getenv(const char *name, char *buffer, int buffer_size) {
+    if (name == NULL || buffer_size < 0 || (buffer == NULL && buffer_size > 0))
+        return INT_MIN;
+
+    int result = 0;
+    int term_zero_idx = 0;
+    size_t value_length = 0;
+
+#ifdef _WIN32
+    value_length = GetEnvironmentVariable(name, buffer, buffer_size);
+#else
+    const char *value = ::getenv(name);
+    value_length = value == NULL ? 0 : strlen(value);
+#endif
+
+    if (value_length > INT_MAX)
+        result = INT_MIN;
+    else {
+        int int_value_length = (int)value_length;
+        if (int_value_length >= buffer_size) {
+            result = -int_value_length;
+        } else {
+            term_zero_idx = int_value_length;
+            result = int_value_length;
+#ifndef _WIN32
+            if (value) strncpy(buffer, value, buffer_size - 1);
+#endif
+        }
+    }
+
+    if (buffer != NULL) buffer[term_zero_idx] = '\0';
+    return result;
+}
+
+int getenv_int(const char *name, int default_value) {
+    int value = default_value;
+    // # of digits in the longest 32-bit signed int + sign + terminating null
+    const int len = 12;
+    char value_str[len];
+    if (getenv(name, value_str, len) > 0) value = atoi(value_str);
+    return value;
+}
+
+std::string getenv_str(const char *name, const std::string &default_value) {
+    std::string value = default_value;
+    // allow max path length of 64k bytes
+    const int len = 65536;
+    char value_str[len];
+    if (getenv(name, value_str, len) > 0) value = std::string(value_str);
+    return value;
+}

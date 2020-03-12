@@ -26,6 +26,12 @@
 
 /// @cond DO_NOT_DOCUMENT_THIS
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+
+// Set target version for OpenCL explicitly to suppress a compiler warning.
+#ifndef CL_TARGET_OPENCL_VERSION
+#define CL_TARGET_OPENCL_VERSION 120
+#endif
+
 #include <CL/cl.h>
 #endif
 /// @endcond
@@ -647,6 +653,123 @@ dnnl_status_t DNNL_API dnnl_post_ops_get_params_eltwise(
         const_dnnl_post_ops_t post_ops, int index, float *scale,
         dnnl_alg_kind_t *alg_kind, float *alpha, float *beta);
 
+/// Appends a depthwise post-op convolution with stride 1.
+///
+/// This post-op can only be fused with a 2D 1x1 convolution (convolution with
+/// weights spatial dimension equal to 1 i.e., kh=kw=1).
+///
+/// The kind of this post-op is #dnnl_convolution.
+///
+/// The number of outputs for primitive remain same as before. The output size
+/// remain same as the original primitive due to stride=1.
+///
+/// The Post-op can be defined as:
+///
+///      dst[:] <- scales * (conv_dw(conv_1x1))
+///
+/// See @ref dev_guide_attributes_post_ops_depthwise and
+/// @ref dev_guide_attributes_post_ops_depthwise_fusion for more info.
+///
+/// @param post_ops Post-ops.
+/// @param weights_data_type Weights data type of depthwise post-op
+/// @param bias_data_type Bias data type of depthwise post-op
+/// @param dst_data_type Output data type of depthwise post-op
+/// @param count Output length of the array of scaling factors @p scales.
+/// @param mask Output scaling factors correspondence mask that defines the
+///     correspondence between the output tensor dimensions and the @p
+///     scales array. The set i-th bit indicates that a dedicated output scaling
+///     factor is used for each index along that dimension. The mask value of 0
+///     implies a common scaling factor for the whole output tensor.
+/// @param scales Output pointer to a constant array of float scaling factors.
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise
+dnnl_status_t DNNL_API dnnl_post_ops_append_dw_k3s1p1(dnnl_post_ops_t post_ops,
+        dnnl_data_type_t weights_data_type, dnnl_data_type_t bias_data_type,
+        dnnl_data_type_t dst_data_type, dnnl_dim_t count, int mask,
+        const float *scales);
+
+/// Returns the parameters of an depthwise post-op with stride 1.
+///
+/// @param post_ops Post-ops.
+/// @param index Index of the elementwise post-op.
+/// @param weights_data_type Weights data type of depthwise post-op
+/// @param bias_data_type Bias data type of depthwise post-op
+/// @param dst_data_type Output data type of depthwise post-op
+/// @param count Output length of the array of scaling factors @p scales.
+/// @param mask Output scaling factors correspondence mask that defines the
+///     correspondence between the output tensor dimensions and the @p
+///     scales array. The set i-th bit indicates that a dedicated output scaling
+///     factor is used for each index along that dimension. The mask value of 0
+///     implies a common scaling factor for the whole output tensor.
+/// @param scales Output pointer to a constant array of float scaling factors.
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise
+dnnl_status_t DNNL_API dnnl_post_ops_get_params_dw_k3s1p1(
+        const_dnnl_post_ops_t post_ops, int index,
+        dnnl_data_type_t *weights_data_type, dnnl_data_type_t *bias_data_type,
+        dnnl_data_type_t *dst_data_type, dnnl_dim_t *count, int *mask,
+        const float **scales);
+
+/// Appends a depthwise post-op convolution with stride 2.
+///
+/// This post-op can only be fused with a 2D 1x1 convolution (convolution with
+/// weights spatial dimension equal to 1 i.e., kh=kw=1).
+///
+/// The kind of this post-op is #dnnl_convolution.
+///
+/// The number of outputs for primitive remain same as before. The output
+/// spatial size can be derived as below:
+///
+/// output_height = ceil(output_height_1x1_convolution, stride)
+/// output_width = ceil(output_width_1x1_convolution, stride)
+///
+/// The Post-op can be defined as:
+///
+///      dst[:] <- scales * (conv_dw(conv_1x1))
+///
+/// See @ref dev_guide_attributes_post_ops_depthwise and
+/// @ref dev_guide_attributes_post_ops_depthwise_fusion for more info.
+///
+/// @param post_ops Post-ops.
+/// @param weights_data_type Weights data type of depthwise post-op
+/// @param bias_data_type Bias data type of depthwise post-op
+/// @param dst_data_type Output data type of depthwise post-op
+/// @param count Output length of the array of scaling factors @p scales.
+/// @param mask Output scaling factors correspondence mask that defines the
+///     correspondence between the output tensor dimensions and the @p
+///     scales array. The set i-th bit indicates that a dedicated output scaling
+///     factor is used for each index along that dimension. The mask value of 0
+///     implies a common scaling factor for the whole output tensor.
+/// @param scales Output pointer to a constant array of float scaling factors.
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise
+dnnl_status_t DNNL_API dnnl_post_ops_append_dw_k3s2p1(dnnl_post_ops_t post_ops,
+        dnnl_data_type_t weights_data_type, dnnl_data_type_t bias_data_type,
+        dnnl_data_type_t dst_data_type, dnnl_dim_t count, int mask,
+        const float *scales);
+
+/// Returns the parameters of an depthwise post-op with stride 2.
+///
+/// @param post_ops Post-ops.
+/// @param index Index of the elementwise post-op.
+/// @param weights_data_type Weights data type of depthwise post-op
+/// @param bias_data_type Bias data type of depthwise post-op
+/// @param dst_data_type Output data type of depthwise post-op
+/// @param count Output length of the array of scaling factors @p scales.
+/// @param mask Output scaling factors correspondence mask that defines the
+///     correspondence between the output tensor dimensions and the @p
+///     scales array. The set i-th bit indicates that a dedicated output scaling
+///     factor is used for each index along that dimension. The mask value of 0
+///     implies a common scaling factor for the whole output tensor.
+/// @param scales Output pointer to a constant array of float scaling factors.
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise
+dnnl_status_t DNNL_API dnnl_post_ops_get_params_dw_k3s2p1(
+        const_dnnl_post_ops_t post_ops, int index,
+        dnnl_data_type_t *weights_data_type, dnnl_data_type_t *bias_data_type,
+        dnnl_data_type_t *dst_data_type, dnnl_dim_t *count, int *mask,
+        const float **scales);
+
 /// @} dnnl_api_attributes
 
 /// @} dnnl_api_primitives
@@ -824,15 +947,21 @@ size_t DNNL_API dnnl_memory_desc_get_size(
 
 /// Creates a memory object.
 ///
+/// Unless @p handle is equal to DNNL_MEMORY_NONE, the constructed memory
+/// object will have the underlying buffer set. In this case, the buffer will
+/// be initialized as if dnnl_memory_set_data_handle() had been called.
+///
+/// @sa dnnl_memory_set_data_handle()
+///
 /// @param memory Output memory object.
 /// @param memory_desc Memory descriptor.
 /// @param engine Engine to use.
-/// @param handle Memory handle:
-///     - A pointer to the user- allocated buffer. In this case the library
+/// @param handle Handle of the memory buffer to use as an underlying storage.
+///     - A pointer to the user-allocated buffer. In this case the library
 ///       doesn't own the buffer.
-///     - DNNL_MEMORY_ALLOCATE special value instructs the library to allocate
-///       the buffer for the memory object. In this case the library owns
-///       the buffer.
+///     - The DNNL_MEMORY_ALLOCATE special value. Instructs the library to
+///       allocate the buffer for the memory object. In this case the library
+///       owns the buffer.
 ///     - DNNL_MEMORY_NONE to create dnnl_memory without an underlying buffer.
 /// @returns #dnnl_success on success and a status describing the error
 ///     otherwise.
@@ -858,10 +987,10 @@ dnnl_status_t DNNL_API dnnl_memory_get_memory_desc(
 dnnl_status_t DNNL_API dnnl_memory_get_engine(
         const_dnnl_memory_t memory, dnnl_engine_t *engine);
 
-/// Maps a memory object and returns a pointer to host-side buffer with a
+/// Maps a memory object and returns a pointer to a host-side buffer with a
 /// copy of its contents.
 ///
-/// Mapping allows explicit direct access to memory contents for the engines
+/// Mapping enables explicit direct access to memory contents for the engines
 /// that do not support it implicitly.
 ///
 /// Mapping is an exclusive operation - a memory object cannot be used in
@@ -869,12 +998,12 @@ dnnl_status_t DNNL_API dnnl_memory_get_engine(
 ///
 /// @note
 ///     Any primitives working with @p memory should be completed before
-///     mapping the memory. Use dnnl_stream_wait to synchronize the
+///     the memory is mapped. Use dnnl_stream_wait to synchronize the
 ///     corresponding execution stream.
 ///
 /// @note
-///     dnnl_memory_map_data() and dnnl_memory_unmap_data() function are
-///     mainly provided for debug and testing purposes, and its performance
+///     The dnnl_memory_map_data() and dnnl_memory_unmap_data() functions are
+///     mainly provided for debug and testing purposes, and their performance
 ///     may be suboptimal.
 ///
 /// @param memory Memory object.
@@ -884,17 +1013,17 @@ dnnl_status_t DNNL_API dnnl_memory_get_engine(
 dnnl_status_t DNNL_API dnnl_memory_map_data(
         const_dnnl_memory_t memory, void **mapped_ptr);
 
-/// Unmaps a memory objects and writes any changes to the previously mapped
-/// buffer back.
+/// Unmaps a memory object and writes back any changes to the previously mapped
+/// buffer.
 ///
 /// @note
-///     dnnl_memory_map_data() and dnnl_memory_unmap_data() function are
-///     mainly provided for debug and testing purposes, and its performance
+///     The dnnl_memory_map_data() and dnnl_memory_unmap_data() functions are
+///     mainly provided for debug and testing purposes, and their performance
 ///     may be suboptimal.
 ///
 /// @param memory Memory object.
 /// @param mapped_ptr Pointer to the mapped buffer that must have been
-///     obtained using dnnl_memory_map_data() function.
+///     obtained using the dnnl_memory_map_data() function.
 /// @returns #dnnl_success on success and a status describing the error
 ///     otherwise.
 dnnl_status_t DNNL_API dnnl_memory_unmap_data(
@@ -910,7 +1039,28 @@ dnnl_status_t DNNL_API dnnl_memory_unmap_data(
 dnnl_status_t DNNL_API dnnl_memory_get_data_handle(
         const_dnnl_memory_t memory, void **handle);
 
-/// Sets memory object's data handle.
+/// Sets a memory object's data handle.
+///
+/// This function may write zeroes to the specified data @p handle if the
+/// memory object has padding to maintain data consistency.
+///
+/// @note
+///     The padding is performed for memory objects created with blocked
+///     memory format tags like #dnnl_aBcd8b when any of the dimensions is not
+///     a multiple of a corresponding block size. The padding is performed only
+///     for memory objects created with plain memory format tags like #dnnl_nchw
+///     or #dnnl_nhwc if requested explicitly. More information is available in
+///     @ref dev_guide_understanding_memory_formats.
+///
+/// The write can be time consuming and happens each time the function is
+/// called. Furthermore, it is performed using an internal service stream in a
+/// blocking manner.
+///
+/// @warning
+///     Even if the memory object is used to hold values that stay constant
+///     (e.g., pre-packed weights during inference), the function will still
+///     write zeroes to the padding area if it exists. Hence, the @p handle
+///     parameter cannot and does not have a const qualifier.
 ///
 /// @param memory Memory object.
 /// @param handle Data handle. For the CPU engine, the data handle is a
@@ -931,6 +1081,8 @@ dnnl_status_t DNNL_API dnnl_memory_get_ocl_mem_object(
         const_dnnl_memory_t memory, cl_mem *mem_object);
 
 /// Sets OpenCL memory object associated with a memory object.
+///
+/// For behavioral details, see dnnl_memory_set_data_handle().
 ///
 /// @param memory Memory object.
 /// @param mem_object OpenCL memory object.

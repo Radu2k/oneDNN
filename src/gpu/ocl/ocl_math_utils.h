@@ -81,13 +81,19 @@ float16 __builtin_IB_bftof_16(short16 a) __attribute__((const));
 inline ushort convert_f32_to_bf16(float f) {
     return as_ushort(__builtin_IB_ftobf_1(f));
 }
+
 inline ushort2 convert_f32_to_bf16_vec2(float2 f) {
     return as_ushort2(__builtin_IB_ftobf_2(f));
+}
+
+inline ushort4 convert_f32_to_bf16_vec4(float4 f) {
+    return as_ushort4(__builtin_IB_ftobf_4(f));
 }
 
 inline ushort8 convert_f32_to_bf16_vec8(float8 f) {
     return as_ushort8(__builtin_IB_ftobf_8(f));
 }
+
 inline ushort16 convert_f32_to_bf16_vec16(float16 f) {
     return as_ushort16(__builtin_IB_ftobf_16(f));
 }
@@ -325,6 +331,14 @@ inline ushort convert_f32_to_bf16(float f) {
 inline ushort2 convert_f32_to_bf16_vec2(float2 f) {
     ushort2 r;
     for (int i = 0; i < 2; i++) {
+        r[i] = convert_f32_to_bf16(f[i]);
+    }
+    return r;
+}
+
+inline ushort4 convert_f32_to_bf16_vec4(float4 f) {
+    ushort4 r;
+    for (int i = 0; i < 4; i++) {
         r[i] = convert_f32_to_bf16(f[i]);
     }
     return r;

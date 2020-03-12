@@ -8,7 +8,8 @@ Shuffle {#dev_guide_shuffle}
 The shuffle primitive shuffles data along the shuffle axis (here is designated
 as \f$C\f$) with the group parameter \f$G\f$. Namely, the shuffle axis is
 thought to be a 2D tensor of size \f$(\frac{C}{G} \times G)\f$ and it is being
-transposed to \f$(G \times \frac{C}{G})\f$.
+transposed to \f$(G \times \frac{C}{G})\f$. Variable names follow the standard
+@ref dev_guide_conventions.
 
 The formal definition is shown below:
 
@@ -54,12 +55,12 @@ Essentially, backward propagation is the same as forward propagation with
 ## Execution Arguments
 When executed, the inputs and outputs should be mapped to an execution
 argument index as specified by the following table.
-| Primitive intput/output | Execution argument index |
-| ---                     | ---                      |
-| \src                    | DNNL_ARG_SRC             |
-| \dst                    | DNNL_ARG_DST             |
-| \diffsrc                | DNNL_ARG_DIFF_SRC        |
-| \diffdst                | DNNL_ARG_DIFF_DST        |
+| Primitive input/output | Execution argument index |
+| ---                    | ---                      |
+| \src                   | DNNL_ARG_SRC             |
+| \dst                   | DNNL_ARG_DST             |
+| \diffsrc               | DNNL_ARG_DIFF_SRC        |
+| \diffdst               | DNNL_ARG_DIFF_DST        |
 
 ## Implementation Details
 

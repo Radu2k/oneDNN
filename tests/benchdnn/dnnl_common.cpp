@@ -14,8 +14,10 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include <assert.h>
 #include "dnnl.h"
+
+#include <cassert>
+#include <cstdlib>
 #include <unordered_set>
 
 #include "dnnl_common.hpp"
@@ -44,6 +46,9 @@ dnnl_engine_t engine_tgt;
 // Stream for target engine
 dnnl_stream_t stream_tgt;
 
+// Scratchpad mode for DNNL
+dnnl_scratchpad_mode_t scratchpad_mode;
+
 args_t &args_t::set(int arg, const dnn_mem_t &mem) {
     args_.push_back(std::make_pair(arg, &mem));
     return *this;
@@ -69,15 +74,11 @@ void execute_map_args(const args_t &args) {
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
 bool is_gpu_sim() {
-    static const char *sim_env = getenv("DNNL_GPU_SIM");
-    static bool _is_sim = sim_env && atoi(sim_env) == 1;
-    return _is_sim;
+    return getenv_int("DNNL_GPU_SIM", 0) != 0;
 }
 
 bool is_gpu_perf_sim() {
-    static const char *sim_perf_env = getenv("DNNL_GPU_PERF_SIM");
-    static bool _is_perf_sim = sim_perf_env && atoi(sim_perf_env) == 1;
-    return _is_perf_sim;
+    return getenv_int("DNNL_GPU_PERF_SIM", 0) != 0;
 }
 
 static std::unordered_set<dnn_mem_t *> dnn_mem_objects;
@@ -152,11 +153,8 @@ dnnl_status_t execute_and_wait(
         // Assume that simulation should be done for this primitive.
         if (prim_kind != dnnl_reorder) {
             // Query the run number and verbosity level
-            const char *sim_run_env = getenv("DNNL_GPU_SIM_RUN");
-            const char *sim_verbose_env = getenv("DNNL_GPU_SIM_VERBOSE");
-            const int sim_run = !sim_run_env ? -1 : atoi(sim_run_env);
-            const int sim_verbose
-                    = !sim_verbose_env ? 0 : atoi(sim_verbose_env);
+            const int sim_run = getenv_int("DNNL_GPU_SIM_RUN", -1);
+            const int sim_verbose = getenv_int("DNNL_GPU_SIM_VERBOSE", 0);
 
             // Destroy library objects and exit from benchdnn for the following cases:
             // - Performance simulation
@@ -189,8 +187,8 @@ dnnl_status_t execute_and_wait(
                 }
 
                 // Load memory contents from binaries
-                const char *sim_aub_file = getenv("DNNL_GPU_SIM_AUB_FILE");
-                std::string aub_file(!sim_aub_file ? "out.aub" : sim_aub_file);
+                std::string aub_file = getenv_str(
+                        "DNNL_GPU_SIM_AUB_FILE", std::string("out.aub"));
                 aub_file.resize(aub_file.length() - strlen(".aub"));
                 for (auto &kv : mem_ids) {
                     dnnl_memory_t mem = kv.first;
@@ -335,10 +333,10 @@ void maybe_prepare_runtime_zero_points(dnn_mem_t &zero_points_m,
 }
 
 bool check_md_consistency_with_tag(
-        const dnnl_memory_desc_t &md, dnnl_format_tag_t tag) {
+        const dnnl_memory_desc_t &md, const std::string &tag) {
     dnnl_memory_desc_t md_new_tag;
-    DNN_SAFE(dnnl_memory_desc_init_by_tag(
-                     &md_new_tag, md.ndims, md.dims, md.data_type, tag),
+    DNN_SAFE(dnnl_memory_desc_init_by_tag(&md_new_tag, md.ndims, md.dims,
+                     md.data_type, convert_tag(tag, md.ndims)),
             WARN);
     return dnnl_memory_desc_equal(&md_new_tag, &md);
 }

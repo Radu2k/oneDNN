@@ -5,7 +5,8 @@ Sum {#dev_guide_sum}
 > [API Reference](@ref dnnl_api_sum)
 >
 
-The sum primitive sums \f$N\f$ tensors:
+The sum primitive sums \f$N\f$ tensors (the variable names follow the standard
+@ref dev_guide_conventions):
 
 \f[
     \dst(\overline{x}) =
@@ -20,10 +21,10 @@ The backward propagation for the sum operation is simply an identity operation.
 ## Execution Arguments
 When executed, the inputs and outputs should be mapped to an execution
 argument index as specified by the following table.
-| primitive intput/output | execution argument index |
-| ---                     | ---                      |
-| \src                    | DNNL_ARG_MULTIPLE_SRC    |
-| \dst                    | DNNL_ARG_DST             |
+| primitive input/output | execution argument index |
+| ---                    | ---                      |
+| \src                   | DNNL_ARG_MULTIPLE_SRC    |
+| \dst                   | DNNL_ARG_DST             |
 
 ## Implementation Details
 

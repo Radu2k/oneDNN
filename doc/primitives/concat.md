@@ -6,7 +6,8 @@ Concat {#dev_guide_concat}
 >
 
 The concat primitive concatenates \f$N\f$ tensors over `concat_axis` (here
-designated as \f$C\f$ axis) and defined as:
+designated as \f$C\f$ axis) and defined as (the variable names follow the
+standard @ref dev_guide_conventions):
 
 \f[
     \dst(\overline{ou}, c, \overline{in}) =
@@ -21,10 +22,10 @@ operation.
 
 ## Execution Arguments
 When executed, the inputs and outputs should be mapped to an execution argument index as specified by the following table.
-| Primitive intput/output | Execution argument index |
-| ---                     | ---                      |
-| \src                    | DNNL_ARG_MULTIPLE_SRC    |
-| \dst                    | DNNL_ARG_DST             |
+| Primitive input/output | Execution argument index |
+| ---                    | ---                      |
+| \src                   | DNNL_ARG_MULTIPLE_SRC    |
+| \dst                   | DNNL_ARG_DST             |
 
 ## Implementation Details
 
@@ -56,7 +57,6 @@ meaning associated with any logical dimensions.
 
 The concat primitive doesn't support any post-ops or attributes.
 
-
 ## Implementation Limitations
 
 1. The primitive works with several memory formats, such as plain formats
@@ -71,7 +71,6 @@ The concat primitive doesn't support any post-ops or attributes.
 
 2. Refer to @ref dev_guide_data_types for limitations related to data types
    support.
-
 
 ## Performance Tips
 

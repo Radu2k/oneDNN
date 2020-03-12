@@ -31,7 +31,7 @@ namespace eltwise {
 
 std::vector<dir_t> dir {FWD_D};
 std::vector<dnnl_data_type_t> dt {dnnl_f32};
-std::vector<dnnl_format_tag_t> tag {dnnl_nchw};
+std::vector<std::string> tag {tag::abx};
 std::vector<alg_t> alg {attr_t::post_ops_t::RELU};
 std::vector<float> scales {0, 0.25, -0.25};
 std::vector<float> alpha {scales};
@@ -50,7 +50,7 @@ const char *perf_template = perf_template_def;
 void reset_parameters() {
     dir = {FWD_D};
     dt = {dnnl_f32};
-    tag = {dnnl_nchw};
+    tag = {tag::abx};
     alg = {attr_t::post_ops_t::RELU};
     alpha = scales;
     beta = scales;
@@ -67,7 +67,7 @@ void check_correctness() {
     for_(const auto &i_alg : alg)
     for_(const auto &i_alpha : alpha)
     for_(const auto &i_beta : beta)
-    for_(const auto &i_inplace : inplace)
+    for_(auto i_inplace : inplace)
     for (const auto &i_mb : mb) {
         // iterator over alpha and beta (alphabetic order!)
         switch (i_alg) {

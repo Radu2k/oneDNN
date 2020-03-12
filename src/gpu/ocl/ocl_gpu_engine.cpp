@@ -16,12 +16,12 @@
 
 #include <CL/cl.h>
 
-#include "gpu/ocl/ocl_gpu_engine.hpp"
-
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
+#include "gpu/compute/kernel_list.hpp"
 #include "gpu/jit/binary_format.hpp"
 #include "gpu/ocl/kernel_utils.hpp"
+#include "gpu/ocl/ocl_gpu_engine.hpp"
 #include "gpu/ocl/ocl_memory_storage.hpp"
 #include "gpu/ocl/ocl_stream.hpp"
 #include "gpu/ocl/ocl_utils.hpp"

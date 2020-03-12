@@ -810,10 +810,11 @@ gemm_sig((_ref_rnn_common_t<aprop>::gemm_primitive)) {
             ? ctx.output(DNNL_ARG_WORKSPACE)
             : ctx.input(DNNL_ARG_WORKSPACE);
 
+    std::unique_ptr<memory_storage_t> scratchpad;
     if (pd()->rnn_conf.use_workspace) {
         workspace->memory_storage()->get_data_handle(&scratchpad_ptr);
     } else {
-        auto scratchpad = ctx.get_scratchpad_grantor().get_memory_storage(
+        scratchpad = ctx.get_scratchpad_grantor().get_memory_storage(
                 key_rnn_space);
         scratchpad->get_data_handle(&scratchpad_ptr);
     }
@@ -1443,8 +1444,8 @@ status_t _ref_rnn_common_t<aprop>::execute_(const exec_ctx_t &ctx) const {
             n_parts_weights_layer, offset_wei_state_, n_parts_weights_iter,
             bias_native_, workspace_, scratch_gates, w_input_native_,
             w_state_native_, diff_weights_layer_native_,
-            diff_weights_iter_native_, diff_bias_native_, *scales_buf_,
-            *tm_scales_buf_);
+            diff_weights_iter_native_, diff_bias_native_, scales_buf_.get(),
+            tm_scales_buf_.get());
 
     DPRINT("\n%s(%d) WS before copy res\n\n", __FUNCTION__, __LINE__);
     WS_PRINT(compute_stream, workspace_);
