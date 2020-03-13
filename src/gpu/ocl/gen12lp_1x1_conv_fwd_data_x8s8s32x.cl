@@ -69,6 +69,10 @@
 #define BLOCK_READ_BIA(data, idx) \
     data = as_float4(intel_sub_group_block_read4((__global uint *)&bias[idx]));
 
+#define BLOCK_READ_SCALES(data, idx) \
+    data = as_float4(intel_sub_group_block_read4( \
+            (__global uint *)&scales_per_oc[idx]));
+
 #define CHANNEL_OFFSET 1
 #define MB_OFFSET IC_BLOCK
 #define PIXEL_WIDTH_OFFSET (MB_OFFSET * MB_BLOCK)
@@ -82,12 +86,21 @@
 #define WEIGHTS_HEIGHT_OFFSET (WEIGHTS_WIDTH_OFFSET * 1)
 #define KERNEL_BLOCK_OFFSET (WEIGHTS_HEIGHT_OFFSET * 1)
 
+#if SCALES_PER_OC
+#define SCALE scales
+#elif SCALES_COMMON
+#define SCALE scale
+#else
+#define SCALE 1
+#endif
+
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
         const __global char *wei, const __global float *bias,
         __global DATA_T *dst, float eltwise_alpha, float eltwise_beta,
-        float eltwise_scale, float sum_scale, float scales) {
+        float eltwise_scale, float sum_scale, float scale,
+        const __global float *scales_per_oc) {
 
     // Groups:
     const uint oc_group_id = get_group_id(0);
@@ -217,13 +230,18 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
     uint8 dst_pack;
     DST_DATA_BLOCK_T D0, D1;
 
+#if SCALES_PER_OC
+    float4 scales;
+    BLOCK_READ_SCALES(scales, oc_group_id * OC_BLOCK);
+#endif
+
 #if WITH_BIAS
     float4 bia;
     BLOCK_READ_BIA(bia, oc_group_id * OC_BLOCK);
-    bia *= scales;
-#define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)scales, bia);
+    bia *= SCALE;
+#define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)SCALE, bia);
 #else
-#define QUANTIZE_ADD_BIAS() tmp *= scales;
+#define QUANTIZE_ADD_BIAS() tmp *= SCALE;
 #endif
 
 #if WITH_SUM
