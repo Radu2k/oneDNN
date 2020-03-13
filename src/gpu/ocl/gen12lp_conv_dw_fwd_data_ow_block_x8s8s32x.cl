@@ -27,12 +27,21 @@ inline ushort16 read_block16(const __global ushort *p)
     return __builtin_IB_simd_block_read_16_global_h(p);
 }
 
+#if SCALES_PER_OC
+#define SCALE scales.s0101010101010101
+#elif SCALES_COMMON
+#define SCALE scale
+#else
+#define SCALE 1
+#endif
+
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_dw_fwd_ow_block_x8s8s32x(const __global uchar *src,
         const __global char *wei, const __global float *bias,
         __global DATA_T *dst, float eltwise_alpha, float eltwise_beta,
-        float eltwise_scale, float sum_scale, float scales) {
+        float eltwise_scale, float sum_scale, float scale,
+        const __global float *scales_per_oc) {
     const int osp = get_global_id(1);
     const int od = osp / (OWB * OH);
     const int ohw = osp % (OWB * OH);
@@ -52,6 +61,14 @@ conv_dw_fwd_ow_block_x8s8s32x(const __global uchar *src,
     wei += g * KD * KH * KW;
     int16 S0 = 0;
     int16 S1 = 0;
+
+#if SCALES_PER_OC
+    // TODO: use block read after fix from compiler
+    // float2 scales = as_float2(intel_sub_group_block_read_ul((const __global ulong *)&scales_per_oc[g]));
+    float2 scales;
+    scales.s0 = scales_per_oc[g + 2 * get_sub_group_local_id()];
+    scales.s1 = scales_per_oc[g + 2 * get_sub_group_local_id() + 1];
+#endif
 
 #if WITH_BIAS
     // change after fix from compiler
@@ -441,9 +458,10 @@ conv_dw_fwd_ow_block_x8s8s32x(const __global uchar *src,
         src += IC_BLOCK * MB_BLOCK * IW * (IH * (1 + DD) - KH * (1 + DH));
     }
 
-#if WITH_ELTWISE || WITH_POST_SUM_ELTWISE || WITH_SUM && !SUM_SCALE
-    float16 tmp00 = convert_float16(S0);
-    float16 tmp01 = convert_float16(S1);
+#if WITH_ELTWISE || WITH_POST_SUM_ELTWISE || WITH_SUM && !SUM_SCALE \
+        || SCALES_PER_OC || SCALES_COMMON
+    float16 tmp00 = convert_float16(S0) * SCALE;
+    float16 tmp01 = convert_float16(S1) * SCALE;
 #define CONVERT_TO_ACC convert_float16
 #define ACC0 tmp00
 #define ACC1 tmp01

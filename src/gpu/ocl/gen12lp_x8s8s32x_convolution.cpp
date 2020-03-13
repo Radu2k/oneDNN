@@ -267,6 +267,9 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_kernel_ctx(
         def_postops(kernel_ctx, conf.eltwise.alg);
     }
 
+    kernel_ctx.define_int("SCALES_COMMON", conf.with_common_scales);
+    kernel_ctx.define_int("SCALES_PER_OC", conf.with_per_oc_scales);
+
     kernel_ctx.define_int("SUB_GROUP_SIZE", conf.sub_group_size);
     kernel_ctx.define_int("LWS_0", conf.lws_d[0]);
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);
@@ -283,15 +286,14 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_kernel_ctx(
 
 status_t gen12lp_x8s8s32x_convolution_fwd_t::execute_forward(
         const exec_ctx_t &ctx) const {
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
-
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
     auto &bias = CTX_IN_STORAGE(DNNL_ARG_BIAS);
     auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     const auto &conf = pd()->conf;
+    auto *compute_stream
+            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, src);
@@ -302,8 +304,19 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::execute_forward(
     arg_list.set(5, conf.eltwise.beta);
     arg_list.set(6, conf.eltwise.scale);
     arg_list.set(7, conf.sum_scale);
-    float scales = pd()->attr()->output_scales_.scales_[0];
-    arg_list.set(8, scales);
+
+    if (conf.with_common_scales) {
+        float scales = pd()->attr()->output_scales_.scales_[0];
+        arg_list.set(8, scales);
+    } else {
+        arg_list.set(8, 1);
+    }
+
+    if (conf.with_per_oc_scales) {
+        arg_list.set(9, *scales_mem_->memory_storage());
+    } else {
+        arg_list.set(9, memory_storage_t::empty_storage());
+    }
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
     status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
