@@ -23,11 +23,17 @@ void __builtin_IB_simd_block_write_16_global_h(__global ushort *, ushort16);
 ushort16 __builtin_IB_simd_block_read_16_global_h(const __global ushort *);
 
 #ifdef cl_intel_subgroups_char
-void __attribute__((overloadable))
-intel_sub_group_block_write_uc16(__global uchar *p, uchar16 data);
+uchar2 __attribute__((overloadable))
+intel_sub_group_block_read_uc2(const __global uchar *p);
+
+uchar4 __attribute__((overloadable))
+intel_sub_group_block_read_uc4(const __global uchar *p);
 
 uchar16 __attribute__((overloadable))
 intel_sub_group_block_read_uc16(const __global uchar *p);
+
+void __attribute__((overloadable))
+intel_sub_group_block_write_uc16(__global uchar *p, uchar16 data);
 #endif
 
 #ifdef cl_intel_dot_accumulate

@@ -53,6 +53,7 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
         size_t dyn_offset_a = 0;
         size_t dyn_offset_b = 0;
         size_t dyn_offset_c = 0;
+
         float alpha() const { return attr()->output_scales_.scales_[0]; }
 
         float beta() const {
@@ -70,8 +71,12 @@ public:
     virtual status_t execute(const gemm_exec_ctx_t &ctx) const override;
 
 private:
+    int64_t default_block_k(data_type_t dt) const;
     std::tuple<int64_t, int64_t, int64_t> get_blocking() const;
 
+    status_t launch_clear_sum(compute::compute_stream_t *compute_stream,
+            int64_t r, int64_t c, const memory_storage_t &dst,
+            int32_t offset_dst, int32_t ld_dst, bool copyb) const;
     status_t launch_copy(compute::compute_stream_t *compute_stream, int64_t r,
             int64_t c, const memory_storage_t &src, int64_t offset_src,
             int64_t ld_src, const memory_storage_t &dst, int32_t offset_dst,
@@ -80,14 +85,18 @@ private:
             int32_t m, int32_t n, int32_t k, const memory_storage_t &ap,
             int64_t offset_a, int32_t lda, const memory_storage_t &bp,
             int64_t offset_b, int32_t ldb, const memory_storage_t &c,
-            int64_t offset_c, int32_t ldc, float alpha, float beta) const;
+            int64_t offset_c, int32_t ldc, float alpha, float beta, int16_t ao,
+            int16_t bo, const memory_storage_t &co, int32_t offset_co,
+            bool first_k_block, bool last_k_block) const;
 
-    compute::kernel_t kernel_;
-    compute::kernel_t kernel_b1_;
-    compute::kernel_t copy_kernel_[2]; // [trans]
+    compute::kernel_t kernel_[2][2]; // [first_k_block][last_k_block]
+    compute::kernel_t copy_kernel_[2][2]; // [trans][clear_sum]
 
     std::unique_ptr<memory_storage_t> a_packed_;
     std::unique_ptr<memory_storage_t> b_packed_;
+
+    char co_type_;
+    bool ab_zero_points_;
 
     const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
 };

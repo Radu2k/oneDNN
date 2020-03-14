@@ -34,6 +34,7 @@ status_t gen12hp_systolic_gemm_t::pd_t::init() {
     using namespace prop_kind;
     using namespace data_type;
     using namespace primitive_kind;
+    using smask_t = primitive_attr_t::skip_mask_t;
 
     assert(this->engine()->kind() == engine_kind::gpu);
     auto *compute_engine
@@ -44,18 +45,47 @@ status_t gen12hp_systolic_gemm_t::pd_t::init() {
     // LIMITATIONS:
     // - batch is not supported
     // - runtime dims are not supported
-    // - bias is not supported
+    // - bias is not supported for f16/bf16
     bool limits_ok = d->batch == 1
             && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m, d->n, d->k, d->lda,
                     d->ldb, d->ldc)
             && d->bias_type == data_type::undef;
 
-    bool ok = true && limits_ok && d->a_type == d->b_type
-            && utils::one_of(d->a_type, bf16, f16)
-            && utils::one_of(d->c_type, f32, d->a_type)
+    bool dt_float_ok
+            = (d->a_type == d->b_type && utils::one_of(d->a_type, bf16, f16)
+                    && utils::one_of(d->c_type, f32, d->a_type));
+
+    bool dt_int_ok = (utils::one_of(d->a_type, u8, s8)
+            && utils::one_of(d->b_type, u8, s8) && (d->c_type == s32));
+
+    const auto attr_skip_mask = dt_int_ok
+            ? smask_t::oscale | smask_t::post_ops | smask_t::zero_points_runtime
+            : smask_t::none;
+
+    bool ok = true && limits_ok && (dt_float_ok || dt_int_ok)
             && compute_engine->mayiuse(compute::device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate)
-            && attr()->has_default_values();
+            && attr()->has_default_values(attr_skip_mask);
+
+    if (dt_int_ok) {
+        ok &= attr()->zero_points_.defined(DNNL_ARG_SRC)
+                && attr()->zero_points_.defined(DNNL_ARG_WEIGHTS)
+                && (attr()->zero_points_.has_default_values(DNNL_ARG_DST)
+                        || !attr()->zero_points_.defined(DNNL_ARG_DST))
+                && attr()->output_scales_.mask_ == 0
+                && attr()->post_ops_.len_ <= 2
+                && IMPLICATION(attr()->post_ops_.len_ == 1,
+                        attr()->post_ops_.find(eltwise) != -1
+                                || attr()->post_ops_.find(sum) != -1)
+                && IMPLICATION(attr()->post_ops_.len_ == 2,
+                        attr()->post_ops_.find(sum) == 0
+                                && attr()->post_ops_.find(eltwise) == 1);
+
+        int cmask = 0;
+        attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
+        ok &= utils::one_of(cmask, 0, 1 << 0, 1 << 1);
+    }
+
     if (!ok) return status::unimplemented;
 
     return status::success;
@@ -80,6 +110,7 @@ dim_t gen12hp_systolic_gemm_t::pd_t::k_aligned() const {
 
 status_t gen12hp_systolic_gemm_t::init() {
     using namespace data_type;
+    using kernel_t = gen12hp_systolic_gemm_kernel_t;
 
     auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine());
     if (!gpu_engine) return status::out_of_memory;
@@ -91,20 +122,25 @@ status_t gen12hp_systolic_gemm_t::init() {
 
     if (utils::one_of(acc_type, f16, bf16)) acc_type = f32;
 
+    ab_zero_points_ = (c_type == s32);
+
     int64_t block_m = 0, block_n = 0, block_k = 0;
     std::tie(block_m, block_n, block_k) = get_blocking();
 
+    auto max_ldab_packed
+            = kernel_t::max_ld_packed(block_k, a_type, ab_zero_points_);
+
     memory_storage_t *a_packed_ptr, *b_packed_ptr;
-    this->engine()->create_memory_storage(
-            &a_packed_ptr, block_m * block_k * types::data_type_size(a_type));
-    this->engine()->create_memory_storage(
-            &b_packed_ptr, block_n * block_k * types::data_type_size(b_type));
+    this->engine()->create_memory_storage(&a_packed_ptr,
+            block_m * max_ldab_packed * types::data_type_size(a_type));
+    this->engine()->create_memory_storage(&b_packed_ptr,
+            block_n * max_ldab_packed * types::data_type_size(b_type));
     if (!a_packed_ptr || !b_packed_ptr) return status::runtime_error;
     a_packed_.reset(a_packed_ptr);
     b_packed_.reset(b_packed_ptr);
 
     // Initialize compute kernels (assembly)
-    gen12hp_systolic_gemm_kernel_t::config_t cfg;
+    kernel_t::config_t cfg;
 
     cfg.a_type = convert_dnnl_type_to_ngen(a_type);
     cfg.b_type = convert_dnnl_type_to_ngen(b_type);
@@ -113,34 +149,86 @@ status_t gen12hp_systolic_gemm_t::init() {
     cfg.alpha1 = (pd()->alpha() == 1.0f);
     cfg.beta0 = (pd()->beta() == 0.0f);
     cfg.beta1 = (pd()->beta() == 1.0f);
+    cfg.a_bias = cfg.b_bias = ab_zero_points_;
 
-    if (!cfg.beta1) {
-        auto kernel = gen12hp_systolic_gemm_kernel_t(cfg);
-        kernel_ = compute::kernel_t(new ocl::ocl_gpu_kernel_t(
-                kernel.getKernel(gpu_engine->context(), gpu_engine->device())));
+    co_type_ = 'N';
+    if (c_type == s32) {
+        int cmask = 0;
+        pd()->attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
+
+        switch (cmask) {
+            case 0:
+                cfg.c_bias = kernel_t::bias_t::fixed;
+                co_type_ = 'F';
+                break;
+            case (1 << 1):
+                cfg.c_bias = kernel_t::bias_t::row;
+                co_type_ = 'R';
+                break;
+            case (1 << 0):
+                cfg.c_bias = kernel_t::bias_t::column;
+                co_type_ = 'C';
+                break;
+            default:
+                cfg.c_bias = kernel_t::bias_t::none;
+                co_type_ = 'N';
+                break;
+        }
     }
 
-    cfg.beta0 = false;
-    cfg.beta1 = true;
-    auto kernel_b1 = gen12hp_systolic_gemm_kernel_t(cfg);
-    kernel_b1_ = compute::kernel_t(new ocl::ocl_gpu_kernel_t(
-            kernel_b1.getKernel(gpu_engine->context(), gpu_engine->device())));
+    bool may_k_block = (pd()->desc()->k > default_block_k(a_type));
+
+    for (bool first_k_block : {false, true}) {
+        for (bool last_k_block : {false, true}) {
+            if ((!first_k_block || !last_k_block) && !may_k_block) continue;
+            if (may_k_block && last_k_block
+                    && (cfg.c_bias == kernel_t::bias_t::none))
+                kernel_[first_k_block][last_k_block]
+                        = kernel_[first_k_block][false];
+            else if (may_k_block && first_k_block && cfg.beta1)
+                kernel_[first_k_block][last_k_block]
+                        = kernel_[false][last_k_block];
+            else {
+                auto cfg_copy = cfg;
+                if (!first_k_block) {
+                    cfg_copy.beta0 = false;
+                    cfg_copy.beta1 = true;
+                }
+                if (!last_k_block) cfg_copy.c_bias = kernel_t::bias_t::none;
+
+                auto kernel = kernel_t(cfg_copy);
+                kernel_[first_k_block][last_k_block] = compute::kernel_t(
+                        new ocl::ocl_gpu_kernel_t(kernel.getKernel(
+                                gpu_engine->context(), gpu_engine->device())));
+            }
+        }
+    }
 
     // Initialize copy kernels (OpenCL)
     for (bool copy_b : {false, true}) {
-        compute::kernel_ctx_t kernel_ctx;
+        for (bool clear_sum : {false, true}) {
+            if (clear_sum && !ab_zero_points_) continue;
 
-        auto trans = !copy_b ? pd()->desc()->transa : pd()->desc()->transb;
-        auto status = ocl::gen12hp_systolic_gemm_copy_kernel_t::init_kernel_ctx(
-                kernel_ctx, copy_b, trans);
-        if (status != status::success) return status;
+            compute::kernel_ctx_t kernel_ctx;
 
-        gpu_engine->create_kernel(&copy_kernel_[copy_b],
-                "gen12hp_systolic_gemm_copy", kernel_ctx);
-        if (!copy_kernel_[copy_b]) return status::runtime_error;
+            auto trans = !copy_b ? pd()->desc()->transa : pd()->desc()->transb;
+            auto status
+                    = ocl::gen12hp_systolic_gemm_copy_kernel_t::init_kernel_ctx(
+                            kernel_ctx, !copy_b ? a_type : b_type, copy_b,
+                            trans, ab_zero_points_, clear_sum);
+            if (status != status::success) return status;
+
+            gpu_engine->create_kernel(&copy_kernel_[copy_b][clear_sum],
+                    "gen12hp_systolic_gemm_copy", kernel_ctx);
+            if (!copy_kernel_[copy_b][clear_sum]) return status::runtime_error;
+        }
     }
 
     return status::success;
+}
+
+int64_t gen12hp_systolic_gemm_t::default_block_k(data_type_t dt) const {
+    return 4608 / types::data_type_size(dt);
 }
 
 std::tuple<int64_t, int64_t, int64_t>
@@ -182,7 +270,7 @@ gen12hp_systolic_gemm_t::get_blocking() const {
     block_n = utils::rnd_dn(nstl::min(block_n, max_block_n), align_n);
 
     // Decide on k blocking.
-    int64_t block_k = 4608 / types::data_type_size(dt);
+    int64_t block_k = default_block_k(dt);
     int64_t nblock_k = utils::div_up(k, block_k);
     block_k = utils::div_up(k, nblock_k);
     block_k = utils::rnd_up(block_k, unroll_k);
@@ -195,6 +283,12 @@ status_t gen12hp_systolic_gemm_t::launch_copy(
         const memory_storage_t &src, int64_t offset_src, int64_t ld_src,
         const memory_storage_t &dst, int32_t offset_dst, int32_t ld_dst,
         bool copyb) const {
+
+    if (ab_zero_points_) {
+        auto status = launch_clear_sum(
+                compute_stream, r, c, dst, offset_dst, ld_dst, copyb);
+        if (status) return status;
+    }
 
     int64_t unroll_m = gen12hp_systolic_gemm_kernel_t::unroll_m;
     int64_t unroll_n = gen12hp_systolic_gemm_kernel_t::unroll_n;
@@ -215,7 +309,7 @@ status_t gen12hp_systolic_gemm_t::launch_copy(
     bool transb = (pd()->desc()->transb == dnnl_trans);
     bool trans = !copyb ? transa : transb;
 
-    auto &kernel = copy_kernel_[copyb];
+    auto &kernel = copy_kernel_[copyb][false];
 
     assert(kernel);
     compute::kernel_arg_list_t arg_list;
@@ -228,14 +322,48 @@ status_t gen12hp_systolic_gemm_t::launch_copy(
     arg_list.set(6, offset_dst);
     arg_list.set(7, ld_dst);
 
+    auto elt_size = types::data_type_size(pd()->desc()->a_type);
     size_t r_threads = utils::div_up(utils::rnd_up(r, align_r),
-            ocl::gen12hp_systolic_gemm_copy_kernel_t::unroll_r(copyb, trans));
+            ocl::gen12hp_systolic_gemm_copy_kernel_t::unroll_r(
+                    elt_size, copyb, trans));
     size_t c_threads = utils::div_up(utils::rnd_up(c, align_c),
-            ocl::gen12hp_systolic_gemm_copy_kernel_t::unroll_c(copyb, trans));
+            ocl::gen12hp_systolic_gemm_copy_kernel_t::unroll_c(
+                    elt_size, copyb, trans));
     size_t sg = ocl::gen12hp_systolic_gemm_copy_kernel_t::subgroup_size(
-            copyb, trans);
+            elt_size, copyb, trans);
 
     size_t gws[3] = {r_threads * sg, c_threads, 1};
+    size_t lws[3] = {sg, 1, 1};
+
+    auto nd_range = compute::nd_range_t(gws, lws);
+
+    return compute_stream->parallel_for(nd_range, kernel, arg_list);
+}
+
+status_t gen12hp_systolic_gemm_t::launch_clear_sum(
+        compute::compute_stream_t *compute_stream, int64_t r, int64_t c,
+        const memory_storage_t &dst, int32_t offset_dst, int32_t ld_dst,
+        bool copyb) const {
+
+    auto &kernel = copy_kernel_[copyb][true];
+
+    assert(kernel);
+    compute::kernel_arg_list_t arg_list;
+    arg_list.set(0, r);
+    arg_list.set(1, c);
+    arg_list.set(2, dst);
+    arg_list.set(3, offset_dst);
+    arg_list.set(4, ld_dst);
+
+    auto elt_size = types::data_type_size(pd()->desc()->a_type);
+    size_t threads = !copyb
+            ? utils::div_up(r, gen12hp_systolic_gemm_kernel_t::unroll_m)
+            : utils::div_up(c, gen12hp_systolic_gemm_kernel_t::unroll_n);
+    size_t sg
+            = ocl::gen12hp_systolic_gemm_copy_kernel_t::subgroup_size_clear_sum(
+                    elt_size, copyb);
+
+    size_t gws[3] = {threads * sg, 1, 1};
     size_t lws[3] = {sg, 1, 1};
 
     auto nd_range = compute::nd_range_t(gws, lws);
@@ -248,17 +376,17 @@ status_t gen12hp_systolic_gemm_t::launch_compute(
         int32_t k, const memory_storage_t &ap, int64_t offset_a, int32_t lda,
         const memory_storage_t &bp, int64_t offset_b, int32_t ldb,
         const memory_storage_t &c, int64_t offset_c, int32_t ldc, float alpha,
-        float beta) const {
+        float beta, int16_t ao, int16_t bo, const memory_storage_t &co,
+        int32_t offset_co, bool first_k_block, bool last_k_block) const {
 
     using kernel_t = gen12hp_systolic_gemm_kernel_t;
     auto unroll_m = kernel_t::unroll_m;
     auto unroll_n = kernel_t::unroll_n;
-    auto unroll_k = kernel_t::unroll_k(pd()->desc()->a_type);
     auto tg_m = kernel_t::thread_group_m;
     auto tg_n = kernel_t::thread_group_n;
     auto sg = kernel_t::nominal_subgroup_size;
 
-    auto &kernel = (beta == 1.0f) ? kernel_b1_ : kernel_;
+    auto &kernel = kernel_[first_k_block][last_k_block];
 
     //   kernel void gemm_kernel(global char *Ap, global uchar *Bp, global int *C,
     //                           int k, int ldc,
@@ -270,20 +398,29 @@ status_t gen12hp_systolic_gemm_t::launch_compute(
     assert(kernel);
 
     compute::kernel_arg_list_t arg_list;
-    arg_list.set(0, ap);
-    arg_list.set(1, bp);
-    arg_list.set(2, c);
-    arg_list.set(3, utils::div_up(k, unroll_k));
-    arg_list.set(4, ldc);
-    arg_list.set(5, offset_a);
-    arg_list.set(6, offset_b);
-    arg_list.set(7, offset_c);
-    arg_list.set(8, m);
-    arg_list.set(9, n);
-    arg_list.set(10, alpha);
-    arg_list.set(11, beta);
-    arg_list.set(12, lda);
-    arg_list.set(13, ldb);
+    int argn = 0;
+    arg_list.set(argn++, ap);
+    arg_list.set(argn++, bp);
+    arg_list.set(argn++, c);
+    arg_list.set(argn++, k);
+    arg_list.set(argn++, ldc);
+    arg_list.set(argn++, offset_a);
+    arg_list.set(argn++, offset_b);
+    arg_list.set(argn++, offset_c);
+    arg_list.set(argn++, m);
+    arg_list.set(argn++, n);
+    arg_list.set(argn++, alpha);
+    arg_list.set(argn++, beta);
+    arg_list.set(argn++, lda);
+    arg_list.set(argn++, ldb);
+    if (ab_zero_points_) {
+        uint32_t abo = (uint16_t(ao) | (uint16_t(bo) << 16));
+        arg_list.set(argn++, abo);
+    }
+    if (last_k_block && (pd()->desc()->c_type == data_type::s32)) {
+        arg_list.set(argn++, co);
+        arg_list.set(argn++, offset_co);
+    }
 
     auto thread_m = utils::div_up(m, unroll_m * tg_m) * tg_m;
     auto thread_n = utils::div_up(n, unroll_n * tg_n) * tg_n;
@@ -322,6 +459,9 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     auto &a = GEMM_CTX_ARG_STORAGE(a);
     auto &b = GEMM_CTX_ARG_STORAGE(b);
     auto &c = GEMM_CTX_ARG_STORAGE(c);
+    auto &co = GEMM_CTX_ARG_STORAGE(c_zero_point);
+
+    int32_t ao = 0, bo = 0;
 
     size_t off_a0
             = a.offset() / types::data_type_size(a_type) + pd()->dyn_offset_a;
@@ -330,17 +470,28 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     size_t off_c0
             = c.offset() / types::data_type_size(c_type) + pd()->dyn_offset_c;
 
+    if (c_type == data_type::s32) {
+        const int *ao_i32 = nullptr;
+        const int *bo_i32 = nullptr;
+        pd()->attr()->zero_points_.get(DNNL_ARG_SRC, nullptr, nullptr, &ao_i32);
+        pd()->attr()->zero_points_.get(
+                DNNL_ARG_WEIGHTS, nullptr, nullptr, &bo_i32);
+        ao = -*ao_i32;
+        bo = -*bo_i32;
+    }
+
     int64_t block_m = 0, block_n = 0, block_k = 0;
     std::tie(block_m, block_n, block_k) = get_blocking();
 
-    auto unroll_k = gen12hp_systolic_gemm_kernel_t::unroll_k(a_type);
-    auto lda_packed = utils::rnd_up(block_k, unroll_k);
+    auto lda_packed = gen12hp_systolic_gemm_kernel_t::get_ld_packed(
+            block_k, a_type, ab_zero_points_);
     auto ldb_packed = lda_packed;
 
     status_t status;
 
     for (int64_t Bk = 0; Bk < k; Bk += block_k) {
         int64_t size_k = k - Bk;
+        bool first_k_block = (Bk == 0);
         bool last_k_block = (size_k <= block_k);
         if (!last_k_block) size_k = block_k;
 
@@ -371,12 +522,19 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
                 }
 
                 auto off_c = off_c0 + Bm + Bn * ldc;
+                auto off_co = 0;
+                switch (co_type_) {
+                    case 'R': off_co = Bm; break;
+                    case 'C': off_co = Bn; break;
+                    default: off_co = 0; break;
+                }
 
-                float this_beta = (Bk == 0) ? beta : 1.0f;
+                float this_beta = first_k_block ? beta : 1.0f;
                 status = launch_compute(compute_stream, size_m, size_n, size_k,
                         *a_packed_, off_a_packed, lda_packed, *b_packed_,
                         off_b_packed, ldb_packed, c, off_c, ldc, alpha,
-                        this_beta);
+                        this_beta, ao, bo, co, off_co, first_k_block,
+                        last_k_block);
                 if (status) return status;
             }
         }

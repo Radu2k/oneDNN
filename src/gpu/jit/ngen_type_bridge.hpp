@@ -31,11 +31,12 @@ inline ngen::DataType convert_dnnl_type_to_ngen(data_type_t dt) {
     DataType dt_out = DataType::invalid;
 
     switch (dt) {
-        case data_type::f32: dt_out = DataType::f; break;
         case data_type::f16: dt_out = DataType::hf; break;
         case data_type::bf16: dt_out = DataType::bf; break;
-        case data_type::u8: dt_out = DataType::ub; break;
+        case data_type::f32: dt_out = DataType::f; break;
+        case data_type::s32: dt_out = DataType::d; break;
         case data_type::s8: dt_out = DataType::b; break;
+        case data_type::u8: dt_out = DataType::ub; break;
         default: assert(!"Unknown datatype");
     }
 

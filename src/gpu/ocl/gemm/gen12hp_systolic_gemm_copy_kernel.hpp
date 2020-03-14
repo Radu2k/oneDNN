@@ -27,27 +27,44 @@ namespace gpu {
 namespace ocl {
 
 struct gen12hp_systolic_gemm_copy_kernel_t {
-    static status_t init_kernel_ctx(
-            compute::kernel_ctx_t &kernel_ctx, bool copyb, bool trans) {
+    static status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx,
+            data_type_t dt, bool copyb, bool trans, bool sum = false,
+            bool clear_sum = false) {
 
+        auto dt_size = types::data_type_size(dt);
+
+        if (dt_size == 1) kernel_ctx.add_option("-Dcl_intel_subgroups_char");
+        kernel_ctx.define_int("ELEMENT_SIZE", int(dt_size));
         kernel_ctx.define_int("COPY_A", int(!copyb));
         kernel_ctx.define_int("COPY_B", int(copyb));
         kernel_ctx.define_int("COPY_TRANS", int(trans));
+        kernel_ctx.define_int("COPY_SUM", int(sum));
+        kernel_ctx.define_int("COPY_CLEAR_SUM", int(clear_sum));
+        kernel_ctx.define_int("COPY_SIGNED", int(dt == data_type::s8));
         kernel_ctx.add_option("-cl-strict-aliasing");
 
         return status::success;
     }
 
-    static constexpr int unroll_r(bool copyb, bool trans) {
-        return !copyb ? 32 : 16;
+    static constexpr int unroll_k(size_t element_size) {
+        return 32 / int(element_size);
     }
 
-    static constexpr int unroll_c(bool copyb, bool trans) {
-        return !copyb ? 16 : 48;
+    static constexpr int unroll_r(size_t element_size, bool copyb, bool trans) {
+        return !copyb ? 32 : unroll_k(element_size);
     }
 
-    static constexpr int subgroup_size(bool copyb, bool trans) {
+    static constexpr int unroll_c(size_t element_size, bool copyb, bool trans) {
+        return !copyb ? unroll_k(element_size) : 48;
+    }
+
+    static constexpr int subgroup_size(
+            size_t element_size, bool copyb, bool trans) {
         return (copyb && trans) ? 16 : 8;
+    }
+
+    static constexpr int subgroup_size_clear_sum(size_t element_size, bool copyb) {
+        return 8;
     }
 };
 

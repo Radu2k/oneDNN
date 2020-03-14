@@ -32,41 +32,38 @@ void gen12hp_systolic_gemm_kernel_t::zero_c() {
 }
 
 void gen12hp_systolic_gemm_kernel_t::scattered_setup_c(int stride, bool load) {
-    auto c = load ? c_ptr_mem : uc_base;
-
     // Set up SIMD16 scattered access pointers to emulate block access to C
     //   (2 columns x 8 regs/column).
     mov<uint16_t>(4, uheaders[15],
             Immediate::uv(0 * stride, 1 * stride, 2 * stride, 3 * stride, 0, 0,
                     0, 0));
-    add<uint64_t>(4 | SWSB<AllPipes>(1), uheaders[0], c, uheaders[15].uw());
-    add<uint64_t>(4 | SWSB(1), uheaders[1], uheaders[0], uint16_t(stride * 4));
-    add<uint64_t>(8 | SWSB(1), uheaders[2], uheaders[0], uint16_t(stride * 8));
-    add<uint64_t>(8 | SWSB(2), uheaders[4], uheaders[0], uint16_t(stride * 16));
-    add<uint64_t>(8 | SWSB(3), uheaders[6], uheaders[0], uint16_t(stride * 24));
+    add<uint64_t>(4, uheaders[0], uc_base, uheaders[15].uw());
+    add<uint64_t>(4, uheaders[1], uheaders[0], uint16_t(stride * 4));
+    add<uint64_t>(8, uheaders[2], uheaders[0], uint16_t(stride * 8));
+    add<uint64_t>(8, uheaders[4], uheaders[0], uint16_t(stride * 16));
+    add<uint64_t>(8, uheaders[6], uheaders[0], uint16_t(stride * 24));
     for (int q = 8; q < 16; q += 2)
-        add<uint64_t>(8 | SWSB(4), uheaders[q], uheaders[q - 8], uldc);
+        add<uint64_t>(8, uheaders[q], uheaders[q - 8], uldc);
 }
 
 void gen12hp_systolic_gemm_kernel_t::block_setup_c(bool remainder, bool load) {
-    auto c = load ? c_ptr_mem : uc_base;
     if (remainder) {
         // 8 blocks, each 16x1.
-        mov<uint64_t>(1, uheaders[0][0], c);
-        add<uint64_t>(1 | SWSB<int>(3), uheaders[1][0], c,
+        mov<uint64_t>(1, uheaders[0][0], uc_base);
+        add<uint64_t>(1, uheaders[1][0], uc_base,
                 uint16_t(getBytes(cfg.c_type) * 16));
-        add<uint64_t>(8 | SWSB<AllPipes>(1), uheaders[2], uheaders[0], uldc);
-        add<uint64_t>(8 | SWSB(2), uheaders[4], uheaders[0], uldc_x2);
-        add<uint64_t>(8 | SWSB(2), uheaders[6], uheaders[2], uldc_x2);
+        add<uint64_t>(8, uheaders[2], uheaders[0], uldc);
+        add<uint64_t>(8, uheaders[4], uheaders[0], uldc_x2);
+        add<uint64_t>(8, uheaders[6], uheaders[2], uldc_x2);
         for (int q = 8; q < 16; q += 2)
-            add<uint64_t>(8 | SWSB(4), uheaders[q], uheaders[q - 8], uldc_x4);
+            add<uint64_t>(8, uheaders[q], uheaders[q - 8], uldc_x4);
     } else {
         // 4 blocks, each 32x1.
-        mov<uint64_t>(1, uheaders[0][0], c);
-        add<uint64_t>(1 | SWSB<int>(3), uheaders[1][0], c, uldc);
-        add<uint64_t>(8 | SWSB<AllPipes>(1), uheaders[2], uheaders[0], uldc_x2);
-        add<uint64_t>(8 | SWSB(2), uheaders[4], uheaders[0], uldc_x4);
-        add<uint64_t>(8 | SWSB(2), uheaders[6], uheaders[2], uldc_x4);
+        mov<uint64_t>(1, uheaders[0][0], uc_base);
+        add<uint64_t>(1, uheaders[1][0], uc_base, uldc);
+        add<uint64_t>(8, uheaders[2], uheaders[0], uldc_x2);
+        add<uint64_t>(8, uheaders[4], uheaders[0], uldc_x4);
+        add<uint64_t>(8, uheaders[6], uheaders[2], uldc_x4);
     }
 }
 
@@ -84,15 +81,12 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
     bool alpha1 = cfg.alpha1;
     bool beta0 = cfg.beta0;
     bool beta1 = cfg.beta1;
+    bool float_update = !(alpha1 && (beta0 || beta1));
 
     const auto c_elem_bytes = getBytes(cfg.c_type);
     bool c32 = (c_elem_bytes == 4);
-    int loads_per_col = (c32 && c_align16 && !remainder) ? 1 : 2;
 
-    if (beta0 && alpha1) {
-        sync(SyncFunction::nop, SWSB<AllPipes>(1));
-        return; // Nothing to do.
-    }
+    if (beta0 && alpha1) return; // Nothing to do.
 
     // Get the bank ID for a given register.
     auto bank = [](const RegData &r) { return (r.getBase() & 2) >> 1; };
@@ -122,24 +116,21 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
                 if (remainder) {
                     // Block read with masks.
                     assert(c32);
-                    load(16 | f0[0] | SWSB(SBID(2 * jj + 0), 7),
-                            utemp[jj * 4 + 0], block_oword(4), A64,
+                    load(16 | f0[0], utemp[jj * 4 + 0], block_oword(4), A64,
                             uheaders[2 * jj + 0]);
-                    load(16 | f0[1] | SWSB(SBID(2 * jj + 1), 7),
-                            utemp[jj * 4 + 2], block_oword(4), A64,
+                    load(16 | f0[1], utemp[jj * 4 + 2], block_oword(4), A64,
                             uheaders[2 * jj + 1]);
                 } else {
                     // Block read.
-                    load(16 | SWSB(SBID(jj), 7),
-                            utemp[jj * 4 + 4 - c_elem_bytes],
+                    load(16, utemp[jj * 4 + 4 - c_elem_bytes],
                             aligned_block_oword(c_elem_bytes * 2), A64,
                             uheaders[jj]);
                 }
             } else {
                 // Scattered byte or dword load, possibly masked.
                 auto j1 = (j & 1);
-                auto mod0 = 16 | SWSB(SBID(2 * jj + 0), 7);
-                auto mod1 = 16 | SWSB(SBID(2 * jj + 1), 5);
+                InstructionModifier mod0 = 16;
+                InstructionModifier mod1 = 16;
                 if (remainder) {
                     mod0 = mod0 | f0[0];
                     mod1 = mod1 | f0[1];
@@ -156,13 +147,11 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
                             A64, uheaders[8 * j1 + 4]);
                 }
                 if (j + 2 < 48) {
-                    add<uint64_t>(8 | SBID(2 * jj + 0).src,
-                            uheaders[8 * j1 + 0], uheaders[8 * j1 + 0],
+                    add<uint64_t>(8, uheaders[8 * j1 + 0], uheaders[8 * j1 + 0],
                             uldc_x2);
                     add<uint64_t>(8, uheaders[8 * j1 + 2], uheaders[8 * j1 + 2],
                             uldc_x2);
-                    add<uint64_t>(8 | SBID(2 * jj + 1).src,
-                            uheaders[8 * j1 + 4], uheaders[8 * j1 + 4],
+                    add<uint64_t>(8, uheaders[8 * j1 + 4], uheaders[8 * j1 + 4],
                             uldc_x2);
                     add<uint64_t>(8, uheaders[8 * j1 + 6], uheaders[8 * j1 + 6],
                             uldc_x2);
@@ -175,15 +164,12 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
             for (int j = j0; j < j0 + 4; j++) {
                 auto jj = (j & 7);
                 if (remainder) {
-                    add<uint64_t>(1 | SBID(2 * jj + 0).src,
-                            uheaders[2 * jj + 0], uheaders[2 * jj + 0],
+                    add<uint64_t>(1, uheaders[2 * jj + 0], uheaders[2 * jj + 0],
                             uldc_x8);
-                    add<uint64_t>(1 | SBID(2 * jj + 1).src,
-                            uheaders[2 * jj + 1], uheaders[2 * jj + 1],
+                    add<uint64_t>(1, uheaders[2 * jj + 1], uheaders[2 * jj + 1],
                             uldc_x8);
                 } else
-                    add<uint64_t>(1 | SBID(jj).src, uheaders[jj], uheaders[jj],
-                            uldc_x8);
+                    add<uint64_t>(1, uheaders[jj], uheaders[jj], uldc_x8);
             }
         }
 
@@ -192,7 +178,7 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
 
     if (remainder) {
         // Do the first n compare.
-        cmp(1 | gt | f1[0] | SWSB(6), null.ud(), un_rem, uint32_t(0));
+        cmp(1 | gt | f1[0], null.ud(), un_rem, uint32_t(0));
     }
 
     // Set up headers.
@@ -207,9 +193,6 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
     for (int j0 = 0; j0 < 48; j0 += 4) {
         int j0_4 = j0 & 4;
 
-        auto acc = c_regs[interleave(j0)];
-        auto acc_stride = 48;
-
         // Get (sub)register in loaded C submatrix at offset (ii*8, jj).
         auto get_load_reg = [&](DataType dt, int ii, int jj) {
             auto bytes = c_align16 ? getBytes(dt) : 4;
@@ -221,6 +204,12 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
             return reg.sub(off, dt)(stride);
         };
 
+        // Get register in accumulated C submatrix at offset (ii*8, jj).
+        auto get_acc_reg = [&](DataType dt, int ii, int jj) {
+            auto acc_base = c_regs[interleave(j0)];
+            return (acc_base + (jj + ii * acc_stride)).retype(dt);
+        };
+
         // Load C block ahead of time for next loop, and check for loop exit.
         if ((j0 + 4) < 48) {
             c_load(j0 + 4);
@@ -228,57 +217,74 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
                 cmp(1 | gt | f1[1], null.ud(), un_rem, uint16_t(j0 + 4));
         }
 
+        // If accumulator not single precision, convert to single precision, unless alpha = 1 and beta is 0 or 1.
+        auto cur_acc_type = cfg.acc_type;
+        if (float_update && (cfg.acc_type != DataType::f)) {
+            for (int ii = 0; ii < 4; ii++) {
+                for (int jj = 0; jj < 4; jj += 2) {
+                    auto acc_orig = get_acc_reg(cfg.acc_type, ii, jj);
+                    auto acc_f = get_acc_reg(DataType::f, ii, jj);
+                    mov(16, acc_f, acc_orig);
+                }
+            }
+            cur_acc_type = DataType::f;
+        }
+
         // Premultiply by alpha if both alpha is not 1, unless beta = 1 (use FMA later instead).
-        InstructionModifier swsb_pa {};
         if (!alpha1 && !beta1) {
-            for (int ii = 0; ii < 4; ii++)
-                for (int jj = 0; jj < 4; jj += 2)
-                    mul<float>(16, acc + (jj + ii * acc_stride),
-                            acc + (jj + ii * acc_stride),
-                            ualpha_regs[!bank(acc + jj)]);
-            swsb_pa = SWSB<float>(7);
+            for (int ii = 0; ii < 4; ii++) {
+                for (int jj = 0; jj < 4; jj += 2) {
+                    auto a_reg = get_acc_reg(cur_acc_type, ii, jj);
+                    mul(16, a_reg, a_reg, ualpha_regs[!bank(a_reg)]);
+                }
+            }
         }
 
-        // Wait for loads. Use SBIDs instead once auto-SWSB implemented in nGEN.
-        if (!beta0) {
-            uint16_t sbid_mask = (loads_per_col == 2) ? (0xFF << (j0_4 * 2))
-                                                      : (0xF << j0_4);
-            sync(SyncFunction::allwr, sbid_mask);
-        }
-
-        // Half-precision C must be upconverted to single precision separately (no hf/f mixed mode support in Gen12HP)
+        // Half-precision C must be upconverted to single precision separately (no hf/f mixed mode support in Gen12HP).
+        // Similarly integer C must be upconverted if alpha or beta float.
         auto old_type = cfg.c_type;
-        if (cfg.c_type == DataType::hf) {
+        if ((float_update
+                    && utils::one_of(cfg.c_type, DataType::d, DataType::ud))
+                || (cfg.c_type == DataType::hf)) {
             for (int jj = 0; jj < 4; jj++) {
                 for (int ii = 0; ii < 4; ii += 2) {
-                    auto old_hf = get_load_reg(DataType::hf, ii, jj);
-                    auto old_f = get_load_reg(DataType::f, ii, jj);
+                    auto old_hf = get_load_reg(cfg.c_type, ii, jj);
+                    auto old_f = get_load_reg(cur_acc_type, ii, jj);
                     mov(16, old_f, old_hf);
                 }
             }
-            old_type = DataType::f;
-            sync(SyncFunction::nop,
-                    SWSB<float>(1)); // Temporary until auto-SWSB supported.
+            old_type = cur_acc_type;
         }
 
         // Main alpha/beta scaling.
         for (int ii = 0; ii < 4; ii++) {
             for (int jj = 0; jj < 4; jj++) {
-                GRF a_reg = acc + (jj + ii * acc_stride);
-                a_reg = a_reg.retype(cfg.acc_type);
-                auto oreg = get_load_reg(old_type, ii, jj);
+                auto a_reg = get_acc_reg(cur_acc_type, ii, jj);
+                auto o_reg = get_load_reg(old_type, ii, jj);
                 int b = !bank(a_reg);
 
                 if (beta0) {
                     /* no op */
                 } else if (beta1) {
                     if (alpha1)
-                        add(8, a_reg, a_reg, oreg);
+                        add(8, a_reg, a_reg, o_reg);
                     else
-                        mad(8 | swsb_pa, a_reg, oreg, a_reg, ualpha_regs[b]);
+                        mad(8, a_reg, o_reg, a_reg, ualpha_regs[b]);
                 } else
-                    mad(8 | swsb_pa, a_reg, a_reg, oreg, ubeta_regs[b]);
+                    mad(8, a_reg, a_reg, o_reg, ubeta_regs[b]);
             }
+        }
+
+        // Convert back from single precision, if needed.
+        if (cfg.acc_type != cur_acc_type) {
+            for (int ii = 0; ii < 4; ii++) {
+                for (int jj = 0; jj < 4; jj += 2) {
+                    auto acc_cur = get_acc_reg(cur_acc_type, ii, jj);
+                    auto acc_orig = get_acc_reg(cfg.acc_type, ii, jj);
+                    mov(16, acc_orig, acc_cur);
+                }
+            }
+            cur_acc_type = cfg.acc_type;
         }
 
         // Early exit if no more columns to load.
@@ -286,7 +292,6 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
     }
 
     mark(done);
-    sync(SyncFunction::allrd, SWSB<AllPipes>(1));
 }
 
 void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
@@ -297,8 +302,8 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
 
     if (remainder) {
         // Do the first two n compares.
-        cmp(1 | gt | f1[0] | SWSB(6), null.ud(), un_rem, uint32_t(0));
-        cmp(1 | gt | f1[1] | SWSB(7), null.ud(), un_rem, uint32_t(1));
+        cmp(1 | gt | f1[0], un_rem, uint16_t(0));
+        cmp(1 | gt | f1[1], un_rem, uint16_t(1));
     }
 
     // Set up headers. TODO: reuse headers from load where possible.
@@ -311,7 +316,6 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
         int j0_4 = j0 & 4;
 
         auto acc = c_regs[interleave(j0)];
-        auto acc_stride = 48;
 
         // Get (sub)register in stored C submatrix at offset (ii*8, jj).
         auto get_store_reg = [&](int ii, int jj) {
@@ -349,21 +353,21 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
                 // Skip this load if masked off. Otherwise, prepare next flag.
                 jmpi(1 | ~f1[j & 1], done);
                 if (j + 2 < 48)
-                    cmp(1 | gt | f1[j & 1], null.ud(), un_rem, uint16_t(j + 2));
+                    cmp(1 | gt | f1[j & 1], un_rem, uint16_t(j + 2));
             }
 
             if (c_align16) {
                 if (remainder) {
                     // Block write with masks.
                     assert(c32);
-                    store(16 | f0[0] | SWSB<AllPipes>(4), block_oword(4), A64,
-                            uheaders[2 * jj + 0], utemp[jj * 4 + 0]);
-                    store(16 | f0[1] | SWSB<AllPipes>(4), block_oword(4), A64,
-                            uheaders[2 * jj + 1], utemp[jj * 4 + 2]);
+                    store(16 | f0[0], block_oword(4), A64, uheaders[2 * jj + 0],
+                            utemp[jj * 4 + 0]);
+                    store(16 | f0[1], block_oword(4), A64, uheaders[2 * jj + 1],
+                            utemp[jj * 4 + 2]);
                 } else {
                     // Block write.
-                    store(16 | SWSB<AllPipes>(4), block_oword(2 * c_elem_bytes),
-                            A64, uheaders[jj], utemp[jj * 4]);
+                    store(16, block_oword(2 * c_elem_bytes), A64, uheaders[jj],
+                            utemp[jj * 4]);
                 }
 
                 if ((jj == 7) && (j0 + 8 < 48)) {
@@ -375,8 +379,8 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
             } else {
                 // Scattered dword or byte store, possibly masked.
                 auto j1 = (j & 1);
-                auto mod0 = 16 | SWSB<AllPipes>(7);
-                auto mod1 = 16 | SWSB<AllPipes>(7);
+                InstructionModifier mod0 = 16;
+                InstructionModifier mod1 = 16;
                 if (remainder) {
                     mod0 = mod0 | f0[0];
                     mod1 = mod1 | f0[1];
@@ -405,6 +409,112 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
     mark(done);
 }
 
+void gen12hp_systolic_gemm_kernel_t::load_c_bias() {
+    assert(uoff_co.getOffset() == 2 && uoff_co2.getOffset() == 2);
+    switch (cfg.c_bias) {
+        case bias_t::none: break;
+        case bias_t::fixed:
+            load(1, uoffset[0], scattered_dword(1), Surface(co_surface),
+                    uoff_co);
+            break;
+        case bias_t::row:
+            load(16, uoffset[0], aligned_block_oword(8), Surface(co_surface),
+                    uoff_co);
+            break;
+        case bias_t::column:
+            add(1, uoff_co2, uoff_co, uint16_t(32 * 4));
+            load(16, uoffset[0], aligned_block_oword(8), Surface(co_surface),
+                    uoff_co);
+            load(16, uoffset[4], aligned_block_oword(4), Surface(co_surface),
+                    uoff_co2);
+            break;
+    }
+}
+
+void gen12hp_systolic_gemm_kernel_t::add_c_bias() {
+    auto co_fixed = uoffset[0].sub(0, cfg.acc_type);
+    if (merge_abc_bias()) add(1, co_fixed, co_fixed, uao_bo_k);
+
+    for (int ii = 0; ii < 4; ii++) {
+        for (int j = 0; j < 48; j += 2) {
+            auto a_reg = c_regs[interleave(j) + ii * acc_stride].retype(
+                    cfg.acc_type);
+            switch (cfg.c_bias) {
+                case bias_t::none: break;
+                case bias_t::fixed: add(16, a_reg, a_reg, co_fixed); break;
+                case bias_t::row:
+                    add(16, a_reg, a_reg,
+                            uoffset[ii].sub(0, cfg.acc_type)(0, 8, 1));
+                    break;
+                case bias_t::column:
+                    add(16, a_reg, a_reg,
+                            uoffset[j >> 3].sub(j & 7, cfg.acc_type)(1, 8, 0));
+                    break;
+            }
+        }
+    }
+}
+
+bool gen12hp_systolic_gemm_kernel_t::merge_abc_bias() {
+    return cfg.a_bias && cfg.b_bias && (cfg.c_bias == bias_t::fixed)
+            && cfg.alpha1;
+}
+
+void gen12hp_systolic_gemm_kernel_t::add_ab_bias() {
+    auto a_row_sums = utemp[6] - utemp[9];
+    auto b_col_sums = utemp[0] - utemp[5];
+    GRF headers[3] = {uheaders[0], uheaders[2], uheaders[4]};
+
+    // Precompute ao * bo * k if needed.
+    if (cfg.a_bias && cfg.b_bias) {
+        mul(1, uao_bo_k, uk, uao);
+        mul(1, uao_bo_k, uao_bo_k, ubo);
+    }
+
+    // Load A row sums and B column sums.
+    if (cfg.a_bias) {
+        mov(1, headers[0].ud(2), off_bsum_save);
+        add(1, headers[1].ud(2), off_bsum_save, uint16_t(32 * 4));
+        load(16, b_col_sums[0], aligned_block_oword(8), Surface(bp_surface),
+                headers[0]);
+        load(16, b_col_sums[4], aligned_block_oword(4), Surface(bp_surface),
+                headers[1]);
+    }
+    if (cfg.b_bias) {
+        mov(1, headers[2].ud(2), off_asum_save);
+        load(16, a_row_sums[0], aligned_block_oword(8), Surface(ap_surface),
+                headers[2]);
+    }
+    // Compute bias contributions.
+    if (cfg.a_bias) {
+        // ao * b_sum
+        for (int j = 0; j < 48; j++) {
+            for (int ii = 0; ii < 4; ii++) {
+                auto a_reg = c_regs[interleave(j) + ii * acc_stride].retype(
+                        cfg.acc_type);
+                mad(8, a_reg, a_reg, b_col_sums[j / 8].d(j % 8), uao);
+            }
+        }
+    }
+    if (cfg.b_bias) {
+        // a_sum * bo
+        for (int ii = 0; ii < 4; ii++) {
+            for (int j = 0; j < 48; j++) {
+                auto a_reg = c_regs[interleave(j) + ii * acc_stride].retype(
+                        cfg.acc_type);
+                mad(8, a_reg, a_reg, a_row_sums[ii].d(), ubo);
+            }
+        }
+    }
+    if (cfg.a_bias && cfg.b_bias && !merge_abc_bias()) {
+        // ao * bo * k (if not possible to absorb into co)
+        for (int o = 0; o < 192; o += 2) {
+            auto c_reg = c_regs[o].retype(cfg.acc_type);
+            add(16, c_reg, c_reg, uao_bo_k);
+        }
+    }
+}
+
 void gen12hp_systolic_gemm_kernel_t::update_c(bool remainder) {
     // C is arranged in 8x8 column major blocks organized in a row major 4x6 array, for a total size of 32x48.
     // Each 8x8 block is split in two 8x4 blocks (due to dpasw).
@@ -420,50 +530,52 @@ void gen12hp_systolic_gemm_kernel_t::update_c(bool remainder) {
         auto t0 = r25.ud(0);
         auto t1 = r27.uq(0);
 
-        add(1 | sat | SWSB(2), t0, -um_rem, uint16_t(32));
+        add(1 | sat, t0, -um_rem, uint16_t(32));
         mov(1, t1, uint32_t(0xFFFFFFFF));
-        shr(1 | SWSB(1), t1, t1, t0);
-        mov(1 | SWSB<int64_t>(1), f0.ud(0), t1.ud());
+        shr(1, t1, t1, t0);
+        mov(1, f0.ud(0), t1.ud());
     }
 
     // Set up headers and multiples of LDC (= ldc in bytes). TODO collapse into one instruction.
-    shl(1 | SWSB(3), uldc_x2, uldc, uint16_t(1));
+    shl(1, uldc_x2, uldc, uint16_t(1));
     shl(1, uldc_x4, uldc, uint16_t(2));
     shl(1, uldc_x8, uldc, uint16_t(3));
 
     // Check whether C pointer has given (power of 2) alignment. Result stored in f1.1.
-    auto check_c_align = [&](int align,
-                                 InstructionModifier swsb
-                                 = InstructionModifier()) {
+    auto check_c_align = [&](int align) {
         // This should work, but doesn't (Fulsim bug?):
         // auto dummy = utemp[0].ud(0);
-        // bfn(1 | swsb | ze | f1[1], getBFNCtrl([](uint8_t a, uint8_t b, uint8_t c) { return (a | b) & c; }),
+        // bfn(1 | ze | f1[1], getBFNCtrl([](uint8_t a, uint8_t b, uint8_t c) { return (a | b) & c; }),
         //    dummy, uldc, uc_base.ud(0), uint16_t(align - 1));
         auto uc_align = r18.ud(0);
-        or_(1, uc_align, uldc, c_ptr_mem.ud(0));
-        and_(1 | SWSB(1) | ze | f1[1], null.ud(), uc_align,
-                uint16_t(align - 1));
+        or_(1, uc_align, uldc, uc_base.ud(0));
+        and_(1 | ze | f1[1], null.ud(), uc_align, uint16_t(align - 1));
     };
 
     Label unaligned_c;
 
+    load_c_bias();
     if (!cfg.c_align16_check) {
         // Assume 16-byte alignment.
         load_c(remainder, true);
+        add_c_bias();
         store_c(remainder, true);
     } else if (!c32 && remainder) {
         // C not 32-bit, remainder. Only one (unaligned) path.
         load_c(remainder, false);
+        add_c_bias();
         store_c(remainder, false);
     } else {
         // Two full paths, one with aligned C, one without.
         check_c_align(16);
         jmpi(1 | ~f1[1], unaligned_c);
         load_c(remainder, true);
+        add_c_bias();
         store_c(remainder, true);
         epilogue();
         mark(unaligned_c);
         load_c(remainder, false);
+        add_c_bias();
         store_c(remainder, false);
     }
 }
@@ -472,17 +584,22 @@ void gen12hp_systolic_gemm_kernel_t::update_c(bool remainder) {
 void gen12hp_systolic_gemm_kernel_t::update_c() {
     Label partial_c;
 
+    // Turn on auto-SWSB for the remainder of the kernel.
+    setDefaultAutoSWSB();
+
     // Move C pointer to safety.
     mov(2, uc_base, c_ptr_mem);
 
     // Pull saved data from accumulators. Note moves to/from accumulator don't support full swizzling, so
-    //  the Subregisters for the following movs must match.
-    assert(ldc_save.getByteOffset() == uldc.getByteOffset());
-    mov(1, uldc, ldc_save);
+    //  the subregister offsets for the following movs must match.
+    assert(ubase.getByteOffset() == 0 && base_save.getByteOffset() == 0);
+    mov(8, ubase, base_save);
 
-    assert(mrem_save.getByteOffset() == um_rem.getByteOffset());
-    mov(4, um_rem.ud()(1), mrem_save.ud()(1));
+    assert(ualpha_regs[1].getByteOffset() == alpha_save.getByteOffset());
     mov(2, ualpha_regs[1].ud()(1), alpha_save.ud()(1));
+
+    // Add A/B bias terms.
+    add_ab_bias();
 
     // Do remainder check.
     if (!cfg.c_remainder)
@@ -496,18 +613,6 @@ void gen12hp_systolic_gemm_kernel_t::update_c() {
         update_c(true);
     }
 }
-
-// Scoreboard usage:
-//   $0-2   B SLM loads
-//   $3-4   A SLM loads
-//   $5     Last DPASW in chain
-//   $6-7   Load local IDs/kernel arguments
-//   $8     A copy to SLM
-//   $9-10  B copy to SLM
-//   $11    Initial A copy to SLM using C register space
-//   $12-13 Initial B copy to SLM using C register space
-//   $14    EOT
-//   $15    Barriers/SLM fences
 
 void gen12hp_systolic_gemm_kernel_t::dpasw_typed(const InstructionModifier &mod,
         uint8_t sdepth, uint8_t rcount, const GRF &c_reg, const GRF &a_reg,
@@ -785,7 +890,8 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     //                           long offset_a, long offset_b, long offset_c,
     //                           int m, int n,
     //                           float alpha, float beta,
-    //                           int lda, int ldb)
+    //                           int lda, int ldb [, uint abo]
+    //                           [, int [*] co, int offset_co]);
 
     externalName("gen12hp_systolic_gemm_kernel");
     newArgument("ap", ExternalArgumentType::GlobalPtr);
@@ -802,6 +908,11 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     newArgument("beta", DataType::f);
     newArgument("lda", DataType::d);
     newArgument("ldb", DataType::d);
+    if (cfg.a_bias || cfg.b_bias) newArgument("abo", DataType::ud);
+    if (cfg.c_bias != bias_t::none) {
+        newArgument("co", ExternalArgumentType::GlobalPtr);
+        newArgument("offset_co", DataType::d);
+    }
     requireBarrier();
     requireDPAS();
     requireGRF(256);
@@ -829,6 +940,12 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     auto beta = getArgument("beta");
     auto lda = getArgument("lda");
     auto ldb = getArgument("ldb");
+    auto abo = getArgumentIfExists("abo");
+    auto in_offset_co = getArgumentIfExists("offset_co");
+
+    ap_surface = getArgumentSurface("ap");
+    bp_surface = getArgumentSurface("bp");
+    if (cfg.c_bias != bias_t::none) co_surface = getArgumentSurface("co");
 
     // Temporaries
     auto n0 = r10.ud(0);
@@ -836,6 +953,9 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     auto offset_a = r12.uq(0);
     auto offset_b = r12.uq(1);
     auto offset_c = r12.uq(2);
+    auto offset_asum = r14.ud(0);
+    auto offset_bsum = r14.ud(1);
+    auto temp_q = r17.uq(0);
     auto global_n0 = r18.ud(0);
     auto global_m0 = r18.ud(1);
     auto local_n0 = r20.ud(0);
@@ -844,30 +964,19 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     auto suboffset_b = r26.ud(1);
     auto thd1_adjust = r27.ud(0);
     auto temp = r28.ud(0);
-    auto k_copy = r29.ud(0);
-    auto save_copy = r30.ud();
+    auto save_copy = r32.ud();
+    auto k_counter_copy = r32.ud(0);
     auto ldc_copy = r32.ud(1);
+    auto off_co_copy = r32.ud(2);
+    auto k_copy = r32.ud(3);
+    auto mrem_copy = r32.uw(8);
+    auto nrem_copy = r32.uw(9);
+    auto abo_copy = r32.ud(5);
+    auto alpha_copy = r32.ud(6);
+    auto beta_copy = r32.ud(7);
 
-    // Prologue w/ local ID load.
-    GRF header = r61;
-
-    mov<uint32_t>(8, header, uint32_t(0));
-    and_<uint32_t>(1, header[2], r0[0], uint32_t(0xFFFFFFE0));
-    and_<uint16_t>(1, header[0], r0[4], uint16_t(0xFF));
-    add<uint32_t>(1 | SWSB(2), header[2], header[2], uint16_t(0x80));
-    mad<uint32_t>(
-            1 | SWSB(1), header[2], header[2], header.uw(0), uint16_t(0x60));
-    load(16 | SWSB(sb7, 1), r1, aligned_block_oword(4), A32NC,
-            header); // Read local IDs.
-    sync(SyncFunction::nop, sb7.dst);
-    sync(SyncFunction::nop);
-
-    // Prologue w/o local ID load for HW-generated local IDs (offset 0x80).
-    mov<uint32_t>(8, header, uint32_t(0));
-    and_<uint32_t>(1, header[2], r0[0], uint32_t(0xFFFFFFE0));
-    mov<uint32_t>(8, r0_save, r0);
-
-    load(16 | SWSB(sb6, 2), r4, aligned_block_oword(8), A32NC, header);
+    setDefaultAutoSWSB(true);
+    prologue();
 
     // Find our threadgroup's position within the matrix.
     shl(1, global_m0, global_id_x, uint16_t(7));
@@ -876,7 +985,7 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     // Find our position within the threadgroup. Fixed threadgroup size: 4x4.
     shl(1, local_m0, local_id_x, uint16_t(2));
     mul(1, local_n0, local_id_y, uint16_t(48));
-    add(2 | SWSB(1), n0(1), local_n0(1), global_n0(1));
+    add(2, n0(1), local_n0(1), global_n0(1));
 
     // Compute starting addresses:
     //   - suboffset_a = local_id_Y * 8 * 32
@@ -890,84 +999,93 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     //   - C += m0 + n0 * ldc [save for later]
     uint16_t lg2_a_elem_bytes = ngen::utils::log2(getBytes(cfg.a_type));
     uint16_t lg2_c_elem_bytes = ngen::utils::log2(getBytes(cfg.c_type));
+    auto this_unroll_k = unroll_k_bytes / getBytes(cfg.a_type);
 
-    sync(SyncFunction::nop, sb6.dst);
-    shl(1, ldc_copy, ldc, lg2_c_elem_bytes);
     mov(1, k_copy, k);
+    add(1, k, k, uint16_t(this_unroll_k - 1));
+    shl(1, ldc_copy, ldc, lg2_c_elem_bytes);
     shl(1, suboffset_a, local_id_y, uint16_t(8));
     mul(1, suboffset_b, local_id_x, uint16_t(12 * 32 / 8));
+    shr(1, k, k, uint16_t(5 - ngen::utils::log2(getBytes(cfg.a_type))));
     assert(ldc_save.getByteOffset() == ldc_copy.getByteOffset());
-    mov(1 | SWSB(3), ldc_save.ud(), ldc_copy.ud());
-    mul(1 | SWSB<int>(5), offset_c, n0, ldc);
+    mov(1, ldc_save.ud(), ldc_copy.ud());
+    mul(1, temp_q.uq(), k.ud(), uint32_t(0xAAAAAAAB)); // ~ division by 1.5
+    mul(1, offset_c, n0, ldc);
     mul(1, offset_a, m0, lda);
     mul(1, offset_b, n0, ldb);
-    add(1 | SWSB(3), offset_c, offset_c, m0);
-    add(1 | SWSB(3), offset_a, offset_a, in_offset_a); // TODO: combine
-    add(1 | SWSB(3), offset_b, offset_b, in_offset_b);
-    add(1 | SWSB(3), offset_c, offset_c, in_offset_c);
+    shr(1, k, temp_q.ud(1), uint16_t(1));
+    switch (cfg.c_bias) {
+        case bias_t::none: break;
+        case bias_t::fixed: mov(1, off_co_copy, in_offset_co); break;
+        case bias_t::row: add(1, off_co_copy, in_offset_co, m0); break;
+        case bias_t::column: add(1, off_co_copy, in_offset_co, n0); break;
+    }
+    add(1, offset_c, offset_c, m0);
+    add(1, offset_a, offset_a, in_offset_a); // TODO: combine
+    add(1, offset_b, offset_b, in_offset_b);
+    add(1, offset_c, offset_c, in_offset_c);
     if (getBytes(cfg.a_type) > 1)
-        shl(2 | SWSB(2), offset_a(1), offset_a(1), lg2_a_elem_bytes); // A, B
-    // add(2 | SWSB<AllPipes>(1), offset_a(1), offset_a(1), suboffset_a(1));    // unclear if allowed in HW
-    add(1 | SWSB<AllPipes>(1), offset_a, offset_a, suboffset_a);
-    add(1 | SWSB<AllPipes>(2), offset_b, offset_b, suboffset_b);
-    shl(1 | SWSB(2), offset_c, offset_c, lg2_c_elem_bytes);
-    add(1 | SWSB(2), a_ptr_mem, ap, offset_a);
-    add(1 | SWSB(3), b_ptr_mem, bp, offset_b);
-    add(1 | SWSB(3), c_ptr_mem, c_ptr, offset_c);
+        shl(2, offset_a(1), offset_a(1), lg2_a_elem_bytes); // A, B
+    if (cfg.a_bias)
+        mad(1, offset_asum, offset_a.ud(), k, uint16_t(32 * this_unroll_k));
+    if (cfg.b_bias)
+        mad(1, offset_bsum, offset_b.ud(), k, uint16_t(48 * this_unroll_k));
+    add(1, offset_a, offset_a, suboffset_a);
+    add(1, offset_b, offset_b, suboffset_b);
+    shl(1, offset_c, offset_c, lg2_c_elem_bytes);
+    add(1, a_ptr_mem, ap, offset_a);
+    add(1, b_ptr_mem, bp, offset_b);
+    add(1, c_ptr_mem, c_ptr, offset_c);
+    if (utils::one_of(cfg.c_bias, bias_t::row, bias_t::column))
+        shl(1, off_co_copy, off_co_copy, uint16_t(lg2_c_elem_bytes));
 
     and_(1, temp, local_id_x, uint16_t(8));
-    shr(2 | SWSB(7), suboffset_a(1), suboffset_a(1), uint16_t(4));
+    shr(2, suboffset_a(1), suboffset_a(1), uint16_t(4));
 
     if (cfg.pad_a) {
         shl(1, local_n0, local_n0, uint16_t(5 - 4));
         mul(1, local_m0, local_id_x, uint16_t(9));
-        mul(1 | SWSB(2), thd1_adjust, temp, uint16_t(24 * 32 / (8 * 16)));
-        add(1 | SWSB(3), local_n0, local_n0, uint16_t((128 * 36) / 16));
+        mul(1, thd1_adjust, temp, uint16_t(24 * 32 / (8 * 16)));
+        add(1, local_n0, local_n0, uint16_t((128 * 36) / 16));
     } else {
         shl(2, local_n0(1), local_n0(1), uint32_t(5 - 4));
-        mul(1 | SWSB(2), thd1_adjust, temp, uint16_t(24 * 32 / (8 * 16)));
-        add(1 | SWSB(2), local_n0, local_n0, uint16_t(128 * 32 / 16));
+        mul(1, thd1_adjust, temp, uint16_t(24 * 32 / (8 * 16)));
+        add(1, local_n0, local_n0, uint16_t(128 * 32 / 16));
     }
 
-    mov(1 | SWSB(2), slm_a_offset_load_init.uw(), local_m0.uw());
-    add(1 | SWSB(2), slm_b_offset_load_init.uw(), local_n0.uw(),
-            thd1_adjust.uw());
-    assert(k_counter.getByteOffset() == k_copy.getByteOffset());
-    mov(1, k_counter, k_copy);
-    add(1 | SWSB(6), slm_a_offset_store_init.uw(), local_m0.uw(),
-            suboffset_a.uw());
-    add(1 | SWSB(5), slm_b_offset_store_init.uw(), local_n0.uw(),
-            suboffset_b.uw());
-    mov(2 | SWSB(4), slm_a_offset_load(1), slm_a_offset_load_init(1));
+    mov(1, slm_a_offset_load_init.uw(), local_m0.uw());
+    add(1, slm_b_offset_load_init.uw(), local_n0.uw(), thd1_adjust.uw());
+    add(1, slm_a_offset_store_init.uw(), local_m0.uw(), suboffset_a.uw());
+    add(1, slm_b_offset_store_init.uw(), local_n0.uw(), suboffset_b.uw());
+    mov(2, slm_a_offset_load(1), slm_a_offset_load_init(1));
+    mov(1, k_counter_copy, k);
 
-    // Compute m, n remainders and save alpha/beta for C update.
+    // Compute m, n remainders and save variables for C update.
     // Also compute threshold for m remainder: 64 for thread 0 of fused pair,
     //  32 for thread 1.
     if (cfg.c_remainder) {
         shl(1, temp, temp, uint16_t(2));
-        add(1 | sat, m.ud(), m, -m0);
-        add(1 | sat, n.ud(), n, -n0);
-        add(1 | SWSB(3), temp, -temp, uint16_t(64));
+        add(1 | sat, mrem_copy, m, -m0);
+        add(1 | sat, nrem_copy, n, -n0);
+        add(1, temp, -temp, uint16_t(64));
     }
+
+    if (abo.isValid()) mov(1, abo_copy.f(), abo.f());
+    mov(1, alpha_copy.f(), alpha.f());
+    mov(1, beta_copy.f(), beta.f());
 
     sync(SyncFunction::nop, SWSB<AllPipes>(1));
 
-    if (mrem_save.getByteOffset() == m.getByteOffset())
-        mov(4, mrem_save.ud()(1), m.ud()(1)); // m/n/alpha/beta
-    else {
-        // Shuffle into correct lanes before moving to accumulator.
-        mov(1, save_copy.f(4), m.f());
-        mov(1, save_copy.f(5), n.f());
-        mov(1, save_copy.f(6), alpha.f());
-        mov(1, save_copy.f(7), beta.f());
-        mov(4 | SWSB<float>(1), mrem_save.ud()(1), save_copy.ud(4)(1));
-    }
+    mov(8, base_save, save_copy);
+    mov(2, off_asum_save(1), offset_asum(1));
 
     // Check whether to use remainder path, and save in f0.0/f1.0 for later.
     if (cfg.c_remainder) {
-        cmp(1 | lt | f0[0], null.ud(), m, temp);
-        cmp(1 | lt | f1[0], null.ud(), n, uint32_t(48));
+        cmp(1 | lt | f0[0], mrem_copy, temp);
+        cmp(1 | lt | f1[0], nrem_copy, uint32_t(48));
     }
+
+    setDefaultAutoSWSB(false);
 
     // Main body.
     body();
