@@ -26,13 +26,8 @@ __kernel void ref_convolution_fwd(const __global SRC_DATA_T *src,
         __global DST_DATA_T *dst, float eltwise_alpha, float eltwise_beta,
         float eltwise_scale, float sum_scale
 #if SRC_DT_S8 == 1 || SRC_DT_U8 == 1
-#if SCALES_PER_OC
         ,
-        const __global float *scales
-#elif SCALES_COMMON
-        ,
-        float scales
-#endif
+        float scale, const __global float *scales
 #endif
 ) {
 
@@ -70,7 +65,7 @@ __kernel void ref_convolution_fwd(const __global SRC_DATA_T *src,
 #if SCALES_PER_OC
     tmp *= scales[g * OC + oc];
 #elif SCALES_COMMON
-    tmp *= scales;
+    tmp *= scale;
 #endif
 #endif
 

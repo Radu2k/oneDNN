@@ -147,14 +147,12 @@ struct ref_convolution_fwd_t : public primitive_impl_t {
         }
 
         status_t init_scales_md() {
-            if (with_per_oc_scales()) {
-                scales_md_.data_type = data_type::f32;
-                scales_md_.ndims = 1;
-                scales_md_.dims[0] = attr()->output_scales_.count_;
-                return memory_desc_init_by_tag(scales_md_, format_tag::x);
-            }
+            if (!conf.with_per_oc_scales) return status::success;
 
-            return status::success;
+            scales_md_.data_type = data_type::f32;
+            scales_md_.ndims = 1;
+            scales_md_.dims[0] = attr()->output_scales_.count_;
+            return memory_desc_init_by_tag(scales_md_, format_tag::x);
         }
 
         memory_desc_t scales_md_;
