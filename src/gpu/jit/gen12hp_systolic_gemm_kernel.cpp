@@ -783,8 +783,8 @@ void gen12hp_systolic_gemm_kernel_t::copy_store(int store_buffer, bool first) {
                 uint16_t(slm_buf_size() / 16));
 }
 
-void gen12hp_systolic_gemm_kernel_t::store_signal() {
-    if (cfg.use_slm_fence) {
+void gen12hp_systolic_gemm_kernel_t::store_signal(bool force_fence) {
+    if (cfg.use_slm_fence || force_fence) {
         // Signal SLM data ready once memory fence returns, asynchronously
         sync(SyncFunction::nop, dep_addr0);
         and_<uint32_t>(
@@ -809,12 +809,14 @@ void gen12hp_systolic_gemm_kernel_t::body() {
     copy_load(0, true); // L0 -> C
     copy_load(1); // L1
     copy_store(0, true); // S0 <- C
-    store_signal(); // Signal 0 ready
+    store_signal(true); // Signal 0 ready
     zero_c();
     sync(SyncFunction::nop, SWSB<uint32_t>(1));
     copy_store(1); // S1
-    if (!cfg.alt_barriers) barrierwait(); // Wait 0 ready
-    store_signal(); // Signal 1 ready
+    if (!cfg.alt_barriers) {
+        barrierwait(); // Wait 0 ready
+        store_signal(); // Signal 1 ready
+    }
 
     jmpi(1 | f0[1], bottom); // Zero-trip loop check
 
