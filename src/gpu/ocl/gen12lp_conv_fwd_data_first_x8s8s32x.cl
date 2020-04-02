@@ -561,13 +561,13 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
         if (WITH_SUM) d = BLOCK_READ_DST4(dst); \
         for (int didx = 0; didx < 4; ++didx) { \
             float tmp_i = tmp[didx]; \
-            DST_DATA_T d_i = d[didx]; \
+            SUM_DATA_T d_i = AS_SUM_DATA_T(d[didx]); \
             const int po_mb = group_mb % MB; \
             const int po_oc \
                     = (oc * OC_BLOCK + ((didx * SUB_GROUP_SIZE) % OC_BLOCK) \
                               + sub_local_id) \
                     % (OC * G); \
-            APPLY_POST_OPS(tmp_i, float, d_i, DST_DATA_T, po_mb, 1, po_oc, 1, \
+            APPLY_POST_OPS(tmp_i, float, d_i, SUM_DATA_T, po_mb, 1, po_oc, 1, \
                     0, 1, 0, 1, 0, 1, 0, 1); \
             tmp[didx] = tmp_i; \
         } \
@@ -580,13 +580,13 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
         float16 tmp_x16 = (float16)(tmp0, tmp1); \
         for (int didx = 0; didx < 16; ++didx) { \
             float tmp_i = tmp_x16[didx]; \
-            DST_DATA_T d_i = d[didx]; \
+            SUM_DATA_T d_i = AS_SUM_DATA_T(d[didx]); \
             const int po_mb = group_mb % MB; \
             const int po_oc \
                     = (oc * OC_BLOCK + ((didx * SUB_GROUP_SIZE) % OC_BLOCK) \
                               + sub_local_id) \
                     % (OC * G); \
-            APPLY_POST_OPS(tmp_i, float, d_i, DST_DATA_T, po_mb, 1, po_oc, 1, \
+            APPLY_POST_OPS(tmp_i, float, d_i, SUM_DATA_T, po_mb, 1, po_oc, 1, \
                     0, 1, 0, 1, 0, 1, 0, 1); \
             tmp_x16[didx] = tmp_i; \
         } \

@@ -158,6 +158,11 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_kernel_ctx(
     def_data_type(kernel_ctx, conf.dst_data_type, "DST");
     def_data_type(kernel_ctx, conf.weights_data_type, "WEI");
     def_data_type(kernel_ctx, conf.bias_data_type, "BIA");
+    def_data_type(kernel_ctx,
+            conf.attr_info.sum_data_type == dnnl_data_type_undef
+                    ? conf.dst_data_type
+                    : conf.attr_info.sum_data_type,
+            "SUM");
 
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
     kernel_ctx.add_option("-Dcl_intel_subgroups_long");

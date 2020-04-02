@@ -64,8 +64,8 @@ __kernel void ref_convolution_fwd(const __global SRC_DATA_T *src,
 
     POST_OP_DATA_T sum_src;
 #if WITH_SUM
-    sum_src = (POST_OP_DATA_T)DST_TO_REF(
-            dst[DST_OFF(n, g * OC + oc, od, oh, ow)]);
+    sum_src = (POST_OP_DATA_T)SUM_TO_REF(
+            AS_SUM_DATA_T(dst[DST_OFF(n, g * OC + oc, od, oh, ow)]));
 #endif
 
     APPLY_POST_OPS(tmp, POST_OP_DATA_T, sum_src, POST_OP_DATA_T, n, 1,

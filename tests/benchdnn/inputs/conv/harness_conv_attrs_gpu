@@ -35,6 +35,11 @@
 --attr=post_ops='sum;relu' --batch=shapes_resnet_50
 --attr=post_ops='sum:2.5;relu:0.5' --batch=set_gpu
 --attr=post_ops='sum;linear:0.5:1.5' --batch=shapes_resnet_50
+--attr=post_ops='relu:0.5;sum:1.5:u8'
+--cfg=u8s8s8 --batch=shapes_resnet_50
+
+--attr=post_ops='sum:0.5:s8;relu:1.5'
+--cfg=u8s8u8 --batch=shapes_resnet_50
 
 # f32
 --reset --cfg=f32

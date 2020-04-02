@@ -405,13 +405,23 @@ int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
                 s += strlen(ks);
                 if (is_sum_kind(k)) {
                     float scale = 1.f;
+                    dnnl_data_type_t dt = dnnl_data_type_undef;
                     if (*s == ':') {
                         char *end;
+                        const char *end_dt;
                         scale = strtof(++s, &end);
                         if (end == s) return FAIL;
                         s = end;
+                        if (*s == ':') ++s;
+                        end_dt = s;
+                        while (*s && isalnum(*s))
+                            ++s;
+                        if (end_dt != s) {
+                            dt = str2dt(
+                                    std::string(end_dt, s - end_dt).c_str());
+                        }
                     }
-                    this->append_sum(scale);
+                    this->append_sum(scale, dt);
                 } else if (is_convolution_kind(k)) {
                     dnnl_data_type_t dst_dt = dnnl_f32;
                     scale_t oscale = attr_t::scale_t();
@@ -486,10 +496,11 @@ bool attr_t::is_def() const {
             && post_ops.is_def();
 }
 
-void attr_t::post_ops_t::append_sum(float ascale) {
+void attr_t::post_ops_t::append_sum(float ascale, dnnl_data_type_t adt) {
     entry_t e;
     e.kind = SUM;
     e.sum.scale = ascale;
+    e.sum.dt = adt;
     entry.push_back(e);
 }
 
@@ -670,7 +681,9 @@ std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t &post_ops) {
         s << e.kind;
 
         if (e.kind == pk_t::SUM) {
-            if (e.sum.scale != 1.0f) s << ":" << e.sum.scale;
+            if (e.sum.scale != 1.0f || e.sum.dt != dnnl_data_type_undef)
+                s << ":" << e.sum.scale;
+            if (e.sum.dt != dnnl_data_type_undef) s << ":" << e.sum.dt;
         } else if (e.is_convolution_kind()) {
             if (e.convolution.dst_dt != dnnl_f32)
                 s << ":" << e.convolution.dst_dt;
@@ -843,7 +856,8 @@ dnnl_primitive_attr_t create_dnnl_attr_v2(
         for (int idx = 0; idx < po.len(); ++idx) {
             const auto &e = po.entry[idx];
             if (e.kind == pk_t::SUM) {
-                DNN_SAFE_V(dnnl_post_ops_append_sum(ops, e.sum.scale));
+                DNN_SAFE_V(dnnl_post_ops_append_sum_v2(
+                        ops, e.sum.scale, e.sum.dt));
             } else if (e.is_eltwise_kind()) {
                 DNN_SAFE_V(dnnl_post_ops_append_eltwise(ops, e.eltwise.scale,
                         e.eltwise.alg, e.eltwise.alpha, e.eltwise.beta));
@@ -931,7 +945,8 @@ dnnl_primitive_attr_t create_dnnl_attr(const attr_t &attr, int64_t scale_cnt,
         for (int idx = 0; idx < po.len(); ++idx) {
             const auto &e = po.entry[idx];
             if (e.kind == pk_t::SUM) {
-                DNN_SAFE_V(dnnl_post_ops_append_sum(ops, e.sum.scale));
+                DNN_SAFE_V(dnnl_post_ops_append_sum_v2(
+                        ops, e.sum.scale, e.sum.dt));
             } else if (e.is_eltwise_kind()) {
                 DNN_SAFE_V(dnnl_post_ops_append_eltwise(ops, e.eltwise.scale,
                         e.eltwise.alg, e.eltwise.alpha, e.eltwise.beta));

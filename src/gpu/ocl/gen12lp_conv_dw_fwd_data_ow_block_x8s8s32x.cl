@@ -483,10 +483,10 @@ conv_dw_fwd_ow_block_x8s8s32x(const __global uchar *src,
     }
 #endif // WITH_SUM
 
-    APPLY_POST_OPS(ACC0, ACC_DATA_TYPE, D0, DST_DATA_T, 0, 1, 0, 1, 0, 1, 0, 1,
-            0, 1, 0, 1);
-    APPLY_POST_OPS(ACC1, ACC_DATA_TYPE, D1, DST_DATA_T, 0, 1, 0, 1, 0, 1, 0, 1,
-            0, 1, 0, 1);
+    APPLY_POST_OPS(ACC0, ACC_DATA_TYPE, AS_SUM_DATA16_T(D0), SUM_DATA_T, 0, 1,
+            0, 1, 0, 1, 0, 1, 0, 1, 0, 1);
+    APPLY_POST_OPS(ACC1, ACC_DATA_TYPE, AS_SUM_DATA16_T(D1), SUM_DATA_T, 0, 1,
+            0, 1, 0, 1, 0, 1, 0, 1, 0, 1);
 
     DST_DATA16_T R0 = CONVERT_DST_DATA16_T(ACC0);
     DST_DATA16_T R1 = CONVERT_DST_DATA16_T(ACC1);

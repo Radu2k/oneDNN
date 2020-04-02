@@ -203,8 +203,8 @@ conv_dw_fwd_mb_block_x8s8s32x(const __global uchar *src,
 #endif // WITH_SUM
 
     float16 tmp_x16 = (float16)(tmp00, tmp01);
-    APPLY_POST_OPS(tmp_x16, float, D00, DST_DATA_T, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-            1, 0, 1);
+    APPLY_POST_OPS(tmp_x16, float, AS_SUM_DATA16_T(D00), SUM_DATA_T, 0, 1, 0, 1,
+            0, 1, 0, 1, 0, 1, 0, 1);
 
     DST_DATA16_T R0 = CONVERT_DST_DATA16_T(tmp_x16);
 

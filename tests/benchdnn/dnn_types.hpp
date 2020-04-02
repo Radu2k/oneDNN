@@ -222,6 +222,7 @@ struct attr_t {
             union {
                 struct {
                     float scale;
+                    dnnl_data_type_t dt;
                 } sum;
                 struct {
                     dnnl_alg_kind_t alg;
@@ -247,7 +248,8 @@ struct attr_t {
 
         post_ops_t() : entry() {}
 
-        void append_sum(float ascale = 1.f);
+        void append_sum(float ascale = 1.f,
+                dnnl_data_type_t adt = dnnl_data_type_undef);
         void append_convolution(kind_t akind, dnnl_data_type_t adst_dt,
                 attr_t::scale_t aoscale);
         void append_eltwise(kind_t akind, float aalpha = 0.f, float abeta = 0.f,

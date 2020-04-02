@@ -11,7 +11,7 @@ readability):
     [oscale={none,common,per_oc}[:scale[*]];]
     [scales='arg:{none,common}[:scale][[_]...]';]
     [zero_points=arg:zero_point[*][[_]...];]
-    [post_ops='eltwise[:alpha[:beta[:int8_eltwise_scale]]];sum[:sum_scale];';]
+    [post_ops='eltwise[:alpha[:beta[:int8_eltwise_scale]]];sum[:sum_scale[:dt]];';]
 ```
 
 where `oscale` stands for output_scales. The first parameter is the policy that

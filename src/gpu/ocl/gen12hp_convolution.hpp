@@ -44,7 +44,8 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
             assert(engine->kind() == engine_kind::gpu);
 
             const auto attr_skip_mask = primitive_attr_t::skip_mask_t::oscale
-                    | primitive_attr_t::skip_mask_t::post_ops;
+                    | primitive_attr_t::skip_mask_t::post_ops
+                    | primitive_attr_t::skip_mask_t::sum_dt;
 
             bool ok = true
                     && utils::one_of(this->desc()->prop_kind, forward_training,
@@ -60,7 +61,8 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
                             expect_data_types(u8, s8, f32, s8, s32),
                             expect_data_types(s8, s8, f32, u8, s32),
                             expect_data_types(s8, s8, f32, s8, s32))
-                    && attr()->has_default_values(attr_skip_mask)
+                    && attr()->has_default_values(
+                            attr_skip_mask, desc()->dst_desc.data_type)
                     && post_ops_ok(attr());
             if (!ok) return status::unimplemented;
 

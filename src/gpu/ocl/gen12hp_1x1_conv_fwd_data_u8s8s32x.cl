@@ -197,14 +197,14 @@ gen12hp_1x1_conv_fwd_u8s8s32x(const __global uchar *src,
             DATA4_T dn_i = AS_DATA4_T(D[n_i]); \
             for (int didx = 0; didx < 4; ++didx) { \
                 float tmp_i = tmp[didx]; \
-                DATA_T dni_i = dn_i[didx]; \
+                SUM_DATA_T dni_i = AS_SUM_DATA_T(dn_i[didx]); \
                 const int po_mb \
                         = (mb_group_id * MB_BLOCK + mb_stride + n_i) % MB; \
                 const int po_oc = (oc_group_id * OC_BLOCK + sg_local_id \
                                           + didx * SUB_GROUP_SIZE) \
                         % OC; \
-                APPLY_POST_OPS(tmp_i, float, dni_i, DATA_T, po_mb, 1, po_oc, \
-                        1, 0, 1, 0, 1, 0, 1, 0, 1); \
+                APPLY_POST_OPS(tmp_i, float, dni_i, SUM_DATA_T, po_mb, 1, \
+                        po_oc, 1, 0, 1, 0, 1, 0, 1, 0, 1); \
                 tmp[didx] = tmp_i; \
             } \
             CONVERT_PACK(n_i); \

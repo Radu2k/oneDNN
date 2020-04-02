@@ -20,7 +20,7 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
 #if DT_BF16 || SRC_DT_BF16 || WEI_DT_BF16 || DST_DT_BF16 || BIA_DT_BF16 \
-        || A_DT_BF16 || B_DT_BF16 || C_DT_BF16
+        || A_DT_BF16 || B_DT_BF16 || C_DT_BF16 || SUM_DT_BF16
 #define MATH_UTILS_DECLARE_BF16 1
 #endif
 

@@ -265,12 +265,12 @@ gen12hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
         DST_DATA4_T d = AS_DST_DATA4_T(d_pack0); \
         for (int didx = 0; didx < 4; ++didx) { \
             float tmp_i = tmp[didx]; \
-            DST_DATA_T d_i = d[didx]; \
+            SUM_DATA_T d_i = AS_SUM_DATA_T(d[didx]); \
             const int po_mb = (group_mb * MB_BLOCK + mb_shift * 8 + n_i) % MB; \
             const int po_oc = (group_oc * OC_BLOCK + didx * SUB_GROUP_SIZE \
                                       + ocl_local_id) \
                     % (OC * G); \
-            APPLY_POST_OPS(tmp_i, float, d_i, DST_DATA_T, po_mb, 1, po_oc, 1, \
+            APPLY_POST_OPS(tmp_i, float, d_i, SUM_DATA_T, po_mb, 1, po_oc, 1, \
                     0, 1, 0, 1, 0, 1, 0, 1); \
             tmp[didx] = tmp_i; \
         } \

@@ -170,6 +170,11 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
 
     def_data_type(kernel_ctx, conf.dst_data_type, "DST");
     def_data_type(kernel_ctx, conf.dst_data_type, "BIA");
+    def_data_type(kernel_ctx,
+            conf.attr_info.sum_data_type == dnnl_data_type_undef
+                    ? conf.dst_data_type
+                    : conf.attr_info.sum_data_type,
+            "SUM");
 
     if (use_int8_slm_impl) kernel_ctx.define_int("INT8_SLM", 1);
     if (use_xf16_src_slm_impl && (conf.gws_d[0] % 32 == 0))
