@@ -14,32 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if USE_16MB_UNROLL == 1
-#define MB_BLOCK 16
-#define MB16
-#define VECT_DT_N 8
-#else
-#define MB_BLOCK 1
-#define VECT_DT_N 1
-#endif
-
-#if VECT_DT_N == 1
-#if DT_F16 == 1
-#define VECT_ACC_FLOAT_T half
-#else
-#define VECT_ACC_FLOAT_T float
-#endif
-#elif VECT_DT_N == 8
-#if DT_F16 == 1
-#define VECT_ACC_FLOAT_T half8
-#else
-#define VECT_ACC_FLOAT_T float8
-#endif
-#endif
-
 #include "gpu/ocl/ocl_types.h"
 
-#if IS_FWD == 1
+#if IS_FWD
 KERNEL_ATTR
 __kernel void ref_pooling_fwd(
         __global DATA_T *src, __global int *ws, __global DATA_T *dst) {
@@ -169,13 +146,13 @@ __kernel void ref_pooling_fwd(
         for (int oh = 0; oh < OH; ++oh)
             for (int ow = 0; ow < OW; ++ow) {
                 const uint dst_off = DST_OFF(mb, oc, od, oh, ow);
-#if POOLING_MAX == 1 && IS_TRAINING == 1
+#if ALG_MAX && IS_TRAINING
                 ws[dst_off] = -1;
 #endif
-#if POOLING_MAX == 1
-#if DT_BF16 == 1
+#if ALG_MAX
+#if DT_BF16
                 DEF_ACC_DATA_T d = DATA_MIN;
-#else // DT_BF16 == 0
+#else // DT_BF16
                 DATA_T d = DATA_MIN;
 #endif
                 for (int kd = 0; kd < KD; ++kd)
@@ -189,26 +166,26 @@ __kernel void ref_pooling_fwd(
                             if (ih < 0 || ih >= IH) continue;
                             if (iw < 0 || iw >= IW) continue;
 
-#if POOLING_MAX == 1 && IS_TRAINING == 1
+#if ALG_MAX && IS_TRAINING
                             if (ws[dst_off] < 0)
                                 ws[dst_off] = kd * KH * KW + kh * KW + kw;
 #endif
                             int src_off = SRC_OFF(mb, oc, id, ih, iw);
-#if DT_BF16 == 1
+#if DT_BF16
                             DEF_ACC_DATA_T s = DATA_TO_REF(src[src_off]);
 #else // DT_BF16 == 0
                             DATA_T s = src[src_off];
 #endif
                             if (s > d) {
                                 d = s;
-#if POOLING_MAX == 1 && IS_TRAINING == 1
+#if ALG_MAX && IS_TRAINING
                                 ws[dst_off] = kd * KH * KW + kh * KW + kw;
 #endif
                             }
                         }
                     }
                 dst[dst_off] = CONVERT_DATA_T(d);
-#if POOLING_MAX == 1 && IS_TRAINING == 1
+#if ALG_MAX && IS_TRAINING
                 if (ws[dst_off] < 0) ws[dst_off] = 0;
 #endif
 #else
@@ -219,7 +196,7 @@ __kernel void ref_pooling_fwd(
                 const int ih_end = min(oh * SH - PH + KH, IH);
                 const int iw_end = min(ow * SW - PW + KW, IW);
 
-#ifdef POOLING_AVG_INCLUDE_PADDING
+#if ALG_AVG_P
                 const int num_summands = KD * KW * KH;
 #else
                 const int num_summands = (ih_end - ih_start)
@@ -236,10 +213,10 @@ __kernel void ref_pooling_fwd(
                 dst[dst_off] = CONVERT_DATA_T(ROUND(d / num_summands));
 #endif
             }
-#endif
 }
 #endif
-#if IS_BWD == 1
+
+#if IS_BWD
 KERNEL_ATTR
 __kernel void ref_pooling_bwd(__global DATA_T *diff_src, __global int *ws,
         __global DATA_T *diff_dst) {
@@ -342,7 +319,7 @@ __kernel void ref_pooling_bwd(__global DATA_T *diff_src, __global int *ws,
                 diff_src[diff_src_offset] = 0;
             }
 
-#if DT_BF16 == 1
+#if DT_BF16
     // For bfloat16, iterate over input to use a temporary float accumulator
     for (int id = 0; id < ID; ++id)
         for (int ih = 0; ih < IH; ++ih)
@@ -367,7 +344,7 @@ __kernel void ref_pooling_bwd(__global DATA_T *diff_src, __global int *ws,
 
                             const uint dst_off = DST_OFF(mb, oc, od, oh, ow);
 
-#ifdef POOLING_MAX
+#if ALG_MAX
                             const int index = ws[dst_off];
 
                             const int hw = index % (KW * KH);
@@ -378,11 +355,11 @@ __kernel void ref_pooling_bwd(__global DATA_T *diff_src, __global int *ws,
                                 continue;
 #endif
 
-#ifdef POOLING_MAX
+#if ALG_MAX
                             const int denom = 1;
-#elif defined(POOLING_AVG_INCLUDE_PADDING)
+#elif ALG_AVG_P
                             const int denom = KD * KH * KW;
-#elif defined(POOLING_AVG_EXCLUDE_PADDING)
+#elif ALG_AVG_NP
                             const int id_start = max(od * SD - PD, 0);
                             const int ih_start = max(oh * SH - PH, 0);
                             const int iw_start = max(ow * SW - PW, 0);
@@ -397,14 +374,14 @@ __kernel void ref_pooling_bwd(__global DATA_T *diff_src, __global int *ws,
                 uint diff_src_offset = SRC_OFF(mb, oc, id, ih, iw);
                 diff_src[diff_src_offset] = CONVERT_DATA_T(s);
             }
-#else // DT_BF16 == 1
+#else // DT_BF16
     for (int od = 0; od < OD; ++od)
         for (int oh = 0; oh < OH; ++oh)
             for (int ow = 0; ow < OW; ++ow) {
                 const uint dst_off = DST_OFF(mb, oc, od, oh, ow);
                 const float d = diff_dst[dst_off];
 
-#if POOLING_MAX
+#if ALG_MAX
                 const int index = ws[dst_off];
                 const int kd = index / (KW * KH);
                 const int hw = index % (KW * KH);
@@ -429,7 +406,7 @@ __kernel void ref_pooling_bwd(__global DATA_T *diff_src, __global int *ws,
                 const int ih_end = min(oh * SH - PH + KH, IH);
                 const int iw_end = min(ow * SW - PW + KW, IW);
 
-#ifdef POOLING_AVG_INCLUDE_PADDING
+#if ALG_AVG_P
                 const int num_summands = KD * KW * KH;
 #else
                 const int num_summands = (ih_end - ih_start)
@@ -444,7 +421,6 @@ __kernel void ref_pooling_bwd(__global DATA_T *diff_src, __global int *ws,
                         }
 #endif
             }
-#endif
 #endif
 }
 #endif

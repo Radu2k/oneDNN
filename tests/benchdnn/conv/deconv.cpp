@@ -161,12 +161,12 @@ inline int init_pd(const prb_t *p, dnnl_primitive_desc_t &dpd, res_t *r) {
     SAFE(init_status, WARN);
 
     const char *impl_str = query_impl_info(dpd);
-    if (maybe_skip(skip_impl, impl_str)) {
-        print(2, "SKIPPED: dnnl implementation: %s\n", impl_str);
+    if (maybe_skip(impl_str)) {
+        BENCHDNN_PRINT(2, "SKIPPED: dnnl implementation: %s\n", impl_str);
         DNN_SAFE(dnnl_primitive_desc_destroy(dpd), WARN);
         return r->state = SKIPPED, OK;
     } else {
-        print(5, "dnnl implementation: %s\n", impl_str);
+        BENCHDNN_PRINT(5, "dnnl implementation: %s\n", impl_str);
     }
 
     return OK;

@@ -60,7 +60,11 @@ using dnnl::impl::f16_support::float16_t;
 using memory = dnnl::memory;
 
 bool is_current_test_failed();
+
+#ifdef DNNL_TEST_WITH_ENGINE_PARAM
 dnnl::engine::kind get_test_engine_kind();
+dnnl::engine get_test_engine();
+#endif
 
 template <typename data_t>
 struct data_traits {};
@@ -469,7 +473,7 @@ struct test_convolution_eltwise_params_t {
 
 template <typename F>
 bool catch_expected_failures(const F &f, bool expect_to_fail,
-        dnnl_status_t expected_status, bool ignore_unimplemented = true) {
+        dnnl_status_t expected_status, bool ignore_unimplemented = false) {
     try {
         f();
     } catch (const dnnl::error &e) {

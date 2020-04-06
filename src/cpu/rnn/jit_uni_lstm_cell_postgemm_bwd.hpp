@@ -115,14 +115,14 @@ protected:
 
         // helper lambda to address the gates and biases
         auto sg_addr = [&](int i) {
-            return ptr[addr_scratch_gates_reg + i * rnn_.dic * scratch_dt_size];
+            return ptr[addr_scratch_gates_reg + i * rnn_.dhc * scratch_dt_size];
         };
         auto weights_peephole_addr = [&](int i) {
             return ptr[addr_weights_peephole_reg
-                    + i * rnn_.dic * weights_peephole_dt_size];
+                    + i * rnn_.dhc * weights_peephole_dt_size];
         };
         auto wg_addr = [&](int i) {
-            return ptr[addr_ws_gates_reg + i * rnn_.dic * gate_dt_size];
+            return ptr[addr_ws_gates_reg + i * rnn_.dhc * gate_dt_size];
         };
 
         // initialize registers with addresses and constants
@@ -131,7 +131,7 @@ protected:
         uni_vmovups(one_vmm, one_addr);
         tanh_injector_->load_table_addr();
 
-        mov(loop_cnt, rnn_.dic * scratch_dt_size);
+        mov(loop_cnt, rnn_.dhc * scratch_dt_size);
         cmp(loop_cnt, vlen_scratch);
         jl(vector_loop_end_label, Xbyak::CodeGenerator::T_NEAR);
 
@@ -154,10 +154,12 @@ protected:
             tanh_injector_->compute_vector(tanhCt.getIdx());
 
             // compute dHt
-            uni_vmovups(dHt, ptr[addr_diff_states_tp1_l_reg]);
             // assumption: the diff_states_t_lp1 address is already offset by rnn.n_states
-            uni_vmovups(tmp1, ptr[addr_diff_states_t_lp1_reg]);
-            uni_vaddps(dHt, dHt, tmp1);
+            uni_vmovups(dHt, ptr[addr_diff_states_t_lp1_reg]);
+            if (!rnn_.is_lstm_projection) {
+                uni_vmovups(tmp1, ptr[addr_diff_states_tp1_l_reg]);
+                uni_vaddps(dHt, dHt, tmp1);
+            }
 
             // compute dCt
             uni_vmovups(tmp1, one_vmm);
@@ -257,10 +259,12 @@ protected:
             tanh_injector_->compute_vector(tanhCt.getIdx());
 
             // compute dHt
-            uni_vmovss(dHt, ptr[addr_diff_states_tp1_l_reg]);
             // assumption: the diff_states_t_lp1 address is already offset by rnn.n_states
-            uni_vmovss(tmp1, ptr[addr_diff_states_t_lp1_reg]);
-            uni_vaddss(dHt, dHt, tmp1);
+            uni_vmovss(dHt, ptr[addr_diff_states_t_lp1_reg]);
+            if (!rnn_.is_lstm_projection) {
+                uni_vmovss(tmp1, ptr[addr_diff_states_tp1_l_reg]);
+                uni_vaddss(dHt, dHt, tmp1);
+            }
 
             // compute dCt
             uni_vmovss(tmp1, one_xmm);

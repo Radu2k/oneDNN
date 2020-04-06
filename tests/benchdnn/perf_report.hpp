@@ -80,13 +80,13 @@ struct base_perf_report_t {
 
         HANDLE("attr", if (attr() && !attr()->is_def()) s << *attr());
         HANDLE("axis", if (axis()) s << *axis());
-        HANDLE("dir", if (dir()) s << dir2str(*dir()));
-        HANDLE("dt", if (dt()) s << dt2str(*dt()));
+        HANDLE("dir", if (dir()) s << *dir());
+        HANDLE("dt", if (dt()) s << *dt());
         HANDLE("group", if (group()) s << *group());
         HANDLE("sdt", if (sdt()) s << *sdt());
         HANDLE("stag", if (stag()) s << *stag());
         HANDLE("name", if (name()) s << name());
-        HANDLE("ddt", if (ddt()) s << dt2str(*ddt()));
+        HANDLE("ddt", if (ddt()) s << *ddt());
         HANDLE("dtag", if (dtag()) s << *dtag());
         HANDLE("prop", if (prop()) s << prop2str(*prop()));
         HANDLE("tag", if (tag()) s << *tag());
@@ -122,7 +122,7 @@ struct base_perf_report_t {
         }
 
         std::string str = ss.str();
-        print(0, "%s\n", str.c_str());
+        BENCHDNN_PRINT(0, "%s\n", str.c_str());
     };
 
     /* truly common types */
@@ -156,7 +156,7 @@ private:
     void dump_perf_footer() const {
         static bool footer_printed = false;
         if (!footer_printed) {
-            print(0, "Output template: %s\n", pt_);
+            BENCHDNN_PRINT(0, "Output template: %s\n", pt_);
             footer_printed = true;
         }
     }

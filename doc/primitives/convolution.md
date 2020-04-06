@@ -212,6 +212,13 @@ post-ops are supported:
 | forward     | post-op   | [eltwise](@ref dnnl::post_ops::append_eltwise)               | Applies an @ref dnnl_api_eltwise operation to the result                      |                        |
 | forward     | post-op   | [sum](@ref dnnl::post_ops::append_sum)                       | Adds the operation result to the destination tensor instead of overwriting it |                        |
 
+To facilitate dynamic quantization, the primitive supports run-time output
+scales. That means a user could configure attributes with output scales set to
+the #DNNL_RUNTIME_F32_VAL wildcard value instead of the actual scales,
+if the scales are not known at the primitive descriptor creation stage.
+In this case, the user must provide the scales as an additional input memory
+object with argument `DNNL_ARG_ATTR_OUTPUT_SCALES` during the execution stage.
+
 @note The library doesn't prevent using post-ops in training, but note that
 not all post-ops are feasible for training usage. For instance, using ReLU
 with non-zero negative slope parameter as a post-op would not produce an
@@ -398,6 +405,7 @@ the convolution.)
 2. **CPU**
    - Winograd are implemented only for Intel(R) AVX-512 or
      Intel(R) AVX512-DL Boost instruction sets
+   - Run-time output scales are not supported
 
 3. **GPU**
     - No support for Winograd algorithm
@@ -407,3 +415,9 @@ the convolution.)
 - Use #dnnl::memory::format_tag::any for source, weights, and destinations
   memory format tags when create a convolution primitive to allow the library
   to choose the most appropriate memory format.
+
+## Examples
+
+| Engine  | Name                         | Comments
+| :--     | :--                          | :--
+| CPU/GPU | @ref convolution_example_cpp | @copydetails convolution_example_cpp_short

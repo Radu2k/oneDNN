@@ -44,7 +44,7 @@
         dnnl_status_t status = f; \
         if (status != dnnl_success) { \
             if (s == CRIT || s == WARN) { \
-                print(0, "error [%s:%d]: '%s' -> %s(%d)\n", \
+                BENCHDNN_PRINT(0, "error [%s:%d]: '%s' -> %s(%d)\n", \
                         __PRETTY_FUNCTION__, __LINE__, #f, status2str(status), \
                         (int)status); \
                 fflush(0); \
@@ -58,8 +58,9 @@
     do { \
         dnnl_status_t status = f; \
         if (status != dnnl_success) { \
-            print(0, "error [%s:%d]: '%s' -> %s(%d)\n", __PRETTY_FUNCTION__, \
-                    __LINE__, STRINGIFY(f), status2str(status), (int)status); \
+            BENCHDNN_PRINT(0, "error [%s:%d]: '%s' -> %s(%d)\n", \
+                    __PRETTY_FUNCTION__, __LINE__, STRINGIFY(f), \
+                    status2str(status), (int)status); \
             fflush(0); \
             exit(2); \
         } \
@@ -70,7 +71,7 @@
         dnnl_status_t status = f; \
         if (status != dnnl_success) { \
             if (s == CRIT || s == WARN) { \
-                print(0, "error [%s:%d]: '%s' -> %s(%d)\n", \
+                BENCHDNN_PRINT(0, "error [%s:%d]: '%s' -> %s(%d)\n", \
                         __PRETTY_FUNCTION__, __LINE__, #f, status2str(status), \
                         (int)status); \
                 fflush(0); \
@@ -209,12 +210,21 @@ void unregister_dnn_mem_object(dnn_mem_t *mem);
 inline void register_dnn_mem_object(dnn_mem_t *mem) {}
 inline void unregister_dnn_mem_object(dnn_mem_t *mem) {}
 #endif
+/* for fast-ref-gpu support */
+extern dnnl_engine_t engine_cpu;
+extern dnnl_stream_t stream_cpu;
 
 inline int init() {
     if (!engine_tgt) {
         DNN_SAFE(dnnl_engine_create(&engine_tgt, engine_tgt_kind, 0), CRIT);
         DNN_SAFE(dnnl_stream_create(
                          &stream_tgt, engine_tgt, dnnl_stream_default_flags),
+                CRIT);
+    }
+    if (!engine_cpu) {
+        DNN_SAFE(dnnl_engine_create(&engine_cpu, dnnl_cpu, 0), CRIT);
+        DNN_SAFE(dnnl_stream_create(
+                         &stream_cpu, engine_cpu, dnnl_stream_default_flags),
                 CRIT);
     }
 
@@ -224,6 +234,8 @@ inline int init() {
 inline int finalize() {
     DNN_SAFE(dnnl_stream_destroy(stream_tgt), CRIT);
     DNN_SAFE(dnnl_engine_destroy(engine_tgt), CRIT);
+    DNN_SAFE(dnnl_engine_destroy(engine_cpu), CRIT);
+    DNN_SAFE(dnnl_stream_destroy(stream_cpu), CRIT);
     return OK;
 }
 
