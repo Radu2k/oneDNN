@@ -15,7 +15,11 @@
 *******************************************************************************/
 
 #include "dnnl.h"
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+#include "dnnl_threadpool_iface.hpp"
+#endif
 
+#include "dnnl_thread.hpp"
 #include "dnnl_traits.hpp"
 #include "nstl.hpp"
 #include "utils.hpp"
@@ -177,7 +181,7 @@ dnnl_status_t gemm_s8x8s32(const char *transa, const char *transb,
             LDA, ao, B, LDB, bo, beta, C, LDC, co);
     if (status == dnnl_success) return status;
 
-    if (mayiuse(avx2) && !mayiuse(avx512_mic))
+    if (mayiuse(sse41) && !mayiuse(avx512_mic))
         status = gemm_driver(transa, transb, offsetc, M, N, K, alpha, A, LDA,
                 ao, B, LDB, bo, beta, C, LDC, co, false);
     else
@@ -202,7 +206,7 @@ dnnl_status_t gemm_s8x8s32(const char *transa, const char *transb,
     bool use_jit = mayiuse(avx512_core);
     bool use_s8u8 = true
             && utils::everyone_is(0, *ao, *bo) // so far a requirement
-            && IMPLICATION(USE_MKL_IGEMM == 0, mayiuse(avx2));
+            && IMPLICATION(USE_MKL_IGEMM == 0, mayiuse(sse41));
 
     if (use_jit)
         status = gemm_driver(transa, transb, offsetc, M, N, K, alpha, A, LDA,
@@ -295,15 +299,13 @@ dnnl_status_t dnnl_gemm_s8s8s32(char transa, char transb, char offsetc,
     int lda_s32 = (int)lda;
     int ldb_s32 = (int)ldb;
     int ldc_s32 = (int)ldc;
-
     return gemm_s8x8s32<int8_t>(&transb, &transa, c2f_offsetC(&offsetc), &N_s32,
             &M_s32, &K_s32, &alpha, B, &ldb_s32, &bo, A, &lda_s32, &ao, &beta,
             C, &ldc_s32, co);
 }
 
-extern "C" {
-dnnl_status_t DNNL_API dnnl_gemm_bf16bf16f32(char transa, char transb,
-        dnnl_dim_t M, dnnl_dim_t N, dnnl_dim_t K, float alpha,
+extern "C" dnnl_status_t DNNL_API dnnl_gemm_bf16bf16f32(char transa,
+        char transb, dnnl_dim_t M, dnnl_dim_t N, dnnl_dim_t K, float alpha,
         const bfloat16_t *A, dnnl_dim_t lda, const bfloat16_t *B,
         dnnl_dim_t ldb, float beta, float *C, dnnl_dim_t ldc) {
     int M_s32 = (int)M;
@@ -312,8 +314,81 @@ dnnl_status_t DNNL_API dnnl_gemm_bf16bf16f32(char transa, char transb,
     int lda_s32 = (int)lda;
     int ldb_s32 = (int)ldb;
     int ldc_s32 = (int)ldc;
-
     return gemm_bf16bf16f32(&transb, &transa, &N_s32, &M_s32, &K_s32, &alpha, B,
             &ldb_s32, A, &lda_s32, &beta, C, &ldc_s32);
 }
+
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+dnnl_status_t dnnl_sgemm_tp(char transa, char transb, int64_t M, int64_t N,
+        int64_t K, float alpha, const float *A, int64_t lda, const float *B,
+        const int64_t ldb, float beta, float *C, int64_t ldc, void *th) {
+    int M_s32 = (int)M;
+    int N_s32 = (int)N;
+    int K_s32 = (int)K;
+    int lda_s32 = (int)lda;
+    int ldb_s32 = (int)ldb;
+    int ldc_s32 = (int)ldc;
+    threadpool_utils::activate_threadpool((dnnl::threadpool_iface *)th);
+    status_t status = extended_sgemm(&transb, &transa, &N_s32, &M_s32, &K_s32,
+            &alpha, B, &ldb_s32, A, &lda_s32, &beta, C, &ldc_s32, nullptr,
+            false);
+    threadpool_utils::deactivate_threadpool();
+    return status;
 }
+
+dnnl_status_t dnnl_gemm_u8s8s32_tp(char transa, char transb, char offsetc,
+        int64_t M, int64_t N, int64_t K, float alpha, const uint8_t *A,
+        int64_t lda, uint8_t ao, const int8_t *B, int64_t ldb, int8_t bo,
+        float beta, int32_t *C, int64_t ldc, const int32_t *co, void *th) {
+    int M_s32 = (int)M;
+    int N_s32 = (int)N;
+    int K_s32 = (int)K;
+    int lda_s32 = (int)lda;
+    int ldb_s32 = (int)ldb;
+    int ldc_s32 = (int)ldc;
+
+    threadpool_utils::activate_threadpool((dnnl::threadpool_iface *)th);
+    status_t status = gemm_s8x8s32(&transb, &transa, c2f_offsetC(&offsetc),
+            &N_s32, &M_s32, &K_s32, &alpha, B, &ldb_s32, &bo, A, &lda_s32, &ao,
+            &beta, C, &ldc_s32, co);
+    threadpool_utils::deactivate_threadpool();
+    return status;
+}
+
+dnnl_status_t dnnl_gemm_s8s8s32_tp(char transa, char transb, char offsetc,
+        int64_t M, int64_t N, int64_t K, float alpha, const int8_t *A,
+        int64_t lda, int8_t ao, const int8_t *B, int64_t ldb, int8_t bo,
+        float beta, int32_t *C, int64_t ldc, const int32_t *co, void *th) {
+    int M_s32 = (int)M;
+    int N_s32 = (int)N;
+    int K_s32 = (int)K;
+    int lda_s32 = (int)lda;
+    int ldb_s32 = (int)ldb;
+    int ldc_s32 = (int)ldc;
+
+    threadpool_utils::activate_threadpool((dnnl::threadpool_iface *)th);
+    status_t status = gemm_s8x8s32<int8_t>(&transb, &transa,
+            c2f_offsetC(&offsetc), &N_s32, &M_s32, &K_s32, &alpha, B, &ldb_s32,
+            &bo, A, &lda_s32, &ao, &beta, C, &ldc_s32, co);
+    threadpool_utils::deactivate_threadpool();
+    return status;
+}
+
+extern "C" dnnl_status_t DNNL_API dnnl_gemm_bf16bf16f32_tp(char transa,
+        char transb, dnnl_dim_t M, dnnl_dim_t N, dnnl_dim_t K, float alpha,
+        const bfloat16_t *A, dnnl_dim_t lda, const bfloat16_t *B,
+        dnnl_dim_t ldb, float beta, float *C, dnnl_dim_t ldc, void *th) {
+    int M_s32 = (int)M;
+    int N_s32 = (int)N;
+    int K_s32 = (int)K;
+    int lda_s32 = (int)lda;
+    int ldb_s32 = (int)ldb;
+    int ldc_s32 = (int)ldc;
+
+    threadpool_utils::activate_threadpool((dnnl::threadpool_iface *)th);
+    status_t status = gemm_bf16bf16f32(&transb, &transa, &N_s32, &M_s32, &K_s32,
+            &alpha, B, &ldb_s32, A, &lda_s32, &beta, C, &ldc_s32);
+    threadpool_utils::deactivate_threadpool();
+    return status;
+}
+#endif

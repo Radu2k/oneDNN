@@ -44,7 +44,7 @@ argument index as specified by the following table.
 
    - Reorder implementations between weights in non-plain memory formats might
      be limited (but if encountered in real practice should be treated as a
-     bug and reported to the DNNL team);
+     bug and reported to oneDNN team);
 
    - Weights in one Winograd format cannot be reordered to the weights of the
      other Winograd format;
@@ -117,3 +117,9 @@ floating point data type.
 ## Performance Tips
 
 N/A
+
+## Examples
+
+| Engine  | Name                     | Comments
+| :--     | :--                      | :--
+| CPU/GPU | @ref reorder_example_cpp | @copydetails reorder_example_cpp_short

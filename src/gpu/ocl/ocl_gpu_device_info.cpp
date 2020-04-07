@@ -25,8 +25,7 @@ namespace ocl {
 
 size_t ocl_gpu_device_info_t::get_llc_cache_size() const {
     // Integrated GPUs share LLC with CPU which is L3 cache on CPU.
-    size_t cache_size = cpu::get_cache_size(3, false);
-    return cache_size;
+    return llc_cache_size_;
 }
 
 } // namespace ocl

@@ -102,8 +102,8 @@ protected:
     void Test() {
         p = ::testing::TestWithParam<decltype(p)>::GetParam();
 
-        eng = engine(get_test_engine_kind(), 0);
-        strm = stream(eng);
+        eng = get_test_engine();
+        strm = make_stream(eng);
         data_type = data_traits<data_t>::data_type;
 
         bool is_training = p.aprop_kind == prop_kind::forward_training;

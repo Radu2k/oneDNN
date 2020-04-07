@@ -90,7 +90,7 @@ const _dt_conf_t conf_bf16bf16f32 = {
 const _dt_conf_t conf_bf16bf16bf16 = {
         /* eps is 1e-2 because of loss in precision of
      * output when converted from fp32 to bf16.
-     * DNNL output is compared against reference computed in fp32.*/
+     * oneDNN output is compared against reference computed in fp32.*/
         {dnnl_bf16, -int_max_exact, int_max_exact, -32, 32, 0, 1, .75, 1e-2},
         {dnnl_bf16, -int_max_exact, int_max_exact, -32, 32, 0, 1, .75, 1e-2},
         {dnnl_bf16, -int_max_exact, int_max_exact, -32, 32, 0, 1, .75, 1e-2},
@@ -242,9 +242,9 @@ const dt_conf_t *str2cfg(const char *str) {
     return (const dt_conf_t *)1;
 }
 
-const char *cfg2str(const dt_conf_t *cfg) {
+std::ostream &operator<<(std::ostream &s, const dt_conf_t *cfg) {
 #define CASE(_cfg) \
-    if (cfg == CONCAT2(conf_, _cfg)) return STRINGIFY(_cfg)
+    if (cfg == CONCAT2(conf_, _cfg)) return s << STRINGIFY(_cfg)
     CASE(f16);
     CASE(f32);
     CASE(f32_no_limits);
@@ -267,23 +267,24 @@ const char *cfg2str(const dt_conf_t *cfg) {
     CASE(f32bf16bf16);
     CASE(bf16f32bf16);
 #undef CASE
-    []() {
-        SAFE(FAIL, CRIT);
-        return 0;
-    }();
-    return NULL;
+    SAFE_V(FAIL);
+    return s;
 }
 
 const dt_conf_t *auto_cfg(const alg_t alg, const dt_conf_t *cfg) {
-    const char *cfg_s = cfg2str(cfg);
+    if (alg != WINO) return cfg;
+
+    std::stringstream ss;
+    ss << cfg << "_wino";
+    const std::string cpp_pstr = ss.str();
+    const char *cfg_s = cpp_pstr.c_str();
 #define CASE(_cfg_) \
-    if (alg == WINO && !strcmp(cfg_s, STRINGIFY(_cfg_))) \
-    return CONCAT2(conf_, CONCAT2(_cfg_, _wino))
-    CASE(f32);
-    CASE(u8s8f32);
-    CASE(u8s8s32);
-    CASE(u8s8s8);
-    CASE(u8s8u8);
+    if (!strcmp(cfg_s, STRINGIFY(_cfg_))) return CONCAT2(conf_, _cfg_)
+    CASE(f32_wino);
+    CASE(u8s8f32_wino);
+    CASE(u8s8s32_wino);
+    CASE(u8s8s8_wino);
+    CASE(u8s8u8_wino);
 #undef CASE
     return cfg;
 }

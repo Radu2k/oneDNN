@@ -24,6 +24,7 @@
 #include "common/z_magic.hpp"
 #include "gpu/compute/device_info.hpp"
 #include "gpu/ocl/ocl_utils.hpp"
+#include "cpu/cpu_isa_traits.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -256,7 +257,9 @@ private:
 
         hw_threads_ = eu_count_ * threads_per_eu;
 
-        llc_cache_size_ = get_llc_cache_size();
+        size_t cache_size
+                = cpu::get_per_core_cache_size(3) * cpu::get_num_cores();
+        llc_cache_size_ = (size_t)cache_size;
         return status::success;
     }
 

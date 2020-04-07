@@ -60,7 +60,11 @@ using dnnl::impl::f16_support::float16_t;
 using memory = dnnl::memory;
 
 bool is_current_test_failed();
+
+#ifdef DNNL_TEST_WITH_ENGINE_PARAM
 dnnl::engine::kind get_test_engine_kind();
+dnnl::engine get_test_engine();
+#endif
 
 template <typename data_t>
 struct data_traits {};
@@ -469,7 +473,7 @@ struct test_convolution_eltwise_params_t {
 
 template <typename F>
 bool catch_expected_failures(const F &f, bool expect_to_fail,
-        dnnl_status_t expected_status, bool ignore_unimplemented = true) {
+        dnnl_status_t expected_status, bool ignore_unimplemented = false) {
     try {
         f();
     } catch (const dnnl::error &e) {
@@ -789,6 +793,20 @@ void test_bwd_pd_constructors(const op_desc_t &op_desc, const pd_t &pd,
     test_bwd_pd_attr_scales<op_desc_t, pd_t>(op_desc, eng, hint_pd, aa.scales);
     // check allow empty, should not throw
     test_bwd_pd_allow_empty<op_desc_t, pd_t>(test_pd, hint_pd);
+}
+
+inline dnnl::stream make_stream(dnnl::engine engine,
+        dnnl::stream::flags flags = dnnl::stream::flags::default_flags) {
+#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
+    if (engine.get_kind() != dnnl::engine::kind::cpu)
+        return dnnl::stream(engine, flags);
+    dnnl::stream_attr stream_attr(dnnl::engine::kind::cpu);
+    stream_attr.set_threadpool(
+            dnnl::impl::threadpool_utils::get_active_threadpool());
+    return dnnl::stream(engine, flags, stream_attr);
+#else
+    return dnnl::stream(engine, flags);
+#endif
 }
 
 #endif

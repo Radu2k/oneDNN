@@ -14,7 +14,7 @@
 # limitations under the License.
 #===============================================================================
 
-# Test DNNL for embeddability
+# Test oneDNN for embeddability
 # by imitating a project that includes the library
 #
 # To test run:
@@ -27,18 +27,18 @@ set(PROJECT_NAME "Project")
 # force CPU runtime
 set(DNNL_CPU_RUNTIME "SEQ" CACHE STRING "" FORCE)
 
-# set SEQ variable
-#set(SEQ "some-value")
-
 # force GPU runtime
 set(DNNL_GPU_RUNTIME "NONE" CACHE STRING "" FORCE)
 
-# set SEQ variable
-set(NONE "some-value")
+if(POLICY CMP0054)
+    # Try to catch cases of double-expansion if CMake version is recent enough
+    # to support a policy that controls it.
+    set(NONE "some-value")
+endif()
 
-# include DNNL
+# include oneDNN
 set(DNNL_DIR "../../..")
-add_subdirectory(${DNNL_DIR} DNNL)
+add_subdirectory(${DNNL_DIR} oneDNN)
 include_directories(${DNNL_DIR}/include)
 
 add_executable(project_app main.c)

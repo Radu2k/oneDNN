@@ -23,6 +23,10 @@
 #include "dnnl_common.hpp"
 #include "dnnl_memory.hpp"
 
+#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
+#include "../testing_threadpool.hpp"
+#endif
+
 float round_to_nearest_representable(dnnl_data_type_t dt, float value) {
     switch (dt) {
         case dnnl_f32: break;
@@ -37,17 +41,23 @@ float round_to_nearest_representable(dnnl_data_type_t dt, float value) {
     return value;
 }
 
-// Engine kind used to run DNNL primitives for testing
+// Engine kind used to run oneDNN primitives for testing
 dnnl_engine_kind_t engine_tgt_kind = dnnl_cpu;
 
-// Engine used to run DNNL primitives for testing
+// Engine used to run oneDNN primitives for testing
 dnnl_engine_t engine_tgt;
 
 // Stream for target engine
 dnnl_stream_t stream_tgt;
 
-// Scratchpad mode for DNNL
+// Scratchpad mode for oneDNN
 dnnl_scratchpad_mode_t scratchpad_mode;
+
+// Engine used to run reference implementations (fast-ref-gpu option)
+dnnl_engine_t engine_cpu;
+
+// Stream for CPU engine
+dnnl_stream_t stream_cpu;
 
 args_t &args_t::set(int arg, const dnn_mem_t &mem) {
     args_.push_back(std::make_pair(arg, &mem));

@@ -141,8 +141,8 @@ protected:
         auto p = ::testing::TestWithParam<
                 deconvolution_test_params>::GetParam();
 
-        eng = engine(get_test_engine_kind(), 0);
-        strm = stream(eng);
+        eng = get_test_engine();
+        strm = make_stream(eng);
 
         ASSERT_EQ(p.aalgorithm, algorithm::deconvolution_direct);
         memory::data_type data_type = data_traits<data_t>::data_type;

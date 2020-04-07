@@ -69,8 +69,8 @@ protected:
         aa.po_eltwise = 1;
         aa.scales = 1;
 
-        auto eng = engine(get_test_engine_kind(), 0);
-        auto strm = stream(eng);
+        auto eng = get_test_engine();
+        auto strm = make_stream(eng);
 
         std::vector<memory::desc> srcs_md;
         std::vector<memory> srcs;

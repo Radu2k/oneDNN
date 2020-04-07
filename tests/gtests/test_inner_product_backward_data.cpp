@@ -107,8 +107,8 @@ protected:
         bool has_spatial = ipd.kh > 1 || ipd.kw > 1;
         if (p.ndims == 5) has_spatial = has_spatial || ipd.kd > 1;
 
-        auto eng = engine(get_test_engine_kind(), 0);
-        auto strm = stream(eng);
+        auto eng = get_test_engine();
+        auto strm = make_stream(eng);
         memory::data_type data_type = data_traits<data_t>::data_type;
         ASSERT_EQ(data_type, dnnl::memory::data_type::f32);
 

@@ -33,13 +33,24 @@
 #define BLOCK_READ_BIA(data, idx) \
     data = as_float4(intel_sub_group_block_read4((__global uint *)&bias[idx]));
 
+#define BLOCK_READ_SCALES(data, idx) \
+    data = as_float4(intel_sub_group_block_read4( \
+            (__global uint *)&scales_per_oc[idx]));
+
+#if SCALES_PER_OC
+#define SCALE scales
+#elif SCALES_COMMON
+#define SCALE scale
+#else
+#define SCALE 1
+#endif
+
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_fwd_mb_block_x8s8s32x(const __global uchar *src, const __global char *wei,
-        const __global float *bias, __global DST_DATA_T *dst,
-        float eltwise_alpha, float eltwise_beta, float eltwise_scale,
-        float sum_scale, float scales) {
-
+        const __global float *bias, __global DATA_T *dst, float eltwise_alpha,
+        float eltwise_beta, float eltwise_scale, float sum_scale, float scale,
+        const __global float *scales_per_oc) {
 #ifdef MB_FULL_BLOCK
     const int mb_blocks = 1;
 #else // MB_FULL_BLOCK
@@ -165,13 +176,18 @@ conv_fwd_mb_block_x8s8s32x(const __global uchar *src, const __global char *wei,
     uint8 dst_pack;
     uint8 D0, D1, D2, D3;
 
+#if SCALES_PER_OC
+    float4 scales;
+    BLOCK_READ_SCALES(scales, (group_oc + oc) * OC_BLOCK);
+#endif
+
 #if WITH_BIAS
     float4 bia;
     BLOCK_READ_BIA(bia, (group_oc + oc) * OC_BLOCK);
-    bia *= scales;
-#define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)scales, bia);
+    bia *= SCALE;
+#define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)SCALE, bia);
 #else
-#define QUANTIZE_ADD_BIAS() tmp *= scales;
+#define QUANTIZE_ADD_BIAS() tmp *= SCALE;
 #endif
 
 #if WITH_SUM

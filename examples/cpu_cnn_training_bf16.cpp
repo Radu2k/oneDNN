@@ -28,7 +28,6 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
-#include <numeric>
 #include <stdexcept>
 
 #include "dnnl.hpp"
@@ -36,11 +35,6 @@
 #include "example_utils.hpp"
 
 using namespace dnnl;
-
-memory::dim product(const memory::dims &dims) {
-    return std::accumulate(dims.begin(), dims.end(), (memory::dim)1,
-            std::multiplies<memory::dim>());
-}
 
 void simple_net() {
     using tag = memory::format_tag;
@@ -117,7 +111,7 @@ void simple_net() {
     } catch (error &e) {
         if (e.status == dnnl_unimplemented)
             throw example_allows_unimplemented {
-                    "DNNL does not have bf16 convolution implementation "
+                    "oneDNN does not have bf16 convolution implementation "
                     "that supports this system.\n"
                     "Please refer to the developer guide for details."};
 

@@ -826,16 +826,17 @@ static inline bool nocopy_checker_avx512(int nthr, const int transa,
 
     bool is_lda_verybad = lda % VERYBAD_LD_MULT == 0;
 
-    // Crude threshold to nocopy kernels if copy overhead is significant
-    // and nthr greater than 1.
-    if (nthr > 1 && 1.0 / m + 1.0 / n >= FORCE_NOCOPY_THRESH
+    // Copy-based performs better for TN case with small N in sequential case.
+    if (nthr == 1 && is_TN_case && m > 100
+            && ((m < 1200 && n < 200 && k < 1200)
+                    || (is_lda_bad && is_ldb_bad)))
+        return false;
+
+    // Crude threshold for nocopy kernels if copy overhead is significant.
+    if (1.0 / m + 1.0 / n >= FORCE_NOCOPY_THRESH
             && !(is_lda_verybad && is_NT_case)) {
         return true;
     }
-
-    // Copy-based performs better for TN case with small N in sequential case.
-    if (nthr == 1 && is_TN_case && m > 100 && m < 1200 && n < 200 && k < 1200)
-        return false;
 
     // Copy strategy usually performs better than nocopy on "bad" leading
     // dimensions.
@@ -896,7 +897,7 @@ static inline bool nocopy_checker(
 }
 
 template <typename a_type, typename b_type, typename c_type>
-static inline void set_thread_opts_nopack(int nthrs,
+static inline void set_thread_opts_nopack(int nthrs, int nthrs_spawn,
         gemm_threading_t &thread_info,
         const gemm_info_t<a_type, b_type, c_type> *arg) {
 
@@ -1003,7 +1004,7 @@ static inline void set_thread_opts_nopack(int nthrs,
         thread_info.copy = copy_type::shared_a;
         thread_info.partition = partition_type::col_1d;
         thread_info.nthrs_m = 1;
-        thread_info.nthrs_n = nthrs;
+        thread_info.nthrs_n = nthrs_spawn; // Using all spawned threads.
     } else {
         auto veclen = get_vector_length<c_type>();
 
@@ -1131,7 +1132,8 @@ static inline void set_thread_opts_pack(int nthrs,
 }
 
 template <typename a_type, typename b_type, typename c_type>
-static inline int set_thread_opts(int nthrs, gemm_threading_t &thread_info,
+static inline int set_thread_opts(int nthrs, int nthrs_spawn,
+        gemm_threading_t &thread_info,
         const gemm_info_t<a_type, b_type, c_type> *arg) {
 
     thread_info.block_m = thread_info.block_n = thread_info.block_k = -1;
@@ -1169,7 +1171,7 @@ static inline int set_thread_opts(int nthrs, gemm_threading_t &thread_info,
         if (arg->packing != pack_type::none && (is_int8 || is_bf16))
             set_thread_opts_pack(nthrs, thread_info, arg);
         else
-            set_thread_opts_nopack(nthrs, thread_info, arg);
+            set_thread_opts_nopack(nthrs, nthrs_spawn, thread_info, arg);
     }
 
     return thread_info.nthrs_m * thread_info.nthrs_n * thread_info.nthrs_k;
@@ -1448,6 +1450,7 @@ static dnnl_status_t gemm_threading_driver(
     auto is_b_packed = (arg->transb == packed);
     constexpr bool is_int8 = utils::one_of(
             data_traits<a_type>::data_type, data_type::s8, data_type::u8);
+    constexpr bool is_bf16 = data_traits<a_type>::data_type == data_type::bf16;
 
     if ((arg->m <= 0) || (arg->n <= 0)) return dnnl_success;
 
@@ -1484,9 +1487,14 @@ static dnnl_status_t gemm_threading_driver(
             force_threading = &arg->a_packed->threading();
         else if (is_b_packed)
             force_threading = &arg->b_packed->threading();
-        else
-                // Use k-partitioning if necessary.
-                if (arg->n <= 128 && arg->k >= 3072 && is_int8) {
+        else if (arg->m <= 768 && arg->n <= 768 && arg->k >= 2048 && is_bf16) {
+            // Try k-partitioning.
+            set_thread_opts_pack(nthr_goal, force_k_decomp, arg);
+
+            // Decide partition type later if no partitions in k-dimension.
+            if (force_k_decomp.nthrs_k > 1) force_threading = &force_k_decomp;
+        } else if (arg->n <= 128 && arg->k >= 3072 && is_int8) {
+            // Use k-partitioning if necessary.
             // Use 3D decomposition from pack api without n-partitioning.
             set_thread_opts_pack(
                     nthr_goal, force_k_decomp, arg, true, true, false);
@@ -1511,7 +1519,7 @@ static dnnl_status_t gemm_threading_driver(
         auto &thread_info = pack_dst->threading();
         force_threading = &thread_info;
 
-        nthr_goal = set_thread_opts(nthr_goal, thread_info, arg);
+        nthr_goal = set_thread_opts(nthr_goal, nthr_max, thread_info, arg);
         arg->update_blocking(thread_info);
 
         if (thread_info.copy != copy_type::no_copy) {
@@ -1556,12 +1564,12 @@ static dnnl_status_t gemm_threading_driver(
     bool k_summing = k_blocking && !packing;
 
     auto *thread_arg = (gemm_per_thread_t<c_type> *)malloc(
-            sizeof(gemm_per_thread_t<c_type>) * nthr_goal, PAGE_4K);
+            sizeof(gemm_per_thread_t<c_type>) * nthr_max, PAGE_4K);
 
     if (!thread_arg) return dnnl_out_of_memory;
 
     dim_t max_mt = 0, max_nt = 0;
-    for (int ithr = 0; ithr < nthr_goal; ithr++) {
+    for (int ithr = 0; ithr < nthr_max; ithr++) {
         thread_arg[ithr].result = dnnl_success;
         thread_arg[ithr].compute_done = false;
         thread_arg[ithr].c_local = thread_arg[ithr].c_global = nullptr;
@@ -1590,6 +1598,11 @@ static dnnl_status_t gemm_threading_driver(
         c_local_storage = (c_type *)malloc(
                 sizeof(c_type) * c_local_stride * nthr_goal, PAGE_4K);
 
+        if (!c_local_storage) {
+            free(thread_arg);
+            return dnnl_out_of_memory;
+        }
+
         for (int ithr = 0; ithr < nthr_goal; ithr++) {
             thread_arg[ithr].c_local = c_local_storage + ithr * c_local_stride;
             thread_arg[ithr].ldc_local = ldc_local;
@@ -1598,9 +1611,9 @@ static dnnl_status_t gemm_threading_driver(
 
     char *shared_mem = NULL;
 
-    // For active force_threading, always use the maximum number of threads
-    // to avoid OMP overhead that can occur due to changing thread counts.
-    int nthr_spawn = force_threading ? nthr_max : nthr_goal;
+    // Always use the maximum number of threads to avoid OMP overhead that can
+    // occur due to change thread counts.
+    int nthr_spawn = dnnl_thr_syncable() ? nthr_max : nthr_goal;
 
     parallel(nthr_spawn, [&](int ithr, int nthr) {
         int nthr_eff = force_threading ? nthr_goal : nstl::min(nthr_goal, nthr);
@@ -1615,9 +1628,10 @@ static dnnl_status_t gemm_threading_driver(
             if (force_threading)
                 thread_info = *force_threading;
             else {
-                nthr_eff = set_thread_opts(nthr_eff, thread_info, arg);
-                thread_arg[ithr].slice = thread_info.get_thread_slice(
-                        ithr, arg->m, arg->n, arg->k);
+                nthr_eff = set_thread_opts(nthr_eff, nthr, thread_info, arg);
+                if (ithr < nthr_eff)
+                    thread_arg[ithr].slice = thread_info.get_thread_slice(
+                            ithr, arg->m, arg->n, arg->k);
             }
 
             for (; ithr < nthr_eff; ithr += nthr) {
@@ -1704,7 +1718,7 @@ static dnnl_status_t gemm_threading_driver(
     });
 
     dnnl_status_t result = dnnl_success; // Initialize to success
-    for (int ithr = 0; ithr < nthr_goal; ithr++) {
+    for (int ithr = 0; ithr < nthr_max; ithr++) {
         if (thread_arg[ithr].result != dnnl_success) {
             result = static_cast<dnnl_status_t>(thread_arg[ithr].result);
             break;
@@ -1742,9 +1756,9 @@ dnnl_status_t gemm_driver(const char *transA, const char *transB,
     assert(IMPLICATION(data_traits<a_type>::data_type == data_type::bf16,
             mayiuse(avx512_core) && !force_nocopy));
 
-    // gemm_driver supports 8-bit integer Intel AVX512, Intel AVX2 and
-    // Intel DL Boost.
-    assert(IMPLICATION(is_int8, mayiuse(avx2) && !mayiuse(avx512_mic)));
+    // gemm_driver supports 8-bit integer Intel AVX512, Intel AVX2, Intel AVX,
+    // Intel SSE4.1 and Intel DL Boost.
+    assert(IMPLICATION(is_int8, mayiuse(sse41) && !mayiuse(avx512_mic)));
 
     // gemm_driver supports sgemm for Intel AVX512, Intel AVX2, Intel AVX,
     // and Intel SSE4.1

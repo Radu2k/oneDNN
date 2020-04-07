@@ -50,7 +50,7 @@
 #include "gpu/ocl/verbose.hpp"
 #endif
 
-/* DNNL CPU ISA info */
+/* oneDNN CPU ISA info */
 #define ISA_ANY "Intel 64"
 #define SSE41 "Intel SSE4.1"
 #define AVX "Intel AVX"
@@ -73,14 +73,16 @@ static setting_t<int> verbose {0};
 int get_verbose() {
 #if !defined(DISABLE_VERBOSE)
     if (!verbose.initialized()) {
+        // Assumes that all threads see the same environment
         const int len = 2;
         char val[len] = {0};
         if (getenv("MKLDNN_VERBOSE", val, len) == 1) verbose.set(atoi(val));
         if (getenv("DNNL_VERBOSE", val, len) == 1) verbose.set(atoi(val));
+        if (!verbose.initialized()) verbose.set(0);
     }
     static bool version_printed = false;
     if (!version_printed && verbose.get() > 0) {
-        printf("dnnl_verbose,info,DNNL v%d.%d.%d (commit %s)\n",
+        printf("dnnl_verbose,info,oneDNN v%d.%d.%d (commit %s)\n",
                 dnnl_version()->major, dnnl_version()->minor,
                 dnnl_version()->patch, dnnl_version()->hash);
         printf("dnnl_verbose,info,cpu,runtime:%s\n",
@@ -843,9 +845,9 @@ static void init_info_rnn(pd_t *s, char *buffer) {
             dnnl_alg_kind2str(s->activation_kind()));
 
     DPRINT(prb_str, DNNL_VERBOSE_PRB_LEN, prb_written,
-            "l" DFMT "t" DFMT "mb" DFMT "sic" DFMT "slc" DFMT "dic" DFMT
+            "l" DFMT "t" DFMT "mb" DFMT "sic" DFMT "slc" DFMT "dhc" DFMT
             "dlc" DFMT,
-            s->L(), s->T(), s->MB(), s->SIC(), s->SLC(), s->DIC(), s->DLC());
+            s->L(), s->T(), s->MB(), s->SIC(), s->SLC(), s->DHC(), s->DLC());
 
     verbose_templ(buffer, s->engine(), s->kind(), s->name(),
             s->desc()->prop_kind, dat_str, attr_str, aux_str, prb_str);

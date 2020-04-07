@@ -58,7 +58,7 @@ const _dt_conf_t conf_bf16bf16f32 = {
 const _dt_conf_t conf_bf16bf16bf16 = {
         /* eps is 1e-2 because of loss in precision of
      * output when converted from fp32 to bf16.
-     * DNNL output is compared against reference computed in fp32.*/
+     * oneDNN output is compared against reference computed in fp32.*/
         {dnnl_bf16, -int_max_exact, int_max_exact, -64, 64, 0, .35, 1. / 128,
                 1e-2},
         {dnnl_bf16, -int_max_exact, int_max_exact, -128, 128, 0, 1.0, 1. / 256,
@@ -193,9 +193,9 @@ const dt_conf_t *str2cfg(const char *str) {
     return (const dt_conf_t *)1;
 }
 
-const char *cfg2str(const dt_conf_t *cfg) {
+std::ostream &operator<<(std::ostream &s, const dt_conf_t *cfg) {
 #define CASE(_cfg) \
-    if (cfg == CONCAT2(conf_, _cfg)) return STRINGIFY(_cfg)
+    if (cfg == CONCAT2(conf_, _cfg)) return s << STRINGIFY(_cfg)
     CASE(f32);
     CASE(f16);
     CASE(u8s8f32);
@@ -211,11 +211,8 @@ const char *cfg2str(const dt_conf_t *cfg) {
     CASE(f32bf16bf16);
     CASE(bf16f32bf16);
 #undef CASE
-    []() {
-        SAFE(FAIL, CRIT);
-        return 0;
-    }();
-    return NULL;
+    SAFE_V(FAIL);
+    return s;
 }
 
 } // namespace ip

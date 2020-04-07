@@ -44,7 +44,7 @@
         dnnl_status_t status = f; \
         if (status != dnnl_success) { \
             if (s == CRIT || s == WARN) { \
-                print(0, "error [%s:%d]: '%s' -> %s(%d)\n", \
+                BENCHDNN_PRINT(0, "error [%s:%d]: '%s' -> %s(%d)\n", \
                         __PRETTY_FUNCTION__, __LINE__, #f, status2str(status), \
                         (int)status); \
                 fflush(0); \
@@ -58,8 +58,9 @@
     do { \
         dnnl_status_t status = f; \
         if (status != dnnl_success) { \
-            print(0, "error [%s:%d]: '%s' -> %s(%d)\n", __PRETTY_FUNCTION__, \
-                    __LINE__, STRINGIFY(f), status2str(status), (int)status); \
+            BENCHDNN_PRINT(0, "error [%s:%d]: '%s' -> %s(%d)\n", \
+                    __PRETTY_FUNCTION__, __LINE__, STRINGIFY(f), \
+                    status2str(status), (int)status); \
             fflush(0); \
             exit(2); \
         } \
@@ -70,7 +71,7 @@
         dnnl_status_t status = f; \
         if (status != dnnl_success) { \
             if (s == CRIT || s == WARN) { \
-                print(0, "error [%s:%d]: '%s' -> %s(%d)\n", \
+                BENCHDNN_PRINT(0, "error [%s:%d]: '%s' -> %s(%d)\n", \
                         __PRETTY_FUNCTION__, __LINE__, #f, status2str(status), \
                         (int)status); \
                 fflush(0); \
@@ -196,7 +197,9 @@ extern dnnl_engine_t engine_tgt;
 extern dnnl_stream_t stream_tgt;
 extern dnnl_scratchpad_mode_t scratchpad_mode;
 
-struct dnn_mem_t;
+/* for fast-ref-gpu support */
+extern dnnl_engine_t engine_cpu;
+extern dnnl_stream_t stream_cpu;
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
 extern "C" int dnnl_memory_get_sim_id(dnnl_memory_t mem);
@@ -219,12 +222,55 @@ inline bool is_gpu_perf_sim() {
 inline void register_dnn_mem_object(dnn_mem_t *mem) {}
 inline void unregister_dnn_mem_object(dnn_mem_t *mem) {}
 #endif
+#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
+#include "dnnl_threadpool_iface.hpp"
+// XXX: cannot include dnnl_thread.hpp because of conflicting macro
+// definitions
+namespace dnnl {
+namespace impl {
+namespace threadpool_utils {
+threadpool_iface *get_active_threadpool();
+}
+} // namespace impl
+} // namespace dnnl
+#endif
+
+inline int create_dnnl_stream(
+        dnnl_stream_t *stream, dnnl_engine_t engine, unsigned flags) {
+    dnnl_engine_kind_t engine_kind;
+    DNN_SAFE(dnnl_engine_get_kind(engine, &engine_kind), CRIT);
+
+    dnnl_stream_attr_t stream_attr;
+    DNN_SAFE(dnnl_stream_attr_create(&stream_attr, engine_kind), CRIT);
+#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
+    if (engine_kind == dnnl_cpu) {
+        SAFE_V(dnnl_stream_attr_set_threadpool(stream_attr,
+                dnnl::impl::threadpool_utils::get_active_threadpool()));
+    }
+#endif
+
+    DNN_SAFE(dnnl_stream_create_v2(stream, engine, flags, stream_attr), CRIT);
+    dnnl_stream_attr_destroy(stream_attr);
+    return OK;
+}
 
 inline int init() {
     if (!engine_tgt) {
         DNN_SAFE(dnnl_engine_create(&engine_tgt, engine_tgt_kind, 0), CRIT);
+        SAFE(create_dnnl_stream(
+                     &stream_tgt, engine_tgt, dnnl_stream_default_flags),
+                CRIT);
+    }
+    if (!engine_cpu) {
+        DNN_SAFE(dnnl_engine_create(&engine_cpu, dnnl_cpu, 0), CRIT);
+        SAFE(create_dnnl_stream(
+                     &stream_cpu, engine_cpu, dnnl_stream_default_flags),
+                CRIT);
+    }
+    if (!engine_cpu) {
+        DNN_SAFE(dnnl_engine_create(&engine_cpu, dnnl_cpu, 0), CRIT);
         DNN_SAFE(dnnl_stream_create(
-                         &stream_tgt, engine_tgt, dnnl_stream_default_flags),
+                         &stream_cpu, engine_cpu, dnnl_stream_default_flags),
                 CRIT);
     }
 
@@ -234,6 +280,8 @@ inline int init() {
 inline int finalize() {
     DNN_SAFE(dnnl_stream_destroy(stream_tgt), CRIT);
     DNN_SAFE(dnnl_engine_destroy(engine_tgt), CRIT);
+    DNN_SAFE(dnnl_engine_destroy(engine_cpu), CRIT);
+    DNN_SAFE(dnnl_stream_destroy(stream_cpu), CRIT);
     return OK;
 }
 

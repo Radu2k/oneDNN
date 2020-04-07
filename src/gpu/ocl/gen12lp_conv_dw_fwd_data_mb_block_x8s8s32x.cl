@@ -22,12 +22,24 @@
 
 #define KDHW_SIZE KD *KH *KW
 
+#if SCALES_PER_OC
+#define SCALE scales
+#define SCALE_VEC8 scales.s01010101
+#elif SCALES_COMMON
+#define SCALE scale
+#define SCALE_VEC8 scale
+#else
+#define SCALE 1
+#define SCALE_VEC8 1
+#endif
+
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_dw_fwd_mb_block_x8s8s32x(const __global uchar *src,
         const __global char *wei, const __global float *bias,
-        __global DST_DATA_T *dst, float eltwise_alpha, float eltwise_beta,
-        float eltwise_scale, float sum_scale, float scales) {
+        __global DATA_T *dst, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale, float sum_scale, float scale,
+        const __global float *scales_per_oc) {
 
     const int osp = get_global_id(1);
     const int od = osp / (OW * OH);
@@ -182,14 +194,20 @@ conv_dw_fwd_mb_block_x8s8s32x(const __global uchar *src,
         } \
     } while (0)
 
+#if SCALES_PER_OC
+    float2 scales = as_float2(intel_sub_group_block_read2(
+            (const __global uint *)&scales_per_oc[g]));
+#endif
+
 #if WITH_BIAS
     float2 B = as_float2(
             intel_sub_group_block_read2((const __global uint *)&bias[g]));
-    tmp00 = (tmp00 + B.s01010101) * scales;
-    tmp01 = (tmp01 + B.s01010101) * scales;
+    B *= SCALE;
+    tmp00 = fma(tmp00, (float8)SCALE_VEC8, B.s01010101);
+    tmp01 = fma(tmp01, (float8)SCALE_VEC8, B.s01010101);
 #else
-    tmp00 *= scales;
-    tmp01 *= scales;
+    tmp00 *= SCALE_VEC8;
+    tmp01 *= SCALE_VEC8;
 #endif
 
 #if WITH_ELTWISE

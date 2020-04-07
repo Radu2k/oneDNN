@@ -95,7 +95,7 @@ typedef enum {
 
 /// Memory format tag specification.
 ///
-/// DNNL formats describe physical data layout. The physical layout
+/// oneDNN formats describe physical data layout. The physical layout
 /// is described as a sequence of the dimensions as they are laid out in the
 /// memory (from the outer-most to the inner-most). Note that this order
 /// doesn't affect the logical order of the dimensions that is kept in the
@@ -138,7 +138,7 @@ typedef enum {
 ///    For example, #dnnl_nc is used to denote 2D CNN activations tensor
 ///    memory format, where channels are the innermost dimension and batch is an
 ///    outermost one. Moreover, #dnnl_nc is just an alias to #dnnl_ab,
-///    since for DNNL CNN primitives the logical dimensions of
+///    since for oneDNN CNN primitives the logical dimensions of
 ///    activations tensors come in order: batch, channels, spatial.
 ///    In other words, batch corresponds to the first logical dimension (`a`),
 ///    channels correspond to the second one (`b`).
@@ -183,6 +183,7 @@ typedef enum {
 
     // Permuted plain formats
 
+    dnnl_abdc, ///< permuted 4D tensor
     dnnl_abdec, ///< permuted 5D tensor
     dnnl_acb, ///< permuted 3D tensor
     dnnl_acbde, ///< permuted 5D tensor
@@ -197,6 +198,7 @@ typedef enum {
     dnnl_bcdea, ///< permuted 5D tensor
     dnnl_cba, ///< permuted 3D tensor
     dnnl_cdba, ///< permuted 4D tensor
+    dnnl_dcab, ///< permuted 4D tensor
     dnnl_cdeba, ///< permuted 5D tensor
     dnnl_decab, ///< permuted 5D tensor
     dnnl_defcab, ///< permuted 6D tensor
@@ -244,6 +246,8 @@ typedef enum {
     dnnl_ABcd4b16a4b,
     dnnl_ABcd4b4a,
     dnnl_ABcd4a4b,
+    dnnl_aBCd2c4b2c,
+    dnnl_aBCd4b8c2b,
     dnnl_aBCd4c16b4c,
     dnnl_aBCd2c8b4c,
     dnnl_aBCd4c4b,
@@ -254,6 +258,7 @@ typedef enum {
     dnnl_ABcd8a4b,
     /// 4D tensor blocked by 2nd dimension with block size 8
     dnnl_aBcd8b,
+    dnnl_aBCd4c8b2c,
     dnnl_ABcd8b16a2b,
     dnnl_aBCd8b16c2b,
     dnnl_BAcd8a16b2a,
@@ -269,6 +274,8 @@ typedef enum {
     dnnl_Abcde32a,
     dnnl_ABcde16a16b,
     dnnl_BAcde8a16b2a,
+    /// 4D tensor blocked by 3rd dimension with block size 4
+    dnnl_aBCd2b4c2b,
     /// 5D tensor blocked by 1st dimension with block size 16
     dnnl_ABcde4b16a4b,
     /// 5D tensor blocked by 1st dimension with block size 8
@@ -286,6 +293,8 @@ typedef enum {
     dnnl_ABcde4b4a,
     dnnl_ABcde4a4b,
     dnnl_aBCde4b4c,
+    dnnl_aBCde2c4b2c,
+    dnnl_aBCde4b8c2b,
     dnnl_aBCde4c16b4c,
     dnnl_aBCde4c4b,
     dnnl_Abcde8a,
@@ -296,6 +305,7 @@ typedef enum {
     dnnl_aBcde8b,
     dnnl_ABcde8b16a2b,
     dnnl_aBCde8b16c2b,
+    dnnl_aBCde4c8b2c,
     dnnl_aCBde8b16c2b,
     dnnl_ABcde8b8a,
     dnnl_ABcde32a16b,
@@ -326,6 +336,8 @@ typedef enum {
     dnnl_aBCde2b8c8b2c,
     dnnl_aBCde8c16b2c,
     dnnl_aBCde8c8b,
+    /// 5D tensor blocked by 3rd dimension with block size 4
+    dnnl_aBCde2b4c2b,
     /// 6D tensor blocked by 2nd dimension with block size 16
     dnnl_aBcdef16b,
     dnnl_aBCdef16b16c,
@@ -333,10 +345,15 @@ typedef enum {
     dnnl_aBCdef4c16b4c,
     /// 6D tensor blocked by 2nd dimension with block size 8
     dnnl_aBCdef2c8b4c,
+    dnnl_aBCdef4c8b2c,
+    /// 6D tensor blocked by 3rd dimension with block size 4
+    dnnl_aBCdef2b4c2b,
     /// 6D tensor blocked by 2nd dimension with block size 4
     dnnl_aBcdef4b,
     dnnl_aBCdef4c4b,
     dnnl_aBCdef4b4c,
+    dnnl_aBCdef2c4b2c,
+    dnnl_aBCdef4b8c2b,
     dnnl_aBCdef8b8c,
     dnnl_aBCdef8b4c,
     dnnl_aBCdef8c16b2c,
@@ -451,6 +468,8 @@ typedef enum {
 
     /// 4D CNN weights tensor (incl. groups), an alias to #dnnl_abcd
     dnnl_goiw = dnnl_abcd,
+    /// 4D CNN weights tensor (incl. groups), an alias to #dnnl_dcab
+    dnnl_wigo = dnnl_dcab,
     /// 5D CNN weights tensor (incl. groups), an alias to #dnnl_abcde
     dnnl_goihw = dnnl_abcde,
     /// 5D CNN weights tensor (incl. groups), an alias to #dnnl_decab
@@ -485,6 +504,12 @@ typedef enum {
     ///    and output gate.
     ///  - For GRU cells, the gates order is update, reset and output gate.
     dnnl_ldgoi = dnnl_abdec,
+    /// 4D LSTM projection tensor in the format (num_layers, num_directions,
+    /// num_channels_in_hidden_state, num_channels_in_recurrent_projection).
+    dnnl_ldio = dnnl_abcd,
+    /// 4D LSTM projection tensor in the format (num_layers, num_directions,
+    /// num_channels_in_recurrent_projection, num_channels_in_hidden_state).
+    dnnl_ldoi = dnnl_abdc,
     /// 4D RNN bias tensor in the format (num_layers, num_directions,
     /// num_gates, output_channels).
     ///
@@ -634,6 +659,10 @@ typedef enum {
     dnnl_gOwi4o = dnnl_aBdc4b,
     dnnl_gOwi8o = dnnl_aBdc8b,
     dnnl_Goiw32g = dnnl_Abcd32a,
+    dnnl_gOIw2i4o2i = dnnl_aBCd2c4b2c,
+    dnnl_gOIw2o4i2o = dnnl_aBCd2b4c2b,
+    dnnl_gOIw4i8o2i = dnnl_aBCd4c8b2c,
+    dnnl_gOIw4o8i2o = dnnl_aBCd4b8c2b,
 
     // weights w/ groups, 4D
     dnnl_gIOhw16i16o = dnnl_aCBde16c16b,
@@ -687,6 +716,10 @@ typedef enum {
     dnnl_gIOdhw4i8o8i2o = dnnl_aCBdef4c8b8c2b,
     dnnl_gIOhw4i8o8i2o = dnnl_aCBde4c8b8c2b,
     dnnl_gIOw4i8o8i2o = dnnl_aCBd4c8b8c2b,
+    dnnl_gOIhw2i4o2i = dnnl_aBCde2c4b2c,
+    dnnl_gOIhw2o4i2o = dnnl_aBCde2b4c2b,
+    dnnl_gOIhw4i8o2i = dnnl_aBCde4c8b2c,
+    dnnl_gOIhw4o8i2o = dnnl_aBCde4b8c2b,
 
     // weights w/ groups, 6D
     dnnl_gIOdhw16i16o = dnnl_aCBdef16c16b,
@@ -711,6 +744,10 @@ typedef enum {
     dnnl_gOIdhw8o4i = dnnl_aBCdef8b4c,
     dnnl_Goidhw16g = dnnl_Abcdef16a,
     dnnl_Goidhw32g = dnnl_Abcdef32a,
+    dnnl_gOIdhw2i4o2i = dnnl_aBCdef2c4b2c,
+    dnnl_gOIdhw4i8o2i = dnnl_aBCdef4c8b2c,
+    dnnl_gOIdhw2o4i2o = dnnl_aBCdef2b4c2b,
+    dnnl_gOIdhw4o8i2o = dnnl_aBCdef4b8c2b,
 } dnnl_format_tag_t;
 
 /// @} dnnl_api_memory
@@ -895,8 +932,18 @@ typedef enum {
     dnnl_resampling_linear = 0x2fff1,
 } dnnl_alg_kind_t;
 
-/// Flags for batch normalization primitive.
+/// Flags for normalization primitives.
 typedef enum {
+    /// Use no normalization flags
+    ///
+    /// If specified
+    ///  - on forward training propagation mean and variance are computed and
+    ///    stored as output
+    ///  - on backward propagation compute full derivative wrt data
+    ///  - on backward propagation prop_kind == #dnnl_backward_data has the same
+    ///    behavior as prop_kind == #dnnl_backward
+    dnnl_normalization_flags_none = 0x0U,
+
     /// Use global statistics
     ///
     /// If specified
@@ -905,9 +952,9 @@ typedef enum {
     ///    mean and variance are considered as constants
     ///
     ///  If not specified:
-    ///   - on forward propagation mean and variance are computed and stored in
+    ///   - on forward propagation mean and variance are computed and stored as
     ///     output
-    ///   - on backward propagation compute full derivative wrt to data
+    ///   - on backward propagation compute full derivative wrt data
     dnnl_use_global_stats = 0x1U,
 
     /// Use scale and shift parameters
@@ -916,7 +963,7 @@ typedef enum {
     ///  - on forward propagation use scale and shift (aka scale and bias) for
     ///    the batch normalization results
     ///  - on backward propagation (for prop_kind == #dnnl_backward) compute
-    ///    diff wrt to scale and shift (hence one extra output used)
+    ///    diff wrt scale and shift (hence one extra output used)
     ///
     /// If no specified:
     ///  - on backward propagation prop_kind == #dnnl_backward_data has the
@@ -1550,12 +1597,14 @@ typedef struct {
     dnnl_memory_desc_t dst_iter_desc;
     /// Destination iter memory descriptor for cell state.
     dnnl_memory_desc_t dst_iter_c_desc;
-    /// Weights peephole memory descriptor
+    /// Weights peephole memory descriptor.
     /// This memory descriptor is equal to zero memory descriptor in case of
     /// non-peephole LSTMs and other non-LSTM RNNs.
     dnnl_memory_desc_t weights_peephole_desc;
-    /// Placeholders
-    dnnl_memory_desc_t placeholder_desc;
+    /// Weights projection memory descriptor.
+    /// This memory descriptor is equal to zero memory descriptor in case of
+    /// non-projection LSTMs and other non-LSTM RNNs.
+    dnnl_memory_desc_t weights_projection_desc;
 
     /// Source gradient layer memory descriptor.
     dnnl_memory_desc_t diff_src_layer_desc;
@@ -1575,12 +1624,14 @@ typedef struct {
     dnnl_memory_desc_t diff_dst_iter_desc;
     /// Destination gradient iteration memory descriptor for cell state.
     dnnl_memory_desc_t diff_dst_iter_c_desc;
-    /// Weights gradient peephole memory descriptor
+    /// Weights gradient peephole memory descriptor.
     /// This memory descriptor is equal to zero memory descriptor in case of
     /// non-peephole LSTMs and other non-LSTM RNNs.
     dnnl_memory_desc_t diff_weights_peephole_desc;
-    /// Placeholders
-    dnnl_memory_desc_t diff_placeholder_desc;
+    /// Weights gradient projection memory descriptor.
+    /// This memory descriptor is equal to zero memory descriptor in case of
+    /// non-projection LSTMs and other non-LSTM RNNs.
+    dnnl_memory_desc_t diff_weights_projection_desc;
 
     /// RNN cell flags
     unsigned int flags;
@@ -1879,6 +1930,12 @@ typedef const struct dnnl_primitive *const_dnnl_primitive_t;
 /// An alias for #DNNL_ARG_WEIGHTS_2.
 #define DNNL_ARG_WEIGHTS_PEEPHOLE DNNL_ARG_WEIGHTS_2
 
+/// Weights argument #3.
+#define DNNL_ARG_WEIGHTS_3 36
+/// A special mnemonic for RNN weights applied to the projection weights.
+/// An alias for #DNNL_ARG_WEIGHTS_3.
+#define DNNL_ARG_WEIGHTS_PROJECTION DNNL_ARG_WEIGHTS_3
+
 /// Bias tensor argument.
 #define DNNL_ARG_BIAS 41
 
@@ -1958,6 +2015,12 @@ typedef const struct dnnl_primitive *const_dnnl_primitive_t;
 /// A special mnemonic for diff of RNN weights applied to the peephole weights.
 /// An alias for #DNNL_ARG_DIFF_WEIGHTS_2.
 #define DNNL_ARG_DIFF_WEIGHTS_PEEPHOLE DNNL_ARG_DIFF_WEIGHTS_2
+
+/// Gradient (diff) of the weights argument #3.
+#define DNNL_ARG_DIFF_WEIGHTS_3 164
+/// A special mnemonic for diff of RNN weights applied to the projection
+/// weights. An alias for #DNNL_ARG_DIFF_WEIGHTS_3.
+#define DNNL_ARG_DIFF_WEIGHTS_PROJECTION DNNL_ARG_DIFF_WEIGHTS_3
 
 /// Gradient (diff) of the bias tensor argument.
 #define DNNL_ARG_DIFF_BIAS 169
@@ -2106,6 +2169,13 @@ typedef struct dnnl_stream *dnnl_stream_t;
 /// A constant execution stream handle.
 typedef const struct dnnl_stream *const_dnnl_stream_t;
 
+/// An opaque structure to describe execution stream attrbutes.
+struct dnnl_stream_attr;
+/// An execution stream attributes handle.
+typedef struct dnnl_stream_attr *dnnl_stream_attr_t;
+/// A constant execution stream attributes handle.
+typedef const struct dnnl_stream_attr *const_dnnl_stream_attr_t;
+
 /// @} dnnl_api_stream
 
 /// @addtogroup dnnl_api_service
@@ -2122,6 +2192,9 @@ typedef const struct dnnl_stream *const_dnnl_stream_t;
 
 /// TBB runtime (CPU only)
 #define DNNL_RUNTIME_TBB 4u
+
+/// Threadpool runtime (CPU only)
+#define DNNL_RUNTIME_THREADPOOL 8u
 
 /// OpenCL runtime
 #define DNNL_RUNTIME_OCL 256u

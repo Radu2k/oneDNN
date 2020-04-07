@@ -18,6 +18,7 @@
 #define TEST_GEMM_COMMON_H
 
 #include "dnnl_test_common.hpp"
+#include "dnnl_thread.hpp"
 #include "gtest/gtest.h"
 
 #include "cpu_isa_traits.hpp"
@@ -608,7 +609,7 @@ struct dnnl_gemm<float16_t, float16_t, float16_t> {
             const test_memory &) {
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            engine eng(get_test_engine_kind(), 0);
+            engine eng = get_test_engine();
             stream s(eng);
             cl_command_queue q = s.get_ocl_command_queue();
             auto status = dnnl_ocl_hgemm(q, p.transA, p.transB, p.M, p.N, p.K,
@@ -812,7 +813,7 @@ struct dnnl_gemm<int8_t, int8_t, int32_t> {
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            engine eng(get_test_engine_kind(), 0);
+            engine eng = get_test_engine();
             stream s(eng);
             cl_command_queue q = s.get_ocl_command_queue();
             auto status = dnnl_ocl_gemm_s8s8s32(q, p.transA, p.transB,
@@ -848,7 +849,7 @@ struct dnnl_gemm<int8_t, uint8_t, int32_t> {
             const test_memory &oc_mem) {
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            engine eng(get_test_engine_kind(), 0);
+            engine eng = get_test_engine();
             stream s(eng);
             cl_command_queue q2 = s.get_ocl_command_queue();
             auto status = dnnl_ocl_gemm_s8u8s32(q2, p.transA, p.transB,
@@ -874,7 +875,7 @@ struct dnnl_gemm<uint8_t, uint8_t, int32_t> {
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            engine eng(get_test_engine_kind(), 0);
+            engine eng = get_test_engine();
             stream s(eng);
             cl_command_queue q = s.get_ocl_command_queue();
             auto status = dnnl_ocl_gemm_u8u8s32(q, p.transA, p.transB,
@@ -985,7 +986,7 @@ struct dnnl_gemm<uint8_t, int8_t, int32_t> {
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            engine eng(get_test_engine_kind(), 0);
+            engine eng = get_test_engine();
             stream s(eng);
             cl_command_queue q = s.get_ocl_command_queue();
             auto status = dnnl_ocl_gemm_u8s8s32(q, p.transA, p.transB,
@@ -1164,19 +1165,19 @@ template <typename a_dt, typename b_dt, typename c_dt>
 struct run_test_gemm {
     static void call(const test_params &p) {
         if (p.expect_to_fail) {
-            engine eng(get_test_engine_kind(), 0);
+            engine eng = get_test_engine();
             test_memory zero_mem({}, eng);
             auto status = dnnl_gemm<a_dt, b_dt, c_dt>::call(
                     p, zero_mem, zero_mem, zero_mem, zero_mem);
             if (status != dnnl_success)
-                throw error(status, "dnnl gemm returned error");
+                throw error(status, "oneDNN gemm returned error");
             return;
         }
 
         size_t sizeA, sizeB, sizeC;
         get_matrix_size(p, sizeA, sizeB, sizeC);
 
-        engine eng(get_test_engine_kind(), 0);
+        engine eng = get_test_engine();
         test_memory a_mem = get_matrix_memory<a_dt>(sizeA, p.off.a, eng);
         test_memory b_mem = get_matrix_memory<b_dt>(sizeB, p.off.b, eng);
         test_memory c_mem = get_matrix_memory<c_dt>(sizeC, p.off.c, eng);
@@ -1203,7 +1204,7 @@ struct run_test_gemm {
         }
 
         if (status != dnnl_success)
-            throw error(status, "dnnl gemm returned error");
+            throw error(status, "oneDNN gemm returned error");
     }
 };
 
@@ -1248,6 +1249,18 @@ protected:
                 [=]() { Test(); }, p.expect_to_fail, p.expected_status);
     }
     void Test() {
+#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
+        struct scoped_threadpool {
+            scoped_threadpool() {
+                impl::threadpool_utils::activate_threadpool(
+                        impl::threadpool_utils::get_active_threadpool());
+            }
+            ~scoped_threadpool() {
+                impl::threadpool_utils::deactivate_threadpool();
+            }
+        };
+        scoped_threadpool stp;
+#endif
         const auto &p = ::testing::TestWithParam<test_params>::GetParam();
         run_test_gemm<a_dt, b_dt, c_dt>::call(p);
     }

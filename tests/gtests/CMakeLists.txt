@@ -38,6 +38,7 @@ file(GLOB PRIM_TEST_CASES_SRC
                               test_iface_pd_iter.cpp
                               test_iface_attr.cpp
                               test_iface_handle.cpp
+                              test_iface_stream_attr.cpp
                               test_iface_runtime_dims.cpp
                               test_iface_runtime_attr.cpp
                               test_dnnl_threading.cpp
@@ -84,6 +85,7 @@ file(GLOB PRIM_TEST_CASES_SRC
                               test_resampling.cpp
                               test_isa_mask.cpp
                               test_isa_iface.cpp
+                              test_global_scratchpad.cpp
                               )
 
 # Some tests will fail on AArch64 and need to be skipped.

@@ -765,12 +765,13 @@ status_t init_conf(jit_gemm_conv_conf_t &jcp,
 
     jcp.outer_threading = false;
 
-    bool is_int8_conv = utils::one_of(src_d.data_type(), s32, s8, u8)
-            && weights_d.data_type() == s8;
-
     const bool is_bwd_d = jcp.prop_kind == backward_data;
     const bool is_bwd_w = jcp.prop_kind == backward_weights;
     const bool is_fwd = !is_bwd_d && !is_bwd_w;
+
+    bool is_int8_conv = (is_fwd ? utils::one_of(src_d.data_type(), s8, u8)
+                                : utils::one_of(dst_d.data_type(), s8, u8))
+            && weights_d.data_type() == s8;
 
     bool is_bf16_conv = false
             || (is_fwd
@@ -809,7 +810,7 @@ status_t init_conf(jit_gemm_conv_conf_t &jcp,
     bool is_depthwise = jcp.ic == 1 && jcp.oc == 1 && jcp.ngroups != 1;
 
     // TODO: maybe mitigate blocking restriction
-    const int L2 = get_cache_size(2, true) / data_size;
+    const int L2 = get_per_core_cache_size(2) / data_size;
     const int gemm_thrld = 64 * 1024;
 
     if (is_int8_conv) {

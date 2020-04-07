@@ -60,12 +60,15 @@ struct gen12lp_x8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
                     && attr()->has_default_values(attr_skip_mask)
                     && post_ops_ok(attr())
                     && IMPLICATION(!attr()->output_scales_.has_default_values(),
-                            attr()->output_scales_.mask_ == 0);
-
+                            utils::one_of(
+                                    attr()->output_scales_.mask_, 0, 1 << 1));
             if (!ok) return status::unimplemented;
 
             status_t status = init_conf();
             if (status != status::success) return status;
+
+            auto scales_status = init_scales_md();
+            if (scales_status != status::success) return scales_status;
 
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
@@ -75,7 +78,21 @@ struct gen12lp_x8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
         status_t init_conf();
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
+        const memory_desc_t *scales_md() const { return &scales_md_; }
+
         conv_conf_t conf;
+
+    private:
+        status_t init_scales_md() {
+            if (!conf.with_per_oc_scales) return status::success;
+
+            scales_md_.data_type = data_type::f32;
+            scales_md_.ndims = 1;
+            scales_md_.dims[0] = attr()->output_scales_.count_;
+            return memory_desc_init_by_tag(scales_md_, format_tag::x);
+        }
+
+        memory_desc_t scales_md_;
     };
 
     status_t init() override {
@@ -84,6 +101,21 @@ struct gen12lp_x8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
         compute::kernel_ctx_t kernel_ctx;
         auto status = pd()->init_kernel_ctx(kernel_ctx);
         if (status != status::success) return status;
+
+        if (pd()->conf.with_per_oc_scales) {
+            memory_desc_wrapper scales_mdw(pd()->scales_md());
+            scales_mem_.reset(new memory_t(engine(), pd()->scales_md(),
+                    memory_flags_t::alloc, nullptr));
+            void *scales_ptr = nullptr;
+            status_t status
+                    = scales_mem_->memory_storage()->map_data(&scales_ptr);
+            if (status != status::success) return status;
+            utils::array_copy((float *)scales_ptr,
+                    pd()->attr()->output_scales_.scales_,
+                    pd()->attr()->output_scales_.count_);
+            status = scales_mem_->memory_storage()->unmap_data(scales_ptr);
+            if (status != status::success) return status;
+        }
 
         auto *compute_engine
                 = utils::downcast<compute::compute_engine_t *>(engine());
@@ -104,6 +136,7 @@ private:
     status_t execute_forward(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
     compute::kernel_t kernel_;
+    std::unique_ptr<memory_t> scales_mem_;
 };
 
 } // namespace ocl

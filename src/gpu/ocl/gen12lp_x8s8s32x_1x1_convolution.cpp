@@ -43,9 +43,6 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
                     && (conf.oc % 32 != 0 || conf.ic % 32 != 0)))
         return status::unimplemented;
 
-    if (conf.oc % 32 != 0 || conf.ic % 32 != 0) return status::unimplemented;
-
-    if (!(conf.mb == 8 || conf.mb % 16 == 0)) return status::unimplemented;
     conf.src_data_type = src_mdw.data_type();
     conf.dst_data_type = dst_mdw.data_type();
 
@@ -58,7 +55,7 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
         conf.mb_block = 32;
         conf.sp_block = 1;
     } else {
-        if (conf.stride_w != 1 || conf.stride_w != 1)
+        if (conf.stride_h != 1 || conf.stride_w != 1)
             return status::unimplemented;
         conf.mb_block = 1;
         conf.sp_block = 4;
@@ -147,6 +144,8 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("WITH_POST_SUM_ELTWISE", conf.with_post_sum_eltwise);
     if (conf.with_eltwise || conf.with_post_sum_eltwise)
         def_postops(kernel_ctx, conf.eltwise.alg);
+    kernel_ctx.define_int("SCALES_COMMON", conf.with_common_scales);
+    kernel_ctx.define_int("SCALES_PER_OC", conf.with_per_oc_scales);
 
     kernel_ctx.define_int("SUB_GROUP_SIZE", conf.sub_group_size);
 
@@ -193,8 +192,18 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::execute_forward(
     arg_list.set(6, conf.eltwise.scale);
     arg_list.set(7, conf.sum_scale);
 
-    float scales = pd()->attr()->output_scales_.scales_[0];
-    arg_list.set(8, scales);
+    if (conf.with_common_scales) {
+        float scales = pd()->attr()->output_scales_.scales_[0];
+        arg_list.set(8, scales);
+    } else {
+        arg_list.set(8, 1);
+    }
+
+    if (conf.with_per_oc_scales) {
+        arg_list.set(9, *scales_mem_->memory_storage());
+    } else {
+        arg_list.set(9, memory_storage_t::empty_storage());
+    }
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
     status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);

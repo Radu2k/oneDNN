@@ -32,8 +32,8 @@ protected:
     stream strm;
 
     virtual void SetUp() {
-        eng = engine(get_test_engine_kind(), 0);
-        strm = stream(eng);
+        eng = get_test_engine();
+        strm = make_stream(eng);
     }
 };
 
@@ -153,8 +153,8 @@ protected:
 
         const auto num_srcs = p.srcs_format.size();
 
-        auto eng = engine(get_test_engine_kind(), 0);
-        auto strm = stream(eng);
+        auto eng = get_test_engine();
+        auto strm = make_stream(eng);
 
         std::vector<memory::desc> srcs_md;
         std::vector<memory> srcs;

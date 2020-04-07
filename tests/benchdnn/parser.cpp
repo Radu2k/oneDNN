@@ -95,6 +95,11 @@ bool parse_skip_nonlinear(std::vector<bool> &skip, const char *str,
     return parse_vector_option(skip, str2bool, str, option_name);
 }
 
+bool parse_trivial_strides(std::vector<bool> &ts, const char *str,
+        const std::string &option_name /* = "trivial-strides"*/) {
+    return parse_vector_option(ts, str2bool, str, option_name);
+}
+
 bool parse_scale_policy(std::vector<policy_t> &policy, const char *str,
         const std::string &option_name /*= "scaling"*/) {
     return parse_vector_option(
@@ -102,16 +107,6 @@ bool parse_scale_policy(std::vector<policy_t> &policy, const char *str,
 }
 
 // plain types
-bool parse_skip_impl(const char *&skip_impl, const char *str,
-        const std::string &option_name /* = "skip-impl"*/) {
-    const std::string pattern = get_pattern(option_name);
-    if (pattern.find(str, 0, pattern.size()) != eol) {
-        skip_impl = str + pattern.size();
-        return true;
-    }
-    return false;
-}
-
 bool parse_allow_unimpl(bool &allow_unimpl, const char *str,
         const std::string &option_name /* = "allow-unimpl"*/) {
     return parse_single_value_option(allow_unimpl, str2bool, str, option_name);
@@ -136,16 +131,6 @@ bool parse_perf_template(const char *&pt, const char *pt_def,
             pt = pt_def;
         else
             pt = str;
-        return true;
-    }
-    return false;
-}
-
-bool parse_reset(void (*reset_func)(), const char *str,
-        const std::string &option_name /* = "reset"*/) {
-    const std::string pattern = get_pattern(option_name);
-    if (pattern.find(str, 0, pattern.size() - 1) != eol) {
-        reset_func();
         return true;
     }
     return false;
@@ -256,8 +241,8 @@ static bool parse_engine_kind(
         DNN_SAFE(dnnl_engine_destroy(engine_tgt), CRIT);
 
         DNN_SAFE(dnnl_engine_create(&engine_tgt, engine_tgt_kind, 0), CRIT);
-        DNN_SAFE(dnnl_stream_create(
-                         &stream_tgt, engine_tgt, dnnl_stream_default_flags),
+        SAFE(create_dnnl_stream(
+                     &stream_tgt, engine_tgt, dnnl_stream_default_flags),
                 CRIT);
         return true;
     }
@@ -280,6 +265,16 @@ static bool parse_scratchpad_mode(
             scratchpad_mode, str2scratchpad_mode, str, option_name);
 }
 
+static bool parse_skip_impl(
+        const char *str, const std::string &option_name = "skip-impl") {
+    const std::string pattern = get_pattern(option_name);
+    if (pattern.find(str, 0, pattern.size()) != eol) {
+        skip_impl = str + pattern.size();
+        return true;
+    }
+    return false;
+}
+
 bool parse_bench_settings(const char *str) {
     last_parsed_is_problem = false; // if start parsing, expect an option
 
@@ -287,7 +282,7 @@ bool parse_bench_settings(const char *str) {
             || parse_fix_times_per_prb(str) || parse_verbose(str)
             || parse_engine_kind(str) || parse_fast_ref_gpu(str)
             || parse_canonical(str) || parse_mem_check(str)
-            || parse_scratchpad_mode(str);
+            || parse_scratchpad_mode(str) || parse_skip_impl(str);
 }
 
 void catch_unknown_options(const char *str) {

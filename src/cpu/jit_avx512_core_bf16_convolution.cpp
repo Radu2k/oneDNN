@@ -65,18 +65,13 @@ void jit_avx512_core_bf16_convolution_fwd_t::execute_forward_1d(
     const memory_desc_wrapper dst_d(pd()->dst_md());
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
 
-    const auto &jcp = kernel_->jcp;
+    const auto &jcp = pd()->jcp_;
     assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
 
     int oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
     dim_t work_amount = jcp.mb * jcp.ngroups * oc_chunks * jcp.nb_ow;
 
-    int nthr;
-    if (jcp.aligned_threads)
-        nthr = jcp.aligned_threads;
-    else
-        nthr = dnnl_get_max_threads();
-
+    int nthr = jcp.aligned_threads ? jcp.aligned_threads : jcp.nthr;
     parallel(nthr, [&](const int ithr, const int nthr) {
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
@@ -146,18 +141,13 @@ void jit_avx512_core_bf16_convolution_fwd_t::execute_forward_2d(
     const memory_desc_wrapper dst_d(pd()->dst_md());
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
 
-    const auto &jcp = kernel_->jcp;
+    const auto &jcp = pd()->jcp_;
     assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
 
     int oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
     dim_t work_amount = jcp.mb * jcp.ngroups * oc_chunks * jcp.oh * jcp.nb_ow;
 
-    int nthr;
-    if (jcp.aligned_threads)
-        nthr = jcp.aligned_threads;
-    else
-        nthr = dnnl_get_max_threads();
-
+    int nthr = jcp.aligned_threads ? jcp.aligned_threads : jcp.nthr;
     parallel(nthr, [&](const int ithr, const int nthr) {
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
@@ -248,19 +238,14 @@ void jit_avx512_core_bf16_convolution_fwd_t::execute_forward_3d(
     const memory_desc_wrapper dst_d(pd()->dst_md());
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
 
-    const auto &jcp = kernel_->jcp;
+    const auto &jcp = pd()->jcp_;
     assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
 
     int oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
     dim_t work_amount
             = jcp.mb * jcp.ngroups * oc_chunks * jcp.od * jcp.oh * jcp.nb_ow;
 
-    int nthr;
-    if (jcp.aligned_threads)
-        nthr = jcp.aligned_threads;
-    else
-        nthr = dnnl_get_max_threads();
-
+    int nthr = jcp.aligned_threads ? jcp.aligned_threads : jcp.nthr;
     parallel(nthr, [&](const int ithr, const int nthr) {
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
@@ -360,9 +345,9 @@ void jit_avx512_core_bf16_convolution_bwd_data_t ::execute_backward_data_3d(
     const memory_desc_wrapper diff_src_d(pd()->diff_src_md());
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
 
-    const auto &jcp = kernel_->jcp;
+    const auto &jcp = pd()->jcp_;
 
-    parallel(0, [&](const int ithr, const int nthr) {
+    parallel(jcp.nthr, [&](const int ithr, const int nthr) {
         int start {0}, end {0};
         int ic_chunks = jcp.nb_ic / jcp.nb_ic_blocking;
         int work_amount = jcp.ngroups * jcp.mb * ic_chunks * jcp.id * jcp.ih;
@@ -509,9 +494,9 @@ void jit_avx512_core_bf16_convolution_bwd_data_t ::execute_backward_data(
     const memory_desc_wrapper diff_src_d(pd()->diff_src_md());
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
 
-    const auto &jcp = kernel_->jcp;
+    const auto &jcp = pd()->jcp_;
 
-    parallel(0, [&](const int ithr, const int nthr) {
+    parallel(jcp.nthr, [&](const int ithr, const int nthr) {
         int start {0}, end {0};
         int ic_chunks = jcp.nb_ic / jcp.nb_ic_blocking;
         int work_amount = jcp.ngroups * jcp.mb * ic_chunks * jcp.ih * jcp.nb_iw;
@@ -875,8 +860,7 @@ void jit_avx512_core_bf16_convolution_bwd_weights_t ::compute_diff_weights_2d(
                 balance211(work_amount, nthr_oc_b_, ti->ithr_oc_b, tr_start,
                         tr_end);
 
-                int g;
-                int ic_b;
+                int g {0}, ic_b {0};
                 nd_iterator_init(tr_start, g, ti->g_work, ic_b, ti->ic_b_work,
                         j, ih_e - ih_s);
 
@@ -910,8 +894,7 @@ void jit_avx512_core_bf16_convolution_bwd_weights_t ::compute_diff_weights_2d(
                 balance211(work_amount, nthr_ic_b_, ti->ithr_ic_b, tr_start,
                         tr_end);
 
-                int g;
-                int oc_b;
+                int g {0}, oc_b {0};
                 nd_iterator_init(tr_start, g, ti->g_work, oc_b, ti->oc_b_work,
                         j, oh_e - oh_s);
 
@@ -1054,8 +1037,7 @@ void jit_avx512_core_bf16_convolution_bwd_weights_t ::compute_diff_weights_3d(
                 balance211(work_amount, nthr_oc_b_, ti->ithr_oc_b, tr_start,
                         tr_end);
 
-                int g;
-                int ic_b;
+                int g {0}, ic_b {0};
 
                 nd_iterator_init(tr_start, g, ti->g_work, ic_b, ti->ic_b_work,
                         d, id_e - id_s);
@@ -1092,8 +1074,7 @@ void jit_avx512_core_bf16_convolution_bwd_weights_t ::compute_diff_weights_3d(
                 balance211(work_amount, nthr_ic_b_, ti->ithr_ic_b, tr_start,
                         tr_end);
 
-                int g;
-                int oc_b;
+                int g {0}, oc_b {0};
 
                 nd_iterator_init(tr_start, g, ti->g_work, oc_b, ti->oc_b_work,
                         d, od_e - od_s);
@@ -1615,6 +1596,7 @@ void jit_avx512_core_bf16_convolution_bwd_weights_t ::execute_backward_weights(
     if (!dnnl_thr_syncable()
             && (nthr_mb_ > _start_nthr_mb || pd()->with_bias())) {
         parallel(nthr_, [&](const int ithr, const int nthr) {
+            assert(nthr_ == nthr);
             thread_info_t thread_info(this, ctx, ithr);
             if (nthr_mb_ > _start_nthr_mb)
                 reduce_and_convert_diff_weights(&thread_info);
