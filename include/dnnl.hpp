@@ -33,6 +33,10 @@
 
 #include "dnnl.h"
 
+#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
+#include "dnnl_threadpool_iface.hpp"
+#endif
+
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
 #include <CL/cl.h>
 #endif
@@ -70,17 +74,17 @@
     } while (0)
 #endif
 
-/// @addtogroup dnnl_api DNNL API
+/// @addtogroup dnnl_api oneDNN API
 /// @{
 
-/// DNNL namespace
+/// oneDNN namespace
 namespace dnnl {
 
 /// @addtogroup dnnl_api_utils Utilities
 /// Utility types and definitions.
 /// @{
 
-/// DNNL exception class.
+/// oneDNN exception class.
 ///
 /// This class captures the status returned by a failed C API function and
 /// the error message from the call site.
@@ -118,11 +122,11 @@ void validate_container_size(const T &v, const char *error_message,
 }
 /// @endcond
 
-/// A class that provides the destructor for a DNNL C API handle.
+/// A class that provides the destructor for a oneDNN C API handle.
 template <typename T>
 struct handle_traits {};
 
-/// DNNL C API handle wrapper class.
+/// oneDNN C API handle wrapper class.
 ///
 /// This class is used as the base class for primitive (dnnl::primitive),
 /// engine (dnnl::engine), and stream (dnnl::stream) classes, as well as
@@ -132,7 +136,7 @@ struct handle_traits {};
 /// Otherwise, it follows `std::shared_ptr` semantics.
 ///
 /// @note
-///     The implementation stores DNNL C API handles in a `std::shared_ptr`
+///     The implementation stores oneDNN C API handles in a `std::shared_ptr`
 ///     with deleter set to a dummy function in the weak mode.
 ///
 template <typename T, typename traits = handle_traits<T>>
@@ -354,8 +358,8 @@ struct primitive : public handle<dnnl_primitive_t> {
     /// @param stream Stream object. The stream must belong to the same engine
     ///     as the primitive.
     /// @param args Arguments map.
-    void execute(
-            stream &stream, const std::unordered_map<int, memory> &args) const;
+    void execute(const stream &stream,
+            const std::unordered_map<int, memory> &args) const;
 };
 
 /// Converts primitive kind enum value from C++ API to C API type.
@@ -961,6 +965,14 @@ private:
     }
 };
 
+/// Converts engine kind enum value from C++ API to C API type.
+///
+/// @param kind C++ API engine kind enum value.
+/// @returns Corresponding C API engine kind enum value.
+inline dnnl_engine_kind_t convert_to_c(engine::kind kind) {
+    return static_cast<dnnl_engine_kind_t>(kind);
+}
+
 /// @} dnnl_api_engine
 
 /// @addtogroup dnnl_api_stream Stream
@@ -978,7 +990,58 @@ struct handle_traits<dnnl_stream_t> {
         return dnnl_stream_destroy(p);
     }
 };
+template <>
+struct handle_traits<dnnl_stream_attr_t> {
+    static dnnl_status_t destructor(dnnl_stream_attr_t p) {
+        return dnnl_stream_attr_destroy(p);
+    }
+};
 /// @endcond
+
+/// A container for stream attributes.
+struct stream_attr : public handle<dnnl_stream_attr_t> {
+    using handle::handle;
+
+    /// Constructs default (empty) stream attributes.
+    stream_attr() = default;
+
+    /// Constructs stream attributes for a stream that runs on an engine of a
+    /// particular kind.
+    ///
+    /// @param kind Target engine kind.
+    stream_attr(engine::kind kind) {
+        dnnl_stream_attr_t attr;
+        error::wrap_c_api(dnnl_stream_attr_create(&attr, convert_to_c(kind)),
+                "could not create stream attributes");
+        reset(attr);
+    }
+
+#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
+    /// Sets the threadpool attribute. Always throws unless oneDNN is built with
+    /// threadpool runtime.
+    ///
+    /// @sa @ref dev_guide_threadpool
+    ///
+    /// @param threadpool A pointer to an instance of a class that implements
+    ///     the dnnl::threadpool_iface interface.
+    void set_threadpool(threadpool_iface *threadpool) {
+        error::wrap_c_api(dnnl_stream_attr_set_threadpool(get(), threadpool),
+                "could not set stream threadpool attribute");
+    }
+
+    /// Returns the threadpool attribute. Always throws unless oneDNN is built
+    /// with threadpool runtime.
+    ///
+    /// @sa @ref dev_guide_threadpool
+    ///
+    threadpool_iface *get_threadpool() {
+        threadpool_iface *tp;
+        error::wrap_c_api(dnnl_stream_attr_get_threadpool(get(), (void **)&tp),
+                "could not set stream threadpool attribute");
+        return tp;
+    }
+#endif
+};
 
 /// An execution stream.
 struct stream : public handle<dnnl_stream_t> {
@@ -1006,10 +1069,13 @@ struct stream : public handle<dnnl_stream_t> {
     ///
     /// @param engine Engine to create the stream on.
     /// @param flags Flags controlling stream behavior.
-    stream(const engine &engine, flags flags = flags::default_flags) {
+    /// @param attr Stream attributes.
+    stream(const engine &engine, flags flags = flags::default_flags,
+            const stream_attr &attr = stream_attr()) {
         dnnl_stream_t stream;
-        error::wrap_c_api(dnnl_stream_create(&stream, engine.get(),
-                                  static_cast<dnnl_stream_flags_t>(flags)),
+        error::wrap_c_api(dnnl_stream_create_v2(&stream, engine.get(),
+                                  static_cast<dnnl_stream_flags_t>(flags),
+                                  attr.get(true)),
                 "could not create a stream");
         reset(stream);
     }
@@ -1930,7 +1996,8 @@ struct memory : public handle<dnnl_memory_t> {
     ///
     /// Unless @p handle is equal to DNNL_MEMORY_NONE, the constructed memory
     /// object will have the underlying buffer set. In this case, the buffer
-    /// will be initialized as if memory::set_data_handle() had been called.
+    /// will be initialized as if #dnnl::memory::set_data_handle() had been
+    /// called.
     ///
     /// @sa memory::set_data_handle()
     ///
@@ -1988,44 +2055,60 @@ struct memory : public handle<dnnl_memory_t> {
         return handle;
     }
 
-    /// Sets memory buffer.
+    /// Sets data handle.
     ///
-    /// This function may write zeroes to the specified data @p handle if the
-    /// memory object has padding to maintain data consistency.
+    /// This function may write zero values to the memory specified by the @p
+    /// handle if the memory object has a zero padding area. This may be time
+    /// consuming and happens each time this function is called.  The
+    /// operation is always blocking and the stream parameter is a hint.
     ///
     /// @note
-    ///     The padding is performed for memory objects created with blocked
-    ///     memory format tags like #dnnl_aBcd8b when any of the dimensions is
-    ///     not a multiple of a corresponding block size. The padding is
-    ///     performed only for memory objects created with plain memory format
-    ///     tags like #dnnl_nchw or #dnnl_nhwc if requested explicitly. More
-    ///     information is available in @ref
-    ///     dev_guide_understanding_memory_formats.
+    ///     The zero padding is required by memory objects created with
+    ///     blocked memory format tags like #dnnl_aBcd8b when any of the
+    ///     dimensions is not a multiple of the corresponding block size. For
+    ///     "plain" formats like #dnnl::memory::format_tag::nchw or
+    ///     #dnnl::memory::format_tag::nhwc zero padding area needs to be set
+    ///     up explicitly when creating the corresponding memory descriptors.
+    ///     See @ref dev_guide_understanding_memory_formats for more details.
     ///
-    /// The write can be time consuming and happens each time the function is
-    /// called. Furthermore, it is performed using an internal service stream
-    /// in a blocking manner.
+    /// @note
+    ///     Even when the memory object is used to hold values that stay
+    ///     constant during the execution of the program (pre-packed weights
+    ///     during inference, for example), the function will still write
+    ///     zeroes to the padding area if it exists. Hence, the @p handle
+    ///     parameter cannot and does not have a const qualifier.
     ///
-    /// @warning
-    ///     Even if the memory object is used to hold values that stay constant
-    ///     (e.g., pre-packed weights during inference), the function will still
-    ///     write zeroes to the padding area if it exists. Hence, the @p
-    ///     handle parameter cannot and does not have a const qualifier.
-    ///
-    /// @param handle Output data handle. For the CPU engine, the data handle
+    /// @param handle Data handle. For the CPU engine, the data handle
     ///     is a pointer to the actual data. For OpenCL it is a cl_mem.
-    void set_data_handle(void *handle) const {
-        error::wrap_c_api(dnnl_memory_set_data_handle(get(), handle),
+    /// @param stream Stream to use to execute padding in.
+    void set_data_handle(void *handle, const stream &stream) const {
+        error::wrap_c_api(
+                dnnl_memory_set_data_handle_v2(get(), handle, stream.get(true)),
                 "could not set native handle of a memory object");
     }
 
-    /// Maps the data of the memory.
+    /// Sets data handle.
+    ///
+    /// See documentation for
+    /// #dnnl::memory::set_data_handle(void *, const stream &) const
+    /// for more information.
+    ///
+    /// @param handle Data handle. For the CPU engine, the data handle
+    ///     is a pointer to the actual data. For OpenCL it is a cl_mem.
+    void set_data_handle(void *handle) const {
+        error::wrap_c_api(
+                dnnl_memory_set_data_handle_v2(get(), handle, nullptr),
+                "could not set native handle of a memory object");
+    }
+
+    /// Maps a memory object and returns a host-side pointer to a memory
+    /// buffer with a copy of its contents.
     ///
     /// Mapping enables read/write directly from/to the memory contents for
     /// engines that do not support direct memory access.
     ///
     /// Mapping is an exclusive operation - a memory object cannot be used in
-    /// other operations until this memory object is unmapped.
+    /// other operations until it is unmapped via memory::unmap_data() call.
     ///
     /// @note
     ///     Any primitives working with the memory should be completed before
@@ -2033,8 +2116,8 @@ struct memory : public handle<dnnl_memory_t> {
     ///     corresponding execution stream.
     ///
     /// @note
-    ///     The map/unmap API is provided mainly for debug/testing purposes and
-    ///     its performance may be suboptimal.
+    ///     The map_data and unmap_data functions are provided mainly for
+    ///     debug and testing purposes and their performance may be suboptimal.
     ///
     /// @tparam T Data type to return a pointer to.
     /// @returns Pointer to the mapped memory.
@@ -2046,15 +2129,13 @@ struct memory : public handle<dnnl_memory_t> {
         return static_cast<T *>(mapped_ptr);
     }
 
-    /// Unmaps the previously mapped data for the memory.
-    ///
-    /// Any changes of the mapped data are synchronized back to the memory
-    /// after the call is complete. The mapped pointer must be
-    /// obtained through a map_data() call.
+    /// Unmaps a memory object and writes back any changes made to the
+    /// previously mapped memory buffer. The pointer to the mapped buffer
+    /// must be obtained via the dnnl::memory::map_data() call.
     ///
     /// @note
-    ///     The map/unmap API is provided mainly for debug/testing purposes and
-    ///     its performance may be suboptimal.
+    ///     The map_data and unmap_data functions are provided mainly for
+    ///     debug and testing purposes and their performance may be suboptimal.
     ///
     /// @param mapped_ptr A pointer previously returned by map_data().
     void unmap_data(void *mapped_ptr) const {
@@ -2444,7 +2525,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
         dnnl_scratchpad_mode_t result;
         error::wrap_c_api(
                 dnnl_primitive_attr_get_scratchpad_mode(get(), &result),
-                "could not get primitive scratchpad mode attribute");
+                "could not get scratchpad mode primitive attribute");
         return scratchpad_mode(result);
     }
 
@@ -2454,7 +2535,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
     void set_scratchpad_mode(scratchpad_mode mode) {
         error::wrap_c_api(dnnl_primitive_attr_set_scratchpad_mode(
                                   get(), dnnl::convert_to_c(mode)),
-                "could not set primitive scratchpad mode attribute");
+                "could not set scratchpad mode primitive attribute");
     }
 
     /// Returns output scaling factors correspondence mask and values.
@@ -2472,7 +2553,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
         const float *c_scales;
         error::wrap_c_api(dnnl_primitive_attr_get_output_scales(
                                   get(), &count, &c_mask, &c_scales),
-                "could not get primitive output scales attribute");
+                "could not get output scales primitive attribute");
         scales.resize(count);
 
         mask = c_mask;
@@ -2526,7 +2607,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
         error::wrap_c_api(
                 dnnl_primitive_attr_set_output_scales(
                         get(), (dnnl_dim_t)scales.size(), mask, scales.data()),
-                "could not set primitive output scales attribute");
+                "could not set output scales primitive attribute");
     }
 
     /// Returns scaling factors correspondence mask and values for a given
@@ -2546,7 +2627,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
         const float *c_scales;
         error::wrap_c_api(dnnl_primitive_attr_get_scales(
                                   get(), arg, &count, &c_mask, &c_scales),
-                "could not get scales");
+                "could not get scales primitive attributes");
         scales.resize(count);
 
         mask = c_mask;
@@ -2574,7 +2655,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
         error::wrap_c_api(
                 dnnl_primitive_attr_set_scales(get(), arg,
                         (dnnl_dim_t)scales.size(), mask, scales.data()),
-                "could not set scales");
+                "could not set scales primitive attribute");
     }
 
     /// Returns zero points correspondence mask and values.
@@ -2594,7 +2675,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
         const int32_t *c_zero_points;
         error::wrap_c_api(dnnl_primitive_attr_get_zero_points(
                                   get(), arg, &count, &c_mask, &c_zero_points),
-                "could not get primitive zero points attribute");
+                "could not get zero points primitive attribute");
         zero_points.resize(count);
 
         mask = c_mask;
@@ -2627,7 +2708,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
         error::wrap_c_api(dnnl_primitive_attr_set_zero_points(get(), arg,
                                   (dnnl_dim_t)zero_points.size(), mask,
                                   zero_points.data()),
-                "could not set primitive zero points attribute");
+                "could not set zero points primitive attribute");
     }
 
     /// Returns post-ops previously set via set_post_ops().
@@ -2637,7 +2718,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
         post_ops result;
         const_dnnl_post_ops_t c_result;
         error::wrap_c_api(dnnl_primitive_attr_get_post_ops(get(), &c_result),
-                "could not get primitive post-ops attribute");
+                "could not get post-ops primitive attribute");
         result.reset(const_cast<dnnl_post_ops_t>(c_result), true);
         return result;
     }
@@ -2652,7 +2733,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
     /// @param ops Post-ops object to copy post-ops from.
     void set_post_ops(const post_ops ops) {
         error::wrap_c_api(dnnl_primitive_attr_set_post_ops(get(), ops.get()),
-                "could not set primitive post-ops attribute");
+                "could not set post-ops primitive attribute");
     }
 
     /// Sets quantization scale and shift parameters for RNN data tensors.
@@ -2691,8 +2772,8 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
     void set_rnn_data_qparams(float scale, float shift) {
         error::wrap_c_api(
                 dnnl_primitive_attr_set_rnn_data_qparams(get(), scale, shift),
-                "could not get primitive RNN data quantization parameters "
-                "attributes");
+                "could not get RNN data quantization parameters primitive "
+                "attribute");
     }
 
     /// Sets quantization scaling factors for RNN weights tensors. The
@@ -2724,8 +2805,8 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
     void set_rnn_weights_qparams(int mask, const std::vector<float> &scales) {
         error::wrap_c_api(dnnl_primitive_attr_set_rnn_weights_qparams(get(),
                                   (int)scales.size(), mask, scales.data()),
-                "could not get primitive RNN weights quantization parameters "
-                "attributes");
+                "could not get RNN weights quantization parameters primitive "
+                "attribute");
     }
 };
 
@@ -3166,7 +3247,7 @@ struct reorder : public primitive {
     ///     as the primitive.
     /// @param src Source memory object.
     /// @param dst Destination memory object.
-    void execute(stream stream, memory &src, memory &dst) const {
+    void execute(const stream &stream, memory &src, memory &dst) const {
         primitive::execute(stream, {{DNNL_ARG_FROM, src}, {DNNL_ARG_TO, dst}});
     }
 };
@@ -7849,8 +7930,8 @@ struct lstm_forward : public primitive {
     struct desc {
         dnnl_rnn_desc_t data;
 
-        /// Constructs a descriptor for an LSTM (with or without peephole and
-        /// with or without projection) forward propagation primitive.
+        /// Constructs a descriptor for an LSTM (with or without peephole)
+        /// forward propagation primitive.
         ///
         /// The @p src_iter_desc, @p src_iter_c_desc, @p weights_peephole_desc,
         /// @p bias_desc, @p dst_iter_desc, and @p dst_iter_c_desc may point to
@@ -7858,42 +7939,32 @@ struct lstm_forward : public primitive {
         /// forward propagation primitive should not use them and should
         /// default to zero values instead.
         ///
-        /// The @p weights_projection_desc may point to a zero memory
-        /// descriptor. This would then indicate that the LSTM doesn't have
-        /// recurrent projection layer.
-        ///
-        /// @note
-        ///     All memory descriptors can be initialized with an
-        ///     #dnnl::memory::format_tag::any value of @p format_tag.
-        ///
         /// Inputs:
-        ///  - src_layer (#dnnl::primitive_desc_base::src_desc (0))
-        ///  - src_iter (#dnnl::primitive_desc_base::src_desc (1)), if used
-        ///  - src_iter_c (#dnnl::primitive_desc_base::src_desc (2)), if used
-        ///  - weights_layer (#dnnl::primitive_desc_base::weights_desc (0))
-        ///  - weights_iter (#dnnl::primitive_desc_base::weights_desc (1))
-        ///  - weights_peephole (#dnnl::primitive_desc_base::weights_desc (2)),
+        ///  - `src_layer` (#dnnl::primitive_desc_base::src_desc(`0`))
+        ///  - `src_iter` (#dnnl::primitive_desc_base::src_desc(`1`)), if used
+        ///  - `src_iter_c` (#dnnl::primitive_desc_base::src_desc(`2`)), if used
+        ///  - `weights_layer` (#dnnl::primitive_desc_base::weights_desc(`0`))
+        ///  - `weights_iter` (#dnnl::primitive_desc_base::weights_desc(`1`))
+        ///  - `weights_peephole` (#dnnl::primitive_desc_base::weights_desc(`2`)),
         ///    if used
-        ///  - weights_projection
-        ///    (#dnnl::primitive_desc_base::weights_desc (index)), if used and
-        ///    index is:
-        ///    - 2, if there is no weights_peephole
-        ///    - 3, otherwise
-        ///  - bias (#dnnl::primitive_desc_base::weights_desc (index)), if used
-        ///    and index is:
-        ///    - 2, if neither weights_peephole nor weights_projection is used
-        ///    - 3, if one of weights_peephole or weights_projection is used
-        ///    - 4, if both weights_peephole and weights_projection are used
+        ///  - `bias` (#dnnl::primitive_desc_base::weights_desc(`2`)), if used and
+        ///    LSTM is without peephole
+        ///  - `bias` (#dnnl::primitive_desc_base::weights_desc(`3`)), if used and
+        ///    LSTM is with peephole
         ///
         /// Outputs:
-        ///  - dst_layer (#dnnl::primitive_desc_base::dst_desc (0))
-        ///  - dst_iter (#dnnl::primitive_desc_base::dst_desc (1)), if used
-        ///  - dst_iter_c (#dnnl::primitive_desc_base::dst_desc (2)), if used
-        ///  - workspace (#dnnl::primitive_desc_base::workspace_desc (0)),
+        ///  - `dst_layer` (#dnnl::primitive_desc_base::dst_desc(`0`))
+        ///  - `dst_iter` (#dnnl::primitive_desc_base::dst_desc(`1`)), if used
+        ///  - `dst_iter_c` (#dnnl::primitive_desc_base::dst_desc(`2`)), if used
+        ///  - `workspace` (#dnnl::primitive_desc_base::workspace_desc(`0`)),
         ///     if @p prop_kind equals #dnnl::prop_kind::forward_training;
         ///     must be queried for using @ref
         ///     dnnl::primitive_desc_base::query_md() after a corresponding
         ///     primitive descriptor is created
+        ///
+        /// @note
+        ///     All memory descriptors can be initialized with an
+        ///     #dnnl::memory::format_tag::any value of @p format_tag.
         ///
         /// @param prop_kind Propagation kind. Possible values are
         ///     #dnnl::prop_kind::forward_training, and
@@ -7912,9 +7983,6 @@ struct lstm_forward : public primitive {
         /// @param weights_peephole_desc Memory descriptor for the weights
         ///     applied to the cell states (according to the Peephole LSTM
         ///     formula).
-        /// @param weights_projection_desc Memory descriptor for the weights
-        ///     applied to the hidden states to get the recurrent projection
-        ///     (according to the Projection LSTM formula).
         /// @param bias_desc Bias memory descriptor.
         /// @param dst_layer_desc Memory descriptor for the output vector.
         /// @param dst_iter_desc Memory descriptor for the output recurrent
@@ -10346,7 +10414,7 @@ struct resampling_backward : public primitive {
 
 /// @addtogroup dnnl_api_service Service
 ///
-/// A set of functions that aid in DNNL debugging and profiling.
+/// A set of functions that aid in oneDNN debugging and profiling.
 ///
 /// @{
 
@@ -10459,6 +10527,36 @@ inline status gemm_s8s8s32(char transa, char transb, char offsetc, dnnl_dim_t M,
             K, alpha, A, lda, ao, B, ldb, bo, beta, C, ldc, co));
 }
 
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+/// @copydoc dnnl_sgemm_tp()
+inline status sgemm(char transa, char transb, dnnl_dim_t M, dnnl_dim_t N,
+        dnnl_dim_t K, float alpha, const float *A, dnnl_dim_t lda,
+        const float *B, dnnl_dim_t ldb, float beta, float *C, dnnl_dim_t ldc,
+        dnnl::threadpool_iface *tp) {
+    return static_cast<status>(dnnl_sgemm_tp(
+            transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc, tp));
+}
+/// @copydoc dnnl_gemm_u8s8s32_tp()
+inline status gemm_u8s8s32(char transa, char transb, char offsetc, dnnl_dim_t M,
+        dnnl_dim_t N, dnnl_dim_t K, float alpha, const uint8_t *A,
+        dnnl_dim_t lda, uint8_t ao, const int8_t *B, dnnl_dim_t ldb, int8_t bo,
+        float beta, int32_t *C, dnnl_dim_t ldc, const int32_t *co,
+        dnnl::threadpool_iface *tp) {
+    return static_cast<status>(dnnl_gemm_u8s8s32_tp(transa, transb, offsetc, M,
+            N, K, alpha, A, lda, ao, B, ldb, bo, beta, C, ldc, co, tp));
+}
+
+/// @copydoc dnnl_gemm_s8s8s32_tp()
+inline status gemm_s8s8s32(char transa, char transb, char offsetc, dnnl_dim_t M,
+        dnnl_dim_t N, dnnl_dim_t K, float alpha, const int8_t *A,
+        dnnl_dim_t lda, int8_t ao, const int8_t *B, dnnl_dim_t ldb, int8_t bo,
+        float beta, int32_t *C, dnnl_dim_t ldc, const int32_t *co,
+        dnnl::threadpool_iface *tp) {
+    return static_cast<status>(dnnl_gemm_s8s8s32_tp(transa, transb, offsetc, M,
+            N, K, alpha, A, lda, ao, B, ldb, bo, beta, C, ldc, co, tp));
+}
+#endif
+
 /// @} dnnl_api_blas
 
 // implementation section
@@ -10473,8 +10571,8 @@ inline primitive::primitive(const_dnnl_primitive_desc_t c_pd) {
 
 inline primitive::primitive(const primitive_desc &pd) : primitive(pd.get()) {}
 
-inline void primitive::execute(
-        stream &stream, const std::unordered_map<int, memory> &args) const {
+inline void primitive::execute(const stream &stream,
+        const std::unordered_map<int, memory> &args) const {
     std::vector<dnnl_exec_arg_t> c_args;
     c_args.reserve(args.size());
     for (const auto &a : args)

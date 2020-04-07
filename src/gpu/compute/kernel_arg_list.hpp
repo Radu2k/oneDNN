@@ -51,7 +51,6 @@ enum class scalar_type_t {
     _uint,
     _ulong,
     _ushort,
-    _bool,
 };
 
 template <typename T>

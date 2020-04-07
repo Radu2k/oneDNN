@@ -309,7 +309,7 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::execute_forward(
         float scales = pd()->attr()->output_scales_.scales_[0];
         arg_list.set(8, scales);
     } else {
-        arg_list.set(8, 1);
+        arg_list.set(8, 1.0f);
     }
 
     if (conf.with_per_oc_scales) {

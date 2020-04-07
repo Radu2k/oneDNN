@@ -211,7 +211,7 @@ status_t ref_convolution_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
             float scales = pd()->attr()->output_scales_.scales_[0];
             arg_list.set(8, scales);
         } else {
-            arg_list.set(8, 1);
+            arg_list.set(8, 1.0f);
         }
 
         if (pd()->with_per_oc_scales()) {

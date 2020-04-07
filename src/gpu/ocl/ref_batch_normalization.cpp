@@ -75,15 +75,15 @@ static status_t init_conf_common(bnorm_conf_t &conf, offsets_t &off,
 
     const bool has_padding = !data_mdw.is_dense();
 
-    if (!has_padding
+    if (!has_padding && conf.is_backward
             && data_mdw.matches_one_of_tag(nCw16c, nChw16c, nCdhw16c, NCw16n16c,
                     NChw16n16c, NCdhw16n16c)) {
         conf.mb_block = data_mdw.matches_one_of_tag(
                                 NCw16n16c, NChw16n16c, NCdhw16n16c)
                 ? 16
                 : 1;
-
         conf.ic_block = 16;
+        conf.use_16mb_unroll = 1;
 
         const int max_stat_nblocks = 256;
         int stat_mb_nblocks = conf.mb / conf.mb_block;
@@ -121,8 +121,6 @@ static status_t init_conf_common(bnorm_conf_t &conf, offsets_t &off,
         conf.dispatch.generate();
     } else {
         // Reference
-        conf.ic_block = 1;
-        conf.mb_block = 1;
         conf.use_16mb_unroll = 0;
         conf.dispatch = compute_engine->create_dispatch(data_mdw.md_);
         conf.dispatch.define_dim("MB", 0, conf.mb);
@@ -185,10 +183,11 @@ static status_t init_kernel_ctx_common(compute::kernel_ctx_t &kernel_ctx,
     kernel_ctx.define_int("ID", conf.id);
     kernel_ctx.define_int("IH", conf.ih);
     kernel_ctx.define_int("IW", conf.iw);
-    kernel_ctx.define_int("IC_BLOCK", conf.ic_block);
-    kernel_ctx.define_int("MB_BLOCK", conf.mb_block);
-    kernel_ctx.define_int("REDUCE_STAT_NBLOCKS", conf.reduce_stat_nblocks);
+    kernel_ctx.define_int("USE_16MB_UNROLL", conf.use_16mb_unroll);
     kernel_ctx.define_int("USE_NHWC", conf.use_nhwc);
+    kernel_ctx.define_int("REDUCE_STAT_NBLOCKS", conf.reduce_stat_nblocks);
+    kernel_ctx.define_int("MB_BLOCK", conf.mb_block);
+    kernel_ctx.define_int("IC_BLOCK", conf.ic_block);
 
     kernel_ctx.define_int("REDUCE_DIM_IDX", conf.reduce_dim_idx);
     kernel_ctx.define_int("REDUCE_DIM", conf.reduce_dim);
@@ -207,12 +206,12 @@ static status_t init_kernel_ctx_common(compute::kernel_ctx_t &kernel_ctx,
     kernel_ctx.define_int("CALCULATE_DIFF_STATS", conf.calculate_diff_stats);
     kernel_ctx.define_int("DIFF_SCALESHIFT", conf.diff_scaleshift);
 
+    def_offsets(off.src_off, kernel_ctx, "SRC", conf.ndims);
+
     if (conf.data_type == data_type::s8)
         kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
-    def_offsets(off.src_off, kernel_ctx, "SRC", conf.ndims);
-
-    if (conf.ic_block == 16) {
+    if (conf.calculate_stats || conf.is_backward) {
         def_dispatch(kernel_ctx, conf.dispatch_calc_stat);
         def_dispatch(kernel_ctx, conf.dispatch_reduce_stat);
     }
@@ -232,9 +231,10 @@ status_t ref_batch_normalization_fwd_t::pd_t::init_kernel_ctx(
 
 status_t ref_batch_normalization_fwd_t::pd_t::init_scratchpad(
         memory_tracking::registrar_t &scratchpad) const {
-    if (conf.ic_block == 16 && conf.calculate_stats) {
-        size_t size = 2 * conf.reduce_stat_nblocks * conf.ic
-                * types::data_type_size(data_type::f32);
+    if (conf.calculate_stats) {
+
+        size_t size = 2 * conf.stat_ic * types::data_type_size(data_type::f32);
+
         scratchpad.book(memory_tracking::names::key_bnorm_reduction, size);
     }
 
@@ -266,7 +266,7 @@ status_t ref_batch_normalization_fwd_t::execute_forward(
     auto *variance_ptr = &variance_;
 
     std::unique_ptr<memory_storage_t> temp_reduce = nullptr;
-    if (conf.ic_block == 16 && conf.calculate_stats) {
+    if (conf.calculate_stats) {
         temp_reduce = ctx.get_scratchpad_grantor().get_memory_storage(
                 key_bnorm_reduction);
 
@@ -279,7 +279,7 @@ status_t ref_batch_normalization_fwd_t::execute_forward(
     auto &mean = *mean_ptr;
     auto &variance = *variance_ptr;
 
-    if (conf.ic_block == 16 && conf.calculate_stats) {
+    if (conf.calculate_stats) {
         status_t status;
 
         compute::kernel_arg_list_t calc_mean_arg_list;
@@ -347,7 +347,7 @@ status_t ref_batch_normalization_bwd_t::pd_t::init_kernel_ctx(
 status_t ref_batch_normalization_bwd_t::pd_t::init_scratchpad(
         memory_tracking::registrar_t &scratchpad) const {
     size_t size;
-    if (conf.ic_block == 16) {
+    if (conf.use_16mb_unroll) {
         size = 2 * conf.reduce_stat_nblocks * conf.ic
                 * types::data_type_size(data_type::f32);
     } else {
@@ -377,14 +377,11 @@ status_t ref_batch_normalization_bwd_t::execute_backward(
     const auto &conf = pd()->conf;
 
     std::unique_ptr<memory_storage_t> temp_reduce;
-    if (conf.ic_block == 16) {
-        temp_reduce = ctx.get_scratchpad_grantor().get_memory_storage(
-                key_bnorm_reduction);
-    }
+    temp_reduce = ctx.get_scratchpad_grantor().get_memory_storage(
+            key_bnorm_reduction);
 
-    auto &diff_scaleshift = (conf.ic_block == 16 && !conf.diff_scaleshift)
-            ? *temp_reduce
-            : diff_scaleshift_;
+    auto &diff_scaleshift
+            = (!conf.diff_scaleshift) ? *temp_reduce : diff_scaleshift_;
 
     status_t status;
 
