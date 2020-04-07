@@ -17,6 +17,7 @@
 #include "dnnl_types.h"
 
 #include "c_types_map.hpp"
+#include "dnnl_thread.hpp"
 #include "nstl.hpp"
 #include "type_helpers.hpp"
 
@@ -237,7 +238,6 @@ jit_uni_pooling_bwd_t<isa, d_type>::jit_uni_pooling_bwd_t(const pd_t *apd)
     if (jpp.tag_kind == jptg_ncsp) {
         using namespace jit_uni_pooling_utils;
         auto diff_src_sp = (dim_t)jpp.id * jpp.ih * jpp.iw;
-
         auto diff_dst_sp = (dim_t)jpp.od * jpp.oh * jpp.ow;
         dim_t nb_c = jpp.c_without_padding / jpp.c_block;
         dim_t c_tail = jpp.c_without_padding % jpp.c_block;
@@ -291,10 +291,6 @@ void jit_uni_pooling_bwd_t<isa, d_type>::execute_backward(
 
     const auto &jpp = pd()->jpp_;
 
-    auto diff_src_sp_size = (dim_t)jpp.id * jpp.ih * jpp.iw;
-    auto diff_src_slice_size = diff_src_sp_size * jpp.c_block;
-    auto diff_dst_sp_size = (dim_t)jpp.od * jpp.oh * jpp.ow;
-    auto diff_dst_slice_size = diff_dst_sp_size * jpp.c_block;
     auto diff_src_sp = (dim_t)jpp.id * jpp.ih * jpp.iw;
     auto diff_src_slice = diff_src_sp * jpp.c_block;
     auto diff_dst_sp = (dim_t)jpp.od * jpp.oh * jpp.ow;
@@ -382,29 +378,13 @@ void jit_uni_pooling_bwd_t<isa, d_type>::execute_backward(
             trans_tail->exec(inp, out);
     };
 
-   /*auto trans_exec = [&](tr::kernel_t *trans_ker, const void *inp, void *out) {
-        tr::call_param_t cp;
-        cp.in = inp;
-        cp.out = out;
-        cp.scale = 0;
-        trans_ker->operator()(&cp);
-    };*/
-
     auto process_block = [&](int ithr, int n, int b_c) {
-        if (diff_src_d.is_plain()) {
-            if (transpose_diff_src) {
-                const wsp_data_t zero_val = 0;
-                wsp_data_t *src_diff_base_ptr
-                        = cvt_slice_src_wsp + ithr * diff_src_slice_size;
-                for (dim_t idx = 0; idx < diff_src_slice_size; ++idx)
-                    src_diff_base_ptr[idx] = zero_val;
-            } else {
-                const data_t zero_val = 0;
-                data_t *src_diff_base_ptr = &diff_src[diff_src_d.blk_off(
-                        n, jpp.c_block * b_c, 0)];
-                for (dim_t idx = 0; idx < diff_src_slice_size; ++idx)
-                    src_diff_base_ptr[idx] = zero_val;
-            }
+        if (transpose_diff_src) {
+            const wsp_data_t zero_val = 0;
+            wsp_data_t *src_diff_base_ptr
+                    = cvt_slice_src_wsp + ithr * diff_src_slice;
+            for (dim_t idx = 0; idx < diff_src_slice; ++idx)
+                src_diff_base_ptr[idx] = zero_val;
         } else {
             const data_t zero_val = 0;
             auto ch_off = jpp.is_plain() ? b_c * jpp.c_block : b_c;
@@ -468,35 +448,6 @@ void jit_uni_pooling_bwd_t<isa, d_type>::execute_backward(
             char *__restrict ind_ptr
                     = cvt_slice_ind_wsp + ithr * diff_dst_slice * ind_dt_size;
             for_(dim_t s = 0; s < diff_dst_sp; s++)
-            for_(dim_t c = c_tail; c < jpp.c_block; c++)
-            for (size_t i = 0; i < ind_dt_size; i++)
-                ind_ptr[(s * jpp.c_block + c) * ind_dt_size + i] = 0;
-        }
-
-        size_t start {0}, end {0};
-        balance211(work_amount, nthr, ithr, start, end);
-        int n {0}, b_c {0};
-        utils::nd_iterator_init(start, n, jpp.mb, b_c, jpp.nb_c);
-        for (size_t iwork = start; iwork < end; ++iwork) {
-            process_block(ithr, n, b_c);
-            utils::nd_iterator_step(n, jpp.mb, b_c, jpp.nb_c);
-        }
-    });
-
-    parallel(0, [&](int ithr, int nthr) {
-        const size_t work_amount = (size_t)jpp.mb * jpp.nb_c;
-        if ((size_t)ithr >= work_amount) return;
-
-        if (diff_dst_d.is_plain() && c_tail != 0) {
-            wsp_data_t *__restrict wsp_ptr
-                    = cvt_slice_dst_wsp + ithr * diff_dst_slice_size;
-            for_(dim_t s = 0; s < diff_dst_sp_size; s++)
-            for (dim_t c = c_tail; c < jpp.c_block; c++)
-                wsp_ptr[s * jpp.c_block + c] = 0.f;
-
-            char *__restrict ind_ptr = cvt_slice_ind_wsp
-                    + ithr * diff_dst_slice_size * ind_dt_size;
-            for_(dim_t s = 0; s < diff_dst_sp_size; s++)
             for_(dim_t c = c_tail; c < jpp.c_block; c++)
             for (size_t i = 0; i < ind_dt_size; i++)
                 ind_ptr[(s * jpp.c_block + c) * ind_dt_size + i] = 0;

@@ -577,6 +577,7 @@ enum runtime_kind_t {
     dnnl_runtime_seq,
     dnnl_runtime_omp,
     dnnl_runtime_tbb,
+    dnnl_runtime_threadpool,
     dnnl_runtime_ocl,
 };
 
@@ -585,6 +586,7 @@ const runtime_kind_t none = dnnl_runtime_none;
 const runtime_kind_t seq = dnnl_runtime_seq;
 const runtime_kind_t omp = dnnl_runtime_omp;
 const runtime_kind_t tbb = dnnl_runtime_tbb;
+const runtime_kind_t threadpool = dnnl_runtime_threadpool;
 const runtime_kind_t ocl = dnnl_runtime_ocl;
 } // namespace runtime_kind
 
@@ -781,6 +783,7 @@ const stream_flags_t out_of_order = dnnl_stream_out_of_order;
 const stream_flags_t default_flags = dnnl_stream_default_flags;
 } // namespace stream_flags
 using stream_t = dnnl_stream;
+using stream_attr_t = dnnl_stream_attr;
 
 /* forward declaration of the internal primitive_desc types */
 struct batch_normalization_bwd_pd_t;

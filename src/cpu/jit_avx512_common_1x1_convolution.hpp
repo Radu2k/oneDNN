@@ -89,7 +89,7 @@ struct jit_avx512_common_1x1_convolution_fwd_t : public primitive_impl_t {
             jit_avx512_common_1x1_conv_kernel::init_scratchpad(
                     scratchpad, jcp_);
 
-            rtus_prepare_space_info(this, scratchpad);
+            rtus_prepare_space_info(this, scratchpad, jcp_.nthr);
 
             return status::success;
         }
@@ -153,7 +153,7 @@ struct jit_avx512_common_1x1_convolution_fwd_t : public primitive_impl_t {
             const auto &src_md = dst_md_;
             const memory_desc_wrapper src_d(src_md);
             const auto nthr = dnnl_get_max_threads();
-            auto l2_cache = get_cache_size(2, true) * nthr;
+            auto l2_cache = get_per_core_cache_size(2) * nthr;
 
             // Note: A robust fusion implementation would be to check if both
             // 1x1 conv and dw conv that are considered here for fusion are
@@ -316,7 +316,7 @@ struct jit_avx512_common_1x1_convolution_bwd_data_t : public primitive_impl_t {
             jit_avx512_common_1x1_conv_kernel::init_scratchpad(
                     scratchpad, jcp_);
 
-            rtus_prepare_space_info(this, scratchpad);
+            rtus_prepare_space_info(this, scratchpad, jcp_.nthr);
 
             return status::success;
         }
@@ -414,7 +414,7 @@ struct jit_avx512_common_1x1_convolution_bwd_weights_t
                     scratchpad, memory_tracking::names::prefix_reducer_bia);
             reducer_bia_conf_.init_scratchpad(reducer_bia_scratchpad);
 
-            rtus_prepare_space_info(this, scratchpad);
+            rtus_prepare_space_info(this, scratchpad, jcp_.nthr);
 
             return status::success;
         }

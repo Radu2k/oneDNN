@@ -95,7 +95,7 @@ typedef enum {
 
 /// Memory format tag specification.
 ///
-/// DNNL formats describe physical data layout. The physical layout
+/// oneDNN formats describe physical data layout. The physical layout
 /// is described as a sequence of the dimensions as they are laid out in the
 /// memory (from the outer-most to the inner-most). Note that this order
 /// doesn't affect the logical order of the dimensions that is kept in the
@@ -138,7 +138,7 @@ typedef enum {
 ///    For example, #dnnl_nc is used to denote 2D CNN activations tensor
 ///    memory format, where channels are the innermost dimension and batch is an
 ///    outermost one. Moreover, #dnnl_nc is just an alias to #dnnl_ab,
-///    since for DNNL CNN primitives the logical dimensions of
+///    since for oneDNN CNN primitives the logical dimensions of
 ///    activations tensors come in order: batch, channels, spatial.
 ///    In other words, batch corresponds to the first logical dimension (`a`),
 ///    channels correspond to the second one (`b`).
@@ -2139,6 +2139,13 @@ typedef struct dnnl_stream *dnnl_stream_t;
 /// A constant execution stream handle.
 typedef const struct dnnl_stream *const_dnnl_stream_t;
 
+/// An opaque structure to describe execution stream attrbutes.
+struct dnnl_stream_attr;
+/// An execution stream attributes handle.
+typedef struct dnnl_stream_attr *dnnl_stream_attr_t;
+/// A constant execution stream attributes handle.
+typedef const struct dnnl_stream_attr *const_dnnl_stream_attr_t;
+
 /// @} dnnl_api_stream
 
 /// @addtogroup dnnl_api_service
@@ -2155,6 +2162,9 @@ typedef const struct dnnl_stream *const_dnnl_stream_t;
 
 /// TBB runtime (CPU only)
 #define DNNL_RUNTIME_TBB 4u
+
+/// Threadpool runtime (CPU only)
+#define DNNL_RUNTIME_THREADPOOL 8u
 
 /// OpenCL runtime
 #define DNNL_RUNTIME_OCL 256u
