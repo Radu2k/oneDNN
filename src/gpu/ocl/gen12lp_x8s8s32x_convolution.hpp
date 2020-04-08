@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GPU_OCL_GEN12LP_X8S8S32X_CONVOLUTION_HPP
-#define GPU_OCL_GEN12LP_X8S8S32X_CONVOLUTION_HPP
+#ifndef GPU_GEN12LP_X8S8S32X_CONVOLUTION_HPP
+#define GPU_GEN12LP_X8S8S32X_CONVOLUTION_HPP
 
 #include "common/c_types_map.hpp"
 #include "gpu/compute/compute.hpp"

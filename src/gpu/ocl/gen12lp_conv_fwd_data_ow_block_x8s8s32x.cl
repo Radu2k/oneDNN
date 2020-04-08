@@ -39,7 +39,7 @@
 #define BLOCK_READ_SRC(data, idx) \
     data = intel_sub_group_block_read8((__global uint *)&src[idx]);
 
-#define BLOCK_READ_WEI(data, idx) \
+#define BLOCK_READ_WHT(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
 
 #define BLOCK_READ_BIA(data, idx) \
@@ -229,10 +229,10 @@ conv_fwd_ow_block_x8s8s32x(const __global SRC_DATA_T *src,
                                 S_work + (kw * (1 + DW) + SW * i) * 8);
                     }
 
-                    BLOCK_READ_WEI(W0, 0);
-                    BLOCK_READ_WEI(W1, 8 * IC_BLOCK);
-                    BLOCK_READ_WEI(W2, 16 * IC_BLOCK);
-                    BLOCK_READ_WEI(W3, 24 * IC_BLOCK);
+                    BLOCK_READ_WHT(W0, 0);
+                    BLOCK_READ_WHT(W1, 8 * IC_BLOCK);
+                    BLOCK_READ_WHT(W2, 16 * IC_BLOCK);
+                    BLOCK_READ_WHT(W3, 24 * IC_BLOCK);
 
                     C00 = MMAD(S0, W0, C00);
                     C01 = MMAD(S0, W1, C01);
@@ -279,7 +279,7 @@ conv_fwd_ow_block_x8s8s32x(const __global SRC_DATA_T *src,
 
 #define DO_SUM(d_pack) \
     do { \
-        DST_DATA4_T d = AS_DST_DATA4_T(d_pack); \
+        DATA4_T d = AS_DATA4_T(d_pack); \
         float4 df = convert_float4(d); \
         tmp = fma(df, (float4)sum_scale, tmp); \
     } while (0)
@@ -322,8 +322,9 @@ conv_fwd_ow_block_x8s8s32x(const __global SRC_DATA_T *src,
 
 #define CONVERT_PACK(idx) \
     do { \
-        DST_DATA4_T tmp_cvt = (DST_DATA4_T)(TO_DST(tmp.s0), TO_DST(tmp.s1), \
-                TO_DST(tmp.s2), TO_DST(tmp.s3)); \
+        DATA4_T tmp_cvt \
+                = (DATA4_T)(CONVERT_DATA_T(tmp.s0), CONVERT_DATA_T(tmp.s1), \
+                        CONVERT_DATA_T(tmp.s2), CONVERT_DATA_T(tmp.s3)); \
         dst_pack[idx] = as_uint(tmp_cvt); \
     } while (0)
 

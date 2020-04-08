@@ -63,7 +63,8 @@ struct gen12hp_systolic_gemm_copy_kernel_t {
         return (copyb && trans) ? 16 : 8;
     }
 
-    static constexpr int subgroup_size_clear_sum(size_t element_size, bool copyb) {
+    static constexpr int subgroup_size_clear_sum(
+            size_t element_size, bool copyb) {
         return 8;
     }
 };

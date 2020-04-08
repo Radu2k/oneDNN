@@ -275,7 +275,7 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);
     kernel_ctx.define_int("LWS_2", conf.lws_d[2]);
 
-    kernel_ctx.set_data_type(conf.src_data_type);
+    kernel_ctx.set_data_type(conf.dst_data_type);
     def_data_type(kernel_ctx, conf.src_data_type, "SRC");
     def_data_type(kernel_ctx, conf.dst_data_type, "DST");
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
@@ -309,7 +309,7 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::execute_forward(
         float scales = pd()->attr()->output_scales_.scales_[0];
         arg_list.set(8, scales);
     } else {
-        arg_list.set(8, 1);
+        arg_list.set(8, 1.0f);
     }
 
     if (conf.with_per_oc_scales) {

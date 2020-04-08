@@ -214,7 +214,7 @@ conv_dw_fwd_mb_block_x8s8s32x(const __global uchar *src,
     DO_ELTWISE();
 #endif
 #if WITH_SUM
-    DST_DATA16_T D00 = AS_DST_DATA16_T(
+    DATA16_T D00 = AS_DATA16_T(
             intel_sub_group_block_read_uc16((const __global uchar *)dst));
 #if SUM_SCALE
     tmp00 += convert_float8(D00.s01234567);
@@ -228,6 +228,7 @@ conv_dw_fwd_mb_block_x8s8s32x(const __global uchar *src,
     DO_ELTWISE();
 #endif
 
-    const DST_DATA16_T R0 = (DST_DATA16_T)(TO_DST8(tmp00), TO_DST8(tmp01));
+    const DATA16_T R0
+            = (DATA16_T)(CONVERT_DATA8_T(tmp00), CONVERT_DATA8_T(tmp01));
     intel_sub_group_block_write_uc16((__global uchar *)dst, as_uchar16(R0));
 }

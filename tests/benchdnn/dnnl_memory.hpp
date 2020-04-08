@@ -275,7 +275,7 @@ private:
 
     int cleanup() {
         if (!active_) return OK;
-        unmap();
+        if (is_mapped_) unmap();
         DNN_SAFE(dnnl_memory_destroy(m_), CRIT);
         if (is_data_owner_) zfree(data_);
         return OK;

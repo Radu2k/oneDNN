@@ -75,7 +75,7 @@ static status_t init_conf_common(bnorm_conf_t &conf, offsets_t &off,
 
     const bool has_padding = !data_mdw.is_dense();
 
-    if (!has_padding
+    if (!has_padding && conf.is_backward
             && data_mdw.matches_one_of_tag(nCw16c, nChw16c, nCdhw16c, NCw16n16c,
                     NChw16n16c, NCdhw16n16c)) {
         conf.mb_block = data_mdw.matches_one_of_tag(

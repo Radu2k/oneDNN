@@ -112,8 +112,8 @@ public:
     scalar_type_t scalar_type() const { return scalar_type_; }
     size_t size() const { return size_; }
     bool is_global() const { return kind_ == kind_t::global; }
+    bool is_local() const { return kind_ == kind_t::local; }
     bool is_svm_pointer() const { return kind_ == kind_t::svm; }
-
 
     kernel_arg_t &set_value(const memory_storage_t &storage) {
         kind_ = kind_t::global;

@@ -30,8 +30,6 @@
 #include "gpu/ocl/gen12hp_convolution.hpp"
 #include "gpu/ocl/gen12lp_x8s8s32x_1x1_convolution.hpp"
 #include "gpu/ocl/gen12lp_x8s8s32x_convolution.hpp"
-#include "gpu/ocl/gen12lp_x8s8s32x_1x1_convolution.hpp"
-#include "gpu/ocl/gen12lp_x8s8s32x_convolution.hpp"
 #include "gpu/ocl/gen9_batch_normalization.hpp"
 #include "gpu/ocl/gen9_convolution.hpp"
 #include "gpu/ocl/gen9_pooling.hpp"

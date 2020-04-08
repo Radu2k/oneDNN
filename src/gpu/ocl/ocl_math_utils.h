@@ -665,6 +665,16 @@ void sub_group_block_write_uint8(__local uint *p, uint8 v) {
 }
 #endif
 
+void subgroup_block_write_uint(__local uint *p, uint v) {
+    uint idx = get_sub_group_local_id();
+    p[idx] = v;
+}
+
+void subgroup_block_write_ushort(__local ushort *p, ushort v) {
+    uint idx = get_sub_group_local_id();
+    p[idx] = v;
+}
+
 #if __OPENCL_C_VERSION__ >= 200
 #ifdef cl_intel_global_float_atomics
 inline void atomic_add_global(

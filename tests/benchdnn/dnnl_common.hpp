@@ -196,7 +196,7 @@ extern dnnl_engine_kind_t engine_tgt_kind;
 extern dnnl_engine_t engine_tgt;
 extern dnnl_stream_t stream_tgt;
 extern dnnl_scratchpad_mode_t scratchpad_mode;
-
+struct dnn_mem_t;
 /* for fast-ref-gpu support */
 extern dnnl_engine_t engine_cpu;
 extern dnnl_stream_t stream_cpu;

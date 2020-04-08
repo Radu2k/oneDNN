@@ -26,8 +26,8 @@
 #define WRITE_SLM_BLOCK(_P, _V) WRITE_LOCAL_1(_P, _V)
 #define WRITE_SLM_BLOCK_SHORT(_P, _V) WRITE_LOCAL_SHORT_1(_P, _V)
 #else
-#define WRITE_SLM_BLOCK(_P, _V) sub_group_block_write_uint(_P, _V)
-#define WRITE_SLM_BLOCK_SHORT(_P, _V) sub_group_block_write_ushort(_P, _V)
+#define WRITE_SLM_BLOCK(_P, _V) subgroup_block_write_uint(_P, _V)
+#define WRITE_SLM_BLOCK_SHORT(_P, _V) subgroup_block_write_ushort(_P, _V)
 #endif
 
 #define GET_INT_BLOCK(SRC_SLM, SLM_INDEX, SRC_GLOBAL, GLOBAL_INDEX) \
@@ -40,10 +40,10 @@
 #define BLOCK_READ_SRC(data, idx) \
     data = intel_sub_group_block_read8((__global uint *)&src[idx]);
 
-#define BLOCK_READ_WEI(data, idx) \
+#define BLOCK_READ_WHT(data, idx) \
     data = as_int(intel_sub_group_block_read((__global uint *)&wei[idx]));
 
-#define BLOCK_READ_WEI8(data, idx) \
+#define BLOCK_READ_WHT8(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
 
 #define BLOCK_READ_BIA(data, idx) \
@@ -300,10 +300,10 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
                 && (filter_id * (1 + DD) + id >= 0
                         && filter_id * (1 + DD) + id < ID);
 
-        BLOCK_READ_WEI8(W0, 0);
-        BLOCK_READ_WEI8(W1, KDHW_SIZE * OC_BLOCK);
-        BLOCK_READ_WEI8(W2, 2 * KDHW_SIZE * OC_BLOCK);
-        BLOCK_READ_WEI8(W3, 3 * KDHW_SIZE * OC_BLOCK);
+        BLOCK_READ_WHT8(W0, 0);
+        BLOCK_READ_WHT8(W1, KDHW_SIZE * OC_BLOCK);
+        BLOCK_READ_WHT8(W2, 2 * KDHW_SIZE * OC_BLOCK);
+        BLOCK_READ_WHT8(W3, 3 * KDHW_SIZE * OC_BLOCK);
         if (filter) {
             S.s0 = S_work[SW * 0 + SRC_SLM_SIZE * KH * filter_id
                     + SRC_SLM_SIZE * filter_ih + filter_iw];
@@ -389,10 +389,10 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
                 && (filter_id * (1 + DD) + id >= 0
                         && filter_id * (1 + DD) + id < ID);
         if (filter) {
-            BLOCK_READ_WEI(W00, 0);
-            BLOCK_READ_WEI(W10, KDHW_SIZE * OC_BLOCK);
-            BLOCK_READ_WEI(W20, 2 * KDHW_SIZE * OC_BLOCK);
-            BLOCK_READ_WEI(W30, 3 * KDHW_SIZE * OC_BLOCK);
+            BLOCK_READ_WHT(W00, 0);
+            BLOCK_READ_WHT(W10, KDHW_SIZE * OC_BLOCK);
+            BLOCK_READ_WHT(W20, 2 * KDHW_SIZE * OC_BLOCK);
+            BLOCK_READ_WHT(W30, 3 * KDHW_SIZE * OC_BLOCK);
 
             S.s0 = S_work[SW * 0 + SRC_SLM_SIZE * KH * filter_id
                     + SRC_SLM_SIZE * filter_ih + filter_iw];
@@ -534,7 +534,7 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
         }
         wei += OC_BLOCK;
     }
-    DST_DATA16_T R1, R2, R3, R4;
+    DATA16_T R1, R2, R3, R4;
 
 #if SCALES_PER_OC
     float4 scales;
@@ -559,15 +559,14 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
 #if WITH_SUM
 #define DO_SUM() \
     do { \
-        DST_DATA4_T d = AS_DST_DATA4_T(intel_sub_group_block_read_uc4(dst)); \
+        DATA4_T d = AS_DATA4_T(intel_sub_group_block_read_uc4(dst)); \
         float4 df = convert_float4(d); \
         tmp = fma(df, (float4)sum_scale, tmp); \
     } while (0)
 
 #define DO_SUM_4() \
     do { \
-        DST_DATA16_T d \
-                = AS_DST_DATA16_T(intel_sub_group_block_read_uc16(dst)); \
+        DATA16_T d = AS_DATA16_T(intel_sub_group_block_read_uc16(dst)); \
         float8 df0 = convert_float8(d.s01234567); \
         float8 df1 = convert_float8(d.s89abcdef); \
         tmp0 = fma(df0, (float8)sum_scale, tmp0); \
@@ -676,14 +675,14 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
 
 #define CONVERT_PACK() \
     do { \
-        tmp_cvt = (DST_DATA4_T)(TO_DST(tmp.s0), TO_DST(tmp.s1), \
-                TO_DST(tmp.s2), TO_DST(tmp.s3)); \
+        tmp_cvt = (DATA4_T)(CONVERT_DATA_T(tmp.s0), CONVERT_DATA_T(tmp.s1), \
+                CONVERT_DATA_T(tmp.s2), CONVERT_DATA_T(tmp.s3)); \
     } while (0)
 
 #define CONVERT_PACK_4() \
     do { \
-        R.s01234567 = TO_DST8(tmp0); \
-        R.s89abcdef = TO_DST8(tmp1); \
+        R.s01234567 = CONVERT_DATA8_T(tmp0); \
+        R.s89abcdef = CONVERT_DATA8_T(tmp1); \
     } while (0)
 
 #define STORE_DST(C0, C1, C2, C3, i) \
@@ -712,9 +711,9 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
 
     if (ow < OW) {
         float4 tmp;
-        DST_DATA4_T tmp_cvt;
+        DATA4_T tmp_cvt;
         float8 tmp0, tmp1;
-        DST_DATA16_T R;
+        DATA16_T R;
 
 #if OW_TAIL
         if (ow + OW_BLOCK < OW) {
