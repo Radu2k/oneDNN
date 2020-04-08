@@ -813,6 +813,7 @@ void gen12hp_systolic_gemm_kernel_t::body() {
     zero_c();
     sync(SyncFunction::nop, SWSB<uint32_t>(1));
     copy_store(1); // S1
+
     if (!cfg.alt_barriers) {
         barrierwait(); // Wait 0 ready
         store_signal(); // Signal 1 ready

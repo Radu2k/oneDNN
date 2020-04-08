@@ -83,7 +83,7 @@ public:
         auto ld = block_k;
         ld = utils::rnd_up(ld, unroll_k(dt));
         if (sum) ld += 32 / types::data_type_size(dt);
-        if (!(ld & 0x7FF)) ld += 32;
+        if (!(ld & 0xF)) ld += 4;
         return ld;
     }
 
@@ -91,7 +91,7 @@ public:
         auto ld = block_k;
         ld = utils::rnd_up(ld, unroll_k(dt));
         if (sum) ld += 32 / types::data_type_size(dt);
-        ld += 32;
+        ld += 4;
         return ld;
     }
 
