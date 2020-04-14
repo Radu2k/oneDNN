@@ -41,8 +41,8 @@ public:
         bool b_bias = false;
         bias_t c_bias = bias_t::none;
 
-        bool alt_barriers = false;
-        bool use_slm_fence = true;
+        bool alt_barriers = true;
+        bool use_slm_fence = false;
         bool c_remainder = true;
         bool c_align16_check = true;
         bool pad_a = true;
@@ -83,7 +83,7 @@ public:
         auto ld = block_k;
         ld = utils::rnd_up(ld, unroll_k(dt));
         if (sum) ld += 32 / types::data_type_size(dt);
-        if (!(ld & 0x7FF)) ld += 32;
+        if (!(ld & 0xF)) ld += 4;
         return ld;
     }
 
@@ -91,7 +91,7 @@ public:
         auto ld = block_k;
         ld = utils::rnd_up(ld, unroll_k(dt));
         if (sum) ld += 32 / types::data_type_size(dt);
-        ld += 32;
+        ld += 4;
         return ld;
     }
 
@@ -214,7 +214,7 @@ private:
 
     void copy_load(int load_buffer, bool use_c = false);
     void copy_store(int store_buffer, bool first = false);
-    void store_signal();
+    void store_signal(bool force_fence = false);
 
     void body();
 

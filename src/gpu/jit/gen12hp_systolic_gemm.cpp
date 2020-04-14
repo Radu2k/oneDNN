@@ -254,9 +254,9 @@ gen12hp_systolic_gemm_t::get_blocking() const {
     int64_t max_block_m = nstl::min(m, block_m * 4);
     int64_t max_block_n = nstl::min(n, block_n * 4);
 
-    if (n < block_n)
+    if (n <= block_n)
         block_m = (block_m * block_n) / n;
-    else if (m < block_m)
+    else if (m <= block_m)
         block_n = (block_m * block_n) / m;
     else if (n < 2 * block_n) {
         block_n = utils::rnd_up(n / 2, align_n);
