@@ -177,6 +177,23 @@ dnnl_status_t execute_and_wait(
 
                 destroy_dnn_mem_objects();
 
+                // Store arg -> sim_id mapping.
+                int nargs_not_null = 0;
+                for (int i = 0; i < nargs; ++i) {
+                    if (dnnl_args[i].memory) nargs_not_null++;
+                }
+
+                std::ofstream out("arg2sim_id.txt");
+                out << nargs_not_null << std::endl;
+                for (int i = 0; i < nargs; ++i) {
+                    if (dnnl_args[i].memory) {
+                        int arg = dnnl_args[i].arg;
+                        int sim_id
+                                = dnnl_memory_get_sim_id(dnnl_args[i].memory);
+                        out << arg << " " << sim_id << std::endl;
+                    }
+                }
+
                 DNN_SAFE_V(dnnl_engine_destroy(engine_tgt));
                 DNN_SAFE_V(dnnl_stream_destroy(stream_tgt));
 
@@ -184,16 +201,29 @@ dnnl_status_t execute_and_wait(
             } else {
                 // Handle second run of functional simulation
 
-                // Keep unique memory objects
-                std::set<dnnl_memory_t> uniq_mems;
-                for (int i = 0; i < nargs; ++i)
-                    if (dnnl_args[i].memory)
-                        uniq_mems.insert(dnnl_args[i].memory);
-
                 // Fill "simulation" IDs for memory objects
+                std::map<int, int> arg2sim_id;
+                {
+                    std::ifstream in("arg2sim_id.txt");
+                    assert(in.good());
+
+                    int nargs_not_null;
+                    in >> nargs_not_null;
+                    for (int i = 0; i < nargs_not_null; i++) {
+                        int arg;
+                        int sim_id;
+                        in >> arg >> sim_id;
+                        arg2sim_id[arg] = sim_id;
+                    }
+                }
                 std::map<dnnl_memory_t, int> mem_ids;
-                for (auto mem : uniq_mems) {
-                    mem_ids[mem] = dnnl_memory_get_sim_id(mem);
+                for (int i = 0; i < nargs; ++i) {
+                    int arg = dnnl_args[i].arg;
+                    dnnl_memory_t mem = dnnl_args[i].memory;
+                    if (mem) {
+                        assert(arg2sim_id.count(arg) != 0);
+                        mem_ids[mem] = arg2sim_id[arg];
+                    }
                 }
 
                 // Load memory contents from binaries
