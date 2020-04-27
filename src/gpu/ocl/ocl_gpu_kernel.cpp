@@ -39,7 +39,7 @@ extern "C" int DNNL_API dnnl_memory_get_sim_id(
     auto *ocl_mem_storage = utils::downcast<gpu::ocl::ocl_memory_storage_t *>(
             mem->memory_storage());
     cl_mem ocl_mem = ocl_mem_storage->mem_object();
-    assert(sim_mem_ids.count(mem) > 0);
+    assert(sim_mem_ids.count(ocl_mem) > 0);
     return sim_mem_ids[ocl_mem];
 }
 
