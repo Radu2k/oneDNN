@@ -111,6 +111,14 @@ static void destroy_dnn_mem_objects() {
 }
 #endif
 
+static bool is_null_memory(dnnl_memory_t mem) {
+    if (!mem) return true;
+
+    void *handle;
+    DNN_SAFE_V(dnnl_memory_get_data_handle(mem, &handle));
+    return !handle;
+}
+
 dnnl_status_t execute_and_wait(
         dnnl_primitive_t prim, dnnl_stream_t stream, const args_t &args) {
 
@@ -180,13 +188,13 @@ dnnl_status_t execute_and_wait(
                 // Store arg -> sim_id mapping.
                 int nargs_not_null = 0;
                 for (int i = 0; i < nargs; ++i) {
-                    if (dnnl_args[i].memory) nargs_not_null++;
+                    if (!is_null_memory(dnnl_args[i].memory)) nargs_not_null++;
                 }
 
                 std::ofstream out("arg2sim_id.txt");
                 out << nargs_not_null << std::endl;
                 for (int i = 0; i < nargs; ++i) {
-                    if (dnnl_args[i].memory) {
+                    if (!is_null_memory(dnnl_args[i].memory)) {
                         int arg = dnnl_args[i].arg;
                         int sim_id
                                 = dnnl_memory_get_sim_id(dnnl_args[i].memory);
@@ -220,7 +228,7 @@ dnnl_status_t execute_and_wait(
                 for (int i = 0; i < nargs; ++i) {
                     int arg = dnnl_args[i].arg;
                     dnnl_memory_t mem = dnnl_args[i].memory;
-                    if (mem) {
+                    if (!is_null_memory(mem)) {
                         assert(arg2sim_id.count(arg) != 0);
                         mem_ids[mem] = arg2sim_id[arg];
                     }
