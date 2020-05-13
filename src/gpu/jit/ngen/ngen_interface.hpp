@@ -369,8 +369,17 @@ int NEOInterfaceHandler::getCrossthreadGRFs() const
 template <typename CodeGenerator>
 void NEOInterfaceHandler::generatePrologue(CodeGenerator &generator, const GRF &temp) const
 {
-    generator.loadlid(getCrossthreadGRFs(), needLocalID, simd, temp, true);
-    generator.loadargs(getCrossthreadBase(), getCrossthreadGRFs(), temp);
+#ifdef NGEN_INTERFACE_OLD_PROLOGUE
+    if (needLocalID)
+        generator.loadlid(getCrossthreadGRFs(), needLocalID, simd, temp, 8*16);
+    if (getCrossthreadGRFs() > 1)
+        generator.loadargs(getCrossthreadBase(), getCrossthreadGRFs(), temp);
+#else
+    if (needLocalID)
+        generator.loadlid(getCrossthreadGRFs(), needLocalID, simd, temp, 12*16);
+    if (getCrossthreadGRFs() > 1)
+        generator.loadargs(getCrossthreadBase() + 1, getCrossthreadGRFs() - 1, temp);
+#endif
 }
 
 #ifdef NGEN_ASM

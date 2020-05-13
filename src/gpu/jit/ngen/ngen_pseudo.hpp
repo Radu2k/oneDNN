@@ -447,10 +447,11 @@ void slmfence(const InstructionModifier &mod, const RegData &dst, const RegData 
 void slmfence(const RegData &dst, const RegData &header = GRF(0)) { slmfence(InstructionModifier(), dst, header); }
 
 // ATS prologues.
-void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127), bool pad = false)
+void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127), int paddedSize = 0)
 {
     if (hardware >= HW::Gen12HP) {
         int simdGRFs = (simd > 16) ? 2 : 1;
+        int insns = 0;
 
         if (dims > 0) {
             auto dmSave = defaultModifier;
@@ -462,25 +463,31 @@ void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127)
             add<uint32_t>(1, temp[2], temp[2], uint16_t(argGRFs * 0x20));
             mad<uint32_t>(1, temp[2], temp[2], temp.uw(0), uint16_t(0x60));
             load(8, r1, aligned_block_oword(simdGRFs * ((dims == 1) ? 2 : 4)), A32NC, temp);
+            insns += 6;
             if (dims == 3) {
                 add<uint32_t>(1, temp[2], temp[2], uint16_t(0x40));
                 load(8, GRF(1 + 2 * simdGRFs), aligned_block_oword(2 * simdGRFs), A32NC, temp);
-            } else if (pad) {
-                sync.nop();
-                sync.nop();
+                insns += 2;
             }
 
             defaultModifier = dmSave;
-        } else if (pad) {
-            for (int i = 0; i < 8; i++)
-                sync.nop();
+        }
+
+        if (paddedSize > 0) {
+            int nops = (paddedSize >> 4) - insns;
+#ifdef NGEN_SAFE
+            if (paddedSize & 0xF) throw invalid_operand_exception();
+            if (nops < 0)         throw invalid_operand_exception();
+#endif
+            for (int i = 0; i < nops; i++)
+                nop();
         }
     }
 }
 
 void loadargs(const GRF &base, int argGRFs, const GRF &temp = GRF(127))
 {
-    if (hardware >= HW::Gen12HP) {
+    if (argGRFs > 0 && hardware >= HW::Gen12HP) {
         auto dst = base;
         auto dmSave = defaultModifier;
         defaultModifier |= NoMask | AutoSWSB;
