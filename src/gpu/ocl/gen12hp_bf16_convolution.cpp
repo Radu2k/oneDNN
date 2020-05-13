@@ -246,6 +246,13 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
 
     kernel_ctx.add_option("-cl-std=CL2.0");
     kernel_ctx.add_option("-cl-uniform-work-group-size");
+
+    auto *compute_engine = utils::downcast<ocl_gpu_engine_t *>(engine());
+    auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
+            compute_engine->device_info());
+    if (dev_info->gpu_arch() == gpu_arch_t::gen12hp)
+        kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
+
     kernel_ctx.print_options();
     return status::success;
 }
