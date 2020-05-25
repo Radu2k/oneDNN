@@ -197,7 +197,9 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
                 WARN);
     }
 
-    auto dnnl_attr = create_dnnl_attr_v2(attr_t(), attr_args_t());
+    attr_args_t aa;
+    aa.prepare_binary_post_op_mds(p->attr, p->ndims, dst_dims);
+    auto dnnl_attr = create_dnnl_attr_v2(p->attr, aa);
 
     dnnl_status_t init_status
             = dnnl_primitive_desc_create(&ppd, &pd, dnnl_attr, engine, hint);
@@ -275,21 +277,28 @@ int doit(const prb_t *p, res_t *r) {
     dnn_mem_t ws_dt(ws_md, test_engine);
     dnn_mem_t scratchpad_dt(scratchpad_md, test_engine);
 
+    std::vector<dnn_mem_t> binary_po_fp, binary_po_dt;
+    std::vector<int> binary_po_args;
+    SAFE(setup_binary(const_fpd, binary_po_args, binary_po_dt, binary_po_fp),
+            WARN);
+
     dnn_mem_t d_src_dt, d_dst_dt;
 
     SAFE(fill_src(p, src_dt, src_fp, r), WARN);
+    SAFE(fill_dst(p, dst_dt, dst_fp, r), WARN);
 
     args_t args;
     args.set(DNNL_ARG_SRC, src_dt);
     args.set(DNNL_ARG_DST, dst_dt);
     args.set(DNNL_ARG_WORKSPACE, ws_dt);
     args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
+    args.set(binary_po_args, binary_po_dt);
 
     DNN_SAFE(execute_and_wait(pp, args), WARN);
 
     // want this pass on backward to get ws_fp filled properly
     if (bench_mode & CORR) {
-        compute_ref_fwd(p, src_fp, dst_fp, ws_fp);
+        compute_ref_fwd(p, src_fp, binary_po_fp, dst_fp, ws_fp);
         if (p->dir & FLAG_FWD) {
             dnn_mem_t dst(dst_dt, fp, tag, test_engine);
             SAFE(compare_dst(p, dst, dst_fp, r), WARN);

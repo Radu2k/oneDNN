@@ -86,6 +86,7 @@ struct settings_t {
     }
 
     desc_t desc {};
+    attr_t attr = {};
 
     std::vector<dir_t> dir {FWD_D};
     std::vector<const dt_conf_t *> cfg {conf_f32};
@@ -105,8 +106,8 @@ struct settings_t {
 
 struct prb_t : public desc_t {
     prb_t(const desc_t &desc, dir_t dir, const dt_conf_t *cfg,
-            const std::string &tag, alg_t alg, int64_t mb = 0)
-        : desc_t(desc), dir(dir), cfg(cfg), tag(tag), alg(alg) {
+            const std::string &tag, alg_t alg, attr_t attr, int64_t mb = 0)
+        : desc_t(desc), dir(dir), cfg(cfg), tag(tag), alg(alg), attr(attr) {
         if (mb) this->mb = mb;
     }
     ~prb_t() {}
@@ -115,6 +116,7 @@ struct prb_t : public desc_t {
     const dt_conf_t *cfg;
     std::string tag;
     alg_t alg;
+    attr_t attr;
 
     BENCHDNN_DISALLOW_COPY_AND_ASSIGN(prb_t);
 };
@@ -221,8 +223,8 @@ inline int64_t get_num_summands(
             : (d_end - d_start) * (h_end - h_start) * (w_end - w_start);
 }
 
-void compute_ref_fwd(
-        const prb_t *p, const dnn_mem_t &src, dnn_mem_t &dst, dnn_mem_t &ws);
+void compute_ref_fwd(const prb_t *p, const dnn_mem_t &src,
+        const std::vector<dnn_mem_t> &binary_po, dnn_mem_t &dst, dnn_mem_t &ws);
 void compute_ref_bwd(const prb_t *p, dnn_mem_t &diff_src,
         const dnn_mem_t &diff_dst, const dnn_mem_t &ws);
 
