@@ -2056,6 +2056,9 @@ typedef const struct dnnl_primitive *const_dnnl_primitive_t;
 /// See @ref dev_guide_attributes_post_ops_depthwise_fusion
 #define DNNL_ARG_ATTR_POST_OP_DW 8192
 
+/// Arguments for binary post operation.
+#define DNNL_ARG_ATTR_POST_OP_0 16384
+
 /// A structure that contains an index and a memory object, and is used to pass
 /// arguments to dnnl_primitive_execute().
 typedef struct {

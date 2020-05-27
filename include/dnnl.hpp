@@ -2628,6 +2628,23 @@ struct post_ops : public handle<dnnl_post_ops_t> {
             scales[c] = c_scales[c];
         return;
     }
+
+    /// TODO: add doc
+    void append_binary(algorithm algorithm, const memory::desc &src1_desc) {
+        error::wrap_c_api(dnnl_post_ops_append_binary(get(),
+                                  convert_to_c(algorithm), &src1_desc.data),
+                "could not append a binary post-op");
+    }
+
+    /// TODO: add doc
+    void get_params_binary(
+            int index, algorithm &algorithm, memory::desc &src1_desc) const {
+        dnnl_alg_kind_t c_alg;
+        error::wrap_c_api(dnnl_post_ops_get_params_binary(
+                                  get(), index, &c_alg, &src1_desc.data),
+                "could not get parameters of a binary post-op");
+        algorithm = static_cast<dnnl::algorithm>(c_alg);
+    }
 };
 
 /// @cond DO_NOT_DOCUMENT_THIS

@@ -628,6 +628,7 @@ struct allows_attr_t {
     bool oscale;
     bool po_sum;
     bool po_eltwise;
+    bool po_binary;
     bool zp;
     bool scales;
 };
@@ -675,6 +676,21 @@ void test_fwd_pd_attr_po_eltwise(
         EXPECT_NO_THROW(pd_t pd(op_desc, attr_po_eltwise, eng));
     else
         EXPECT_ANY_THROW(pd_t pd(op_desc, attr_po_eltwise, eng));
+}
+
+template <typename op_desc_t, typename pd_t>
+void test_fwd_pd_attr_po_binary(
+        const op_desc_t &op_desc, const engine &eng, bool supports_po_binary) {
+    dnnl::post_ops ops_binary;
+    dnnl::memory::desc src1_desc(
+            {16}, memory::data_type::s8, memory::format_tag::x);
+    ops_binary.append_binary(dnnl::algorithm::binary_mul, src1_desc);
+    dnnl::primitive_attr attr_po_binary;
+    attr_po_binary.set_post_ops(ops_binary);
+    if (supports_po_binary)
+        EXPECT_NO_THROW(pd_t pd(op_desc, attr_po_binary, eng));
+    else
+        EXPECT_ANY_THROW(pd_t pd(op_desc, attr_po_binary, eng));
 }
 
 template <typename op_desc_t, typename pd_t>
@@ -739,6 +755,7 @@ void test_fwd_pd_constructors(
     test_fwd_pd_attr_oscale<op_desc_t, pd_t>(op_desc, eng, aa.oscale);
     test_fwd_pd_attr_po_sum<op_desc_t, pd_t>(op_desc, eng, aa.po_sum);
     test_fwd_pd_attr_po_eltwise<op_desc_t, pd_t>(op_desc, eng, aa.po_eltwise);
+    test_fwd_pd_attr_po_binary<op_desc_t, pd_t>(op_desc, eng, aa.po_binary);
     test_fwd_pd_attr_zp<op_desc_t, pd_t>(op_desc, eng, aa.zp);
     test_fwd_pd_attr_scales<op_desc_t, pd_t>(op_desc, eng, aa.scales);
     // check allow empty, should not throw
@@ -788,6 +805,21 @@ void test_bwd_pd_attr_po_eltwise(const op_desc_t &op_desc, const engine &eng,
         EXPECT_NO_THROW(pd_t pd(op_desc, attr_po_eltwise, eng, hint));
     else
         EXPECT_ANY_THROW(pd_t pd(op_desc, attr_po_eltwise, eng, hint));
+}
+
+template <typename op_desc_t, typename pd_t, typename hint_pd_t>
+void test_bwd_pd_attr_po_binary(const op_desc_t &op_desc, const engine &eng,
+        const hint_pd_t &hint, bool supports_po_binary) {
+    dnnl::post_ops ops_binary;
+    dnnl::memory::desc src1_desc(
+            {16}, memory::data_type::s8, memory::format_tag::x);
+    ops_binary.append_binary(dnnl::algorithm::binary_mul, src1_desc);
+    dnnl::primitive_attr attr_po_binary;
+    attr_po_binary.set_post_ops(ops_binary);
+    if (supports_po_binary)
+        EXPECT_NO_THROW(pd_t pd(op_desc, attr_po_binary, eng, hint));
+    else
+        EXPECT_ANY_THROW(pd_t pd(op_desc, attr_po_binary, eng, hint));
 }
 
 template <typename op_desc_t, typename pd_t, typename hint_pd_t>

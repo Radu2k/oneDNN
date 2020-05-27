@@ -248,6 +248,23 @@ status_t post_ops_t::append_dw_k3s2p1(data_type_t wei_dt, data_type_t bias_dt,
     return success;
 }
 
+status_t post_ops_t::append_binary(
+        alg_kind_t alg, const memory_desc_t *src1_desc) {
+    using namespace alg_kind;
+    bool alg_ok = one_of(alg, binary_add, binary_mul, binary_max, binary_min);
+    if (!alg_ok) return invalid_arguments;
+    if (!memory_desc_sanity_check(src1_desc)) return invalid_arguments;
+    if (len_ == capacity) return out_of_memory;
+
+    entry_[len_].kind = primitive_kind::binary;
+    entry_[len_].binary.alg = alg;
+    entry_[len_].binary.src1_desc = *src1_desc;
+
+    len_++;
+
+    return success;
+}
+
 bool post_ops_t::defined() const {
     for (int idx = 0; idx < len_; ++idx) {
         auto kind = entry_[idx].kind;
@@ -261,6 +278,8 @@ bool post_ops_t::defined() const {
         } else if (kind == primitive_kind::convolution) {
             const auto &c = entry_[idx].depthwise_conv;
             if (c.scales && is_runtime_value(*(c.scales))) return false;
+        } else if (kind == primitive_kind::binary) {
+            // binary is always defined
         } else {
             assert(!"unreachable");
         }
@@ -515,6 +534,25 @@ status_t dnnl_post_ops_get_params_dw_k3s2p1(const post_ops_t *post_ops,
     if (count) *count = d.count;
     if (mask) *mask = d.mask;
     if (scales) *scales = d.scales;
+
+    return success;
+}
+
+status_t DNNL_API dnnl_post_ops_append_binary(post_ops_t *post_ops,
+        alg_kind_t alg_kind, const memory_desc_t *src1_desc) {
+    if (post_ops == nullptr) return invalid_arguments;
+
+    return post_ops->append_binary(alg_kind, src1_desc);
+}
+
+status_t DNNL_API dnnl_post_ops_get_params_binary(const post_ops_t *post_ops,
+        int index, alg_kind_t *alg_kind, memory_desc_t *src1_desc) {
+    if (!simple_get_params_check(post_ops, index, primitive_kind::binary))
+        return invalid_arguments;
+
+    const auto &b = post_ops->entry_[index].binary;
+    if (alg_kind) *alg_kind = b.alg;
+    if (src1_desc) *src1_desc = b.src1_desc;
 
     return success;
 }

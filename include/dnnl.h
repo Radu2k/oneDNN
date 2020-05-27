@@ -770,6 +770,15 @@ dnnl_status_t DNNL_API dnnl_post_ops_get_params_dw_k3s2p1(
         dnnl_data_type_t *dst_data_type, dnnl_dim_t *count, int *mask,
         const float **scales);
 
+/// TODO: Add doc
+dnnl_status_t DNNL_API dnnl_post_ops_append_binary(dnnl_post_ops_t post_ops,
+        dnnl_alg_kind_t alg_kind, const dnnl_memory_desc_t *src1_desc);
+
+/// TODO: Add doc
+dnnl_status_t DNNL_API dnnl_post_ops_get_params_binary(
+        const_dnnl_post_ops_t post_ops, int index, dnnl_alg_kind_t *alg_kind,
+        dnnl_memory_desc_t *src1_desc);
+
 /// @} dnnl_api_attributes
 
 /// @} dnnl_api_primitives

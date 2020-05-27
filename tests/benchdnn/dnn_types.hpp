@@ -231,10 +231,16 @@ struct attr_t {
                     dnnl_data_type_t dst_dt;
                     scale_t oscale;
                 } convolution;
+                struct {
+                    dnnl_alg_kind_t alg;
+                    dnnl_data_type_t src1_dt;
+                    scale_t::policy_t policy;
+                } binary;
             };
 
             bool is_eltwise_kind() const;
             bool is_convolution_kind() const;
+            bool is_binary_kind() const;
         };
 
         post_ops_t() : len(0) {}
@@ -246,6 +252,9 @@ struct attr_t {
         int find(kind_t kind, int start = 0, int stop = -1) const;
         int eltwise_index(int start = 0, int stop = -1) const;
         int convolution_index(int start = 0, int stop = -1) const;
+        int binary_index(int start = 0, int stop = -1) const;
+
+        std::vector<int> get_binary_po_masks() const;
 
         enum { capacity = 4 };
         int len;
@@ -339,12 +348,16 @@ struct attr_args_t {
         entries.insert(std::make_pair(aarg, entry_t(acount, avals, aruntime)));
     }
 
+    int prepare_binary_post_op_mds(
+            const attr_t &attr, int ndims, const dnnl_dims_t dims);
+
     entry_t operator[](int arg) const {
         const auto it = entries.find(arg);
         return it == entries.end() ? entry_t() : it->second;
     }
 
     std::map<int, entry_t> entries;
+    std::map<int, dnnl_memory_desc_t> mds;
 };
 
 struct engine_t {
@@ -395,6 +408,12 @@ float compute_eltwise_fwd(attr_t::post_ops_t::kind_t kind, float src,
 float compute_eltwise_bwd(attr_t::post_ops_t::kind_t kind, float d_dst,
         float src, float alpha, float beta);
 float compute_binary(attr_t::post_ops_t::kind_t kind, float src0, float src1);
-void maybe_post_ops(const attr_t &attr, float &val, float sum_val = 0.f);
-
+void maybe_post_ops(const attr_t &attr, float &val, float sum_val,
+        const std::vector<float> &v_binary_vals);
+inline void maybe_post_ops(const attr_t &attr, float &val) {
+    maybe_post_ops(attr, val, 0.f, std::vector<float>());
+}
+inline void maybe_post_ops(const attr_t &attr, float &val, float sum_val) {
+    maybe_post_ops(attr, val, sum_val, std::vector<float>());
+}
 #endif

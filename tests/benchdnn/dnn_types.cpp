@@ -359,6 +359,19 @@ dnnl_alg_kind_t attr_t::post_ops_t::kind2dnnl_kind(pk_t kind) {
     return kind_table[KIND_TOTAL].dnnl_kind;
 }
 
+std::vector<int> attr_t::post_ops_t::get_binary_po_masks() const {
+    std::vector<int> v_masks;
+    for (int idx = 0; idx < len; ++idx) {
+        const auto &e = this->entry[idx];
+        if (!e.is_binary_kind()) continue;
+
+        auto policy = e.binary.policy;
+        auto mask = attr_t::scale_t::get_default_mask(policy);
+        v_masks.push_back(mask);
+    }
+    return v_masks;
+}
+
 int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
     *this = post_ops_t();
 
@@ -443,6 +456,34 @@ int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
                     }
 
                     if (e.eltwise.scale <= 0) return FAIL;
+                } else if (e.is_binary_kind()) {
+                    e.binary.alg = kind2dnnl_kind(k);
+                    e.binary.policy = policy_t::COMMON;
+
+                    // TODO: rework parser completely
+                    if (*s == ':') ++s;
+                    auto *end = s;
+                    while (*s && isalnum(*s))
+                        ++s;
+                    if (end != s) {
+                        // actually, dt is mandatory to avoid assumptions
+                        const auto dt_str = std::string(end, s - end).c_str();
+                        e.binary.src1_dt = str2dt(dt_str);
+                        if (e.binary.src1_dt == dnnl_data_type_undef)
+                            return FAIL;
+
+                        // optional mask can be passed
+                        if (*s == ':') ++s;
+                        end = s;
+                        while (*s && (isalnum(*s) || *s == '_'))
+                            ++s;
+                        if (end != s) {
+                            const auto policy_str
+                                    = std::string(end, s - end).c_str();
+                            e.binary.policy
+                                    = attr_t::scale_t::str2policy(policy_str);
+                        }
+                    }
                 }
 
                 break;
@@ -489,6 +530,18 @@ int attr_t::post_ops_t::convolution_index(int start, int stop) const {
     if (stop == -1) stop = len;
     for (int idx = start; idx < stop; ++idx) {
         if (entry[idx].is_convolution_kind()) return idx;
+    }
+    return -1;
+}
+
+bool attr_t::post_ops_t::entry_t::is_binary_kind() const {
+    return kind > pk_t::BINARY_START && kind < pk_t::BINARY_END;
+}
+
+int attr_t::post_ops_t::binary_index(int start, int stop) const {
+    if (stop == -1) stop = len;
+    for (int idx = start; idx < stop; ++idx) {
+        if (entry[idx].is_binary_kind()) return idx;
     }
     return -1;
 }
@@ -606,6 +659,10 @@ std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t &post_ops) {
                 s << ":" << e.eltwise.alpha << ":" << e.eltwise.beta;
             else if (e.eltwise.alpha != 0.f)
                 s << ":" << e.eltwise.alpha;
+        } else if (e.is_binary_kind()) {
+            s << ":" << e.binary.src1_dt;
+            if (e.binary.policy != policy_t::COMMON)
+                s << ":" << e.binary.policy;
         } else {
             assert(!"unknown kind");
             s << "unknown_kind";
@@ -677,6 +734,33 @@ int attr_bundle_t::generate(int scale_mask) {
     return OK;
 }
 
+int attr_args_t::prepare_binary_post_op_mds(
+        const attr_t &attr, int ndims, const dnnl_dims_t dims) {
+    const auto &po = attr.post_ops;
+    // iterate over all post ops and prepare md for each binary
+    for (int idx = 0; idx < po.len; ++idx) {
+        const auto &e = po.entry[idx];
+        if (!e.is_binary_kind()) continue;
+
+        const auto dt = e.binary.src1_dt;
+        const auto policy = e.binary.policy;
+        const int mask = attr_t::scale_t::get_default_mask(policy);
+
+        // deduce binary dims based on input policy
+        dnnl_dims_t binary_dims;
+        for (auto d = 0; d < ndims; ++d)
+            binary_dims[d] = (!(mask & (1 << d))) ? 1 : dims[d];
+
+        dnnl_memory_desc_t src1_desc;
+        DNN_SAFE(dnnl_memory_desc_init_by_tag(&src1_desc, ndims, binary_dims,
+                         dt, get_abx_tag(ndims)),
+                WARN);
+        mds.insert(std::make_pair(DNNL_ARG_ATTR_POST_OP_0 + idx, src1_desc));
+    }
+
+    return OK;
+}
+
 dnnl_primitive_attr_t create_dnnl_attr_v2(
         const attr_t &attr, const attr_args_t &attr_args) {
     dnnl_primitive_attr_t dnnl_attr = NULL;
@@ -736,6 +820,14 @@ dnnl_primitive_attr_t create_dnnl_attr_v2(
             } else if (e.is_eltwise_kind()) {
                 DNN_SAFE_V(dnnl_post_ops_append_eltwise(ops, e.eltwise.scale,
                         e.eltwise.alg, e.eltwise.alpha, e.eltwise.beta));
+            } else if (e.is_binary_kind()) {
+                // Assumption that everything is linear
+                const auto &mds = attr_args.mds;
+                const auto it = mds.find(DNNL_ARG_ATTR_POST_OP_0 + idx);
+                assert(it != mds.end());
+                auto src1_md = it->second;
+                DNN_SAFE_V(dnnl_post_ops_append_binary(
+                        ops, e.binary.alg, &src1_md));
             } else {
                 assert(!"unknown attr::post_ops::kind");
             }
@@ -1027,9 +1119,11 @@ float compute_binary(pk_t kind, float src0, float src1) {
     return 0;
 }
 
-void maybe_post_ops(const attr_t &attr, float &val, float sum_val) {
+void maybe_post_ops(const attr_t &attr, float &val, float sum_val,
+        const std::vector<float> &v_binary_vals) {
     using namespace dnnl::impl::math;
 
+    auto it_bin_po = v_binary_vals.begin();
     const auto &ops = attr.post_ops;
     for (int idx = 0; idx < ops.len; ++idx) {
         const auto &e = ops.entry[idx];
@@ -1043,6 +1137,9 @@ void maybe_post_ops(const attr_t &attr, float &val, float sum_val) {
             const auto &a = e.eltwise.alpha;
             const auto &b = e.eltwise.beta;
             val = compute_eltwise_fwd(e.kind, val, s, a, b);
+        } else if (e.is_binary_kind()) {
+            val = compute_binary(e.kind, val, *it_bin_po);
+            it_bin_po++;
         }
     }
 }

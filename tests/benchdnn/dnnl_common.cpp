@@ -20,6 +20,8 @@
 #include <cstdlib>
 #include <unordered_set>
 
+#include "tests/test_thread.hpp"
+
 #include "dnnl_common.hpp"
 #include "dnnl_memory.hpp"
 
@@ -51,6 +53,14 @@ dnnl_scratchpad_mode_t scratchpad_mode = dnnl_scratchpad_mode_library;
 
 args_t &args_t::set(int arg, const dnn_mem_t &mem) {
     args_.push_back(std::make_pair(arg, &mem));
+    return *this;
+}
+
+args_t &args_t::set(
+        const std::vector<int> &args, const std::vector<dnn_mem_t> &mems) {
+    assert(args.size() == mems.size());
+    for (size_t i = 0; i < mems.size(); ++i)
+        args_.push_back(std::make_pair(args[i], &mems[i]));
     return *this;
 }
 
@@ -403,4 +413,53 @@ void check_known_skipped_case_common(
         }
     }
     if (r->state == SKIPPED) return;
+}
+
+int setup_binary(const_dnnl_primitive_desc_t pd, std::vector<int> &args,
+        std::vector<dnn_mem_t> &mem, std::vector<dnn_mem_t> &mem_ref) {
+    auto fill_src = [](int input_idx, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp) {
+        const auto nelems = mem_fp.nelems();
+        if (nelems == 0) return OK;
+
+        const auto dt = mem_dt.dt();
+        const int range = 16;
+        const int f_min = dt == dnnl_u8 ? 0 : -range / 2;
+
+        dnnl::impl::parallel_nd(nelems, [&](int64_t i) {
+            const float gen = ((101 * i) + 7 * input_idx - 97) % (range + 1);
+            const float value = (dt == dnnl_bf16 || dt == dnnl_f16)
+                    ? (f_min + gen) / range
+                    : (f_min + gen) * (1.0f + 4.0f / range);
+            mem_fp.set_elem(i, round_to_nearest_representable(dt, value));
+        });
+
+        SAFE(mem_dt.reorder(mem_fp), WARN);
+        return OK;
+    };
+
+    const_dnnl_primitive_attr_t const_attr;
+    DNN_SAFE(dnnl_primitive_desc_get_attr(pd, &const_attr), WARN);
+
+    const_dnnl_post_ops_t const_attr_po;
+    DNN_SAFE(
+            dnnl_primitive_attr_get_post_ops(const_attr, &const_attr_po), WARN);
+
+    auto po_len = dnnl_post_ops_len(const_attr_po);
+    for (int idx = 0; idx < po_len; ++idx) {
+        auto kind = dnnl_post_ops_get_kind(const_attr_po, idx);
+        if (kind != dnnl_binary) continue;
+
+        dnnl_memory_desc_t po_md;
+        DNN_SAFE(dnnl_post_ops_get_params_binary(
+                         const_attr_po, idx, NULL, &po_md),
+                WARN);
+
+        const auto tag = get_abx_tag(po_md.ndims);
+        mem_ref.emplace_back(po_md, dnnl_f32, tag, get_test_engine());
+        mem.emplace_back(po_md, get_test_engine());
+        args.push_back(DNNL_ARG_ATTR_POST_OP_0 + idx);
+
+        fill_src(idx, mem.back(), mem_ref.back());
+    }
+    return OK;
 }

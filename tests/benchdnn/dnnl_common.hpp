@@ -297,6 +297,8 @@ struct attr_bundle_t;
 
 struct args_t {
     args_t &set(int arg, const dnn_mem_t &mem);
+    args_t &set(
+            const std::vector<int> &args, const std::vector<dnn_mem_t> &mems);
     void clear() { args_.clear(); }
 
     int size() const { return (int)args_.size(); }
@@ -381,5 +383,8 @@ bool check_md_consistency_with_tag(
 
 void check_known_skipped_case_common(
         const std::vector<dnnl_data_type_t> &v_dt, res_t *r);
+
+int setup_binary(const_dnnl_primitive_desc_t pd, std::vector<int> &args,
+        std::vector<dnn_mem_t> &mem, std::vector<dnn_mem_t> &mem_ref);
 
 #endif

@@ -42,6 +42,9 @@ public:
                 alg_kind::binary_min, alg_kind::binary_mul));
     }
 
+    ref_binary_scalar_t(const post_ops_t::entry_t::binary_t &binary)
+        : ref_binary_scalar_t(binary.alg) {}
+
     template <typename src0_data_t = float, typename src1_data_t = src0_data_t,
             typename dst_data_t = src0_data_t>
     dst_data_t compute_scalar(src0_data_t src0, src1_data_t src1) {

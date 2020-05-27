@@ -21,6 +21,8 @@
 
 namespace dnnl {
 
+using data_type = memory::data_type;
+
 class attr_test : public ::testing::Test {
 protected:
     virtual void SetUp() {}
@@ -251,6 +253,19 @@ TEST_F(attr_test, TestPostOps) {
     ASSERT_EQ(alg, algorithm::eltwise_bounded_relu);
     ASSERT_FLOAT_EQ(alpha, 3.3f);
     ASSERT_FLOAT_EQ(beta, 4.4f);
+
+    memory::desc src1_md({1}, data_type::f32, {1});
+    ops.append_binary(algorithm::binary_add, src1_md);
+    attr.set_post_ops(ops);
+
+    ASSERT_EQ(attr.get_post_ops().len(), 3);
+    ASSERT_EQ(attr.get_post_ops().kind(0), primitive::kind::sum);
+    ASSERT_EQ(attr.get_post_ops().kind(1), primitive::kind::eltwise);
+    ASSERT_EQ(attr.get_post_ops().kind(2), primitive::kind::binary);
+    memory::desc src1_md_out;
+    attr.get_post_ops().get_params_binary(2, alg, src1_md_out);
+    ASSERT_EQ(alg, algorithm::binary_add);
+    ASSERT_EQ(src1_md, src1_md_out);
 }
 
 TEST_F(attr_test, DepthwiseFusionPostop) {
