@@ -20,6 +20,7 @@
 #include "common/c_types_map.hpp"
 #include "gpu/cm/kernel_utils.hpp"
 #include "gpu/compute/compute.hpp"
+#include "gpu/gpu_primitive.hpp"
 #include "gpu/gpu_sum_pd.hpp"
 #include "gpu/primitive_conf.hpp"
 
@@ -28,18 +29,18 @@ namespace impl {
 namespace gpu {
 namespace cm {
 
-struct simple_sum_t : public primitive_impl_t {
+struct simple_sum_t : public gpu_primitive_t {
     struct pd_t : public gpu_sum_pd_t {
         using gpu_sum_pd_t::gpu_sum_pd_t;
 
         DECLARE_SUM_PD_T("cm:ref:any", simple_sum_t);
 
-        status_t init() {
+        status_t init(engine_t *engine) {
             if (!is_cm_enabled()) return status::unimplemented;
 
             const int n = n_inputs();
 
-            bool ok = gpu_sum_pd_t::init() == status::success
+            bool ok = gpu_sum_pd_t::init(engine) == status::success
                     && n <= max_num_arrs;
             if (!ok) return status::unimplemented;
 
@@ -61,11 +62,11 @@ struct simple_sum_t : public primitive_impl_t {
         sum_conf_t conf;
     };
 
-    simple_sum_t(const pd_t *apd) : primitive_impl_t(apd) {}
+    simple_sum_t(const pd_t *apd) : gpu_primitive_t(apd) {}
 
-    virtual status_t init() override {
+    virtual status_t init(engine_t *engine) {
         auto *compute_engine
-                = utils::downcast<compute::compute_engine_t *>(engine());
+                = utils::downcast<compute::compute_engine_t *>(engine);
 
         compute::kernel_ctx_t kernel_ctx;
         pd()->init_kernel_ctx(kernel_ctx);
@@ -76,12 +77,12 @@ struct simple_sum_t : public primitive_impl_t {
         return status::success;
     }
 
-    virtual status_t execute(const exec_ctx_t &ctx) const override;
+    virtual status_t execute(const exec_ctx_t &ctx) const;
 
     static const int max_num_arrs = 16;
 
 private:
-    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 
     compute::kernel_t kernel_;
 };

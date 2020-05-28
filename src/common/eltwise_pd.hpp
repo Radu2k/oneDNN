@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef ELTWISE_PD_HPP
-#define ELTWISE_PD_HPP
+#ifndef COMMON_ELTWISE_PD_HPP
+#define COMMON_ELTWISE_PD_HPP
 
 #include "dnnl.h"
 
@@ -30,19 +30,19 @@ struct eltwise_fwd_pd_t;
 struct eltwise_pd_t : public primitive_desc_t {
     static constexpr auto base_pkind = primitive_kind::eltwise;
 
-    eltwise_pd_t(dnnl::impl::engine_t *engine, const eltwise_desc_t *adesc,
-            const primitive_attr_t *attr, const eltwise_fwd_pd_t *hint_fwd_pd)
-        : primitive_desc_t(engine, attr, base_pkind)
+    eltwise_pd_t(const eltwise_desc_t *adesc, const primitive_attr_t *attr,
+            const eltwise_fwd_pd_t *hint_fwd_pd)
+        : primitive_desc_t(attr, base_pkind)
         , desc_(*adesc)
         , hint_fwd_pd_(hint_fwd_pd)
         , data_md_(desc_.data_desc) {}
 
     const eltwise_desc_t *desc() const { return &desc_; }
-    virtual const op_desc_t *op_desc() const override {
+    const op_desc_t *op_desc() const override {
         return reinterpret_cast<const op_desc_t *>(this->desc());
     }
 
-    virtual status_t query(query_t what, int idx, void *result) const override {
+    status_t query(query_t what, int idx, void *result) const override {
         switch (what) {
             case query::prop_kind:
                 *(prop_kind_t *)result = desc()->prop_kind;
@@ -74,6 +74,17 @@ struct eltwise_pd_t : public primitive_desc_t {
         return memory_desc_wrapper(desc_.data_desc).has_zero_dim();
     }
 
+    bool use_dst() const {
+        using namespace alg_kind;
+        return !is_fwd()
+                && utils::one_of(desc_.alg_kind, eltwise_relu_use_dst_for_bwd,
+                        eltwise_tanh_use_dst_for_bwd,
+                        eltwise_elu_use_dst_for_bwd,
+                        eltwise_sqrt_use_dst_for_bwd,
+                        eltwise_logistic_use_dst_for_bwd,
+                        eltwise_exp_use_dst_for_bwd);
+    }
+
 protected:
     eltwise_desc_t desc_;
     const eltwise_fwd_pd_t *hint_fwd_pd_;
@@ -88,11 +99,11 @@ struct eltwise_fwd_pd_t : public eltwise_pd_t {
     typedef eltwise_fwd_pd_t base_class;
     typedef eltwise_fwd_pd_t hint_class;
 
-    eltwise_fwd_pd_t(dnnl::impl::engine_t *engine, const eltwise_desc_t *adesc,
-            const primitive_attr_t *attr, const eltwise_fwd_pd_t *hint_fwd_pd)
-        : eltwise_pd_t(engine, adesc, attr, hint_fwd_pd) {}
+    eltwise_fwd_pd_t(const eltwise_desc_t *adesc, const primitive_attr_t *attr,
+            const eltwise_fwd_pd_t *hint_fwd_pd)
+        : eltwise_pd_t(adesc, attr, hint_fwd_pd) {}
 
-    virtual arg_usage_t arg_usage(int arg) const override {
+    arg_usage_t arg_usage(int arg) const override {
         if (arg == DNNL_ARG_SRC) return arg_usage_t::input;
 
         if (arg == DNNL_ARG_DST) return arg_usage_t::output;
@@ -100,7 +111,7 @@ struct eltwise_fwd_pd_t : public eltwise_pd_t {
         return primitive_desc_t::arg_usage(arg);
     }
 
-    virtual const memory_desc_t *arg_md(int arg) const override {
+    const memory_desc_t *arg_md(int arg) const override {
         switch (arg) {
             case DNNL_ARG_SRC: return src_md(0);
             case DNNL_ARG_DST: return dst_md(0);
@@ -108,15 +119,15 @@ struct eltwise_fwd_pd_t : public eltwise_pd_t {
         }
     }
 
-    virtual const memory_desc_t *src_md(int index = 0) const override {
+    const memory_desc_t *src_md(int index = 0) const override {
         return index == 0 ? &data_md_ : &glob_zero_md;
     }
-    virtual const memory_desc_t *dst_md(int index = 0) const override {
+    const memory_desc_t *dst_md(int index = 0) const override {
         return index == 0 ? &data_md_ : &glob_zero_md;
     }
 
-    virtual int n_inputs() const override { return 1; }
-    virtual int n_outputs() const override { return 1; }
+    int n_inputs() const override { return 1; }
+    int n_outputs() const override { return 1; }
 
     bool is_zero_preserved() const {
         return math::eltwise_fwd_preserves_zero(
@@ -128,12 +139,12 @@ struct eltwise_bwd_pd_t : public eltwise_pd_t {
     typedef eltwise_bwd_pd_t base_class;
     typedef eltwise_fwd_pd_t hint_class;
 
-    eltwise_bwd_pd_t(engine_t *engine, const eltwise_desc_t *adesc,
-            const primitive_attr_t *attr, const eltwise_fwd_pd_t *hint_fwd_pd)
-        : eltwise_pd_t(engine, adesc, attr, hint_fwd_pd)
+    eltwise_bwd_pd_t(const eltwise_desc_t *adesc, const primitive_attr_t *attr,
+            const eltwise_fwd_pd_t *hint_fwd_pd)
+        : eltwise_pd_t(adesc, attr, hint_fwd_pd)
         , diff_data_md_(desc_.diff_data_desc) {}
 
-    virtual arg_usage_t arg_usage(int arg) const override {
+    arg_usage_t arg_usage(int arg) const override {
         if (use_dst() ? arg == DNNL_ARG_DST : arg == DNNL_ARG_SRC)
             return arg_usage_t::input;
 
@@ -143,7 +154,7 @@ struct eltwise_bwd_pd_t : public eltwise_pd_t {
         return primitive_desc_t::arg_usage(arg);
     }
 
-    virtual const memory_desc_t *arg_md(int arg) const override {
+    const memory_desc_t *arg_md(int arg) const override {
         switch (arg) {
             case DNNL_ARG_SRC: return src_md(0);
             case DNNL_ARG_DST: return dst_md(0);
@@ -153,30 +164,25 @@ struct eltwise_bwd_pd_t : public eltwise_pd_t {
         }
     }
 
-    virtual const memory_desc_t *src_md(int index = 0) const override {
+    const memory_desc_t *src_md(int index = 0) const override {
         return index == 0 ? &data_md_ : &glob_zero_md;
     }
-    virtual const memory_desc_t *dst_md(int index = 0) const override {
+    const memory_desc_t *dst_md(int index = 0) const override {
         return index == 0 ? &data_md_ : &glob_zero_md;
     }
-    virtual const memory_desc_t *diff_dst_md(int index = 0) const override {
+    const memory_desc_t *diff_dst_md(int index = 0) const override {
         return index == 0 ? &diff_data_md_ : &glob_zero_md;
     }
-    virtual const memory_desc_t *diff_src_md(int index = 0) const override {
+    const memory_desc_t *diff_src_md(int index = 0) const override {
         return index == 0 ? &diff_data_md_ : &glob_zero_md;
     }
 
-    virtual int n_inputs() const override { return 2; }
-    virtual int n_outputs() const override { return 1; }
+    int n_inputs() const override { return 2; }
+    int n_outputs() const override { return 1; }
 
-    bool is_zero_preserved() const { return true; }
-
-    bool use_dst() const {
-        using namespace alg_kind;
-        return utils::one_of(desc_.alg_kind, eltwise_relu_use_dst_for_bwd,
-                eltwise_tanh_use_dst_for_bwd, eltwise_elu_use_dst_for_bwd,
-                eltwise_sqrt_use_dst_for_bwd, eltwise_logistic_use_dst_for_bwd,
-                eltwise_exp_use_dst_for_bwd);
+    bool is_zero_preserved() const {
+        return math::eltwise_bwd_preserves_zero(
+                desc_.alg_kind, desc_.alpha, desc_.beta);
     }
 
 protected:

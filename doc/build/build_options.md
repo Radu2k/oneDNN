@@ -6,14 +6,14 @@ oneDNN supports the following build-time options.
 | Option                      | Supported values (defaults in bold) | Description
 | :---                        | :---                                | :---
 | DNNL_LIBRARY_TYPE           | **SHARED**, STATIC                  | Defines the resulting library type
-| DNNL_CPU_RUNTIME            | **OMP**, TBB, SEQ, THREADPOOL       | Defines the threading runtime for CPU engines
-| DNNL_GPU_RUNTIME            | **NONE**, OCL                       | Defines the offload runtime for GPU engines
+| DNNL_CPU_RUNTIME            | **OMP**, TBB, SEQ, THREADPOOL, DPCPP| Defines the threading runtime for CPU engines
+| DNNL_GPU_RUNTIME            | **NONE**, OCL, DPCPP                | Defines the offload runtime for GPU engines
 | DNNL_BUILD_EXAMPLES         | **ON**, OFF                         | Controls building the examples
 | DNNL_BUILD_TESTS            | **ON**, OFF                         | Controls building the tests
 | DNNL_ARCH_OPT_FLAGS         | *compiler flags*                    | Specifies compiler optimization flags (see warning note below)
 | DNNL_ENABLE_CONCURRENT_EXEC | ON, **OFF**                         | Disables sharing a common scratchpad between primitives in #dnnl::scratchpad_mode::library mode
 | DNNL_ENABLE_JIT_PROFILING   | **ON**, OFF                         | Enables integration with Intel(R) VTune(TM) Amplifier
-| DNNL_ENABLE_PRIMITIVE_CACHE | ON, **OFF**                         | Enables primitive cache
+| DNNL_ENABLE_PRIMITIVE_CACHE | **ON**, OFF                         | Enables primitive cache
 | DNNL_ENABLE_MAX_CPU_ISA     | **ON**, OFF                         | Enables controlling CPU dispatcher at run-time
 
 All other building options that can be found in CMake files are dedicated for
@@ -21,12 +21,6 @@ the development/debug purposes and are subject to change without any notice.
 Please avoid using them.
 
 ## Common options
-
-### Primitive cache
-Primitive cache is disabled in the default build configuration.
-
-To enable the primitive cache you can use `DNNL_ENABLE_PRIMITIVE_CACHE` CMake option.
-The default value is `"OFF"`.
 
 ## CPU Options
 Intel Architecture Processors and compatible devices are supported by
@@ -62,9 +56,9 @@ run-time to, for example, test SSE4.1 code on an AVX2-capable processor. The
 feature. See @ref dev_guide_cpu_dispatcher_control for more information.
 
 ### Runtimes
-CPU engine can use OpenMP, TBB or sequential threading runtimes. OpenMP
-threading is the default build mode. This behavior is controlled by the
-`DNNL_CPU_RUNTIME` CMake option.
+CPU engine can use OpenMP, Threading Building Blocks (TBB) or sequential
+threading runtimes. OpenMP threading is the default build mode. This behavior
+is controlled by the `DNNL_CPU_RUNTIME` CMake option.
 
 #### OpenMP
 oneDNN uses OpenMP runtime library provided by the compiler.
@@ -77,7 +71,7 @@ undefined behavior including incorrect results or crashes. However as long as
 both the library and the application use the same or compatible compilers there
 would be no conflicts.
 
-#### TBB
+#### Threading Building Blocks (TBB)
 To build oneDNN with TBB support, set `DNNL_CPU_RUNTIME` to `TBB`:
 
 ~~~sh
@@ -91,10 +85,7 @@ installation path or pass the path directly to CMake:
 $ cmake -DDNNL_CPU_RUNTIME=TBB -DTBBROOT=/opt/intel/path/tbb ..
 ~~~
 
-oneDNN has limited optimizations for Intel TBB and has some functional
-limitations if built with Intel TBB.
-
-Functional limitations:
+oneDNN has functional limitations if built with TBB:
 * Winograd convolution algorithm is not supported for fp32 backward
   by data and backward by weights propagation.
 

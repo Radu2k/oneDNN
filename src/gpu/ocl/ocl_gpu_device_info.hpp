@@ -22,7 +22,6 @@
 #include <CL/cl.h>
 
 #include "common/z_magic.hpp"
-#include "cpu/cpu_isa_traits.hpp"
 #include "gpu/compute/device_info.hpp"
 #include "gpu/ocl/ocl_utils.hpp"
 
@@ -92,7 +91,11 @@ class ocl_gpu_device_info_t : public compute::device_info_t {
 public:
     ocl_gpu_device_info_t(cl_device_id device) : device_(device) {}
 
-    virtual status_t init() override {
+    status_t init() override {
+        CHECK(init_arch());
+        CHECK(init_extensions());
+        CHECK(init_attributes());
+
         // Device name
         size_t size_name {0};
         cl_int err = clGetDeviceInfo(
@@ -134,7 +137,7 @@ public:
         return status::success;
     }
 
-    virtual bool has(compute::device_ext_t ext) const override {
+    bool has(compute::device_ext_t ext) const override {
         return has(extensions_, ext);
     }
 
@@ -164,9 +167,9 @@ public:
 
     gpu_arch_t gpu_arch() const { return gpu_arch_; }
 
-    virtual int eu_count() const override { return eu_count_; }
-    virtual int hw_threads() const override { return hw_threads_; }
-    virtual size_t llc_cache_size() const override { return llc_cache_size_; }
+    int eu_count() const override { return eu_count_; }
+    int hw_threads() const override { return hw_threads_; }
+    size_t llc_cache_size() const override { return llc_cache_size_; }
 
 private:
     status_t init_arch() {
@@ -256,9 +259,8 @@ private:
         }
 
         hw_threads_ = eu_count_ * threads_per_eu;
-
-        size_t cache_size
-                = cpu::get_per_core_cache_size(3) * cpu::get_num_cores();
+        size_t cache_size = cpu::platform::get_per_core_cache_size(3)
+                * cpu::platform::get_num_cores();
         llc_cache_size_ = (size_t)cache_size;
         return status::success;
     }
@@ -266,8 +268,6 @@ private:
     bool has(uint64_t extensions, compute::device_ext_t ext) const {
         return extensions & (uint64_t)ext;
     }
-
-    size_t get_llc_cache_size() const;
 
     cl_device_id device_ = nullptr;
 

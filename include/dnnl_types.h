@@ -193,6 +193,7 @@ typedef enum {
     dnnl_ba, ///< permuted 2D tensor
     dnnl_bac, ///< permuted 3D tensor
     dnnl_bacd, ///< permuted 4D tensor
+    dnnl_bacde, ///< permuted 5D tensor
     dnnl_bca, ///< permuted 3D tensor
     dnnl_bcda, ///< permuted 4D tensor
     dnnl_bcdea, ///< permuted 5D tensor
@@ -214,6 +215,7 @@ typedef enum {
     dnnl_aBc16b,
     dnnl_ABc16b16a,
     dnnl_Abc4a,
+    /// 3D tensor blocked by 2nd dimension with block size 32
     dnnl_aBc32b,
     /// 3D tensor blocked by 2nd dimension with block size 4
     dnnl_aBc4b,
@@ -240,6 +242,7 @@ typedef enum {
     dnnl_aBCd16b16c,
     dnnl_aBCd16c16b,
     dnnl_Abcd4a,
+    /// 4D tensor blocked by 2nd dimension with block size 32
     dnnl_aBcd32b,
     /// 4D tensor blocked by 2nd dimension with block size 4
     dnnl_aBcd4b,
@@ -287,6 +290,7 @@ typedef enum {
     dnnl_aBCde16c16b,
     dnnl_aBCde2c8b4c,
     dnnl_Abcde4a,
+    /// 5D tensor blocked by 2nd dimension with block size 32
     dnnl_aBcde32b,
     /// 5D tensor blocked by 2nd dimension with block size 4
     dnnl_aBcde4b,
@@ -459,6 +463,8 @@ typedef enum {
     dnnl_iohw = dnnl_bacd,
     /// 5D CNN weights tensor, an alias to #dnnl_abcde
     dnnl_oidhw = dnnl_abcde,
+    /// 5D CNN weights tensor, an alias to #dnnl_bacde
+    dnnl_iodhw = dnnl_bacde,
     /// 5D CNN weights tensor, an alias to #dnnl_cdeba
     dnnl_dhwio = dnnl_cdeba,
     /// 5D CNN weights tensor, an alias to #dnnl_acdeb
@@ -2199,6 +2205,12 @@ typedef const struct dnnl_stream_attr *const_dnnl_stream_attr_t;
 /// OpenCL runtime
 #define DNNL_RUNTIME_OCL 256u
 
+/// SYCL runtime
+#define DNNL_RUNTIME_SYCL 512u
+
+/// DPC++ runtime
+#define DNNL_RUNTIME_DPCPP DNNL_RUNTIME_SYCL
+
 /// Structure containing version information as per [Semantic
 /// Versioning](https://semver.org)
 typedef struct {
@@ -2213,7 +2225,7 @@ typedef struct {
 /// Disable profiling completely
 #define DNNL_JIT_PROFILE_NONE 0u
 
-/// Enable VTune integration
+/// Enable VTune Amplifier integration
 #define DNNL_JIT_PROFILE_VTUNE 1u
 
 /// Enable Linux perf integration via perfmap files
@@ -2235,35 +2247,35 @@ typedef enum {
     /// Any ISA (no restrictions)
     dnnl_cpu_isa_all = 0x0,
 
-    /// Intel(R) SSE4.1.
+    /// Intel Streaming SIMD Extensions 4.1 (Intel SSE4.1)
     dnnl_cpu_isa_sse41 = 0x1,
 
-    /// Intel(R) Advanced Vector Extensions.
+    /// Intel Advanced Vector Extensions (Intel AVX)
     dnnl_cpu_isa_avx = 0x3,
 
-    /// Intel(R) Advanced Vector Extensions 2.
+    /// Intel Advanced Vector Extensions 2 (Intel AVX2)
     dnnl_cpu_isa_avx2 = 0x7,
 
-    /// Intel(R) Advanced Vector Extensions 512 subset for Intel(R) Xeon
-    /// Phi(TM) Processors x200 Series.
+    /// Intel Advanced Vector Extensions 512 (Intel AVX-512) subset
+    /// for Intel Xeon Phi processors x200 Series.
     dnnl_cpu_isa_avx512_mic = 0xf,
 
-    /// Intel(R) Advanced Vector Extensions 512 subset for Intel(R) Xeon
-    /// Phi(TM) Processors 7235, 7285, 7295 Series.
+    /// Intel AVX-512 subset
+    /// for Intel Xeon Phi processors 7235, 7285, 7295 Series.
     dnnl_cpu_isa_avx512_mic_4ops = 0x1f,
 
-    /// Intel(R) Advanced Vector Extensions 512 for Intel(R) Xeon(R) Processor
-    /// Scalable Family and Intel(R) Core(TM) processor family.
+    /// Intel AVX-512 subset for Intel Xeon Scalable processor family
+    /// and Intel Core processor family.
     dnnl_cpu_isa_avx512_core = 0x27,
 
-    /// Intel(R) Advanced Vector Extensions 512 with Intel(R) DL Boost Support
-    /// for Intel(R) Xeon(R) Processor Scalable Family and Intel(R) Core(TM)
-    /// processor family.
+    /// Intel AVX-512 and Intel Deep Learning Boost (Intel DL Boost) support
+    /// for Intel Xeon Scalable processor family
+    /// and Intel Core processor family.
     dnnl_cpu_isa_avx512_core_vnni = 0x67,
 
-    /// Intel(R) Advanced Vector Extensions 512 with Intel(R) DL Boost and
-    /// Bfloat16 Support for Intel(R) Xeon(R) Processor Scalable Family and
-    /// Intel(R) Core(TM) processor family.
+    /// Intel AVX-512, Intel DL Boost and bfloat16 support
+    /// for Intel Xeon Scalable processor family
+    /// and Intel Core processor family.
     dnnl_cpu_isa_avx512_core_bf16 = 0xe7,
 } dnnl_cpu_isa_t;
 

@@ -33,9 +33,47 @@ append(CMAKE_CXX_FLAGS "${CMAKE_CCXX_NOWARN_FLAGS}")
 include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(${PROJECT_SOURCE_DIR}/examples)
 
-set_if(UNIX LIBM m)
+if(UNIX)
+    find_library(LIBM m)
+endif()
 
 file(GLOB_RECURSE sources *.cpp *.c)
+file(GLOB_RECURSE headers *.hpp *.h)
+
+# Skip SYCL, GPU and cross-engine examples
+foreach(f ${sources})
+    get_filename_component(f_name ${f} NAME)
+    if(DNNL_GPU_RUNTIME STREQUAL "NONE" AND ${f_name} MATCHES "^(cross_engine|gpu)")
+        list(REMOVE_ITEM sources "${f}")
+    endif()
+    if(NOT DNNL_WITH_SYCL AND ${f_name} MATCHES "^sycl")
+        list(REMOVE_ITEM sources "${f}")
+    endif()
+endforeach()
+
+# Skip CPU examples that do not work with SYCL
+if(DNNL_CPU_SYCL)
+    foreach(f
+            cpu_cnn_training_f32.c
+            cpu_rnn_inference_int8.cpp
+            cpu_rnn_inference_f32.cpp)
+        get_filename_component(f_path
+                ${CMAKE_CURRENT_LIST_DIR}/${f} ABSOLUTE)
+        list(REMOVE_ITEM sources "${f_path}")
+    endforeach()
+endif()
+
+# Skip USM example with ComputeCpp
+if(DNNL_SYCL_COMPUTECPP)
+    list(REMOVE_ITEM sources "${CMAKE_CURRENT_LIST_DIR}/sycl_interop_usm.cpp")
+endif()
+
+# Skip matmul examples with SYCL
+foreach(f ${sources})
+    if(DNNL_WITH_SYCL AND ${f} MATCHES "matmul")
+        list(REMOVE_ITEM sources "${f}")
+    endif()
+endforeach()
 
 foreach(src ${sources})
     file(RELATIVE_PATH src_rel_path ${CMAKE_CURRENT_SOURCE_DIR} ${src})
@@ -48,40 +86,63 @@ foreach(src ${sources})
             example_name ${example_name})
     endforeach()
 
-    if(${example_name} MATCHES "(cpu-)")
-        # Example name contains cpu-
-        register_exe(${example_name} ${src} "test" ${LIBM})
-    elseif(${example_name} MATCHES "^(cross-engine|gpu)")
-        # Example name contains cross-engine or gpu-
-        if (NOT DNNL_GPU_RUNTIME STREQUAL "NONE")
+    if(${example_name} MATCHES "(cross-engine|cpu|gpu)-")
+        # Example name contains cross-engine, cpu or gpu
+        if(NOT ${example_name} MATCHES ".*opencl" OR DNNL_GPU_RUNTIME STREQUAL "OCL")
             register_exe(${example_name} ${src} "test" ${LIBM})
         endif()
     else()
+        set(cpu_rt_pattern "(SEQ|OMP|TBB|SYCL|DPCPP)")
+        set(gpu_rt_pattern "(OCL|SYCL|DPCPP)")
+        if(${example_name} MATCHES "sycl.*")
+            set(cpu_rt_pattern "(SYCL|DPCPP)")
+            set(gpu_rt_pattern "(SYCL|DPCPP)")
+        endif()
+        set(should_add_usm_target false)
+        if(DNNL_SYCL_DPCPP AND NOT ${example_name} MATCHES "sycl-interop")
+            set(should_add_usm_target true)
+        endif()
+        if(DNNL_CPU_RUNTIME MATCHES ${cpu_rt_pattern})
+            # Adding test for CPU
+            add_test("cpu-${example_name}" "${example_name}" cpu)
+            maybe_configure_windows_test("cpu-${example_name}" TEST)
+            if(should_add_usm_target)
+                add_test("cpu-usm-${example_name}" "usm-${example_name}" cpu)
+                maybe_configure_windows_test("cpu-usm-${example_name}" TEST)
+            endif()
+        endif()
+        if(DNNL_GPU_RUNTIME MATCHES ${gpu_rt_pattern})
+            # Adding test for GPU
+            add_test("gpu-${example_name}" "${example_name}" gpu)
+            maybe_configure_windows_test("gpu-${example_name}" TEST)
+            if(should_add_usm_target)
+                add_test("gpu-usm-${example_name}" "usm-${example_name}" gpu)
+                maybe_configure_windows_test("gpu-usm-${example_name}" TEST)
+            endif()
+        endif()
         register_exe(${example_name} ${src} "" ${LIBM})
-
-        # Adding test for CPU
-        add_test("cpu-${example_name}" "${example_name}" cpu)
-        maybe_configure_windows_test("cpu-${example_name}" TEST)
-
-        # Adding test for GPU
-        if (NOT DNNL_GPU_RUNTIME STREQUAL "NONE")
-           add_test("gpu-${example_name}" "${example_name}" gpu)
-           maybe_configure_windows_test("gpu-${example_name}" TEST)
+        if(should_add_usm_target)
+            register_exe("usm-${example_name}" ${src} "" ${LIBM})
+            target_compile_definitions("usm-${example_name}" PUBLIC -DDNNL_USE_DPCPP_USM)
+        endif()
+        if(DNNL_SYCL_COMPUTECPP AND NOT ${example_name} MATCHES ".*-c$")
+            add_sycl_to_target(TARGET ${example_name} SOURCES ${src})
         endif()
     endif()
 endforeach()
 
 if (DNNL_INSTALL_MODE STREQUAL "BUNDLE")
-    file(GLOB example_sources
-         "cpu_*.cpp" "c_*.c" "cnn_*.c" "cnn_*.cpp" "rnn_*.cpp" "*.h*")
     configure_file(CMakeLists.txt.in CMakeLists.txt @ONLY)
     install(FILES
         ${CMAKE_CURRENT_BINARY_DIR}/CMakeLists.txt
-        ${example_sources}
+        ${sources} ${headers}
         DESTINATION examples)
-    install(DIRECTORY
-        tutorials
-        DESTINATION examples)
+    # Skip matmul examples with SYCL
+    if(NOT DNNL_WITH_SYCL)
+        install(DIRECTORY
+            tutorials
+            DESTINATION examples)
+    endif()
     if(CMAKE_GENERATOR MATCHES "Visual Studio")
         install(FILES
             ${PROJECT_SOURCE_DIR}/cmake/template.vcxproj.user

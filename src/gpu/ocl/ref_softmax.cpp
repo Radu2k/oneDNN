@@ -22,8 +22,8 @@ namespace gpu {
 namespace ocl {
 
 status_t ref_softmax_fwd_t::execute_generic(const exec_ctx_t &ctx) const {
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
+    if (memory_desc_wrapper(pd()->desc()->data_desc).has_zero_dim())
+        return status::success;
 
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
@@ -33,12 +33,15 @@ status_t ref_softmax_fwd_t::execute_generic(const exec_ctx_t &ctx) const {
     arg_list.set(1, dst);
 
     auto nd_range = compute::nd_range_t(pd()->gws, pd()->lws);
-    status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
 
+    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
     return status;
 }
 
 status_t ref_softmax_bwd_t::execute_generic(const exec_ctx_t &ctx) const {
+    if (memory_desc_wrapper(pd()->desc()->diff_desc).has_zero_dim())
+        return status::success;
+
     auto &dst = CTX_IN_STORAGE(DNNL_ARG_DST);
     auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
     auto &diff_src = CTX_OUT_STORAGE(DNNL_ARG_DIFF_SRC);
@@ -49,9 +52,8 @@ status_t ref_softmax_bwd_t::execute_generic(const exec_ctx_t &ctx) const {
     arg_list.set(2, diff_dst);
 
     auto nd_range = compute::nd_range_t(pd()->gws);
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
-    status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
+
+    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
     return status;
 }

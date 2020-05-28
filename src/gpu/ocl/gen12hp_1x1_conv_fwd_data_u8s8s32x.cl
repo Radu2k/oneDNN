@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * licensed under the apache license, version 2.0 (the "license");
 * you may not use this file except in compliance with the license.
@@ -15,10 +15,8 @@
 *******************************************************************************/
 
 #include "gpu/ocl/ocl_math_utils.h"
-#include "gpu/ocl/ocl_types.h"
-#if WITH_ELTWISE == 1 || WITH_POST_SUM_ELTWISE == 1
 #include "gpu/ocl/ocl_post_ops.h"
-#endif
+#include "gpu/ocl/ocl_types.h"
 
 #define BLOCK_READ_SRC(data, idx) \
     data = intel_sub_group_block_read8((__global uint *)&src[idx]);
@@ -200,13 +198,13 @@ gen12hp_1x1_conv_fwd_u8s8s32x(const __global uchar *src,
                 tmp[3], eltwise_alpha, eltwise_beta, eltwise_scale); \
     } while (0)
 
-#if WITH_ELTWISE
+#if ELTWISE_IDX == 0
 #define DO_ELTWISE() ELTWISE();
 #else
 #define DO_ELTWISE() ;
 #endif
 
-#if WITH_POST_SUM_ELTWISE
+#if ELTWISE_IDX == 1
 #define DO_POST_SUM_ELTWISE() ELTWISE();
 #else
 #define DO_POST_SUM_ELTWISE() ;

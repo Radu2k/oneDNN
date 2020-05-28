@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -139,12 +139,7 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("IC_BLOCK", conf.ic_block);
 
     kernel_ctx.define_int("WITH_BIAS", conf.with_bias);
-    kernel_ctx.define_int("WITH_ELTWISE", conf.with_eltwise);
-    kernel_ctx.define_int("WITH_SUM", conf.with_sum);
-    kernel_ctx.define_int("SUM_SCALE", conf.sum_scale == 1.0);
-    kernel_ctx.define_int("WITH_POST_SUM_ELTWISE", conf.with_post_sum_eltwise);
-    if (conf.with_eltwise || conf.with_post_sum_eltwise)
-        def_postops(kernel_ctx, conf.eltwise.alg);
+    def_attr_info(kernel_ctx, conf.attr_info);
 
     kernel_ctx.define_int("SUB_GROUP_SIZE", conf.sub_group_size);
 
@@ -170,11 +165,7 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
 
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
-    auto *compute_engine = utils::downcast<ocl_gpu_engine_t *>(engine());
-    auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
-            compute_engine->device_info());
-    if (dev_info->gpu_arch() == gpu_arch_t::gen12hp)
-        kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
+    if (is_gen12hp) kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
 
     return status::success;
 }
@@ -187,18 +178,16 @@ status_t gen12hp_1x1_convolution_fwd_t::execute_forward(
     auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     const auto &conf = pd()->conf;
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, src);
     arg_list.set(1, weights);
     arg_list.set(2, bias);
     arg_list.set(3, dst);
-    arg_list.set(4, conf.eltwise.alpha);
-    arg_list.set(5, conf.eltwise.beta);
-    arg_list.set(6, conf.eltwise.scale);
-    arg_list.set(7, conf.sum_scale);
+    arg_list.set(4, conf.attr_info.eltwise_alpha);
+    arg_list.set(5, conf.attr_info.eltwise_beta);
+    arg_list.set(6, conf.attr_info.eltwise_scale);
+    arg_list.set(7, conf.attr_info.sum_scale);
 
     if (conf.src_data_type == data_type::u8) {
         float scales = pd()->attr()->output_scales_.scales_[0];
@@ -206,7 +195,7 @@ status_t gen12hp_1x1_convolution_fwd_t::execute_forward(
     }
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
-    status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
+    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
     return status;
 }

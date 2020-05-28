@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef NSTL_HPP
-#define NSTL_HPP
+#ifndef COMMON_NSTL_HPP
+#define COMMON_NSTL_HPP
 
 #include <float.h>
 #include <limits.h>
@@ -238,6 +238,22 @@ public:
     }
 };
 
+// Compile-time sequence of indices (part of C++14)
+template <size_t... Ints>
+struct index_sequence {};
+
+template <size_t N, size_t... Next>
+struct make_index_sequence_helper
+    : public make_index_sequence_helper<N - 1, N - 1, Next...> {};
+
+template <size_t... Next>
+struct make_index_sequence_helper<0, Next...> {
+    using type = index_sequence<Next...>;
+};
+
+// Generator of compile-time sequence of indices
+template <size_t N>
+using make_index_sequence = typename make_index_sequence_helper<N>::type;
 } // namespace nstl
 } // namespace impl
 } // namespace dnnl

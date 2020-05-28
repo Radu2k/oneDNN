@@ -20,10 +20,10 @@ in comparison to fp32.
 
 oneDNN supports training and inference with the following data types:
 
-| Usage mode | CPU                | GPU        |
-| :---       | :---               | :---       |
-| Inference  | f32, bf16, s8/u8   | f32, f16   |
-| Training   | f32, bf16          | f32        |
+| Usage mode | CPU                | GPU                     |
+| :---       | :---               | :---                    |
+| Inference  | f32, bf16, s8/u8   | f32, bf16, f16, s8/u8   |
+| Training   | f32, bf16          | f32, bf16               |
 
 @note
     Using lower precision arithmetic may require changes in the deep learning
@@ -42,22 +42,54 @@ guide.
 ## Hardware Limitations
 
 While all the platforms oneDNN supports have hardware acceleration for
-fp32 arithmetics, that is not the case for other data types. Considering that
-performance is the main purpose of the low precision data types support,
-oneDNN implements this functionality only for the platforms that have
-hardware acceleration for these data types. The table below summarizes the
-current support matrix:
+fp32 arithmetics, that is not the case for other data types. Support for low
+precision data types may not be available for older platforms. The next sections
+explain limitations that exist for low precision data types for
+Intel(R) Architecture processors, Intel Processor Graphics and
+Xe architecture-based Graphics.
 
-| Data type | CPU                             | GPU           |
-| :---      | :---                            | :---          |
-| f32       | any                             | any           |
-| bf16      | Intel(R) DL Boost with bfloat16 | not supported |
-| f16       | not supported                   | any           |
-| s8, u8    | Intel AVX512, Intel DL Boost    | not supported |
+### Intel(R) Architecture Processors
+
+oneDNN performance optimizations for Intel Architecture Processors are
+specialized based on Instruction Set Architecture (ISA).
+The following ISA have specialized optimizations in the library:
+* Intel Streaming SIMD Extensions 4.1 (Intel SSE4.1)
+* Intel Advanced Vector Extensions (Intel AVX)
+* Intel Advanced Vector Extensions 2 (Intel AVX2)
+* Intel Advanced Vector Extensions 512 (Intel AVX-512)
+* Intel Deep Learning Boost (Intel DL Boost)
+
+The following table indicates the minimal supported ISA for each of the data
+types that oneDNN recognizes.
+| Data type | Minimal supported ISA
+| :---      | :---
+| f32       | Intel SSE4.1
+| s8, u8    | Intel AVX2
+| bf16      | Intel DL Boost with bfloat16 support
+| f16       | not supported
 
 @note
-  oneDNN has functional bfloat16 support on processors with
-  Intel AVX512 Byte and Word Instructions (AVX512BW) support for validation
+  See @ref dev_guide_int8_computations in the Developer Guide for additional
+  limitations related to int8 arithmetic.
+
+@note
+  The library has functional bfloat16 support on processors with
+  Intel AVX-512 Byte and Word Instructions (AVX512BW) support for validation
   purposes. The performance of bfloat16 primitives on platforms without
   hardware acceleration for bfloat16 is 3-4x lower in comparison to
   the same operations on the fp32 data type.
+
+### Intel(R) Processor Graphics and Xe architecture-based Graphics
+
+Intel Processor Graphics provides hardware acceleration for fp32 and fp16
+arithmetic. Xe architecture-based Graphics additionally provides
+acceleration for int8 arithmetic (both signed and unsigned). Implementations
+for the bf16 data type are functional only and do not currently provide
+performance benefits.
+
+| Data type | Support level
+| :---      | :---
+| f32       | optimized
+| bf16      | functional only
+| f16       | optimized
+| s8, u8    | optimized for Xe architecture-based Graphics (code named DG1 and Tiger Lake)

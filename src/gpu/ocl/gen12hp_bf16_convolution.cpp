@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -156,16 +156,20 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_conf() {
 
     auto scratchpad = scratchpad_registry().registrar();
     if (wei_size)
-        scratchpad.book(
-                memory_tracking::names::key_conv_wei_reduction, wei_size);
+        scratchpad.book(memory_tracking::names::key_conv_wei_reduction,
+                wei_size, types::data_type_size(conf.weights_data_type),
+                OCL_BUFFER_ALIGNMENT);
+    //scratchpad_registry());
     size_t bia_size
             = ((conf.with_bias && conf.bias_data_type == data_type::bf16)
                               ? conf.ngroups * conf.oc
                               : 0)
             * sizeof(float);
     if (bia_size)
-        scratchpad.book(
-                memory_tracking::names::key_conv_bia_reduction, bia_size);
+        scratchpad.book(memory_tracking::names::key_conv_bia_reduction,
+                bia_size, types::data_type_size(conf.bias_data_type),
+                OCL_BUFFER_ALIGNMENT);
+    //bia_size, OCL_BUFFER_ALIGNMENT);
 
     if (!set_default_formats_common(conf.src_tag, conf.wei_tag, conf.dst_tag)) {
         return status::unimplemented;
@@ -247,11 +251,7 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
     kernel_ctx.add_option("-cl-std=CL2.0");
     kernel_ctx.add_option("-cl-uniform-work-group-size");
 
-    auto *compute_engine = utils::downcast<ocl_gpu_engine_t *>(engine());
-    auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
-            compute_engine->device_info());
-    if (dev_info->gpu_arch() == gpu_arch_t::gen12hp)
-        kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
+    if (is_gen12hp) kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
 
     kernel_ctx.print_options();
     return status::success;
@@ -259,8 +259,6 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
 
 status_t gen12hp_bf16_convolution_bwd_weights_t::execute_backward_weights(
         const exec_ctx_t &ctx) const {
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
@@ -293,8 +291,7 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::execute_backward_weights(
                             * conf.kw,
                     conf.oc * conf.ngroups, 1},
             {conf.sub_group_size, 16, 1});
-    CHECK(compute_stream->parallel_for(
-            nd_range, zero_init_kernel_, arg_list_zero));
+    CHECK(parallel_for(ctx, nd_range, zero_init_kernel_, arg_list_zero));
 
     arg_list.set(0, src);
 
@@ -315,8 +312,7 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::execute_backward_weights(
     arg_list.set(3, diff_dst);
 
     nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
-    status_t status
-            = compute_stream->parallel_for(nd_range, conv_kernel_, arg_list);
+    status_t status = parallel_for(ctx, nd_range, conv_kernel_, arg_list);
 
     if (utils::one_of(
                 data_type::bf16, conf.weights_data_type, conf.bias_data_type)) {
@@ -341,8 +337,8 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::execute_backward_weights(
                                 * conf.kh * conf.kw,
                         conf.oc * conf.ngroups, 1},
                 {conf.sub_group_size, 16, 1});
-        status = compute_stream->parallel_for(
-                nd_range, convert_f32_to_bf16_kernel_, arg_list_cvt);
+        status = parallel_for(
+                ctx, nd_range, convert_f32_to_bf16_kernel_, arg_list_cvt);
     }
 
     return status;

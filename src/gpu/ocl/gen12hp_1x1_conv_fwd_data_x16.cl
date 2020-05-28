@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * licensed under the apache license, version 2.0 (the "license");
 * you may not use this file except in compliance with the license.
@@ -90,7 +90,7 @@ inline float8 POST_OPS_PASS(float8 val, float2 bias, float sum_scale,
     val[7] += bias[1];
 #endif // WITH_BIAS
 
-#if WITH_ELTWISE == 1
+#if ELTWISE_IDX == 0
     val[0] = fwd_eltwise(val[0], alpha, beta, scale);
     val[1] = fwd_eltwise(val[1], alpha, beta, scale);
     val[2] = fwd_eltwise(val[2], alpha, beta, scale);
@@ -116,7 +116,7 @@ inline float8 POST_OPS_PASS(float8 val, float2 bias, float sum_scale,
             * sum_scale;
 #endif // WITH_SUM
 
-#if WITH_POST_SUM_ELTWISE
+#if ELTWISE_IDX == 1
     val[0] = fwd_eltwise(val[0], alpha, beta, scale);
     val[1] = fwd_eltwise(val[1], alpha, beta, scale);
     val[2] = fwd_eltwise(val[2], alpha, beta, scale);

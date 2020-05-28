@@ -19,9 +19,11 @@
 #include <stdint.h>
 
 #include "dnnl.h"
+#include "dnnl.hpp"
 
 #include "c_types_map.hpp"
 #include "engine.hpp"
+#include "memory.hpp"
 #include "memory_desc_wrapper.hpp"
 #include "stream.hpp"
 #include "type_helpers.hpp"
@@ -76,11 +78,40 @@ dnnl_memory::dnnl_memory(dnnl::impl::engine_t *engine,
     memory_storage_t *memory_storage_ptr;
     status_t status = engine->create_memory_storage(
             &memory_storage_ptr, flags, size, handle);
-    assert(status == success);
     if (status != success) return;
 
     memory_storage_.reset(memory_storage_ptr);
-    if (!(flags & omit_zero_pad)) zero_pad();
+    if (!(flags & omit_zero_pad)) zero_pad(nullptr);
+}
+
+dnnl_memory::dnnl_memory(dnnl::impl::engine_t *engine,
+        const dnnl::impl::memory_desc_t *md,
+        std::unique_ptr<dnnl::impl::memory_storage_t> &&memory_storage,
+        bool do_zero_pad)
+    : engine_(engine), md_(*md) {
+    if (memory_storage) {
+        memory_storage_ = std::move(memory_storage);
+        if (do_zero_pad) zero_pad(nullptr);
+    } else {
+        memory_storage_t *memory_storage_ptr;
+        status_t status = engine->create_memory_storage(
+                &memory_storage_ptr, use_runtime_ptr, 0, nullptr);
+        if (status != status::success) return;
+
+        memory_storage_.reset(memory_storage_ptr);
+    }
+}
+
+status_t dnnl_memory::set_data_handle(void *handle, stream_t *stream) {
+    using namespace dnnl::impl;
+
+    void *old_handle;
+    CHECK(memory_storage()->get_data_handle(&old_handle));
+
+    if (handle != old_handle) {
+        CHECK(memory_storage()->set_data_handle(handle));
+    }
+    return zero_pad(stream);
 }
 
 status_t dnnl_memory_desc_init_by_tag(memory_desc_t *memory_desc, int ndims,
@@ -516,7 +547,7 @@ status_t dnnl_memory_set_data_handle_v2(
         memory_t *memory, void *handle, stream_t *stream) {
     if (any_null(memory)) return invalid_arguments;
     if (stream) stream->before_exec_hook();
-    status_t status = memory->set_data_handle(handle);
+    status_t status = memory->set_data_handle(handle, stream);
     if (stream) stream->after_exec_hook();
     return status;
 }
@@ -525,14 +556,14 @@ status_t dnnl_memory_map_data(const memory_t *memory, void **mapped_ptr) {
     bool args_ok = !any_null(memory, mapped_ptr);
     if (!args_ok) return invalid_arguments;
 
-    return memory->memory_storage()->map_data(mapped_ptr);
+    return memory->memory_storage()->map_data(mapped_ptr, nullptr);
 }
 
 status_t dnnl_memory_unmap_data(const memory_t *memory, void *mapped_ptr) {
     bool args_ok = !any_null(memory);
     if (!args_ok) return invalid_arguments;
 
-    return memory->memory_storage()->unmap_data(mapped_ptr);
+    return memory->memory_storage()->unmap_data(mapped_ptr, nullptr);
 }
 
 status_t dnnl_memory_destroy(memory_t *memory) {

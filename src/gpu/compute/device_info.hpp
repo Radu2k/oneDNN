@@ -23,6 +23,7 @@
 
 #include "common/c_types_map.hpp"
 #include "common/utils.hpp"
+#include "common/z_magic.hpp"
 
 namespace dnnl {
 namespace impl {

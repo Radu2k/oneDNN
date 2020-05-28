@@ -17,8 +17,8 @@
 #include <memory>
 
 #include "dnnl.h"
-#include "dnnl_thread.hpp"
 #include "engine.hpp"
+#include "memory.hpp"
 #include "nstl.hpp"
 #include "primitive.hpp"
 
@@ -29,6 +29,10 @@
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
 #include "gpu/ocl/ocl_engine.hpp"
+#endif
+
+#if DNNL_WITH_SYCL
+#include "sycl/sycl_engine.hpp"
 #endif
 
 namespace dnnl {
@@ -46,6 +50,10 @@ static inline std::unique_ptr<engine_factory_t> get_engine_factory(
                 new gpu::ocl::ocl_engine_factory_t(kind));
     }
 #endif
+#if DNNL_WITH_SYCL
+    if (runtime_kind == runtime_kind::sycl)
+        return sycl::get_engine_factory(kind);
+#endif
     return nullptr;
 }
 
@@ -55,11 +63,6 @@ static inline std::unique_ptr<engine_factory_t> get_engine_factory(
 using namespace dnnl::impl;
 using namespace dnnl::impl::status;
 using namespace dnnl::impl::utils;
-
-// XXX: allows to have threading related functions in a limited scope
-int dnnl_engine::dnnl_get_max_threads() {
-    return ::dnnl_get_max_threads();
-}
 
 size_t dnnl_engine_get_count(engine_kind_t kind) {
     auto ef = get_engine_factory(kind, get_default_runtime(kind));

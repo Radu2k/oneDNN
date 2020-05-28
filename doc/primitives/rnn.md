@@ -297,7 +297,7 @@ argument index as specified by the following table.
 | \dstlayer              | DNNL_ARG_DST_LAYER               |
 | \dstiter               | DNNL_ARG_DST_ITER                |
 | \dstiterc              | DNNL_ARG_DST_ITER_C              |
-| workspace              | DNNL_WORKSPACE                   |
+| \workspace             | DNNL_WORKSPACE                   |
 | \diffsrclayer          | DNNL_ARG_DIFF_SRC_LAYER          |
 | \diffsrciter           | DNNL_ARG_DIFF_SRC_ITER           |
 | \diffsrciterc          | DNNL_ARG_DIFF_SRC_ITER_C         |
@@ -370,9 +370,17 @@ details on how to use and set these quantization parameters.
 1. Refer to @ref dev_guide_data_types for limitations related to data types
    support.
 
+2. **CPU**
+    - Bias must always be present (that is, the corresponding memory descriptor
+      argument cannot be zero memory descriptor when the RNN operation
+      descriptor is initialized).
+
 2. **GPU**
     - No support for GRU
     - No support for Peephole LSTM and Projection LSTM
+    - Bias must always be present (that is, the corresponding memory descriptor
+      argument cannot be zero memory descriptor when the RNN operation
+      descriptor is initialized).
 
 ## Examples
 

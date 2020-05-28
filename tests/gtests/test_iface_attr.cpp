@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "cpu_isa_traits.hpp"
 #include "dnnl_test_common.hpp"
 #include "gtest/gtest.h"
 
@@ -61,6 +60,37 @@ TEST_F(attr_test, TestScratchpadModeEx) {
         } else {
             ASSERT_EQ(mem_consumption, 0L);
         }
+    }
+}
+
+TEST_F(attr_test, TestScratchpadArg) {
+    engine eng = get_test_engine();
+
+    const memory::dim N = 2, C = 2, W = 2;
+
+    memory::desc data_md(
+            {N, C, W}, memory::data_type::f32, memory::format_tag::ncw);
+
+    dnnl::primitive_attr attr;
+    auto softmax_d
+            = softmax_forward::desc(prop_kind::forward_inference, data_md, 1);
+    for (auto m : {scratchpad_mode::library, scratchpad_mode::user}) {
+        attr.set_scratchpad_mode(m);
+        auto softmax_pd = softmax_forward::primitive_desc(softmax_d, attr, eng);
+
+        memory src(softmax_pd.src_desc(), eng);
+        memory dst(softmax_pd.dst_desc(), eng);
+        memory scratchpad(softmax_pd.scratchpad_desc(), eng);
+
+        fill_data<float>(src.get_desc().get_size() / sizeof(float), src);
+
+        stream s(eng);
+
+        softmax_forward softmax_p(softmax_pd);
+        softmax_p.execute(s,
+                {{DNNL_ARG_SRC, src}, {DNNL_ARG_DST, dst},
+                        {DNNL_ARG_SCRATCHPAD, scratchpad}});
+        s.wait();
     }
 }
 
@@ -278,7 +308,7 @@ TEST_F(attr_test, DepthwiseFusion) {
     std::vector<memory::data_type> test_dts {
             memory::data_type::f32, memory::data_type::s8};
 
-    if (impl::cpu::mayiuse(impl::cpu::avx512_core))
+    if (!unsupported_data_type(memory::data_type::bf16))
         test_dts.push_back(memory::data_type::bf16);
 
     for (auto dt : test_dts) {

@@ -27,10 +27,10 @@ namespace cm {
 
 @KER_LIST_EXTERN@
 
-const char **get_kernel_source(const char *name) {
-    static const std::unordered_map<std::string, const char ** > kernel_list = {
-        @KER_LIST_ENTRIES@
-    };
+        const char **
+        get_kernel_source(const char *name) {
+    static const std::unordered_map<std::string, const char **> kernel_list
+            = { @KER_LIST_ENTRIES@ };
 
     if (!name) return nullptr;
 

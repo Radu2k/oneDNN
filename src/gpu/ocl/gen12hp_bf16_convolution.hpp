@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 #include "common/c_types_map.hpp"
 #include "gpu/compute/compute.hpp"
 #include "gpu/gpu_convolution_pd.hpp"
+#include "gpu/gpu_primitive.hpp"
 #include "gpu/ocl/ocl_stream.hpp"
 #include "gpu/ocl/ocl_utils.hpp"
 #include "gpu/primitive_conf.hpp"
@@ -29,22 +30,20 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-struct gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
+struct gen12hp_bf16_convolution_bwd_weights_t : public gpu_primitive_t {
     struct pd_t : public gpu_convolution_bwd_weights_pd_t {
-        pd_t(engine_t *engine, const convolution_desc_t *adesc,
-                const primitive_attr_t *attr,
+        pd_t(const convolution_desc_t *adesc, const primitive_attr_t *attr,
                 const convolution_fwd_pd_t *hint_fwd_pd)
-            : gpu_convolution_bwd_weights_pd_t(
-                    engine, adesc, attr, hint_fwd_pd) {}
+            : gpu_convolution_bwd_weights_pd_t(adesc, attr, hint_fwd_pd) {}
 
         DECLARE_COMMON_PD_T(
                 "ocl:gen12hp", gen12hp_bf16_convolution_bwd_weights_t);
 
-        status_t init() {
+        status_t init(engine_t *engine) {
             using namespace prop_kind;
             using namespace data_type;
             auto *compute_engine
-                    = utils::downcast<compute::compute_engine_t *>(engine());
+                    = utils::downcast<compute::compute_engine_t *>(engine);
 
             bool ok = desc()->prop_kind == backward_weights
                     && desc()->alg_kind == alg_kind::convolution_direct
@@ -66,6 +65,11 @@ struct gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
 
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
+
+            auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
+                    compute_engine->device_info());
+            is_gen12hp = dev_info->gpu_arch() == gpu_arch_t::gen12hp;
+
             return ok ? status::success : status::unimplemented;
         }
 
@@ -74,9 +78,10 @@ struct gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
 
         conv_conf_t conf;
         offsets_t off;
+        bool is_gen12hp = false;
     };
 
-    status_t init() override {
+    status_t init(engine_t *engine) override {
         std::vector<const char *> kernel_names;
         // split barrier is disabled due to worse performance
         if (pd()->conf.use_split_barrier)
@@ -91,11 +96,8 @@ struct gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
         auto status = pd()->init_kernel_ctx(kernel_ctx);
         if (status != status::success) return status;
 
-        auto *compute_engine
-                = utils::downcast<compute::compute_engine_t *>(engine());
         std::vector<compute::kernel_t> kernels;
-        CHECK(compute_engine->create_kernels(
-                &kernels, kernel_names, kernel_ctx));
+        CHECK(create_kernels(engine, &kernels, kernel_names, kernel_ctx));
         conv_kernel_ = kernels[0];
         zero_init_kernel_ = kernels[1];
 
@@ -106,7 +108,7 @@ struct gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
     }
 
     gen12hp_bf16_convolution_bwd_weights_t(const pd_t *apd)
-        : primitive_impl_t(apd) {}
+        : gpu_primitive_t(apd) {}
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
         return execute_backward_weights(ctx);
@@ -114,7 +116,7 @@ struct gen12hp_bf16_convolution_bwd_weights_t : public primitive_impl_t {
 
 private:
     status_t execute_backward_weights(const exec_ctx_t &ctx) const;
-    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 
     compute::kernel_t conv_kernel_;
     compute::kernel_t zero_init_kernel_;

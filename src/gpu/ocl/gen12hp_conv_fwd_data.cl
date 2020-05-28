@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,10 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "gpu/ocl/ocl_types.h"
-#if WITH_ELTWISE == 1 || WITH_POST_SUM_ELTWISE == 1
 #include "gpu/ocl/ocl_post_ops.h"
-#endif
+#include "gpu/ocl/ocl_types.h"
 
 #define SRC_DATA_BLOCK_T MMAD_DATA8_T
 #define AS_SRC_DATA_BLOCK_T AS_MMAD_DATA8_T
@@ -242,13 +240,13 @@ gen12hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
                 tmp[3], eltwise_alpha, eltwise_beta, eltwise_scale); \
     } while (0)
 
-#if WITH_ELTWISE
+#if ELTWISE_IDX == 0
 #define DO_ELTWISE() ELTWISE();
 #else
 #define DO_ELTWISE() ;
 #endif
 
-#if WITH_POST_SUM_ELTWISE
+#if ELTWISE_IDX == 1
 #define DO_POST_SUM_ELTWISE() ELTWISE();
 #else
 #define DO_POST_SUM_ELTWISE() ;

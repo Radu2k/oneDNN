@@ -1,5 +1,8 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
+=======
+* Copyright 2019-2020 Intel Corporation
+>>>>>>> dev-v2
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -40,20 +43,20 @@ struct gen12lp_gemm_t : public gpu_gemm_t {
     struct pd_t : public gpu_gemm_pd_t {
         using hint_class = void;
 
-        pd_t(engine_t *engine, const gemm_desc_t *adesc,
-                const primitive_attr_t *attr, const hint_class *)
-            : gpu_gemm_pd_t(engine, adesc, attr, nullptr) {}
+        pd_t(const gemm_desc_t *adesc, const primitive_attr_t *attr,
+                const hint_class *)
+            : gpu_gemm_pd_t(adesc, attr, nullptr) {}
 
         DECLARE_COMMON_PD_T("ocl:gemm:any", gen12lp_gemm_t);
-        status_t init() {
+        status_t init(engine_t *engine) {
             using namespace prop_kind;
             using namespace data_type;
             using namespace primitive_kind;
             using smask_t = primitive_attr_t::skip_mask_t;
 
-            assert(this->engine()->kind() == engine_kind::gpu);
+            assert(engine->kind() == engine_kind::gpu);
             auto *compute_engine
-                    = utils::downcast<compute::compute_engine_t *>(engine());
+                    = utils::downcast<compute::compute_engine_t *>(engine);
 
             const auto attr_skip_mask = smask_t::oscale | smask_t::post_ops
                     | smask_t::zero_points_runtime;
@@ -85,7 +88,28 @@ struct gen12lp_gemm_t : public gpu_gemm_t {
                             compute::device_ext_t::intel_subgroups);
 
             if (!ok) return status::unimplemented;
+
+            attr_info_ = attr_info_t::create(attr());
+            init_scratchpad();
+
             return status::success;
+        }
+
+        void init_scratchpad() {
+            if (!do_compute() || !do_scale()) return;
+            auto scratchpad = scratchpad_registry().registrar();
+            size_t tmp_buf_size = desc()->m * desc()->n * sizeof(int);
+            scratchpad.book(memory_tracking::names::key_gemm_tmp_buffer,
+                    tmp_buf_size, 1, OCL_BUFFER_ALIGNMENT);
+        }
+
+        bool do_compute() const {
+            return ((desc()->k > 0) && (alpha() != 0.0f));
+        }
+
+        bool do_scale() const {
+            return !((desc()->k > 0) && (alpha() == 1.0f)
+                    && ((beta() == 0.0f) || (beta() == 1.0f)));
         }
 
         bool zero_points_ok() const {
@@ -139,17 +163,17 @@ struct gen12lp_gemm_t : public gpu_gemm_t {
             return p.contain(sum, 0) ? p.entry_[0].sum.scale : 0.f;
         }
 
+        attr_info_t attr_info_ = {};
         size_t dyn_offset_a = 0;
         size_t dyn_offset_b = 0;
         size_t dyn_offset_c = 0;
         size_t dyn_offset_co = 0;
     };
 
-    status_t init() override {
+    status_t init(engine_t *engine) override {
         auto *compute_engine
-                = utils::downcast<compute::compute_engine_t *>(engine());
-        auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
-                compute_engine->device_info());
+                = utils::downcast<compute::compute_engine_t *>(engine);
+        auto *dev_info = compute_engine->device_info();
 
         eu_count_ = dev_info->eu_count();
         hw_threads_ = dev_info->hw_threads();
@@ -157,13 +181,13 @@ struct gen12lp_gemm_t : public gpu_gemm_t {
         gemm_type_ = get_gemm_type();
 
         switch (gemm_type_) {
-            case type::no_copy: return init_nocopy();
+            case type::no_copy: return init_nocopy(engine);
         }
 
         return status::invalid_arguments;
     }
 
-    status_t init_nocopy() {
+    status_t init_nocopy(engine_t *engine) {
         const char *kernel_name = nullptr;
 
         //compute kernel
@@ -175,12 +199,7 @@ struct gen12lp_gemm_t : public gpu_gemm_t {
         }
 
         auto *compute_engine
-                = utils::downcast<compute::compute_engine_t *>(engine());
-
-        memory_storage_t *temp_buf_ptr;
-        this->engine()->create_memory_storage(
-                &temp_buf_ptr, pd()->desc()->m * pd()->desc()->n * sizeof(int));
-        temp_buf_.reset(temp_buf_ptr);
+                = utils::downcast<compute::compute_engine_t *>(engine);
 
         int cmask = 0;
         pd()->attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
@@ -197,14 +216,13 @@ struct gen12lp_gemm_t : public gpu_gemm_t {
 
             auto status = gen12lp_gemm_x8x8s32_kernel_t::init_kernel_ctx(
                     kernel_ctx, pd()->desc()->transa, pd()->desc()->transb,
-                    fixed_c, column_c, row_c, pd()->with_eltwise(),
-                    pd()->eltwise_alg_kind(), aligned, a_off_non_zero,
-                    b_off_non_zero, pd()->desc()->a_type, pd()->desc()->b_type,
-                    pd()->desc()->c_type);
+                    fixed_c, column_c, row_c, pd()->attr_info_, aligned,
+                    a_off_non_zero, b_off_non_zero, pd()->desc()->a_type,
+                    pd()->desc()->b_type, pd()->desc()->c_type);
             if (status != status::success) return status;
 
-            compute_engine->create_kernel(
-                    &compute_x8x8s32_kernel_[aligned], kernel_name, kernel_ctx);
+            create_kernel(compute_engine, &compute_x8x8s32_kernel_[aligned],
+                    kernel_name, kernel_ctx);
             if (!compute_x8x8s32_kernel_[aligned]) return status::runtime_error;
         }
 
@@ -213,13 +231,12 @@ struct gen12lp_gemm_t : public gpu_gemm_t {
         compute::kernel_ctx_t kernel_ctx;
 
         auto status = gen12lp_gemm_scale_x8x8s32_kernel_t::init_kernel_ctx(
-                kernel_ctx, pd()->with_eltwise(), pd()->eltwise_alg_kind(),
-                pd()->desc()->a_type, pd()->desc()->b_type,
-                pd()->desc()->c_type);
+                kernel_ctx, pd()->attr_info_, pd()->desc()->a_type,
+                pd()->desc()->b_type, pd()->desc()->c_type);
         if (status != status::success) return status;
 
-        compute_engine->create_kernel(
-                &scale_x8x8s32_kernel_, kernel_name, kernel_ctx);
+        create_kernel(compute_engine, &scale_x8x8s32_kernel_, kernel_name,
+                kernel_ctx);
         if (!scale_x8x8s32_kernel_) return status::runtime_error;
 
         return status::success;
@@ -230,20 +247,19 @@ struct gen12lp_gemm_t : public gpu_gemm_t {
     virtual status_t execute(const gemm_exec_ctx_t &ctx) const override;
 
 private:
-    status_t launch_x8x8s32(compute::compute_stream_t *s,
+    status_t launch_x8x8s32(gemm_exec_ctx_t ctx, compute::compute_stream_t *s,
             const memory_storage_t &a, const memory_storage_t &b,
-            const memory_storage_t &c, int64_t offset_a, int64_t offset_b,
-            int64_t offset_c, int64_t lda, int64_t ldb, int64_t ldc, int64_t m,
-            int64_t n, int64_t k, int64_t beta, int64_t ao, int64_t bo,
-            const memory_storage_t &co, int64_t offset_co, bool apply_co,
+            const memory_storage_t &c, int offset_a, int offset_b, int offset_c,
+            int lda, int ldb, int ldc, int m, int n, int k, int beta, int ao,
+            int bo, const memory_storage_t &co, int offset_co, bool apply_co,
             bool apply_eltwise, float eltwise_alpha, float eltwise_beta,
             float eltwise_scale, bool aligned) const;
 
-    status_t launch_scale_x8x8s32(compute::compute_stream_t *s,
-            const memory_storage_t &c_temp, const memory_storage_t &c,
-            char offsetc, int64_t offset_c, int64_t m, int64_t n, int64_t ldc,
-            float alpha, float beta, const memory_storage_t &co,
-            int64_t offset_co, bool alpha_is_zero, bool apply_eltwise,
+    status_t launch_scale_x8x8s32(gemm_exec_ctx_t ctx,
+            compute::compute_stream_t *s, const memory_storage_t &c_temp,
+            const memory_storage_t &c, char offsetc, int offset_c, int m, int n,
+            int ldc, float alpha, float beta, const memory_storage_t &co,
+            int offset_co, bool alpha_is_zero, bool apply_eltwise,
             float eltwise_alpha, float eltwise_beta, float eltwise_scale) const;
 
     virtual status_t execute_standard(const gemm_exec_ctx_t &ctx) const;
@@ -251,13 +267,11 @@ private:
     compute::kernel_t compute_x8x8s32_kernel_[2];
     compute::kernel_t scale_x8x8s32_kernel_;
 
-    std::unique_ptr<memory_storage_t> temp_buf_;
-
     type gemm_type_ = type::no_copy;
     int hw_threads_ = 0;
     int eu_count_ = 0;
 
-    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 
     type get_gemm_type() const { return type::no_copy; }
 };

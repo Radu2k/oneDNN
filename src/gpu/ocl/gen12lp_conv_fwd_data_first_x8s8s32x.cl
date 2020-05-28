@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -15,10 +15,8 @@
 *******************************************************************************/
 
 #include "gpu/ocl/ocl_math_utils.h"
-#include "gpu/ocl/ocl_types.h"
-#if WITH_ELTWISE == 1 || WITH_POST_SUM_ELTWISE == 1
 #include "gpu/ocl/ocl_post_ops.h"
-#endif
+#include "gpu/ocl/ocl_types.h"
 
 #define KDHW_SIZE (KH * KW * KD)
 
@@ -67,9 +65,9 @@
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
-        const __global float *bias, __global DATA_T *dst, float eltwise_alpha,
-        float eltwise_beta, float eltwise_scale, float sum_scale, float scale,
-        const __global float *scales_per_oc) {
+        const __global float *bias, __global DST_DATA_T *dst,
+        float eltwise_alpha, float eltwise_beta, float eltwise_scale,
+        float sum_scale, float scale, const __global float *scales_per_oc) {
 
     const int group_oc = get_group_id(0) * OC_GROUP;
     const int group_mb = get_group_id(2) * MB_GROUP;
@@ -534,7 +532,7 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
         }
         wei += OC_BLOCK;
     }
-    DATA16_T R1, R2, R3, R4;
+    DST_DATA16_T R1, R2, R3, R4;
 
 #if SCALES_PER_OC
     float4 scales;
@@ -559,14 +557,14 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
 #if WITH_SUM
 #define DO_SUM() \
     do { \
-        DATA4_T d = AS_DATA4_T(intel_sub_group_block_read_uc4(dst)); \
+        DST_DATA4_T d = BLOCK_READ_DST4(dst); \
         float4 df = convert_float4(d); \
         tmp = fma(df, (float4)sum_scale, tmp); \
     } while (0)
 
 #define DO_SUM_4() \
     do { \
-        DATA16_T d = AS_DATA16_T(intel_sub_group_block_read_uc16(dst)); \
+        DST_DATA16_T d = BLOCK_READ_DST16(dst); \
         float8 df0 = convert_float8(d.s01234567); \
         float8 df1 = convert_float8(d.s89abcdef); \
         tmp0 = fma(df0, (float8)sum_scale, tmp0); \
@@ -626,7 +624,7 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
                 tmp1.s7, eltwise_alpha, eltwise_beta, eltwise_scale); \
     } while (0)
 
-#if WITH_ELTWISE
+#if WITH_ELTWISE && !WITH_POST_SUM_ELTWISE
 #define DO_ELTWISE() ELTWISE();
 #define DO_ELTWISE_4() ELTWISE_4();
 #else
@@ -675,14 +673,13 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
 
 #define CONVERT_PACK() \
     do { \
-        tmp_cvt = (DATA4_T)(CONVERT_DATA_T(tmp.s0), CONVERT_DATA_T(tmp.s1), \
-                CONVERT_DATA_T(tmp.s2), CONVERT_DATA_T(tmp.s3)); \
+        tmp_cvt = CONVERT_DST_DATA4_T(tmp); \
     } while (0)
 
 #define CONVERT_PACK_4() \
     do { \
-        R.s01234567 = CONVERT_DATA8_T(tmp0); \
-        R.s89abcdef = CONVERT_DATA8_T(tmp1); \
+        R.s01234567 = CONVERT_DST_DATA8_T(tmp0); \
+        R.s89abcdef = CONVERT_DST_DATA8_T(tmp1); \
     } while (0)
 
 #define STORE_DST(C0, C1, C2, C3, i) \
@@ -693,7 +690,7 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
         DO_SUM(); \
         DO_POST_SUM_ELTWISE(); \
         CONVERT_PACK(); \
-        intel_sub_group_block_write_uc4(dst, as_uchar4(tmp_cvt)); \
+        BLOCK_WRITE_DST4(dst, tmp_cvt); \
         dst += OC_BLOCK * MB_BLOCK; \
     } while (0)
 
@@ -705,15 +702,15 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
         DO_SUM_4(); \
         DO_POST_SUM_ELTWISE_4(); \
         CONVERT_PACK_4(); \
-        intel_sub_group_block_write_uc16(dst, as_uchar16(R)); \
+        BLOCK_WRITE_DST16(dst, R); \
         dst += 4 * OC_BLOCK; \
     } while (0)
 
     if (ow < OW) {
         float4 tmp;
-        DATA4_T tmp_cvt;
+        DST_DATA4_T tmp_cvt;
         float8 tmp0, tmp1;
-        DATA16_T R;
+        DST_DATA16_T R;
 
 #if OW_TAIL
         if (ow + OW_BLOCK < OW) {

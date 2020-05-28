@@ -14,12 +14,17 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef C_TYPES_MAP_HPP
-#define C_TYPES_MAP_HPP
+#ifndef COMMON_C_TYPES_MAP_HPP
+#define COMMON_C_TYPES_MAP_HPP
 
 #include "dnnl_types.h"
 #include "gemm_types.hpp"
 #include "internal_desc_types.hpp"
+
+// These aliases should be in the global namespace as they are intended
+// to give names that better reflects the meaning of the entities
+using primitive_iface_t = dnnl_primitive;
+using primitive_desc_iface_t = dnnl_primitive_desc;
 
 namespace dnnl {
 namespace impl {
@@ -165,6 +170,7 @@ const format_tag_t bacd = dnnl_bacd;
 const format_tag_t bca = dnnl_bca;
 const format_tag_t bcda = dnnl_bcda;
 const format_tag_t bcdea = dnnl_bcdea;
+const format_tag_t bacde = dnnl_bacde;
 const format_tag_t cba = dnnl_cba;
 const format_tag_t cdba = dnnl_cdba;
 const format_tag_t dcab = dnnl_dcab;
@@ -378,6 +384,7 @@ const format_tag_t oidhw = dnnl_oidhw;
 const format_tag_t dhwio = dnnl_dhwio;
 const format_tag_t odhwi = dnnl_odhwi;
 const format_tag_t idhwo = dnnl_idhwo;
+const format_tag_t iodhw = dnnl_iodhw;
 const format_tag_t goiw = dnnl_goiw;
 const format_tag_t goihw = dnnl_goihw;
 const format_tag_t wigo = dnnl_wigo;
@@ -609,6 +616,7 @@ enum runtime_kind_t {
     dnnl_runtime_tbb,
     dnnl_runtime_threadpool,
     dnnl_runtime_ocl,
+    dnnl_runtime_sycl,
 };
 
 namespace runtime_kind {
@@ -618,6 +626,7 @@ const runtime_kind_t omp = dnnl_runtime_omp;
 const runtime_kind_t tbb = dnnl_runtime_tbb;
 const runtime_kind_t threadpool = dnnl_runtime_threadpool;
 const runtime_kind_t ocl = dnnl_runtime_ocl;
+const runtime_kind_t sycl = dnnl_runtime_sycl;
 } // namespace runtime_kind
 
 using primitive_kind_t = dnnl_primitive_kind_t;
@@ -799,11 +808,9 @@ struct op_desc_t {
 
 using engine_t = dnnl_engine;
 using primitive_desc_iterator_t = dnnl_primitive_desc_iterator;
-using primitive_desc_t = dnnl_primitive_desc;
 using primitive_attr_t = dnnl_primitive_attr;
 using post_ops_t = dnnl_post_ops;
 using memory_t = dnnl_memory;
-using primitive_t = dnnl_primitive;
 
 using stream_flags_t = dnnl_stream_flags_t;
 namespace stream_flags {
@@ -814,6 +821,8 @@ const stream_flags_t default_flags = dnnl_stream_default_flags;
 } // namespace stream_flags
 using stream_t = dnnl_stream;
 using stream_attr_t = dnnl_stream_attr;
+
+struct memory_storage_t;
 
 /* forward declaration of the internal primitive_desc types */
 struct batch_normalization_bwd_pd_t;

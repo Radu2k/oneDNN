@@ -29,6 +29,7 @@
 #include "dnnl_common.hpp"
 #include "dnnl_debug.hpp"
 #include "src/common/math_utils.hpp"
+#include "tests/test_thread.hpp"
 
 namespace tag {
 const char *abx {"abx"};
@@ -673,8 +674,9 @@ dnnl_primitive_attr_t create_dnnl_attr(const attr_t &attr, int64_t scale_cnt,
             scales = gen_scs;
         }
 
-        DNN_SAFE_V(dnnl_primitive_attr_set_output_scales(dnnl_attr, count,
-                scale_mask, runtime ? &DNNL_RUNTIME_F32_VAL : scales));
+        DNN_SAFE_V(dnnl_primitive_attr_set_output_scales(dnnl_attr,
+                runtime ? 1 : count, scale_mask,
+                runtime ? &DNNL_RUNTIME_F32_VAL : scales));
         if (gen_scs) zfree(gen_scs);
     } else if (!attr.scales.is_def()) {
         // Only common policy is supported at this point
@@ -924,4 +926,51 @@ void maybe_post_ops(float &d, float dst, const attr_t &attr) {
         else if (e.is_eltwise_kind())
             d = compute_eltwise_fwd(e.kind, d, s, a, b);
     }
+}
+
+void engine_t::create_engine(dnnl_engine_kind_t engine_kind) {
+#ifdef DNNL_SYCL_DPCPP
+    if (engine_kind == dnnl_cpu) {
+        static dnnl_engine_t inst = nullptr;
+        if (!inst) DNN_SAFE_V(dnnl_engine_create(&inst, engine_kind, 0));
+        engine_ = inst;
+    } else if (engine_kind == dnnl_gpu) {
+        static dnnl_engine_t inst = nullptr;
+        if (!inst) DNN_SAFE_V(dnnl_engine_create(&inst, engine_kind, 0));
+        engine_ = inst;
+    } else
+        assert(!"unsupported engine_kind");
+#else
+    DNN_SAFE_V(dnnl_engine_create(&engine_, engine_kind, 0));
+#endif
+}
+
+void engine_t::destroy_engine() {
+#ifdef DNNL_SYCL_DPCPP
+    engine_ = NULL;
+#else
+    DNN_SAFE_V(dnnl_engine_destroy(engine_));
+#endif
+}
+
+void stream_t::create_stream() {
+    dnnl_engine_kind_t engine_kind;
+    DNN_SAFE_V(dnnl_engine_get_kind(engine_, &engine_kind));
+
+    dnnl_stream_attr_t stream_attr;
+    DNN_SAFE_V(dnnl_stream_attr_create(&stream_attr, engine_kind));
+#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
+    if (engine_kind == dnnl_cpu) {
+        SAFE_V(dnnl_stream_attr_set_threadpool(
+                stream_attr, dnnl::testing::get_threadpool()));
+    }
+#endif
+
+    DNN_SAFE_V(dnnl_stream_create_v2(
+            &stream_, engine_, dnnl_stream_default_flags, stream_attr));
+    dnnl_stream_attr_destroy(stream_attr);
+}
+
+void stream_t::destroy_stream() {
+    DNN_SAFE_V(dnnl_stream_destroy(stream_));
 }

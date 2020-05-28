@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@
 #include "common/c_types_map.hpp"
 #include "gpu/compute/compute.hpp"
 #include "gpu/gpu_convolution_pd.hpp"
+#include "gpu/gpu_primitive.hpp"
+#include "gpu/gpu_resource.hpp"
 #include "gpu/ocl/ocl_stream.hpp"
 #include "gpu/ocl/ocl_utils.hpp"
 #include "gpu/primitive_conf.hpp"
@@ -29,30 +31,31 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-struct gen12lp_x8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
+struct gen12lp_x8s8s32x_1x1_convolution_fwd_t : public gpu_primitive_t {
     struct pd_t : public gpu_convolution_fwd_pd_t {
-        pd_t(engine_t *engine, const convolution_desc_t *adesc,
-                const primitive_attr_t *attr,
+        pd_t(const convolution_desc_t *adesc, const primitive_attr_t *attr,
                 const convolution_fwd_pd_t *hint_fwd_pd)
-            : gpu_convolution_fwd_pd_t(engine, adesc, attr, hint_fwd_pd) {}
+            : gpu_convolution_fwd_pd_t(adesc, attr, hint_fwd_pd) {}
 
         DECLARE_COMMON_PD_T(
                 "ocl:gen12lp:1x1", gen12lp_x8s8s32x_1x1_convolution_fwd_t);
 
-        status_t init() {
+        status_t init(engine_t *engine) {
             using namespace prop_kind;
             using namespace data_type;
             auto *compute_engine
-                    = utils::downcast<compute::compute_engine_t *>(engine());
+                    = utils::downcast<compute::compute_engine_t *>(engine);
 
-            const auto attr_skip_mask = primitive_attr_t::skip_mask_t::oscale
+            const auto attr_skip_mask
+                    = primitive_attr_t::skip_mask_t::oscale_runtime
                     | primitive_attr_t::skip_mask_t::post_ops;
 
             bool ok = utils::one_of(this->desc()->prop_kind, forward_training,
                               forward_inference)
                     && this->desc()->alg_kind == alg_kind::convolution_direct
                     && utils::one_of(desc()->src_desc.data_type, u8, s8)
-                    && utils::one_of(desc()->dst_desc.data_type, u8, s8)
+                    && utils::one_of(
+                            desc()->dst_desc.data_type, u8, s8, s32, f32)
                     && expect_data_types(desc()->src_desc.data_type, s8, f32,
                             desc()->dst_desc.data_type, s32)
                     && compute_engine->mayiuse(
@@ -64,7 +67,9 @@ struct gen12lp_x8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
                                     attr()->output_scales_.mask_, 0, 1 << 1));
             if (!ok) return status::unimplemented;
 
-            status_t status = init_conf();
+            status_t status = init_conf(engine);
+
+            attr_info_ = attr_info_t::create(attr());
             if (status != status::success) return status;
 
             auto scales_status = init_scales_md();
@@ -75,16 +80,18 @@ struct gen12lp_x8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
             return ok ? status::success : status::unimplemented;
         }
 
-        status_t init_conf();
+        status_t init_conf(engine_t *engine);
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
         const memory_desc_t *scales_md() const { return &scales_md_; }
 
         conv_conf_t conf;
 
+        attr_info_t attr_info_ = {};
+
     private:
         status_t init_scales_md() {
-            if (!conf.with_per_oc_scales) return status::success;
+            if (!attr_info_.with_per_oc_oscales) return status::success;
 
             scales_md_.data_type = data_type::f32;
             scales_md_.ndims = 1;
@@ -95,48 +102,54 @@ struct gen12lp_x8s8s32x_1x1_convolution_fwd_t : public primitive_impl_t {
         memory_desc_t scales_md_;
     };
 
-    status_t init() override {
+    status_t init(engine_t *engine) override {
         const char *kernel_name = "gen12lp_1x1_conv_fwd_x8s8s32x";
 
         compute::kernel_ctx_t kernel_ctx;
         auto status = pd()->init_kernel_ctx(kernel_ctx);
         if (status != status::success) return status;
 
-        if (pd()->conf.with_per_oc_scales) {
-            memory_desc_wrapper scales_mdw(pd()->scales_md());
-            scales_mem_.reset(new memory_t(engine(), pd()->scales_md(),
-                    memory_flags_t::alloc, nullptr));
-            void *scales_ptr = nullptr;
-            status_t status
-                    = scales_mem_->memory_storage()->map_data(&scales_ptr);
-            if (status != status::success) return status;
-            utils::array_copy((float *)scales_ptr,
-                    pd()->attr()->output_scales_.scales_,
-                    pd()->attr()->output_scales_.count_);
-            status = scales_mem_->memory_storage()->unmap_data(scales_ptr);
-            if (status != status::success) return status;
-        }
-
-        auto *compute_engine
-                = utils::downcast<compute::compute_engine_t *>(engine());
-        compute_engine->create_kernel(&kernel_, kernel_name, kernel_ctx);
+        create_kernel(engine, &kernel_, kernel_name, kernel_ctx);
         if (!kernel_) return status::runtime_error;
 
         return status::success;
     }
 
     gen12lp_x8s8s32x_1x1_convolution_fwd_t(const pd_t *apd)
-        : primitive_impl_t(apd) {}
+        : gpu_primitive_t(apd) {}
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
         return execute_forward(ctx);
     }
 
+protected:
+    status_t init_res_storage(
+            engine_t *engine, gpu_resource_t *r) const override {
+        if (!pd()->conf.attr_info.with_per_oc_oscales
+                || pd()->conf.attr_info.with_runtime_oscales)
+            return status::success;
+
+        memory_desc_wrapper scales_mdw(pd()->scales_md());
+        memory_storage_t *tmp_mem_storage_ptr;
+        CHECK(engine->create_memory_storage(
+                &tmp_mem_storage_ptr, scales_mdw.nelems() * sizeof(float)));
+
+        std::unique_ptr<memory_storage_t> tmp_mem_storage(tmp_mem_storage_ptr);
+        void *scales_ptr = nullptr;
+        CHECK(tmp_mem_storage->map_data(&scales_ptr, nullptr));
+        utils::array_copy((float *)scales_ptr,
+                pd()->attr()->output_scales_.scales_,
+                pd()->attr()->output_scales_.count_);
+        CHECK(tmp_mem_storage->unmap_data(scales_ptr, nullptr));
+        r->add_memory_storage(SCALES_, std::move(tmp_mem_storage));
+        return status::success;
+    }
+
 private:
     status_t execute_forward(const exec_ctx_t &ctx) const;
-    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
     compute::kernel_t kernel_;
-    std::unique_ptr<memory_t> scales_mem_;
+    enum { SCALES_ = 0 };
 };
 
 } // namespace ocl

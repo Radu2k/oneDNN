@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 
 #include "common/c_types_map.hpp"
 #include "gpu/compute/compute.hpp"
+#include "gpu/gpu_primitive.hpp"
 #include "gpu/gpu_sum_pd.hpp"
 
 namespace dnnl {
@@ -26,15 +27,15 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
-struct gen9_simple_sum_t : public primitive_impl_t {
+struct gen9_simple_sum_t : public gpu_primitive_t {
     struct pd_t : public gpu_sum_pd_t {
         using gpu_sum_pd_t::gpu_sum_pd_t;
 
         DECLARE_SUM_PD_T("ngen:simple:any", gen9_simple_sum_t);
 
-        status_t init() {
+        status_t init(engine_t *engine) {
             auto *compute_engine
-                    = utils::downcast<compute::compute_engine_t *>(engine());
+                    = utils::downcast<compute::compute_engine_t *>(engine);
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;
 
@@ -42,7 +43,7 @@ struct gen9_simple_sum_t : public primitive_impl_t {
 
             constexpr auto data_type = data_type::f32;
 
-            bool ok = gpu_sum_pd_t::init() == status::success;
+            bool ok = gpu_sum_pd_t::init(engine) == status::success;
             if (!ok) return status::unimplemented;
 
             const memory_desc_wrapper o_d(dst_md());
@@ -58,11 +59,11 @@ struct gen9_simple_sum_t : public primitive_impl_t {
         }
     };
 
-    gen9_simple_sum_t(const pd_t *apd) : primitive_impl_t(apd) {}
+    gen9_simple_sum_t(const pd_t *apd) : gpu_primitive_t(apd) {}
 
-    virtual status_t init() override;
+    virtual status_t init(engine_t *engine);
 
-    virtual status_t execute(const exec_ctx_t &ctx) const override {
+    virtual status_t execute(const exec_ctx_t &ctx) const {
         compute::compute_stream_t *compute_stream
                 = utils::downcast<compute::compute_stream_t *>(ctx.stream());
         auto &output = CTX_OUT_STORAGE(DNNL_ARG_DST);
@@ -92,7 +93,7 @@ struct gen9_simple_sum_t : public primitive_impl_t {
     }
 
 private:
-    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 
     compute::kernel_t kernel_;
 };

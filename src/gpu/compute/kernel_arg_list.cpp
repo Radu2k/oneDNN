@@ -22,7 +22,7 @@ namespace gpu {
 namespace compute {
 
 kernel_arg_t kernel_arg_t::cast(scalar_type_t type, const kernel_arg_t &arg) {
-    assert(arg.kind() == kernel_arg_t::kind_t::scalar);
+    assert(arg.kind() == kernel_arg_kind_t::scalar);
 
     if (type == arg.scalar_type()) return arg;
 

@@ -80,7 +80,8 @@ dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
     s.reset(s_ptr);
 
     // Create primitive descriptor
-    gemm_desc_t op_desc;
+    using pd_type = typename gen9_gemm_t::pd_t;
+    auto op_desc = gemm_desc_t();
     op_desc.primitive_kind = dnnl_gemm;
     op_desc.transa = (*transa == 'n' || *transa == 'N') ? transpose::notrans
                                                         : transpose::trans;
@@ -110,16 +111,18 @@ dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
     status = create_gemm_memory_desc(&c_desc, &op_desc, 2, c_type);
     assert(status == status::success);
 
-    std::unique_ptr<primitive_desc_t> pd;
     primitive_attr_t attr;
     if (alpha != 1.0f) attr.output_scales_.set(alpha);
     if (beta != 0.0f) attr.post_ops_.append_sum(beta);
 
     primitive_desc_t *pd_ptr;
-    status = dnnl_primitive_desc_create(
-            &pd_ptr, &op_desc, &attr, engine.get(), nullptr);
+    status = primitive_desc_t::create<pd_type>(&pd_ptr,
+            reinterpret_cast<const op_desc_t *>(&op_desc), &attr, engine.get(),
+            nullptr);
     if (status != status::success) return status;
-    pd.reset(pd_ptr);
+
+    std::unique_ptr<primitive_desc_iface_t> pd(
+            new primitive_desc_iface_t(pd_ptr, engine.get()));
 
     // Create memory objects
     std::unique_ptr<memory_t> a_mem(new memory_t(
@@ -138,11 +141,9 @@ dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
             offset_c * types::data_type_size(c_type));
 
     // Create primitive
-    std::unique_ptr<primitive_t> gemm_prim;
-    primitive_t *gemm_prim_ptr;
-    status = pd->create_primitive(&gemm_prim_ptr);
+    primitive_iface_t *gemm_prim;
+    status = pd->create_primitive_iface(&gemm_prim);
     if (status != status::success) return status;
-    gemm_prim.reset(gemm_prim_ptr);
 
     exec_args_t args = {
             {DNNL_ARG_SRC, {a_mem.get(), true}},
@@ -152,6 +153,7 @@ dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
 
     exec_ctx_t ctx(s.get(), std::move(args));
     status = gemm_prim->execute(ctx);
+    gemm_prim->release();
     if (status != status::success) return status;
 
     return s->wait();
@@ -196,7 +198,7 @@ dnnl_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
     s.reset(s_ptr);
 
     // Create operation descriptor
-    gemm_desc_t op_desc;
+    auto op_desc = gemm_desc_t();
     op_desc.primitive_kind = dnnl_gemm;
     op_desc.transa = (*transa == 'n' || *transa == 'N') ? transpose::notrans
                                                         : transpose::trans;
@@ -229,7 +231,7 @@ dnnl_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
     if (status != status::success) return status;
 
     // Create primitive descriptor
-    std::unique_ptr<primitive_desc_t> pd;
+    std::unique_ptr<primitive_desc_iface_t> pd;
     primitive_attr_t attr;
 
     auto &zp = attr.zero_points_;
@@ -260,7 +262,7 @@ dnnl_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
     if (alpha != 1.0f) attr.output_scales_.set(alpha);
     if (beta != 0.0f) attr.post_ops_.append_sum(beta);
 
-    primitive_desc_t *pd_ptr;
+    primitive_desc_iface_t *pd_ptr;
     status = dnnl_primitive_desc_create(
             &pd_ptr, &op_desc, &attr, engine.get(), nullptr);
     if (status != status::success) return status;
@@ -288,11 +290,9 @@ dnnl_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
             offset_co * types::data_type_size(c_type));
 
     // Create primitive
-    std::unique_ptr<primitive_t> gemm_prim;
-    primitive_t *gemm_prim_ptr;
-    status = pd->create_primitive(&gemm_prim_ptr);
+    primitive_iface_t *gemm_prim;
+    status = pd->create_primitive_iface(&gemm_prim);
     if (status != status::success) return status;
-    gemm_prim.reset(gemm_prim_ptr);
 
     exec_args_t args = {
             {DNNL_ARG_SRC, {a_mem.get(), true}},
@@ -303,6 +303,7 @@ dnnl_status_t gemm_x8x8s32(cl_command_queue queue, const char *transa,
 
     exec_ctx_t ctx(s.get(), std::move(args));
     status = gemm_prim->execute(ctx);
+    gemm_prim->release();
     if (status != status::success) return status;
 
     return s->wait();

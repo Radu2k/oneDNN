@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef MATH_UTILS_HPP
-#define MATH_UTILS_HPP
+#ifndef COMMON_MATH_UTILS_HPP
+#define COMMON_MATH_UTILS_HPP
 
 #include <math.h>
 #include <stdint.h>
@@ -24,79 +24,14 @@
 #include "nstl.hpp"
 #include "utils.hpp"
 
-#if defined(DNNL_X86_64)
+#include "../cpu/platform.hpp"
+#if DNNL_X64
 #include "immintrin.h"
 #endif
 
 namespace dnnl {
 namespace impl {
 namespace math {
-
-/** rounds @p f to an integer according to the mxcsr register */
-inline int mxcsr_round(float f) ATTR_NO_MSAN {
-#if defined(DNNL_X86_64)
-    return _mm_cvtss_si32(_mm_load_ss(&f));
-#else
-    return (int)nearbyintf(f); // optimism
-#endif
-}
-
-template <typename data_t, typename acc_t>
-inline typename utils::enable_if<!nstl::is_integral<data_t>::value,
-        typename utils::remove_reference<data_t>::type>::type
-saturate(const acc_t &x) {
-    return (typename utils::remove_reference<data_t>::type)x;
-}
-
-template <typename data_t, typename acc_t>
-inline typename utils::enable_if<nstl::is_integral<data_t>::value,
-        typename utils::remove_reference<data_t>::type>::type
-saturate(const acc_t &x) {
-    acc_t v = x;
-    if (v < (acc_t)nstl::numeric_limits<data_t>::lowest())
-        v = (acc_t)nstl::numeric_limits<data_t>::lowest();
-    if (v > (acc_t)nstl::numeric_limits<data_t>::max())
-        v = (acc_t)nstl::numeric_limits<data_t>::max();
-    return (typename utils::remove_reference<data_t>::type)v;
-}
-
-template <typename data_t>
-double saturate(const double &x) {
-    double v = x;
-    if (v < (double)nstl::numeric_limits<data_t>::lowest())
-        v = (double)nstl::numeric_limits<data_t>::lowest();
-    if (v > (double)nstl::numeric_limits<data_t>::max())
-        v = (double)nstl::numeric_limits<data_t>::max();
-    return v;
-}
-
-template <>
-inline int8_t saturate<int8_t, uint8_t>(const uint8_t &x) {
-    return x <= 127u ? x : 127;
-}
-
-template <>
-inline uint8_t saturate<uint8_t, int8_t>(const int8_t &x) {
-    return x >= 0 ? x : 0;
-}
-
-template <typename out_t>
-typename utils::enable_if<nstl::is_integral<out_t>::value, out_t>::type
-out_round(float v) {
-    return (out_t)mxcsr_round(v);
-}
-
-template <typename out_t>
-typename utils::enable_if<nstl::is_integral<out_t>::value, out_t>::type
-out_round(double v) {
-    return (out_t)mxcsr_round((float)v);
-}
-
-template <typename out_t>
-typename utils::enable_if<!nstl::is_integral<out_t>::value, out_t>::type
-out_round(float v) {
-    return v;
-}
 
 inline int gcd(int a, int b) {
     a = impl::nstl::abs(a);
@@ -156,11 +91,30 @@ inline U x_m_square(T x) {
 }
 
 /* activation */
+
+/** rounds @p f to an integer according to the mxcsr register */
+inline int mxcsr_round(float f) ATTR_NO_MSAN {
+#if DNNL_X64
+    return _mm_cvtss_si32(_mm_load_ss(&f));
+#else
+    return (int)nearbyintf(f); // optimism
+#endif
+}
+
 template <typename T, typename A,
         typename U = typename utils::remove_reference<T>::type>
-inline U relu_fwd(T s, A alpha) {
+inline typename utils::enable_if<nstl::is_integral<U>::value, U>::type relu_fwd(
+        T s, A alpha) {
+    return s > 0 ? s : (U)mxcsr_round(static_cast<float>(s * alpha));
+}
+
+template <typename T, typename A,
+        typename U = typename utils::remove_reference<T>::type>
+inline typename utils::enable_if<!nstl::is_integral<U>::value, U>::type
+relu_fwd(T s, A alpha) {
     return s > 0 ? s : (U)(s * alpha);
 }
+
 template <typename T, typename A,
         typename U = typename utils::remove_reference<T>::type>
 inline U relu_bwd(T dd, T s, A alpha) {
@@ -323,7 +277,7 @@ inline U gelu_tanh_fwd(T s) {
 }
 template <typename T, typename U = typename utils::remove_reference<T>::type>
 inline U gelu_tanh_bwd(T dd, T s) {
-    const float sqrt_2_over_pi = 0.797884;
+    const float sqrt_2_over_pi = 0.79788458347320556640625;
     const float fitting_const = 0.044715;
     float g = s * sqrt_2_over_pi * (1 + fitting_const * s * s);
     float dg = sqrt_2_over_pi * (1 + 3 * fitting_const * s * s);
@@ -396,7 +350,7 @@ inline bool is_eltwise_ok(
             && IMPLICATION(alg == eltwise_bounded_relu, alpha >= 0)
             && IMPLICATION(alg == eltwise_clip, beta >= alpha)
             && IMPLICATION(one_of(dt, dnnl_s32, dnnl_s8, dnnl_u8),
-                    alg == eltwise_relu && alpha == 0);
+                    alg == eltwise_relu);
 
     const bool eltwise_use_dst
             = one_of(alg, eltwise_relu_use_dst_for_bwd,
@@ -426,6 +380,28 @@ inline bool eltwise_fwd_preserves_zero(
             || (alg == eltwise_pow && beta > 0);
 }
 
+inline bool eltwise_bwd_preserves_zero(
+        alg_kind_t alg, float alpha, float beta) {
+    // Unlike forward counterpart, bwd works on two tensors (with same formats)
+    // and if alg moves zero to non-zero, it's fine, because diff_dst will
+    // still have zeros in padding and multiplication of zero and non-zero
+    // gives desired result. However, it doesn't work in case of special fp
+    // values which are NaN or infinity which give NaN when multiplying on
+    // zero, so excluding all those algs from here.
+    using namespace alg_kind;
+    using namespace utils;
+    return one_of(alg, eltwise_abs, eltwise_bounded_relu, eltwise_clip,
+                   eltwise_elu, eltwise_exp, eltwise_gelu_erf,
+                   eltwise_gelu_tanh, eltwise_linear, eltwise_logistic,
+                   eltwise_relu, eltwise_soft_relu, eltwise_square,
+                   eltwise_swish, eltwise_tanh)
+            || one_of(alg, eltwise_elu_use_dst_for_bwd,
+                    eltwise_exp_use_dst_for_bwd,
+                    eltwise_logistic_use_dst_for_bwd,
+                    eltwise_relu_use_dst_for_bwd, eltwise_tanh_use_dst_for_bwd)
+            || (alg == eltwise_pow && beta >= 1);
+}
+
 inline float get_bias(const char *bias, size_t offset, data_type_t data_type) {
     if (!bias) return 0.0f;
 
@@ -435,6 +411,7 @@ inline float get_bias(const char *bias, size_t offset, data_type_t data_type) {
     switch (data_type) {
         CASE(data_type::s8);
         CASE(data_type::u8);
+        CASE(data_type::bf16);
         CASE(data_type::s32);
         CASE(data_type::f32);
         default: assert(!"unimplemented");

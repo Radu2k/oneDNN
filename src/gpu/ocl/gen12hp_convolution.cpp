@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -130,9 +130,7 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("OC_NCHUNK", utils::div_up(conf.oc, conf.oc_block));
     kernel_ctx.define_int("IC_NCHUNK", utils::div_up(conf.ic, conf.ic_block));
     kernel_ctx.define_int("WITH_BIAS", conf.with_bias);
-    kernel_ctx.define_int("WITH_ELTWISE", conf.with_eltwise);
-    kernel_ctx.define_int("WITH_SUM", conf.with_sum);
-    kernel_ctx.define_int("WITH_POST_SUM_ELTWISE", conf.with_post_sum_eltwise);
+    def_attr_info(kernel_ctx, conf.attr_info);
     kernel_ctx.define_int("SUB_GROUP_SIZE", conf.sub_group_size);
     kernel_ctx.define_int("LWS_0", conf.lws_d[0]);
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);
@@ -145,26 +143,16 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_kernel_ctx(
     def_data_type(kernel_ctx, conf.weights_data_type, "WEI");
     def_data_type(kernel_ctx, conf.bias_data_type, "BIA");
 
-    if (conf.with_eltwise || conf.with_post_sum_eltwise) {
-        def_postops(kernel_ctx, conf.eltwise.alg);
-    }
-
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
     kernel_ctx.add_option("-Dcl_intel_subgroups_long");
 
-    auto *compute_engine = utils::downcast<ocl_gpu_engine_t *>(engine());
-    auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
-            compute_engine->device_info());
-    if (dev_info->gpu_arch() == gpu_arch_t::gen12hp)
-        kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
+    if (is_gen12hp) kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
 
     return status::success;
 }
 
 status_t gen12hp_convolution_fwd_t::execute_forward(
         const exec_ctx_t &ctx) const {
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
@@ -178,22 +166,22 @@ status_t gen12hp_convolution_fwd_t::execute_forward(
     arg_list.set(1, weights);
     arg_list.set(2, bias);
     arg_list.set(3, dst);
-    arg_list.set(4, conf.eltwise.alpha);
-    arg_list.set(5, conf.eltwise.beta);
-    arg_list.set(6, conf.eltwise.scale);
-    arg_list.set(7, conf.sum_scale);
+    arg_list.set(4, conf.attr_info.eltwise_alpha);
+    arg_list.set(5, conf.attr_info.eltwise_beta);
+    arg_list.set(6, conf.attr_info.eltwise_scale);
+    arg_list.set(7, conf.attr_info.sum_scale);
     float scales = pd()->attr()->output_scales_.scales_[0];
     arg_list.set(8, scales);
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
-    status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
+    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
     return status;
 }
 
 status_t gen12hp_convolution_bwd_data_t::pd_t::init_conf() {
     const convolution_desc_t &cd = *desc();
-    set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
+    set_default_conf(conf, cd, *diff_src_md(), *weights_md(), *diff_dst_md(),
             *weights_md(1), *attr());
 
     status_t status = status::success;
@@ -309,19 +297,13 @@ status_t gen12hp_convolution_bwd_data_t::pd_t::init_kernel_ctx(
 
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
-    auto *compute_engine = utils::downcast<ocl_gpu_engine_t *>(engine());
-    auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
-            compute_engine->device_info());
-    if (dev_info->gpu_arch() == gpu_arch_t::gen12hp)
-        kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
+    if (is_gen12hp) kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
 
     return status::success;
 }
 
 status_t gen12hp_convolution_bwd_data_t::execute_backward_data(
         const exec_ctx_t &ctx) const {
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
     auto &diff_src = CTX_OUT_STORAGE(DNNL_ARG_DIFF_SRC);
     auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
@@ -337,7 +319,7 @@ status_t gen12hp_convolution_bwd_data_t::execute_backward_data(
     arg_list.set(3, diff_dst);
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
-    status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
+    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
     return status;
 }

@@ -42,19 +42,17 @@ struct dnn_mem_t {
     }
 
     dnn_mem_t(const dnnl_memory_desc_t &md, dnnl_data_type_t dt,
-            dnnl_format_tag_t tag = dnnl_format_tag_undef,
-            dnnl_engine_t engine = engine_tgt) {
+            dnnl_format_tag_t tag, dnnl_engine_t engine) {
         active_ = (initialize(md, dt, tag, engine) == OK);
     }
 
     dnn_mem_t(const dnnl_memory_desc_t &md, dnnl_data_type_t dt,
-            dnnl_engine_t engine = engine_tgt) {
+            dnnl_engine_t engine) {
         active_ = (initialize(md, dt, dnnl_format_tag_undef, engine) == OK);
     }
 
-    dnn_mem_t(const dnn_mem_t &rhs, dnnl_data_type_t dt,
-            dnnl_format_tag_t tag = dnnl_format_tag_undef,
-            dnnl_engine_t engine = engine_tgt)
+    dnn_mem_t(const dnn_mem_t &rhs, dnnl_data_type_t dt, dnnl_format_tag_t tag,
+            dnnl_engine_t engine)
         : dnn_mem_t(rhs.md_, dt, tag, engine) {
         if (active_) reorder(rhs);
     }
@@ -183,6 +181,9 @@ struct dnn_mem_t {
 
     static int check_mem_size(const_dnnl_primitive_desc_t const_pd);
 
+    static dnn_mem_t create_from_host_ptr(
+            const dnnl_memory_desc_t &md, dnnl_engine_t engine, void *host_ptr);
+
     /* fields */
     dnnl_memory_desc_t md_ {};
     dnnl_memory_t m_ {};
@@ -216,7 +217,8 @@ private:
         DNN_SAFE_V(dnnl_engine_get_kind(engine_, &engine_kind_));
 
         size_t sz = dnnl_memory_desc_get_size(&md_);
-        if (engine_kind_ == dnnl_cpu && handle == DNNL_MEMORY_ALLOCATE) {
+        if (engine_kind_ == dnnl_cpu && handle == DNNL_MEMORY_ALLOCATE
+                && DNNL_CPU_RUNTIME != DNNL_RUNTIME_DPCPP) {
             // Allocate memory for native runtime directly
             is_data_owner_ = true;
             const size_t alignment = 2 * 1024 * 1024;

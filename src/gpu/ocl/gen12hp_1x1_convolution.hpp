@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@
 #include "common/c_types_map.hpp"
 #include "gpu/compute/compute.hpp"
 #include "gpu/gpu_convolution_pd.hpp"
+#include "gpu/gpu_primitive.hpp"
 #include "gpu/ocl/ocl_stream.hpp"
 #include "gpu/ocl/ocl_utils.hpp"
 #include "gpu/primitive_conf.hpp"
@@ -31,19 +32,18 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-struct gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
+struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
     struct pd_t : public gpu_convolution_fwd_pd_t {
-        pd_t(engine_t *engine, const convolution_desc_t *adesc,
-                const primitive_attr_t *attr,
+        pd_t(const convolution_desc_t *adesc, const primitive_attr_t *attr,
                 const convolution_fwd_pd_t *hint_fwd_pd)
-            : gpu_convolution_fwd_pd_t(engine, adesc, attr, hint_fwd_pd) {}
+            : gpu_convolution_fwd_pd_t(adesc, attr, hint_fwd_pd) {}
 
         DECLARE_COMMON_PD_T("ocl:gen12hp:1x1", gen12hp_1x1_convolution_fwd_t);
 
-        status_t init() {
+        status_t init(engine_t *engine) {
             using namespace prop_kind;
             using namespace data_type;
-            assert(this->engine()->kind() == engine_kind::gpu);
+            assert(engine->kind() == engine_kind::gpu);
 
             const auto attr_skip_mask = primitive_attr_t::skip_mask_t::oscale
                     | primitive_attr_t::skip_mask_t::post_ops;
@@ -74,6 +74,12 @@ struct gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
 
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
+
+            auto *compute_engine = utils::downcast<ocl_gpu_engine_t *>(engine);
+            auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
+                    compute_engine->device_info());
+            is_gen12hp = dev_info->gpu_arch() == gpu_arch_t::gen12hp;
+
             return ok ? status::success : status::unimplemented;
         }
 
@@ -81,9 +87,10 @@ struct gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
         conv_conf_t conf;
+        bool is_gen12hp = false;
     };
 
-    status_t init() override {
+    status_t init(engine_t *engine) {
         const char *kernel_name = nullptr;
         if (pd()->desc()->src_desc.data_type == data_type::f16
                 || pd()->desc()->src_desc.data_type == data_type::bf16)
@@ -97,15 +104,13 @@ struct gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
         auto status = pd()->init_kernel_ctx(kernel_ctx);
         if (status != status::success) return status;
 
-        auto *compute_engine
-                = utils::downcast<compute::compute_engine_t *>(engine());
-        compute_engine->create_kernel(&kernel_, kernel_name, kernel_ctx);
+        create_kernel(engine, &kernel_, kernel_name, kernel_ctx);
         if (!kernel_) return status::runtime_error;
 
         return status::success;
     }
 
-    gen12hp_1x1_convolution_fwd_t(const pd_t *apd) : primitive_impl_t(apd) {}
+    gen12hp_1x1_convolution_fwd_t(const pd_t *apd) : gpu_primitive_t(apd) {}
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
         return execute_forward(ctx);
@@ -113,7 +118,7 @@ struct gen12hp_1x1_convolution_fwd_t : public primitive_impl_t {
 
 private:
     status_t execute_forward(const exec_ctx_t &ctx) const;
-    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 
     compute::kernel_t kernel_;
 };

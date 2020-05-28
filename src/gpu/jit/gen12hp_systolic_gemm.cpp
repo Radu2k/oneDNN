@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -30,15 +30,14 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
-status_t gen12hp_systolic_gemm_t::pd_t::init() {
+status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     using namespace prop_kind;
     using namespace data_type;
     using namespace primitive_kind;
     using smask_t = primitive_attr_t::skip_mask_t;
 
-    assert(this->engine()->kind() == engine_kind::gpu);
-    auto *compute_engine
-            = utils::downcast<compute::compute_engine_t *>(engine());
+    assert(engine->kind() == engine_kind::gpu);
+    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
 
     const auto d = desc();
 
@@ -108,11 +107,11 @@ dim_t gen12hp_systolic_gemm_t::pd_t::k_aligned() const {
             gen12hp_systolic_gemm_kernel_t::unroll_k(desc()->a_type));
 }
 
-status_t gen12hp_systolic_gemm_t::init() {
+status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     using namespace data_type;
     using kernel_t = gen12hp_systolic_gemm_kernel_t;
 
-    auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine());
+    auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine);
     if (!gpu_engine) return status::out_of_memory;
 
     auto a_type = pd()->desc()->a_type;
@@ -131,9 +130,9 @@ status_t gen12hp_systolic_gemm_t::init() {
             = kernel_t::max_ld_packed(block_k, a_type, ab_zero_points_);
 
     memory_storage_t *a_packed_ptr, *b_packed_ptr;
-    this->engine()->create_memory_storage(&a_packed_ptr,
+    engine->create_memory_storage(&a_packed_ptr,
             block_m * max_ldab_packed * types::data_type_size(a_type));
-    this->engine()->create_memory_storage(&b_packed_ptr,
+    engine->create_memory_storage(&b_packed_ptr,
             block_n * max_ldab_packed * types::data_type_size(b_type));
     if (!a_packed_ptr || !b_packed_ptr) return status::runtime_error;
     a_packed_.reset(a_packed_ptr);

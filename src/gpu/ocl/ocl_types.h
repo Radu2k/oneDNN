@@ -19,10 +19,13 @@
 
 #include "gpu/ocl/ocl_math_utils.h"
 
+#define unroll_for __attribute__((opencl_unroll_hint)) for
+
 #define for_ for
 
 #define CONCAt2(a, b) a##b
 #define CONCAT2(a, b) CONCAt2(a, b)
+#define CONCAT3(a, b, c) CONCAT2(CONCAT2(a, b), c)
 
 #if (DT_F16 == 1) || (SRC_DT_F16 == 1) || (DST_DT_F16 == 1) \
         || (WEI_DT_F16 == 1) || (BIA_DT_F16 == 1) || (ACC_DT_F16 == 1)
@@ -222,12 +225,14 @@
 #define POST_OP_DATA_T float
 #define TO_DATA_T(v) convert_char_sat_rte(v)
 #define TO_DEF_ACC_DATA_T(v) (float)(v)
-#define DATA_TO_REF convert_char_sat_rte
+#define DATA_TO_REF convert_float
 #define CONVERT_DATA_T convert_char_sat_rte
 #define CONVERT_DATA2_T convert_char2_sat_rte
 #define CONVERT_DATA4_T convert_char4_sat_rte
 #define CONVERT_DATA8_T convert_char8_sat_rte
 #define CONVERT_FLOAT_T convert_float
+#define CONVERT_FLOAT2_T convert_float2
+#define CONVERT_FLOAT4_T convert_float4
 #define CONVERT_FLOAT8_T convert_float8
 #define ROUND rint
 
@@ -282,12 +287,14 @@
 #define POST_OP_DATA_T float
 #define TO_DATA_T(v) convert_uchar_sat_rte(v)
 #define TO_DEF_ACC_DATA_T(v) (float)(v)
-#define DATA_TO_REF convert_uchar_sat_rte
+#define DATA_TO_REF convert_float
 #define CONVERT_DATA_T convert_uchar_sat_rte
 #define CONVERT_DATA2_T convert_uchar2_sat_rte
 #define CONVERT_DATA4_T convert_uchar4_sat_rte
 #define CONVERT_DATA8_T convert_uchar8_sat_rte
 #define CONVERT_FLOAT_T convert_float
+#define CONVERT_FLOAT2_T convert_float2
+#define CONVERT_FLOAT4_T convert_float4
 #define CONVERT_FLOAT8_T convert_float8
 #define ROUND rint
 
@@ -326,7 +333,7 @@
 #define MMAD_ACC_DATA8_T int8
 #elif DT_S32 == 1
 #define DATA_T int
-#define DATA_TO_REF convert_int
+#define DATA_TO_REF convert_float
 #define CONVERT_DATA_T convert_int_sat_rte
 #define POST_OP_DATA_T float
 #elif !defined(DT_UNDEF)
@@ -548,6 +555,59 @@
 #define AS_DST_DATA8_T CONCAT2(as_, DST_DATA8_T)
 #define AS_DST_DATA16_T CONCAT2(as_, DST_DATA16_T)
 
+#if DST_DT_F32 || DST_DT_F16
+#define CONVERT_DST_DATA2_T CONCAT2(convert_, DST_DATA2_T)
+#define CONVERT_DST_DATA4_T CONCAT2(convert_, DST_DATA4_T)
+#define CONVERT_DST_DATA8_T CONCAT2(convert_, DST_DATA8_T)
+#define CONVERT_DST_DATA16_T CONCAT2(convert_, DST_DATA16_T)
+#else
+#define CONVERT_DST_DATA2_T CONCAT3(convert_, DST_DATA2_T, _sat_rte)
+#define CONVERT_DST_DATA4_T CONCAT3(convert_, DST_DATA4_T, _sat_rte)
+#define CONVERT_DST_DATA8_T CONCAT3(convert_, DST_DATA8_T, _sat_rte)
+#define CONVERT_DST_DATA16_T CONCAT3(convert_, DST_DATA16_T, _sat_rte)
+#endif
+
+// Block read/write macros for dst.
+#if DST_DT_U8 || DST_DT_S8
+
+#define BLOCK_READ_DST4(ptr) \
+    AS_DST_DATA4_T(intel_sub_group_block_read_uc4((__global uchar *)ptr))
+#define BLOCK_WRITE_DST4(ptr, v) \
+    intel_sub_group_block_write_uc4((__global uchar *)ptr, as_uchar4(v))
+
+#define BLOCK_READ_DST8(ptr) \
+    AS_DST_DATA8_T(intel_sub_group_block_read_uc8((__global uchar *)ptr))
+#define BLOCK_WRITE_DST8(ptr, v) \
+    intel_sub_group_block_write_uc8((__global uchar *)ptr, as_uchar8(v))
+
+#define BLOCK_READ_DST16(ptr) \
+    AS_DST_DATA16_T(intel_sub_group_block_read_uc16((__global uchar *)ptr))
+#define BLOCK_WRITE_DST16(ptr, v) \
+    intel_sub_group_block_write_uc16((__global uchar *)ptr, as_uchar16(v))
+
+#elif DST_DT_S32 || DST_DT_F32
+
+#define BLOCK_READ_DST4(ptr) \
+    AS_DST_DATA4_T(intel_sub_group_block_read4((__global uint *)ptr))
+#define BLOCK_WRITE_DST4(ptr, v) \
+    intel_sub_group_block_write4((__global uint *)ptr, as_uint4(v))
+
+#define BLOCK_READ_DST8(ptr) \
+    AS_DST_DATA8_T(intel_sub_group_block_read8((__global uint *)ptr))
+#define BLOCK_WRITE_DST8(ptr, v) \
+    intel_sub_group_block_write8((__global uint *)ptr, as_uint8(v))
+
+#define BLOCK_READ_DST16(ptr) \
+    (DST_DATA16_T)( \
+            BLOCK_READ_DST8(ptr), BLOCK_READ_DST8(ptr + 8 * SUB_GROUP_SIZE))
+#define BLOCK_WRITE_DST16(ptr, v) \
+    do { \
+        BLOCK_WRITE_DST8(ptr, (v).s01234567); \
+        BLOCK_WRITE_DST8(ptr + 8 * SUB_GROUP_SIZE, (v).s89abcdef); \
+    } while (0)
+
+#endif
+
 #if DST_DT_BF16
 #define DST_TO_REF(x) convert_bf16_to_f32(x)
 #define DST_TO_REF2(x) convert_bf16_to_f32_vec2(x)
@@ -580,23 +640,35 @@
 #endif
 #if DST_DT_BF16
 #define TO_DST(x) convert_f32_to_bf16(x)
+#define TO_DST2(x) convert_f32_to_bf16_vec2(convert_float8(x))
+#define TO_DST4(x) convert_f32_to_bf16_vec4(convert_float8(x))
 #define TO_DST8(x) convert_f32_to_bf16_vec8(convert_float8(x))
 #elif DST_DT_F16
 #define TO_DST(x) convert_half(x)
+#define TO_DST2(x) convert_half2(x)
+#define TO_DST4(x) convert_half4(x)
 #define TO_DST8(x) convert_half8(x)
 #elif DST_DT_U8
 #define TO_DST(x) convert_uchar_sat_rte(x)
+#define TO_DST2(x) convert_uchar2_sat_rte(x)
+#define TO_DST4(x) convert_uchar4_sat_rte(x)
 #define TO_DST8(x) convert_uchar8_sat_rte(x)
 #define TO_DST16(x) convert_uchar16_sat_rte(x)
 #elif DST_DT_S8
 #define TO_DST(x) convert_char_sat_rte(x)
+#define TO_DST2(x) convert_char2_sat_rte(x)
+#define TO_DST4(x) convert_char4_sat_rte(x)
 #define TO_DST8(x) convert_char8_sat_rte(x)
 #define TO_DST16(x) convert_char16_sat_rte(x)
 #elif DST_DT_S32
 #define TO_DST(x) convert_int_sat_rte(x)
+#define TO_DST2(x) convert_int2_sat_rte(x)
+#define TO_DST4(x) convert_int4_sat_rte(x)
 #define TO_DST8(x) convert_int8_sat_rte(x)
 #elif DST_DT_F32
 #define TO_DST(x) convert_float(x)
+#define TO_DST2(x) convert_float2(x)
+#define TO_DST4(x) convert_float4(x)
 #define TO_DST8(x) convert_float8(x)
 #else
 #error "Not expected"

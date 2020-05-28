@@ -37,10 +37,8 @@ option(DNNL_ENABLE_CONCURRENT_EXEC
     CAUTION: enabling this option increases memory consumption."
     OFF) # disabled by default
 
-option(DNNL_ENABLE_PRIMITIVE_CACHE "enables primitive cache.
-    WARNING: the primitive cache is an experimental feature and might be
-    changed without prior notification in future releases" OFF)
-    # disabled by default
+option(DNNL_ENABLE_PRIMITIVE_CACHE "enables primitive cache." ON)
+    # enabled by default
 
 option(DNNL_ENABLE_MAX_CPU_ISA
     "enables control of CPU ISA detected by oneDNN via DNNL_MAX_CPU_ISA
@@ -79,7 +77,7 @@ set(DNNL_ARCH_OPT_FLAGS "HostOpts" CACHE STRING
     If empty default optimization level would be applied which depends on the
     compiler being used.
 
-    - For Intel(R) C++ Compilers the default option is `-xSSE4.1` which instructs
+    - For Intel C++ Compilers the default option is `-xSSE4.1` which instructs
       the compiler to generate the code for the processors that support SSE4.1
       instructions. This option would not allow to run the library on older
       architectures.
@@ -97,12 +95,15 @@ set(DNNL_ARCH_OPT_FLAGS "HostOpts" CACHE STRING
 # Profiling capabilities
 # ======================
 
+# TODO: restore default to ON after the issue with linking C files by 
+# Intel oneAPI DPC++ Compiler is fixed. Currently this compiler issues a warning
+# when linking object files built from C and C++ sources.
 option(DNNL_ENABLE_JIT_PROFILING
     "Enable registration of oneDNN kernels that are generated at
-    runtime with Intel VTune Amplifier (on by default). Without the
-    registrations, Intel VTune Amplifier would report data collected inside
+    runtime with VTune Amplifier (on by default). Without the
+    registrations, VTune Amplifier would report data collected inside
     the kernels as `outside any known module`."
-    ON)
+    OFF)
 
 # ===================
 # Engine capabilities
@@ -110,12 +111,12 @@ option(DNNL_ENABLE_JIT_PROFILING
 
 set(DNNL_CPU_RUNTIME "OMP" CACHE STRING
     "specifies the threading runtime for CPU engines;
-    supports OMP (default) or TBB.
+    supports OMP (default), TBB or DPCPP (DPC++ CPU engines).
 
-    To use Intel(R) Threading Building Blocks (Intel(R) TBB) one should also
+    To use Threading Building Blocks (TBB) one should also
     set TBBROOT (either environment variable or CMake option) to the library
     location.")
-if(NOT "${DNNL_CPU_RUNTIME}" MATCHES "^(OMP|TBB|SEQ|THREADPOOL)$")
+if(NOT "${DNNL_CPU_RUNTIME}" MATCHES "^(OMP|TBB|SEQ|THREADPOOL|DPCPP|SYCL)$")
     message(FATAL_ERROR "Unsupported CPU runtime: ${DNNL_CPU_RUNTIME}")
 endif()
 
@@ -129,22 +130,42 @@ if(NOT "${_DNNL_TEST_THREADPOOL_IMPL}" MATCHES "^(STANDALONE|TBB|EIGEN)$")
 endif()
 
 set(TBBROOT "" CACHE STRING
-    "path to Intel(R) Thread Building Blocks (Intel(R) TBB).
-    Use this option to specify Intel(R) TBB installation locaton.")
+    "path to Thread Building Blocks (TBB).
+    Use this option to specify TBB installation locaton.")
 
 set(DNNL_GPU_RUNTIME "NONE" CACHE STRING
     "specifies the runtime to use for GPU engines.
-    Can be NONE (default; no GPU engines) or OCL (OpenCL GPU engines).
+    Can be NONE (default; no GPU engines), OCL (OpenCL GPU engines)
+    or DPCPP (DPC++ GPU engines).
 
     Using OpenCL for GPU requires setting OPENCLROOT if the libraries are
     installed in a non-standard location.")
-if(NOT "${DNNL_GPU_RUNTIME}" MATCHES "^(OCL|NONE)$")
+if(NOT "${DNNL_GPU_RUNTIME}" MATCHES "^(OCL|NONE|DPCPP|SYCL)$")
     message(FATAL_ERROR "Unsupported GPU runtime: ${DNNL_GPU_RUNTIME}")
 endif()
 
 set(OPENCLROOT "" CACHE STRING
-    "path to Intel(R) SDK for OpenCL(TM).
+    "path to Intel SDK for OpenCL applications.
     Use this option to specify custom location for OpenCL.")
+
+# Shortcuts for SYCL/DPC++
+if(DNNL_CPU_RUNTIME STREQUAL "DPCPP" OR DNNL_CPU_RUNTIME STREQUAL "SYCL")
+    set(DNNL_CPU_SYCL true)
+else()
+    set(DNNL_CPU_SYCL false)
+endif()
+
+if(DNNL_GPU_RUNTIME STREQUAL "DPCPP" OR DNNL_GPU_RUNTIME STREQUAL "SYCL")
+    set(DNNL_GPU_SYCL true)
+else()
+    set(DNNL_GPU_SYCL false)
+endif()
+
+if(DNNL_CPU_SYCL OR DNNL_GPU_SYCL)
+    set(DNNL_WITH_SYCL true)
+else()
+    set(DNNL_WITH_SYCL false)
+endif()
 
 # =============
 # Miscellaneous

@@ -19,10 +19,7 @@ file(GLOB_RECURSE HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/*.hpp
     )
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/common
-    )
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 if (DNNL_LIBRARY_TYPE STREQUAL "SHARED")
     add_definitions(-DDNNL_DLL_EXPORTS)
@@ -50,15 +47,12 @@ endif()
 
 if(DNNL_ENABLE_PRIMITIVE_CACHE)
     message(STATUS "Primitive cache is enabled")
-    add_definitions(-DDNNL_ENABLE_PRIMITIVE_CACHE)
+else()
+    add_definitions(-DDNNL_DISABLE_PRIMITIVE_CACHE)
+    message(STATUS "Primitive cache is disabled")
 endif()
 
-if(NOT DNNL_ENABLE_JIT_PROFILING)
-    # XXX: the profiling interface will still be built and present in the
-    # library
-    message(STATUS "Intel(R) VTune(TM) Amplifier JIT profiling disabled")
-    add_definitions(-DDNNL_ENABLE_JIT_PROFILING=0)
-elseif(UNIX AND NOT APPLE)
+if(DNNL_ENABLE_JIT_PROFILING AND UNIX AND NOT APPLE)
     # Not every compiler adds -ldl automatically
     list(APPEND EXTRA_SHARED_LIBS "${CMAKE_DL_LIBS}")
 endif()
@@ -81,6 +75,10 @@ add_subdirectory(cpu)
 
 if(NOT DNNL_GPU_RUNTIME STREQUAL "NONE")
     add_subdirectory(gpu)
+endif()
+
+if(DNNL_WITH_SYCL)
+    add_subdirectory(sycl)
 endif()
 
 get_property(LIB_DEPS GLOBAL PROPERTY DNNL_LIB_DEPS)
@@ -137,7 +135,7 @@ install(EXPORT ${LIB_EXPORT_NAME}
 
 # Intel MKL-DNN compat cmake files
 install(CODE "execute_process(COMMAND ${CMAKE_COMMAND}
-    -DDIR=${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake
+    -DDIR=\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake
     -P ${PROJECT_SOURCE_DIR}/cmake/gen_mkldnn_compat_cmakes.cmake)")
 
 # Intel MKL-DNN compat libraries
@@ -184,7 +182,7 @@ endif()
 
 # Install custom find modules for transitive dependencies
 set(LIB_CONFIG_INSTALL_DIR_COMPAT "${CMAKE_INSTALL_LIBDIR}/cmake/mkldnn")
-if(DNNL_CPU_RUNTIME STREQUAL "TBB")
+if(DNNL_CPU_THREADING_RUNTIME STREQUAL "TBB")
     if(WIN32)
         install(FILES "../cmake/win/TBBConfig.cmake" RENAME "FindTBB.cmake"
             DESTINATION ${LIB_CONFIG_INSTALL_DIR})
@@ -203,8 +201,19 @@ if(DNNL_GPU_RUNTIME STREQUAL "OCL")
     install(FILES
         "../cmake/FindOpenCL.cmake"
         DESTINATION ${LIB_CONFIG_INSTALL_DIR})
-    install(FILES "${CMAKE_INSTALL_PREFIX}/${LIB_CONFIG_INSTALL_DIR}/FindOpenCL.cmake"
+    install(FILES "../cmake/FindOpenCL.cmake"
             DESTINATION ${LIB_CONFIG_INSTALL_DIR_COMPAT})
+endif()
+
+if(DNNL_SYCL_RUNTIME STREQUAL "COMPUTECPP")
+    install(FILES
+        "../cmake/FindComputeCpp.cmake"
+        "../cmake/FindOpenCL.cmake"
+        DESTINATION ${LIB_CONFIG_INSTALL_DIR})
+elseif(DNNL_SYCL_RUNTIME STREQUAL "DPCPP")
+    install(FILES
+        "../cmake/FindLevelZero.cmake"
+        DESTINATION ${LIB_CONFIG_INSTALL_DIR})
 endif()
 
 # On Windows we need to add dnnl.dll path to CTESTCONFIG_PATH which is later

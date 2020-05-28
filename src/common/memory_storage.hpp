@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef MEMORY_STORAGE_HPP
-#define MEMORY_STORAGE_HPP
+#ifndef COMMON_MEMORY_STORAGE_HPP
+#define COMMON_MEMORY_STORAGE_HPP
 
 #include "common/c_types_map.hpp"
 #include "common/utils.hpp"
@@ -32,7 +32,12 @@ namespace impl {
 // Memory storage is engine-specific and has different implementations for
 // different engines.
 struct memory_storage_t : public c_compatible {
-    memory_storage_t(engine_t *engine) : engine_(engine) {}
+    memory_storage_t(engine_t *engine)
+        : engine_(engine), parent_storage_(this) {}
+
+    memory_storage_t(engine_t *engine, const memory_storage_t *parent_storage)
+        : engine_(engine), parent_storage_(parent_storage) {}
+
     virtual ~memory_storage_t() = default;
 
     status_t init(unsigned flags, size_t size, void *handle);
@@ -53,14 +58,13 @@ struct memory_storage_t : public c_compatible {
     size_t offset() const { return offset_; }
     void set_offset(size_t offset) { offset_ = offset; }
 
-    virtual status_t map_data(void **mapped_ptr) const {
-        return get_data_handle(mapped_ptr);
-    }
+    virtual size_t base_offset() const { return 0; }
 
-    virtual status_t unmap_data(void *mapped_ptr) const {
-        UNUSED(mapped_ptr);
-        return status::success;
-    }
+    virtual status_t map_data(void **mapped_ptr, stream_t *stream) const;
+
+    virtual status_t unmap_data(void *mapped_ptr, stream_t *stream) const;
+
+    virtual bool is_host_accessible() const { return false; }
 
     /** returns slice of memory storage
      *
@@ -68,6 +72,9 @@ struct memory_storage_t : public c_compatible {
      * @note: (offset + size) shall not be greater than base memory storage size */
     virtual std::unique_ptr<memory_storage_t> get_sub_storage(
             size_t offset, size_t size) const = 0;
+
+    /** returns shallow copy */
+    virtual std::unique_ptr<memory_storage_t> clone() const = 0;
 
     /** returns true if the pointer associated with the storage is NULL */
     bool is_null() const {
@@ -85,9 +92,13 @@ struct memory_storage_t : public c_compatible {
 protected:
     virtual status_t init_allocate(size_t size) = 0;
 
+    const memory_storage_t *parent_storage() const { return parent_storage_; }
+
 private:
     engine_t *engine_;
     size_t offset_ = 0;
+
+    const memory_storage_t *parent_storage_;
 
     DNNL_DISALLOW_COPY_AND_ASSIGN(memory_storage_t);
 };
@@ -95,24 +106,29 @@ private:
 struct empty_memory_storage_t : public memory_storage_t {
     empty_memory_storage_t() : memory_storage_t(nullptr) {}
 
-    virtual status_t get_data_handle(void **handle) const override {
+    status_t get_data_handle(void **handle) const override {
         *handle = nullptr;
         return status::success;
     }
 
-    virtual status_t set_data_handle(void *handle) override {
+    status_t set_data_handle(void *handle) override {
         assert(!"not expected");
         return status::runtime_error;
     }
 
-    virtual std::unique_ptr<memory_storage_t> get_sub_storage(
+    std::unique_ptr<memory_storage_t> get_sub_storage(
             size_t offset, size_t size) const override {
         assert(!"not expected");
         return nullptr;
     }
 
+    virtual std::unique_ptr<memory_storage_t> clone() const override {
+        assert(!"not expected");
+        return nullptr;
+    }
+
 protected:
-    virtual status_t init_allocate(size_t) override { return status::success; }
+    status_t init_allocate(size_t) override { return status::success; }
 };
 
 inline memory_storage_t &memory_storage_t::empty_storage() {

@@ -35,7 +35,22 @@ status_t ocl_memory_storage_t::init_allocate(size_t size) {
     return status::success;
 }
 
-status_t ocl_memory_storage_t::map_data(void **mapped_ptr) const {
+namespace {
+cl_command_queue get_map_queue(engine_t *engine, stream_t *stream) {
+    ocl_stream_t *ocl_stream;
+    if (stream != nullptr)
+        ocl_stream = utils::downcast<ocl_stream_t *>(stream);
+    else {
+        auto *ocl_engine = utils::downcast<ocl_gpu_engine_t *>(engine);
+        ocl_stream
+                = utils::downcast<ocl_stream_t *>(ocl_engine->service_stream());
+    }
+    return ocl_stream->queue();
+}
+} // namespace
+
+status_t ocl_memory_storage_t::map_data(
+        void **mapped_ptr, stream_t *stream) const {
     if (!mem_object()) {
         *mapped_ptr = nullptr;
         return status::success;
@@ -59,47 +74,63 @@ status_t ocl_memory_storage_t::map_data(void **mapped_ptr) const {
         map_flags |= CL_MAP_WRITE;
     }
 
-    auto *ocl_engine = utils::downcast<ocl_gpu_engine_t *>(engine());
-    auto *service_stream
-            = utils::downcast<ocl_stream_t *>(ocl_engine->service_stream());
-
     // Use blocking operation to simplify the implementation and API
     cl_int err;
-    *mapped_ptr = clEnqueueMapBuffer(service_stream->queue(), mem_object(),
-            CL_TRUE, map_flags, 0, mem_bytes, 0, nullptr, nullptr, &err);
+    *mapped_ptr = clEnqueueMapBuffer(get_map_queue(engine(), stream),
+            mem_object(), CL_TRUE, map_flags, 0, mem_bytes, 0, nullptr, nullptr,
+            &err);
     return convert_to_dnnl(err);
 }
 
-status_t ocl_memory_storage_t::unmap_data(void *mapped_ptr) const {
+status_t ocl_memory_storage_t::unmap_data(
+        void *mapped_ptr, stream_t *stream) const {
     if (!mapped_ptr) return status::success;
-
-    auto *ocl_engine = utils::downcast<ocl_gpu_engine_t *>(engine());
-    auto *service_stream
-            = utils::downcast<ocl_stream_t *>(ocl_engine->service_stream());
-    auto service_queue = service_stream->queue();
-
-    OCL_CHECK(clEnqueueUnmapMemObject(service_queue, mem_object_,
+    auto queue = get_map_queue(engine(), stream);
+    OCL_CHECK(clEnqueueUnmapMemObject(queue, mem_object_,
             const_cast<void *>(mapped_ptr), 0, nullptr, nullptr));
+    OCL_CHECK(clFinish(queue));
     return status::success;
 }
 
 std::unique_ptr<memory_storage_t> ocl_memory_storage_t::get_sub_storage(
         size_t offset, size_t size) const {
+    // Fast return on size = 0.
+    // It also seems clCreateSubBuffer() does not work properly for such case.
+    // Assumption: returned sub-storage won't be used for extracting cl_mem.
+    if (size == 0) return nullptr;
+
     cl_mem_flags mem_flags;
     cl_int err;
     err = clGetMemObjectInfo(
             mem_object(), CL_MEM_FLAGS, sizeof(mem_flags), &mem_flags, nullptr);
     assert(err == CL_SUCCESS);
+    if (err != CL_SUCCESS) return nullptr;
 
-    cl_buffer_region buffer_region = {offset, size};
-    ocl_wrapper_t<cl_mem> sub_buffer = clCreateSubBuffer(mem_object(),
+    assert(size != 0);
+    cl_buffer_region buffer_region = {base_offset_ + offset, size};
+    ocl_wrapper_t<cl_mem> sub_buffer = clCreateSubBuffer(parent_mem_object(),
             mem_flags, CL_BUFFER_CREATE_TYPE_REGION, &buffer_region, &err);
     assert(err == CL_SUCCESS);
+    if (err != CL_SUCCESS) return nullptr;
 
-    auto sub_storage = new ocl_memory_storage_t(this->engine());
-    if (sub_storage)
+    auto sub_storage
+            = new ocl_memory_storage_t(this->engine(), parent_storage());
+    if (sub_storage) {
         sub_storage->init(memory_flags_t::use_runtime_ptr, size, sub_buffer);
+        sub_storage->base_offset_ = base_offset_ + offset;
+    }
     return std::unique_ptr<memory_storage_t>(sub_storage);
+}
+
+std::unique_ptr<memory_storage_t> ocl_memory_storage_t::clone() const {
+    auto storage = new ocl_memory_storage_t(engine());
+    if (storage) storage->init(memory_flags_t::use_runtime_ptr, 0, mem_object_);
+    return std::unique_ptr<memory_storage_t>(storage);
+}
+
+cl_mem ocl_memory_storage_t::parent_mem_object() const {
+    return utils::downcast<const ocl_memory_storage_t *>(parent_storage())
+            ->mem_object();
 }
 
 } // namespace ocl

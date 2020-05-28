@@ -1,5 +1,8 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
+=======
+* Copyright 2019-2020 Intel Corporation
+>>>>>>> dev-v2
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -31,13 +34,12 @@ struct gen12lp_gemm_driver_params_t {
     static constexpr auto block_k = 1024;
 };
 
-status_t gen12lp_gemm_t::launch_x8x8s32(
+status_t gen12lp_gemm_t::launch_x8x8s32(gemm_exec_ctx_t ctx,
         compute::compute_stream_t *compute_stream, const memory_storage_t &a,
-        const memory_storage_t &b, const memory_storage_t &c, int64_t offset_a,
-        int64_t offset_b, int64_t offset_c, int64_t lda, int64_t ldb,
-        int64_t ldc, int64_t m, int64_t n, int64_t k, int64_t beta, int64_t ao,
-        int64_t bo, const memory_storage_t &co, int64_t offset_co,
-        bool apply_co, bool apply_eltwise, float eltwise_alpha,
+        const memory_storage_t &b, const memory_storage_t &c, int offset_a,
+        int offset_b, int offset_c, int lda, int ldb, int ldc, int m, int n,
+        int k, int beta, int ao, int bo, const memory_storage_t &co,
+        int offset_co, bool apply_co, bool apply_eltwise, float eltwise_alpha,
         float eltwise_beta, float eltwise_scale, bool aligned) const {
 
     auto &kernel = compute_x8x8s32_kernel_[aligned];
@@ -98,16 +100,16 @@ status_t gen12lp_gemm_t::launch_x8x8s32(
 
     auto nd_range = compute::nd_range_t(gws, lws);
 
-    return compute_stream->parallel_for(nd_range, kernel, arg_list);
+    return parallel_for(ctx, nd_range, kernel, arg_list);
 }
 
-status_t gen12lp_gemm_t::launch_scale_x8x8s32(
+status_t gen12lp_gemm_t::launch_scale_x8x8s32(gemm_exec_ctx_t ctx,
         compute::compute_stream_t *compute_stream,
         const memory_storage_t &c_temp, const memory_storage_t &c, char offsetc,
-        int64_t offset_c, int64_t m, int64_t n, int64_t ldc, float alpha,
-        float beta, const memory_storage_t &co, int64_t offset_co,
-        bool alpha_is_zero, bool apply_eltwise, float eltwise_alpha,
-        float eltwise_beta, float eltwise_scale) const {
+        int offset_c, int m, int n, int ldc, float alpha, float beta,
+        const memory_storage_t &co, int offset_co, bool alpha_is_zero,
+        bool apply_eltwise, float eltwise_alpha, float eltwise_beta,
+        float eltwise_scale) const {
 
     auto &kernel = scale_x8x8s32_kernel_;
 
@@ -145,7 +147,7 @@ status_t gen12lp_gemm_t::launch_scale_x8x8s32(
 
     auto nd_range = compute::nd_range_t(gws, lws);
 
-    return compute_stream->parallel_for(nd_range, kernel, arg_list);
+    return parallel_for(ctx, nd_range, kernel, arg_list);
 }
 
 status_t gen12lp_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
@@ -201,18 +203,20 @@ status_t gen12lp_gemm_t::execute_standard(const gemm_exec_ctx_t &ctx) const {
     auto &co = GEMM_CTX_ARG_STORAGE(c_zero_point);
     auto &c = GEMM_CTX_ARG_STORAGE(c);
 
-    size_t off_a0
+    auto temp_buf = ctx.get_scratchpad_grantor().get_memory_storage(
+            memory_tracking::names::key_gemm_tmp_buffer);
+
+    int64_t off_a0
             = a.offset() / types::data_type_size(a_type) + pd()->dyn_offset_a;
-    size_t off_b0
+    int64_t off_b0
             = b.offset() / types::data_type_size(b_type) + pd()->dyn_offset_b;
-    size_t off_c0
+    int64_t off_c0
             = c.offset() / types::data_type_size(c_type) + pd()->dyn_offset_c;
-    size_t offset_co
+    int64_t offset_co
             = co.offset() / types::data_type_size(c_type) + pd()->dyn_offset_co;
 
-    bool do_compute = ((k > 0) && (alpha != 0.0f));
-    bool do_scale = !(
-            (k > 0) && (alpha == 1.0f) && ((beta == 0.0f) || (beta == 1.0f)));
+    bool do_compute = pd()->do_compute();
+    bool do_scale = pd()->do_scale();
 
     status_t status;
 
@@ -260,12 +264,12 @@ status_t gen12lp_gemm_t::execute_standard(const gemm_exec_ctx_t &ctx) const {
                             aligned = false;
                         else
                             aligned = true;
-                        status = launch_x8x8s32(compute_stream, a, b, c,
+                        status = launch_x8x8s32(ctx, compute_stream, a, b, c,
                                 off_a_src, off_b_src, off_c, lda, ldb, ldc,
                                 size_m, size_n, size_k, eff_beta, ao, bo, co,
-                                offset_co_src, (int)apply_co,
-                                (int)apply_eltwise, eltwise_alpha, eltwise_beta,
-                                eltwise_scale, aligned);
+                                offset_co_src, apply_co, apply_eltwise,
+                                eltwise_alpha, eltwise_beta, eltwise_scale,
+                                aligned);
 
                         if (status) return status;
                     } else if (do_scale) {
@@ -276,8 +280,8 @@ status_t gen12lp_gemm_t::execute_standard(const gemm_exec_ctx_t &ctx) const {
                             aligned = false;
                         else
                             aligned = true;
-                        status = launch_x8x8s32(compute_stream, a, b,
-                                *temp_buf_, off_a_src, off_b_src, off_c, lda,
+                        status = launch_x8x8s32(ctx, compute_stream, a, b,
+                                *temp_buf, off_a_src, off_b_src, off_c, lda,
                                 ldb, m, size_m, size_n, size_k, eff_beta, ao,
                                 bo, co, offset_co_src, apply_co, 0,
                                 eltwise_alpha, eltwise_beta, eltwise_scale,
@@ -290,7 +294,7 @@ status_t gen12lp_gemm_t::execute_standard(const gemm_exec_ctx_t &ctx) const {
     }
     bool alpha_is_zero = false;
     if (do_scale) {
-        status = launch_scale_x8x8s32(compute_stream, *temp_buf_, c,
+        status = launch_scale_x8x8s32(ctx, compute_stream, *temp_buf, c,
                 offsetc_char, off_c0, m, n, ldc, alpha, beta, co, offset_co,
                 (int)alpha_is_zero, 1, eltwise_alpha, eltwise_beta,
                 eltwise_scale);

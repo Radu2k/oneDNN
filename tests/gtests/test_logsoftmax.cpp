@@ -100,11 +100,9 @@ protected:
         ASSERT_TRUE(pd.diff_dst_desc().is_zero());
         ASSERT_TRUE(pd.diff_weights_desc().is_zero());
 
-        const auto test_engine = pd.get_engine();
-
-        auto src = memory(data_desc, test_engine);
-        dst.reset(new memory(data_desc, test_engine));
-        workspace.reset(new memory(workspace_desc, test_engine));
+        auto src = memory(data_desc, eng);
+        dst.reset(new memory(data_desc, eng));
+        workspace.reset(new memory(workspace_desc, eng));
 
         auto test_with_given_fill = [&](data_t mean, data_t var) {
             fill_data<data_t>(
@@ -178,10 +176,8 @@ protected:
         ASSERT_TRUE(pd.weights_desc().is_zero());
         ASSERT_TRUE(pd.diff_weights_desc().is_zero());
 
-        const auto test_engine = pd.get_engine();
-
-        auto diff_src = memory(diff_data_desc, test_engine);
-        auto diff_dst = memory(diff_data_desc, test_engine);
+        auto diff_src = memory(diff_data_desc, eng);
+        auto diff_dst = memory(diff_data_desc, eng);
 
         auto test_with_given_fill = [&](data_t mean, data_t var) {
             // Fill the logsoftmax backward diffs

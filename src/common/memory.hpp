@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef MEMORY_HPP
-#define MEMORY_HPP
+#ifndef COMMON_MEMORY_HPP
+#define COMMON_MEMORY_HPP
 
 #include <assert.h>
 #include <memory>
@@ -30,14 +30,23 @@
 
 namespace dnnl {
 namespace impl {
+
+struct exec_ctx_t;
+
 enum memory_flags_t { alloc = 0x1, use_runtime_ptr = 0x2, omit_zero_pad = 0x4 };
 } // namespace impl
 } // namespace dnnl
 
 struct dnnl_memory : public dnnl::impl::c_compatible {
+    /** XXX: Parameter flags must contain either alloc or use_runtime_ptr from
+     * memory_flags_t. */
     dnnl_memory(dnnl::impl::engine_t *engine,
             const dnnl::impl::memory_desc_t *md, unsigned flags, void *handle);
-    virtual ~dnnl_memory() {}
+    dnnl_memory(dnnl::impl::engine_t *engine,
+            const dnnl::impl::memory_desc_t *md,
+            std::unique_ptr<dnnl::impl::memory_storage_t> &&memory_storage,
+            bool do_zero_pad = true);
+    virtual ~dnnl_memory() = default;
 
     /** returns memory's engine */
     dnnl::impl::engine_t *engine() const { return engine_; }
@@ -53,20 +62,11 @@ struct dnnl_memory : public dnnl::impl::c_compatible {
     }
 
     /** sets data handle */
-    dnnl::impl::status_t set_data_handle(void *handle) {
-        using namespace dnnl::impl;
-
-        void *old_handle;
-        CHECK(memory_storage()->get_data_handle(&old_handle));
-
-        if (handle != old_handle) {
-            CHECK(memory_storage()->set_data_handle(handle));
-        }
-        return zero_pad();
-    }
+    dnnl::impl::status_t set_data_handle(void *handle, dnnl_stream *stream);
 
     /** zeros padding */
-    dnnl::impl::status_t zero_pad() const;
+    dnnl::impl::status_t zero_pad(dnnl::impl::stream_t *stream) const;
+    dnnl::impl::status_t zero_pad(const dnnl::impl::exec_ctx_t &ctx) const;
 
 protected:
     dnnl::impl::engine_t *engine_;
@@ -74,7 +74,8 @@ protected:
 
 private:
     template <dnnl::impl::data_type_t>
-    dnnl::impl::status_t typed_zero_pad() const;
+    dnnl::impl::status_t typed_zero_pad(
+            const dnnl::impl::exec_ctx_t &ctx) const;
 
     dnnl_memory() = delete;
     DNNL_DISALLOW_COPY_AND_ASSIGN(dnnl_memory);

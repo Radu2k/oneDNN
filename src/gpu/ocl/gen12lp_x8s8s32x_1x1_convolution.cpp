@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -22,7 +22,8 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
+status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf(
+        engine_t *engine) {
     using namespace format_tag;
 
     const convolution_desc_t &cd = *desc();
@@ -30,13 +31,11 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
     const memory_desc_wrapper weights_mdw(weights_md());
     const memory_desc_wrapper dst_mdw(dst_md());
     const memory_desc_wrapper bias_mdw(weights_md(1));
-    auto dev_info = utils::downcast<compute::compute_engine_t *>(engine())
+    auto dev_info = utils::downcast<compute::compute_engine_t *>(engine)
                             ->device_info();
 
     set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
             *weights_md(1), *attr());
-
-    status_t status = status::success;
 
     if (conf.is_depthwise || conf.kh != 1 || conf.kw != 1
             || (conf.with_groups && conf.ngroups > 1
@@ -110,11 +109,21 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_conf() {
             ? utils::pick(conf.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i)
             : utils::pick(conf.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i);
 
-    conf.src_tag = src_tag;
-    conf.wei_tag = wei_tag;
-    conf.dst_tag = dst_tag;
+    conf.src_tag = src_mdw.format_kind() == format_kind::any
+            ? src_tag
+            : src_mdw.matches_one_of_tag(src_tag);
+    conf.wei_tag = weights_mdw.format_kind() == format_kind::any
+            ? wei_tag
+            : weights_mdw.matches_one_of_tag(wei_tag);
+    conf.dst_tag = dst_mdw.format_kind() == format_kind::any
+            ? dst_tag
+            : dst_mdw.matches_one_of_tag(dst_tag);
 
-    return status;
+    if (conf.src_tag != src_tag || conf.wei_tag != wei_tag
+            || conf.dst_tag != dst_tag)
+        return status::unimplemented;
+
+    return status::success;
 }
 
 status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
@@ -138,14 +147,12 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("IC_BLOCK", conf.ic_block);
 
     kernel_ctx.define_int("WITH_BIAS", conf.with_bias);
-    kernel_ctx.define_int("WITH_ELTWISE", conf.with_eltwise);
-    kernel_ctx.define_int("WITH_SUM", conf.with_sum);
-    kernel_ctx.define_int("SUM_SCALE", conf.sum_scale == 1.0);
-    kernel_ctx.define_int("WITH_POST_SUM_ELTWISE", conf.with_post_sum_eltwise);
-    if (conf.with_eltwise || conf.with_post_sum_eltwise)
-        def_postops(kernel_ctx, conf.eltwise.alg);
-    kernel_ctx.define_int("SCALES_COMMON", conf.with_common_scales);
-    kernel_ctx.define_int("SCALES_PER_OC", conf.with_per_oc_scales);
+    kernel_ctx.define_int("WITH_POST_SUM_ELTWISE",
+            conf.attr_info.with_eltwise && conf.attr_info.with_sum
+                    && conf.attr_info.eltwise_idx > conf.attr_info.sum_idx);
+    def_attr_info(kernel_ctx, conf.attr_info);
+    kernel_ctx.define_int("SCALES_COMMON", conf.attr_info.with_common_oscales);
+    kernel_ctx.define_int("SCALES_PER_OC", conf.attr_info.with_per_oc_oscales);
 
     kernel_ctx.define_int("SUB_GROUP_SIZE", conf.sub_group_size);
 
@@ -165,6 +172,7 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
 
     kernel_ctx.set_data_type(conf.dst_data_type);
     def_data_type(kernel_ctx, conf.src_data_type, "SRC");
+    def_data_type(kernel_ctx, conf.dst_data_type, "DST");
 
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
@@ -176,37 +184,39 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::execute_forward(
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
     auto &bias = CTX_IN_STORAGE(DNNL_ARG_BIAS);
+    auto &oscales = CTX_IN_STORAGE(DNNL_ARG_ATTR_OUTPUT_SCALES);
     auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     const auto &conf = pd()->conf;
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, src);
     arg_list.set(1, weights);
     arg_list.set(2, bias);
     arg_list.set(3, dst);
-    arg_list.set(4, conf.eltwise.alpha);
-    arg_list.set(5, conf.eltwise.beta);
-    arg_list.set(6, conf.eltwise.scale);
-    arg_list.set(7, conf.sum_scale);
+    arg_list.set(4, conf.attr_info.eltwise_alpha);
+    arg_list.set(5, conf.attr_info.eltwise_beta);
+    arg_list.set(6, conf.attr_info.eltwise_scale);
+    arg_list.set(7, conf.attr_info.sum_scale);
 
-    if (conf.with_common_scales) {
+    if (conf.attr_info.common_oscales) {
         float scales = pd()->attr()->output_scales_.scales_[0];
         arg_list.set(8, scales);
     } else {
         arg_list.set(8, 1.0f);
     }
 
-    if (conf.with_per_oc_scales) {
-        arg_list.set(9, *scales_mem_->memory_storage());
+    if (conf.attr_info.with_per_oc_oscales) {
+        if (conf.attr_info.with_runtime_oscales)
+            arg_list.set(9, oscales);
+        else
+            arg_list.set(9, CTX_GPU_RES_STORAGE(SCALES_));
     } else {
         arg_list.set(9, memory_storage_t::empty_storage());
     }
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
-    status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
+    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
     return status;
 }

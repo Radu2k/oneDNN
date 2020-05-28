@@ -22,6 +22,7 @@
 #include "utils.hpp"
 
 #include "memory.hpp"
+#include "primitive_exec_types.hpp"
 
 using namespace dnnl::impl;
 using namespace dnnl::impl::data_type;
@@ -185,18 +186,16 @@ void typed_zero_pad_generic_blocked(
 }
 
 template <data_type_t dt>
-status_t memory_t::typed_zero_pad() const {
+status_t memory_t::typed_zero_pad(const exec_ctx_t &ctx) const {
     const memory_desc_wrapper mdw(md());
 
     if (mdw.format_kind() != format_kind::blocked) return unimplemented;
 
     if (mdw.nelems(false) == mdw.nelems(true)) return success;
 
-    void *mapped_ptr = nullptr;
-    status_t status = memory_storage()->map_data(&mapped_ptr);
-    assert(status == status::success);
+    void *mapped_ptr = ctx.map_memory_storage(memory_storage(), ctx.stream());
 
-    auto *data = (typename prec_traits<dt>::type *)mapped_ptr;
+    auto *data = static_cast<typename prec_traits<dt>::type *>(mapped_ptr);
     auto blk = mdw.blocking_desc();
 
     auto get_blksize = [&](int ind) {
@@ -212,8 +211,8 @@ status_t memory_t::typed_zero_pad() const {
     do { \
         if (blksize == blksize_) { \
             typed_zero_pad_blk<dt, blk_kind, blksize_>(mdw, data); \
-            status = memory_storage()->unmap_data(mapped_ptr); \
-            assert(status == status::success); \
+            ctx.unmap_memory_storage( \
+                    memory_storage(), mapped_ptr, ctx.stream()); \
             return success; \
         } \
     } while (0)
@@ -263,27 +262,30 @@ status_t memory_t::typed_zero_pad() const {
     // the last line of defence
     typed_zero_pad_generic_blocked<dt>(mdw, data);
 
-    status = memory_storage()->unmap_data(mapped_ptr);
-    assert(status == status::success);
-
-    MAYBE_UNUSED(status);
+    ctx.unmap_memory_storage(memory_storage(), mapped_ptr, ctx.stream());
     return success;
 }
 
-status_t memory_t::zero_pad() const {
+status_t memory_t::zero_pad(stream_t *stream) const {
+    return zero_pad(exec_ctx_t(stream));
+}
+
+status_t memory_t::zero_pad(const exec_ctx_t &ctx) const {
     memory_desc_wrapper mdw(md());
     const bool skip_zeroing = false || memory_storage()->is_null()
             || mdw.is_zero() || !mdw.is_blocking_desc();
     if (skip_zeroing) return success;
 
+    status_t status = status::success;
     switch (mdw.data_type()) {
-        case f16: return typed_zero_pad<f16>();
-        case bf16: return typed_zero_pad<bf16>();
-        case f32: return typed_zero_pad<f32>();
-        case s32: return typed_zero_pad<s32>();
-        case s8: return typed_zero_pad<s8>();
-        case u8: return typed_zero_pad<u8>();
+        case f16: return typed_zero_pad<f16>(ctx);
+        case bf16: return typed_zero_pad<bf16>(ctx);
+        case f32: return typed_zero_pad<f32>(ctx);
+        case s32: return typed_zero_pad<s32>(ctx);
+        case s8: return typed_zero_pad<s8>(ctx);
+        case u8: return typed_zero_pad<u8>(ctx);
         default: assert(!"memory is undefined"); return unimplemented;
     }
-    return unimplemented;
+
+    return status;
 }

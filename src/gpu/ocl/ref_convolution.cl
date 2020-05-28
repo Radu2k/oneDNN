@@ -14,29 +14,16 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "gpu/ocl/ocl_types.h"
-#if WITH_ELTWISE == 1 || WITH_POST_SUM_ELTWISE == 1
 #include "gpu/ocl/ocl_post_ops.h"
-#endif
+#include "gpu/ocl/ocl_types.h"
 
 #if IS_FWD
 KERNEL_ATTR
 __kernel void ref_convolution_fwd(const __global SRC_DATA_T *src,
         const __global WEI_DATA_T *wei, const __global BIA_DATA_T *bias,
         __global DST_DATA_T *dst, float eltwise_alpha, float eltwise_beta,
-        float eltwise_scale, float sum_scale
-#if SRC_DT_S8 == 1 || SRC_DT_U8 == 1
-#if SCALES_PER_OC
-
-        ,
-        const __global float *scales
-
-#elif SCALES_COMMON
-        ,
-        float scale
-#endif
-#endif
-) {
+        float eltwise_scale, float sum_scale, float scales,
+        const __global float *scales_per_oc) {
 
     const int n = GWS_GET_MB();
     const int oc = GWS_GET_OC();
@@ -65,30 +52,27 @@ __kernel void ref_convolution_fwd(const __global SRC_DATA_T *src,
     POST_OP_DATA_T tmp = d;
 
 #if WITH_BIAS
-    tmp += BIA_TO_REF(bias[g * OC + oc]);
+    tmp += (POST_OP_DATA_T)BIA_TO_REF(bias[g * OC + oc]);
 #endif
 
 #if SRC_DT_S8 == 1 || SRC_DT_U8 == 1
 #if SCALES_PER_OC
-    tmp *= scales[g * OC + oc];
+    tmp *= scales_per_oc[g * OC + oc];
 #elif SCALES_COMMON
-    tmp *= scale;
+    tmp *= scales;
 #endif
 #endif
 
-#if WITH_ELTWISE == 1
+#if ELTWISE_IDX == 0
     tmp = fwd_eltwise(tmp, eltwise_alpha, eltwise_beta, eltwise_scale);
 #endif
 
-#if WITH_SUM == 1
-#if SUM_SCALE == 1
-    tmp += DATA_TO_REF(dst[DST_OFF(n, g * OC + oc, od, oh, ow)]);
-#else
-    tmp += sum_scale * DATA_TO_REF(dst[DST_OFF(n, g * OC + oc, od, oh, ow)]);
-#endif
+#if WITH_SUM
+    tmp += (SUM_SCALE1 ? 1 : sum_scale)
+            * (POST_OP_DATA_T)dst[DST_OFF(n, g * OC + oc, od, oh, ow)];
 #endif
 
-#if WITH_POST_SUM_ELTWISE == 1
+#if ELTWISE_IDX == 1
     tmp = fwd_eltwise(tmp, eltwise_alpha, eltwise_beta, eltwise_scale);
 #endif
 

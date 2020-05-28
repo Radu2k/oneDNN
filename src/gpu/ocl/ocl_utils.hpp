@@ -19,6 +19,7 @@
 
 #include <cinttypes>
 #include <memory>
+#include <sstream>
 #include <string.h>
 #include <string>
 #include <utility>
@@ -85,6 +86,8 @@ inline status_t convert_to_dnnl(cl_int cl_status) {
     }
 }
 
+enum { OCL_BUFFER_ALIGNMENT = 128 };
+
 #ifndef NDEBUG
 #define MAYBE_REPORT_OCL_ERROR(s) \
     do { \
@@ -116,11 +119,10 @@ inline status_t convert_to_dnnl(cl_int cl_status) {
 // Check for two conditions:
 // 1. Device and context are compatible, i.e. the device belongs to
 //    the context devices.
-// 2. Device type matches the passed engine kind (only GPU supported).
+// 2. Device type matches the passed engine kind
 inline status_t check_device(
         engine_kind_t eng_kind, cl_device_id dev, cl_context ctx) {
     assert(dev && ctx);
-    assert(eng_kind == engine_kind::gpu);
 
     size_t dev_bytes;
     OCL_CHECK(
@@ -135,7 +137,12 @@ inline status_t check_device(
             cl_device_type dev_type;
             OCL_CHECK(clGetDeviceInfo(
                     dev, CL_DEVICE_TYPE, sizeof(dev_type), &dev_type, NULL));
-            if ((dev_type & CL_DEVICE_TYPE_GPU) == 0) {
+            if ((eng_kind == engine_kind::cpu)
+                    && (dev_type & CL_DEVICE_TYPE_CPU) == 0) {
+                return status::invalid_arguments;
+            }
+            if ((eng_kind == engine_kind::gpu)
+                    && (dev_type & CL_DEVICE_TYPE_GPU) == 0) {
                 return status::invalid_arguments;
             }
             return status::success;

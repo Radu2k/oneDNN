@@ -28,9 +28,12 @@
 /// to tune oneDNN code to align
 /// with the [best practices](@ref dev_guide_inference).
 ///
-/// It will assume knowledge of memory formats and their usage in
+/// It assumes knowledge of memory formats and their usage in
 /// oneDNN. You can read more about this topic
 /// [here](@ref memory_format_propagation_cpp).
+///
+/// Additionally, see the [article for recommended environment for
+/// running benchmarks](@ref dev_guide_performance_settings).
 ///
 /// The example has three different implementations of the mathematical
 /// operation:
@@ -74,6 +77,7 @@
 /// user's source data entering oneDNN with the NCHW format.
 /// @page performance_profiling_cpp
 /// @snippet performance_profiling.cpp Set dimensions
+/// @page performance_profiling_cpp
 /// @note Here the library allocates memory.
 /// @page performance_profiling_cpp
 /// @snippet performance_profiling.cpp Create memory objects
@@ -201,6 +205,7 @@ void conv_relu_naive(memory user_src, memory user_wei, memory user_dst,
     // [Create and execute relu]
     // execute relu (on convolution's destination format, whatever it is)
     create_and_execute_relu(user_dst, eng, s);
+    s.wait();
     // [Create and execute relu]
     /// @page performance_profiling_cpp
     /// @note The function for creation and execution of ReLU primitive is
@@ -330,6 +335,7 @@ void conv_relu_blocked(memory user_src, memory user_wei, memory user_dst,
         auto r_pd = reorder::primitive_desc(conv_dst, user_dst);
         reorder(r_pd).execute(s, conv_dst, user_dst);
     }
+    s.wait();
     /// @page performance_profiling_cpp
     /// Blocked memory format is recommended for oneDNN primitive
     /// execution and provides better performance, as shown in the
@@ -451,6 +457,7 @@ void conv_relu_fused(memory user_src, memory user_wei, memory user_dst,
         auto r_pd = reorder::primitive_desc(conv_dst, user_dst);
         reorder(r_pd).execute(s, conv_dst, user_dst);
     }
+    s.wait();
     /// @page performance_profiling_cpp
     /// This implementation complies with best practices for f32 inference by
     /// using the oneDNN recommended blocked format for convolution and

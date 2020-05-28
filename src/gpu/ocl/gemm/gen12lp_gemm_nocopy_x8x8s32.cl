@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -281,8 +281,8 @@
 
 #define ADD_BOFF(i) \
     do { \
-        ci[0][i] -= (int)bo * sumRowA[0]; \
-        ci[1][i] -= (int)bo * sumRowA[1]; \
+        ci[0][i] -= bo * sumRowA[0]; \
+        ci[1][i] -= bo * sumRowA[1]; \
     } while (0)
 
 #define ADD_BOFF_LOOP() \
@@ -307,10 +307,10 @@
 
 #define ADD_AOFF(h, i) \
     do { \
-        ci[0][i] -= ((int)ao * sub_group_broadcast(as_int(sumColB), i)) \
-                - (h * (int)ao * (int)bo); \
-        ci[1][i] -= ((int)ao * sub_group_broadcast(as_int(sumColB), i)) \
-                - (h * (int)ao * (int)bo); \
+        ci[0][i] -= (ao * sub_group_broadcast(as_int(sumColB), i)) \
+                - (h * ao * bo); \
+        ci[1][i] -= (ao * sub_group_broadcast(as_int(sumColB), i)) \
+                - (h * ao * bo); \
     } while (0)
 
 #define ADD_AOFF_LOOP(h) \
@@ -402,10 +402,9 @@
 __attribute__((intel_reqd_sub_group_size(16))) kernel void
 gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
-        int n, int k, int beta, A_TYPE ao, B_TYPE bo, global int *co,
-        int offsetCO, int apply_co, local A_TYPE *sa, local B_TYPE *sb,
-        int apply_eltwise, float eltwise_alpha, float eltwise_beta,
-        float eltwise_scale) {
+        int n, int k, int beta, int ao, int bo, global int *co, int offsetCO,
+        int apply_co, local A_TYPE *sa, local B_TYPE *sb, int apply_eltwise,
+        float eltwise_alpha, float eltwise_beta, float eltwise_scale) {
 
     // clang-format off
     A_TYPE4 ai[2];  // 32x4 block of A, 2x 16x4 scattered access
@@ -818,10 +817,9 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
 __attribute__((intel_reqd_sub_group_size(16))) kernel void
 gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
-        int n, int k, int beta, A_TYPE ao, B_TYPE bo, global int *co,
-        int offsetCO, int apply_co, local A_TYPE *sa, local B_TYPE *sb,
-        int apply_eltwise, float eltwise_alpha, float eltwise_beta,
-        float eltwise_scale) {
+        int n, int k, int beta, int ao, int bo, global int *co, int offsetCO,
+        int apply_co, local A_TYPE *sa, local B_TYPE *sb, int apply_eltwise,
+        float eltwise_alpha, float eltwise_beta, float eltwise_scale) {
 
     // clang-format off
     A_TYPE2 ai[4];   // 32x4 block of A, 4x 32x1 block access
@@ -1084,10 +1082,9 @@ gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
 __attribute__((intel_reqd_sub_group_size(16))) kernel void
 gen12lp_gemm_compute_x8x8s32(global A_TYPE *a, global B_TYPE *b, global int *c,
         int offsetA, int offsetB, int offsetC, int lda, int ldb, int ldc, int m,
-        int n, int k, int beta, A_TYPE ao, B_TYPE bo, global int *co,
-        int offsetCO, int apply_co, local A_TYPE *sa, local B_TYPE *sb,
-        int apply_eltwise, float eltwise_alpha, float eltwise_beta,
-        float eltwise_scale) {
+        int n, int k, int beta, int ao, int bo, global int *co, int offsetCO,
+        int apply_co, local A_TYPE *sa, local B_TYPE *sb, int apply_eltwise,
+        float eltwise_alpha, float eltwise_beta, float eltwise_scale) {
 
     // clang-format off
     A_TYPE4 ai[2];  // 32x4 block of A, 2x 16x4 scattered access

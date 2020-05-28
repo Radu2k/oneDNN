@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -38,13 +38,13 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
     struct pd_t : public gpu_gemm_pd_t {
         using hint_class = void;
 
-        pd_t(engine_t *engine, const gemm_desc_t *adesc,
-                const primitive_attr_t *attr, const hint_class *)
-            : gpu_gemm_pd_t(engine, adesc, attr, nullptr) {}
+        pd_t(const gemm_desc_t *adesc, const primitive_attr_t *attr,
+                const hint_class *)
+            : gpu_gemm_pd_t(adesc, attr, nullptr) {}
 
         DECLARE_COMMON_PD_T("ngen:gen12hp:gemm:any", gen12hp_systolic_gemm_t);
 
-        status_t init();
+        status_t init(engine_t *engine);
 
         dim_t m_aligned() const;
         dim_t n_aligned() const;
@@ -63,12 +63,12 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
         }
     };
 
-    status_t init() override;
+    status_t init(engine_t *engine);
 
 public:
     gen12hp_systolic_gemm_t(const pd_t *apd) : gpu_gemm_t(apd) {}
 
-    virtual status_t execute(const gemm_exec_ctx_t &ctx) const override;
+    virtual status_t execute(const gemm_exec_ctx_t &ctx) const;
 
 private:
     int64_t default_block_k(data_type_t dt) const;
@@ -98,7 +98,7 @@ private:
     char co_type_;
     bool ab_zero_points_;
 
-    const pd_t *pd() const { return (const pd_t *)primitive_impl_t::pd(); }
+    const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 };
 
 } // namespace jit

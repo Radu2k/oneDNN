@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -29,16 +29,40 @@ namespace ocl {
 status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_conf() {
     using namespace format_tag;
 
+    const memory_desc_t *src = src_md();
+    const memory_desc_t *dst = dst_md();
+    const memory_desc_t *wei = weights_md();
+    const memory_desc_t *bia = weights_md(1);
+
+    memory_desc_t r_src, r_wei, r_dst;
+
+    int ndims = src_md()->ndims;
+
+    // XXX: try reduce number of spatial dims when iw/ow/kw=1,
+    // memory tags will be selected based on the number of input dimensions
+    bool use_reshaped_mem = ndims > 3;
+    if (dnnl_memory_desc_reshape(&r_src, src, src->ndims - 1, src->dims)
+            != status::success)
+        use_reshaped_mem = false;
+    if (dnnl_memory_desc_reshape(&r_dst, dst, dst->ndims - 1, dst->dims)
+            != status::success)
+        use_reshaped_mem = false;
+    if (dnnl_memory_desc_reshape(&r_wei, wei, wei->ndims - 1, wei->dims)
+            != status::success)
+        use_reshaped_mem = false;
+
+    if (use_reshaped_mem) {
+        src = &r_src;
+        dst = &r_dst;
+        wei = &r_wei;
+    }
+
     const convolution_desc_t &cd = *desc();
-    const memory_desc_wrapper src_mdw(src_md());
-    const memory_desc_wrapper weights_mdw(weights_md());
-    const memory_desc_wrapper dst_mdw(dst_md());
-    const memory_desc_wrapper bias_mdw(weights_md(1));
+    const memory_desc_wrapper src_mdw(src);
+    const memory_desc_wrapper weights_mdw(wei);
+    const memory_desc_wrapper dst_mdw(dst);
 
-    set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
-            *weights_md(1), *attr());
-
-    status_t status = status::success;
+    set_default_conf(conf, cd, *src, *wei, *dst, *bia, *attr());
 
     if (!conf.is_depthwise && conf.with_groups && conf.ngroups > 1
             && (conf.oc % 32 != 0 || conf.ic % 32 != 0))
@@ -158,41 +182,48 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_conf() {
 
     format_tag_t src_tag, dst_tag, wei_tag;
     if (conf.mb_block == 32) {
-        src_tag = utils::pick(
-                conf.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
-        dst_tag = utils::pick(
-                conf.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+        src_tag = utils::pick(ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+        dst_tag = utils::pick(ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
     } else {
-        src_tag = utils::pick(conf.ndims - 3, nCw32c, nChw32c, nCdhw32c);
-        dst_tag = utils::pick(conf.ndims - 3, nCw32c, nChw32c, nCdhw32c);
+        src_tag = utils::pick(ndims - 3, nCw32c, nChw32c, nCdhw32c);
+        dst_tag = utils::pick(ndims - 3, nCw32c, nChw32c, nCdhw32c);
     }
 
     if (!conf.is_depthwise && conf.ver == ver_1stconv) {
         src_tag = (conf.is_nchw)
-                ? utils::pick(conf.ndims - 3, ncw, nchw, ncdhw)
-                : utils::pick(conf.ndims - 3, nCw4c, nChw4c, nCdhw4c);
+                ? utils::pick(ndims - 3, ncw, nchw, ncdhw)
+                : utils::pick(ndims - 3, nCw4c, nChw4c, nCdhw4c);
     }
     if (conf.is_depthwise) {
-        wei_tag = utils::pick(conf.ndims - 3, Goiw32g, Goihw32g, Goidhw32g);
+        wei_tag = utils::pick(ndims - 3, Goiw32g, Goihw32g, Goidhw32g);
     } else {
         if (conf.ver == ver_1stconv) {
             wei_tag = conf.with_groups
-                    ? utils::pick(
-                            conf.ndims - 3, gOIw8o4i, gOIhw8o4i, gOIdhw8o4i)
-                    : utils::pick(conf.ndims - 3, OIw8o4i, OIhw8o4i, OIdhw8o4i);
+                    ? utils::pick(ndims - 3, gOIw8o4i, gOIhw8o4i, gOIdhw8o4i)
+                    : utils::pick(ndims - 3, OIw8o4i, OIhw8o4i, OIdhw8o4i);
         } else {
-            wei_tag = conf.with_groups
-                    ? utils::pick(conf.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i,
-                            gOIdhw4o8i8o4i)
-                    : utils::pick(conf.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i,
-                            OIdhw4o8i8o4i);
+            wei_tag = conf.with_groups ? utils::pick(ndims - 3, gOIw4o8i8o4i,
+                              gOIhw4o8i8o4i, gOIdhw4o8i8o4i)
+                                       : utils::pick(ndims - 3, OIw4o8i8o4i,
+                                               OIhw4o8i8o4i, OIdhw4o8i8o4i);
         }
     }
-    conf.src_tag = src_tag;
-    conf.wei_tag = wei_tag;
-    conf.dst_tag = dst_tag;
 
-    return status;
+    conf.src_tag = src_mdw.format_kind() == format_kind::any
+            ? src_tag
+            : src_mdw.matches_one_of_tag(src_tag);
+    conf.wei_tag = weights_mdw.format_kind() == format_kind::any
+            ? wei_tag
+            : weights_mdw.matches_one_of_tag(wei_tag);
+    conf.dst_tag = dst_mdw.format_kind() == format_kind::any
+            ? dst_tag
+            : dst_mdw.matches_one_of_tag(dst_tag);
+
+    if (conf.src_tag != src_tag || conf.wei_tag != wei_tag
+            || conf.dst_tag != dst_tag)
+        return status::unimplemented;
+
+    return status::success;
 }
 
 status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_kernel_ctx(
@@ -258,17 +289,13 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("SRC_SLM_SIZE", conf.src_slm_size);
 
     kernel_ctx.define_int("WITH_BIAS", conf.with_bias);
-    kernel_ctx.define_int("WITH_ELTWISE", conf.with_eltwise);
-    kernel_ctx.define_int("WITH_SUM", conf.with_sum);
-    kernel_ctx.define_int("SUM_SCALE", conf.sum_scale == 1.0);
-    kernel_ctx.define_int("WITH_POST_SUM_ELTWISE", conf.with_post_sum_eltwise);
+    kernel_ctx.define_int("WITH_POST_SUM_ELTWISE",
+            conf.attr_info.with_eltwise && conf.attr_info.with_sum
+                    && conf.attr_info.eltwise_idx > conf.attr_info.sum_idx);
+    def_attr_info(kernel_ctx, conf.attr_info);
 
-    if (conf.with_eltwise || conf.with_post_sum_eltwise) {
-        def_postops(kernel_ctx, conf.eltwise.alg);
-    }
-
-    kernel_ctx.define_int("SCALES_COMMON", conf.with_common_scales);
-    kernel_ctx.define_int("SCALES_PER_OC", conf.with_per_oc_scales);
+    kernel_ctx.define_int("SCALES_COMMON", conf.attr_info.common_oscales);
+    kernel_ctx.define_int("SCALES_PER_OC", conf.attr_info.with_per_oc_oscales);
 
     kernel_ctx.define_int("SUB_GROUP_SIZE", conf.sub_group_size);
     kernel_ctx.define_int("LWS_0", conf.lws_d[0]);
@@ -289,37 +316,39 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::execute_forward(
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
     auto &bias = CTX_IN_STORAGE(DNNL_ARG_BIAS);
+    auto &oscales = CTX_IN_STORAGE(DNNL_ARG_ATTR_OUTPUT_SCALES);
     auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     const auto &conf = pd()->conf;
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, src);
     arg_list.set(1, weights);
     arg_list.set(2, bias);
     arg_list.set(3, dst);
-    arg_list.set(4, conf.eltwise.alpha);
-    arg_list.set(5, conf.eltwise.beta);
-    arg_list.set(6, conf.eltwise.scale);
-    arg_list.set(7, conf.sum_scale);
+    arg_list.set(4, conf.attr_info.eltwise_alpha);
+    arg_list.set(5, conf.attr_info.eltwise_beta);
+    arg_list.set(6, conf.attr_info.eltwise_scale);
+    arg_list.set(7, conf.attr_info.sum_scale);
 
-    if (conf.with_common_scales) {
+    if (conf.attr_info.common_oscales) {
         float scales = pd()->attr()->output_scales_.scales_[0];
         arg_list.set(8, scales);
     } else {
         arg_list.set(8, 1.0f);
     }
 
-    if (conf.with_per_oc_scales) {
-        arg_list.set(9, *scales_mem_->memory_storage());
+    if (conf.attr_info.with_per_oc_oscales) {
+        if (conf.attr_info.with_runtime_oscales)
+            arg_list.set(9, oscales);
+        else
+            arg_list.set(9, CTX_GPU_RES_STORAGE(SCALES_));
     } else {
         arg_list.set(9, memory_storage_t::empty_storage());
     }
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
-    status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
+    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
     return status;
 }
@@ -328,12 +357,12 @@ status_t gen12lp_x8s8s32x_convolution_bwd_data_t::pd_t::init_conf() {
     using namespace format_tag;
 
     const convolution_desc_t &cd = *desc();
-    const memory_desc_wrapper src_mdw(src_md());
+    const memory_desc_wrapper src_mdw(diff_src_md());
     const memory_desc_wrapper weights_mdw(weights_md());
-    const memory_desc_wrapper dst_mdw(dst_md());
+    const memory_desc_wrapper dst_mdw(diff_dst_md());
     const memory_desc_wrapper bias_mdw(weights_md(1));
 
-    set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
+    set_default_conf(conf, cd, *diff_src_md(), *weights_md(), *diff_dst_md(),
             *weights_md(1), *attr());
 
     status_t status = status::success;
@@ -375,9 +404,19 @@ status_t gen12lp_x8s8s32x_convolution_bwd_data_t::pd_t::init_conf() {
                                : utils::pick(conf.ndims - 3, IOw4i8o8i4o,
                                        IOhw4i8o8i4o, IOdhw4i8o8i4o);
 
-    conf.src_tag = src_tag;
-    conf.wei_tag = wei_tag;
-    conf.dst_tag = dst_tag;
+    conf.src_tag = src_mdw.format_kind() == format_kind::any
+            ? src_tag
+            : src_mdw.matches_one_of_tag(src_tag);
+    conf.wei_tag = weights_mdw.format_kind() == format_kind::any
+            ? wei_tag
+            : weights_mdw.matches_one_of_tag(wei_tag);
+    conf.dst_tag = dst_mdw.format_kind() == format_kind::any
+            ? dst_tag
+            : dst_mdw.matches_one_of_tag(dst_tag);
+
+    if (conf.src_tag != src_tag || conf.wei_tag != wei_tag
+            || conf.dst_tag != dst_tag)
+        return status::unimplemented;
 
     return status;
 }
@@ -436,8 +475,6 @@ status_t gen12lp_x8s8s32x_convolution_bwd_data_t::pd_t::init_kernel_ctx(
 
 status_t gen12lp_x8s8s32x_convolution_bwd_data_t::execute_backward_data(
         const exec_ctx_t &ctx) const {
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
     auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
@@ -453,7 +490,7 @@ status_t gen12lp_x8s8s32x_convolution_bwd_data_t::execute_backward_data(
     arg_list.set(3, diff_dst);
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
-    status_t status = compute_stream->parallel_for(nd_range, kernel_, arg_list);
+    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
     return status;
 }

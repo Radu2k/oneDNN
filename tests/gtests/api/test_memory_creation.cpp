@@ -38,7 +38,7 @@ using params_w_engine_t = std::tuple<dnnl::engine::kind, params_t>;
 class memory_creation_test
     : public ::testing::TestWithParam<params_w_engine_t> {
 protected:
-    virtual void SetUp() override {
+    void SetUp() override {
         params_w_engine_t pwe
                 = ::testing::TestWithParam<decltype(pwe)>::GetParam();
 
@@ -76,7 +76,9 @@ protected:
         // mem1
         // A `corrected` version of mem0 (i.e. padded area should be filled with
         // zeros) and with a buffer taken from mem1_placeholder.
-        dnnl::memory mem1(md, eng, mem1_placeholder.get_data_handle());
+
+        dnnl::memory mem1(md, eng, NULL);
+        mem1.set_data_handle(mem1_placeholder.get_data_handle());
 
         check_zero_tail<data_t>(0, mem1); // Check, if mem1 is indeed corrected
         check_zero_tail<data_t>(1, mem0); // Manually correct mem0
@@ -171,6 +173,8 @@ class c_api_memory_test : public ::testing::Test {
 };
 
 TEST_F(c_api_memory_test, TestZeroPadBoom) {
+    SKIP_IF(DNNL_WITH_SYCL, "Test does not support SYCL.");
+
     dnnl_memory_desc_t md;
     memset(&md, 0xcc, sizeof(md));
 
@@ -210,6 +214,7 @@ TEST_F(c_api_memory_test, TestZeroPadBoom) {
     ASSERT_TRUE(dnnl_success == dnnl_engine_destroy(e));
 }
 
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_DPCPP
 TEST(memory_test_cpp, TestSetDataHandleCPU) {
     engine eng = engine(engine::kind::cpu, 0);
     stream str = make_stream(eng);
@@ -235,5 +240,6 @@ TEST(memory_test_cpp, TestSetDataHandleCPU) {
 
     free(p);
 }
+#endif
 
 } // namespace dnnl

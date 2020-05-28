@@ -665,6 +665,33 @@ void sub_group_block_write_uint8(__local uint *p, uint8 v) {
 }
 #endif
 
+inline int idot4(int src, int wei, int acc) __attribute__((overloadable)) {
+    return IMAD(as_char4(src), as_char4(wei), acc);
+}
+
+inline int idot4(uint src, int wei, int acc) __attribute__((overloadable)) {
+    return IMAD(as_uchar4(src), as_char4(wei), acc);
+}
+
+#define DECLARE_MMAD(_suffix, _src_type, _acc_type, _int_type, _owb, _icb) \
+    inline int mmad_part##_suffix(_int_type a, int8 b, int acc) \
+            __attribute__((overloadable)) { \
+        for (uint i = 0; i < _icb; ++i) \
+            acc = idot4(a[i], b[i], acc); \
+        return acc; \
+    } \
+    inline _acc_type mmad##_suffix(_src_type a, int8 b, _acc_type acc) \
+            __attribute__((overloadable)) { \
+        _acc_type ret; \
+        for (uint i = 0; i < _owb; ++i) { \
+            _int_type c; \
+            for (int j = 0; j < _icb; ++j) \
+                c[j] = sub_group_broadcast(a[i], j); \
+            ret[i] = mmad_part##_suffix(c, b, acc[i]); \
+        } \
+        return ret; \
+    }
+
 void subgroup_block_write_uint(__local uint *p, uint v) {
     uint idx = get_sub_group_local_id();
     p[idx] = v;

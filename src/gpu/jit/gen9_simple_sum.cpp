@@ -25,10 +25,10 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
-status_t gen9_simple_sum_t::init() {
+status_t gen9_simple_sum_t::init(engine_t *engine) {
     compute::kernel_ctx_t kernel_ctx;
 
-    auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine());
+    auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine);
     if (!gpu_engine) return status::runtime_error;
 
     auto kernel = gen9_simple_sum_kernel_f32_t();

@@ -97,8 +97,8 @@ shuffle primitive is optimized for the corresponding memory formats:
 
 | Spatial | Logical tensor | Shuffle Axis | Implementations optimized for memory formats                               |
 | :--     | :--            | :--          | :--                                                                        |
-| 2D      | NCHW           | 1 (C)        | #dnnl_nchw (#dnnl_abcd), #dnnl_nhwc (#dnnl_acdb), *optimized^*     |
-| 3D      | NCDHW          | 1 (C)        | #dnnl_ncdhw (#dnnl_abcde), #dnnl_ndhwc (#dnnl_acdeb), *optimized^* |
+| 2D      | NCHW           | 1 (C)        | #dnnl_nchw (#dnnl_abcd), #dnnl_nhwc (#dnnl_acdb), *optimized^*             |
+| 3D      | NCDHW          | 1 (C)        | #dnnl_ncdhw (#dnnl_abcde), #dnnl_ndhwc (#dnnl_acdeb), *optimized^*         |
 
 Here *optimized^* means the format that
 [comes out](@ref memory_format_propagation_cpp)

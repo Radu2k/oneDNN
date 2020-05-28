@@ -31,6 +31,14 @@ namespace impl {
 namespace gpu {
 namespace compute {
 
+enum class kernel_arg_kind_t {
+    undef,
+    global,
+    local,
+    scalar,
+    svm,
+};
+
 enum class scalar_type_t {
     undef,
     _char,
@@ -98,25 +106,18 @@ struct scalar_type_traits<int64_t> {
 
 class kernel_arg_t {
 public:
-    enum class kind_t {
-        undef,
-        global,
-        local,
-        scalar,
-        svm,
-    };
-
     static constexpr size_t max_size = 8;
 
-    kind_t kind() const { return kind_; }
+    kernel_arg_kind_t kind() const { return kind_; }
     scalar_type_t scalar_type() const { return scalar_type_; }
     size_t size() const { return size_; }
-    bool is_global() const { return kind_ == kind_t::global; }
-    bool is_local() const { return kind_ == kind_t::local; }
-    bool is_svm_pointer() const { return kind_ == kind_t::svm; }
+
+    bool is_global() const { return kind() == kernel_arg_kind_t::global; }
+    bool is_local() const { return kind() == kernel_arg_kind_t::local; }
+    bool is_svm_pointer() const { return kind_ == kernel_arg_kind_t::svm; }
 
     kernel_arg_t &set_value(const memory_storage_t &storage) {
-        kind_ = kind_t::global;
+        kind_ = kernel_arg_kind_t::global;
         size_ = 0;
         value_ = static_cast<const void *>(&storage);
         return *this;
@@ -127,7 +128,7 @@ public:
                     || std::is_same<T, float16_t>::value
                     || std::is_same<T, bfloat16_t>::value>::type>
     kernel_arg_t &set_value(const T &value) {
-        kind_ = kind_t::scalar;
+        kind_ = kernel_arg_kind_t::scalar;
         scalar_type_ = scalar_type_traits<T>::type;
         new (&scalar_storage_) T(value);
         size_ = sizeof(T);
@@ -136,29 +137,29 @@ public:
     }
 
     kernel_arg_t &set_value(size_t size, std::nullptr_t) {
-        kind_ = kind_t::local;
+        kind_ = kernel_arg_kind_t::local;
         size_ = size;
         value_ = nullptr;
         return *this;
     }
 
-    void set_value(void *svm_ptr, kind_t kind) {
-        assert(kind == kind_t::svm);
-        kind_ = kind_t::svm;
+    void set_value(void *svm_ptr, kernel_arg_kind_t kind) {
+        assert(kind == kernel_arg_kind_t::svm);
+        kind_ = kernel_arg_kind_t::svm;
         size_ = 0;
         value_ = svm_ptr;
     }
 
     const void *value() const {
-        assert(kind() != kind_t::undef);
-        if (kind() == kind_t::scalar)
+        assert(kind() != kernel_arg_kind_t::undef);
+        if (kind() == kernel_arg_kind_t::scalar)
             return static_cast<const void *>(&scalar_storage_);
         return value_;
     }
 
     template <typename T>
     T as() const {
-        assert(kind() == kind_t::scalar);
+        assert(kind() == kernel_arg_kind_t::scalar);
         assert(scalar_type() == scalar_type_traits<T>::type);
         return *(const T *)value();
     }
@@ -167,7 +168,7 @@ public:
             scalar_type_t other_type, const kernel_arg_t &other);
 
 private:
-    kind_t kind_ = kind_t::undef;
+    kernel_arg_kind_t kind_ = kernel_arg_kind_t::undef;
     scalar_type_t scalar_type_ = scalar_type_t::undef;
     size_t size_ = 0;
     const void *value_ = nullptr;
@@ -183,7 +184,7 @@ public:
         args_[index].set_value(storage);
     }
 
-    void set(int index, void *value, kernel_arg_t::kind_t kind) {
+    void set(int index, void *value, kernel_arg_kind_t kind) {
         assert(index < max_args);
         nargs_ = nstl::max(nargs_, index + 1);
         args_[index].set_value(value, kind);
@@ -216,7 +217,7 @@ public:
     }
 
     const memory_storage_t &get_memory_storage(int index) const {
-        assert(args_[index].kind() == kernel_arg_t::kind_t::global);
+        assert(args_[index].kind() == kernel_arg_kind_t::global);
         return *static_cast<const memory_storage_t *>(args_[index].value());
     }
 

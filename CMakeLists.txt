@@ -67,12 +67,12 @@ endif()
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
     message(STATUS "CMAKE_BUILD_TYPE is unset, defaulting to Release")
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING
-        "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel ...")
+        "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel RelWithAssert ...")
 endif()
 
 set(PROJECT_NAME "oneDNN")
 set(PROJECT_FULL_NAME "oneAPI Deep Neural Network Library (oneDNN)")
-set(PROJECT_VERSION "1.4.0")
+set(PROJECT_VERSION "1.94.0")
 
 set(LIB_NAME dnnl)
 
@@ -88,10 +88,12 @@ if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
 endif()
 
 # Set the target architecture.
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64.*|AARCH64.*|arm64.*|ARM64.*)")
-    set(TARGET_ARCH "AARCH64")
-else()
-    set(TARGET_ARCH "X86_64")
+if(NOT DNNL_TARGET_ARCH)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64.*|AARCH64.*|arm64.*|ARM64.*)")
+        set(DNNL_TARGET_ARCH "AARCH64")
+    else()
+        set(DNNL_TARGET_ARCH "X64")
+    endif()
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
@@ -109,6 +111,7 @@ include("cmake/mkldnn_compat.cmake")
 
 include("cmake/utils.cmake")
 include("cmake/options.cmake")
+include("cmake/SYCL.cmake")
 include("cmake/OpenMP.cmake")
 include("cmake/TBB.cmake")
 include("cmake/Threadpool.cmake")
@@ -119,6 +122,7 @@ include("cmake/MKL.cmake")
 include("cmake/Doxygen.cmake")
 include("cmake/version.cmake")
 include("cmake/coverage.cmake")
+include("cmake/build_types.cmake")
 
 # Handle cases when OpenMP runtime is requested but not found: override CPU
 # runtime to be sequential
@@ -130,6 +134,16 @@ endif()
 enable_testing()
 
 include_directories(include)
+
+if(DNNL_CPU_SYCL)
+    if(TBB_FOUND)
+        set(DNNL_CPU_THREADING_RUNTIME "TBB")
+    else()
+        set(DNNL_CPU_THREADING_RUNTIME "SEQ")
+    endif()
+else()
+    set(DNNL_CPU_THREADING_RUNTIME "${DNNL_CPU_RUNTIME}")
+endif()
 
 configure_file(
     "${PROJECT_SOURCE_DIR}/include/dnnl_config.h.in"

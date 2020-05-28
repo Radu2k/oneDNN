@@ -24,7 +24,12 @@
 #include <utility>
 #include <vector>
 
-#include "dnnl.h"
+#ifdef __linux__
+#include <string>
+#include <unistd.h>
+#endif
+
+#include "mkldnn.h"
 
 #include "common.hpp"
 
@@ -229,6 +234,37 @@ void parse_result(res_t &res, bool &want_perf_report, bool allow_unimpl,
         for (int mode = 0; mode < (int)bt::n_modes; ++mode)
             bs.ms[mode] += res.timer.ms((bt::mode_t)mode);
     }
+
+#ifdef __linux__
+    // XXX: work around for memory leak in SYCL
+    // Exit when memory consumption is high
+    {
+        size_t page_size_bytes = sysconf(_SC_PAGE_SIZE);
+
+        size_t vm_pages;
+        size_t resident_pages;
+        std::ifstream in_statm("/proc/self/statm");
+        in_statm >> vm_pages >> resident_pages;
+        size_t vm = page_size_bytes * vm_pages;
+
+        size_t total_kb;
+        std::ifstream in_meminfo("/proc/meminfo");
+        std::string dummy;
+        in_meminfo >> dummy >> total_kb >> dummy;
+        in_meminfo >> dummy >> dummy >> dummy;
+        in_meminfo >> dummy >> dummy;
+
+        size_t total = 1024 * total_kb;
+        double mb = 1 << 20;
+
+        if (vm * 1.0 / total > 0.8) {
+            printf("MEMORY CONSUMPTION IS HIGH: %f MB / %f MB. "
+                   "EXITING..........................\n",
+                    vm / mb, total / mb);
+            exit(!!benchdnn_stat.failed);
+        }
+    }
+#endif
 }
 
 /* misc */
@@ -361,28 +397,26 @@ bool match_regex(const char *str, const char *pattern) {
 }
 #endif /* _WIN32 */
 
-bool maybe_skip(const char *impl_str) {
-    if (skip_impl == NULL || *skip_impl == '\0') return false;
+bool maybe_skip(const std::string &impl_str) {
+    if (skip_impl.empty()) return false;
 
-    const std::string impl(impl_str);
+    size_t start_pos = 0, end_pos = 0;
+    if (skip_impl[0] == '"' || skip_impl[0] == '\'') start_pos++;
 
-    const char *s_start = skip_impl;
-    while (1) {
-        if (*s_start == '"' || *s_start == '\'') ++s_start;
-
-        const char *s_end = strchr(s_start, ':');
-        size_t len = s_end ? s_end - s_start : strlen(s_start);
-
-        if (s_start[len - 1] == '"' || s_start[len - 1] == '\'') --len;
-
-        const std::string what(s_start, s_start + len);
-        if (impl.find(what) != std::string::npos) return true;
-
-        if (s_end == NULL) break;
-
-        s_start = s_end + 1;
-        if (*s_start == '\0') break;
-    }
+    do {
+        const size_t delim_pos = skip_impl.find_first_of(':', start_pos);
+        // rows below to identify quotes at the end and deal with them
+        end_pos = MIN2(skip_impl.size(), delim_pos);
+        size_t len = end_pos - start_pos;
+        if (skip_impl[end_pos - 1] == '"' || skip_impl[end_pos - 1] == '\'')
+            len--;
+        std::string sub_skip_impl = skip_impl.substr(start_pos, len);
+        // even incomplete match leads to skipping
+        if (!sub_skip_impl.empty()
+                && impl_str.find(sub_skip_impl) != std::string::npos)
+            return true;
+        start_pos = end_pos + 1;
+    } while (end_pos < skip_impl.size());
 
     return false;
 }

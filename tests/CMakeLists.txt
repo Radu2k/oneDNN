@@ -36,8 +36,11 @@ append(CMAKE_C_FLAGS "${CMAKE_CCXX_SANITIZER_FLAGS}")
 append(CMAKE_CXX_FLAGS "${CMAKE_CCXX_SANITIZER_FLAGS}")
 
 # allow tests to include internal header files with, e.g.
-# include "src/common/dnnl_thread.hpp"
+# include "src/common/dnnl_thread.hpp" ...
 include_directories(${PROJECT_SOURCE_DIR})
+# ... and allow the included files transitively include other headers files
+# e.g. include "common/dnnl_thread_parallel_nd.hpp" from "dnnl_thread.hpp"
+include_directories(${PROJECT_SOURCE_DIR}/src)
 
 if(WIN32 AND NOT MINGW)
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
@@ -59,7 +62,7 @@ append(CMAKE_CXX_FLAGS "${CMAKE_TEST_CCXX_NOWARN_FLAGS}")
 
 register_exe(api-c api.c "test")
 
-if(UNIX OR MINGW)
+if(NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND (UNIX OR MINGW))
     get_directory_property(include_dirs INCLUDE_DIRECTORIES)
     set(test_c_symbols "${CMAKE_CURRENT_BINARY_DIR}/test_c_symbols.c")
     add_custom_command(
@@ -72,10 +75,24 @@ if(UNIX OR MINGW)
 # No Windows support for: test_c_symbols.c
 endif()
 
-add_subdirectory(gtests)
-add_subdirectory(benchdnn)
-add_subdirectory(mkldnn_compat)
-if(UNIX OR MINGW)
-    add_subdirectory(noexcept)
+add_definitions(-DNOMINMAX) # to allow std::max on Windows with parentheses
+
+if(NOT DNNL_ENABLE_PRIMITIVE_CACHE)
+    add_definitions(-DDNNL_DISABLE_PRIMITIVE_CACHE)
 endif()
 
+if ("${DNNL_CPU_THREADING_RUNTIME}" STREQUAL "THREADPOOL")
+    # Only enable this for threadpool runtime to avoid complaints about empty
+    # object files.
+    set(TEST_THREAD ${CMAKE_CURRENT_SOURCE_DIR}/test_thread.cpp)
+endif()
+
+add_subdirectory(gtests)
+add_subdirectory(benchdnn)
+
+if(NOT DNNL_WITH_SYCL)
+    add_subdirectory(mkldnn_compat)
+    if(UNIX OR MINGW)
+        add_subdirectory(noexcept)
+    endif()
+endif()

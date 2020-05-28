@@ -22,15 +22,40 @@ The oneDNN build system is based on CMake. Use
 - `CMAKE_BUILD_TYPE` to select between build type (`Release`, `Debug`,
   `RelWithDebInfo`).
 
+- `CMAKE_PREFIX_PATH` to specify directories to be searched for the
+  dependencies located at non-standard locations.
+
 See @ref dev_guide_build_options for detailed description of build-time
 configuration options.
 
 ### Linux/macOS
 
-- Generate makefile:
+#### Prepare the Build Space
+
 ~~~sh
-mkdir -p build && cd build && cmake ..
+mkdir -p build && cd build
 ~~~
+
+#### Generate makefile
+
+- Native compilation:
+~~~sh
+cmake .. <extra build options>
+~~~
+
+- Cross compilation (AArch64 target on Intel 64 host)
+
+~~~sh
+export CC=aarch64-linux-gnu-gcc
+export CXX=aarch64-linux-gnu-g++
+cmake .. \
+          -DCMAKE_SYSTEM_NAME=Linux \
+          -DCMAKE_SYSTEM_PROCESSOR=AARCH64 \
+          -DCMAKE_LIBRARY_PATH=/usr/aarch64-linux-gnu/lib \
+          <extra build options>
+~~~
+
+#### Build and Install the Library
 
 - Build the library:
 ~~~sh
@@ -80,9 +105,62 @@ cmake --build . --target DOC
 cmake --build . --target INSTALL
 ~~~
 
+### Building with DPCPP runtime
+
+DPCPP runtime requires Intel oneAPI DPC++ Compiler. You can explicitly specify
+the path to Intel oneAPI DPC++ Compiler installation using 
+`-DDPCPPROOT` CMake option.
+
+C and C++ compilers need to be set to point to Intel oneAPI DPC++ Compilers.
+
+#### Linux
+
+~~~sh
+# Set Intel oneAPI DPC++ Compiler environment
+# <..>/setvars.sh
+
+# Set C and C++ compilers
+export CC=clang
+export CXX=clang++
+
+mkdir build
+cd build
+cmake -DDNNL_CPU_RUNTIME=DPCPP -DDNNL_GPU_RUNTIME=DPCPP ..
+cmake --build .
+~~~
+
+#### Windows
+
+~~~bat
+:: Set Intel oneAPI DPC++ Compiler environment
+:: <..>\setvars.bat
+~~~
+
+##### Ninja
+
+~~~bat
+:: Set C and C++ compilers
+set CC=clang
+set CXX=clang++
+
+mkdir build
+cd build
+cmake -G Ninja -DDNNL_CPU_RUNTIME=DPCPP -DDNNL_GPU_RUNTIME=DPCPP ..
+cmake --build .
+~~~
+
+##### Visual Studio
+
+~~~bat
+mkdir build
+cd build
+cmake -G "Visual Studio 16 2019" -A x64 -T "Intel(R) oneAPI DPC++ Compiler" -DDNNL_CPU_RUNTIME=DPCPP -DDNNL_GPU_RUNTIME=DPCPP ..
+msbuild "DNNL.sln"
+~~~
+
 ## Validate the Build
 
-Run unit tests:
+If the library is built for the host system, you can run unit tests using:
 
 ~~~sh
 ctest

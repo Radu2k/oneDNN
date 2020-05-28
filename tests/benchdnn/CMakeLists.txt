@@ -21,6 +21,7 @@ file(GLOB_RECURSE HEADERS
 file(GLOB_RECURSE SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
     )
+list(APPEND SOURCES ${TEST_THREAD})
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/conv
@@ -104,14 +105,22 @@ endfunction()
 
 register_benchdnn_test(test_benchdnn_conv_topologies
     cpu "--conv --batch=inputs/conv/test_conv_all_topologies")
+register_benchdnn_test(test_benchdnn_conv_topologies_f32_nxc
+    cpu "--conv --batch=inputs/conv/test_conv_all_topologies_f32_nxc")
 register_benchdnn_test(test_benchdnn_conv_bfloat16 # temporary proxy
     cpu "--conv --batch=inputs/conv/test_conv_bfloat16")
 register_benchdnn_test(test_benchdnn_conv_bf16
     cpu "--conv --batch=inputs/conv/test_conv_bfloat16")
+register_benchdnn_test(test_benchdnn_conv_nxc_bf16
+    cpu "--conv --batch=inputs/conv/test_conv_nxc_bfloat16")
 register_benchdnn_test(test_benchdnn_conv_f32
     cpu "--conv --batch=inputs/conv/test_conv_f32")
+register_benchdnn_test(test_benchdnn_conv_f32_nxc
+    cpu "--conv --batch=inputs/conv/test_conv_f32_nxc")
 register_benchdnn_test(test_benchdnn_conv_3d
     cpu "--conv --batch=inputs/conv/test_conv_3d")
+register_benchdnn_test(test_benchdnn_conv_3d_f32_nxc
+    cpu "--conv --batch=inputs/conv/test_conv_3d_f32_nxc")
 register_benchdnn_test(test_benchdnn_conv_wino
     cpu "--conv --batch=inputs/conv/test_conv_f32_wino")
 register_benchdnn_test(test_benchdnn_conv_int8_wino
@@ -120,22 +129,34 @@ register_benchdnn_test(test_benchdnn_conv_depthwise
     cpu "--conv --batch=inputs/conv/test_conv_depthwise")
 register_benchdnn_test(test_benchdnn_conv_dilated
     cpu "--conv --batch=inputs/conv/test_conv_dilated")
+register_benchdnn_test(test_benchdnn_conv_dilated_f32_nxc
+    cpu "--conv --batch=inputs/conv/test_conv_dilated_f32_nxc")
 register_benchdnn_test(test_benchdnn_conv_attributes
     cpu "--conv --batch=inputs/conv/test_conv_attrs")
+register_benchdnn_test(test_benchdnn_conv_attributes_f32_nxc
+    cpu "--conv --batch=inputs/conv/test_conv_attrs_f32_nxc")
 register_benchdnn_test(test_benchdnn_conv_int8
     cpu "--conv --batch=inputs/conv/test_conv_int8")
 register_benchdnn_test(test_benchdnn_conv_function
     cpu "--conv --batch=inputs/conv/test_conv_function")
 register_benchdnn_test(test_benchdnn_conv_gemm_f32
     cpu "--conv --batch=inputs/conv/test_conv_gemm_f32")
+register_benchdnn_test(test_benchdnn_conv_gemm_nxc_f32
+    cpu "--conv --batch=inputs/conv/test_conv_gemm_nxc_f32")
 register_benchdnn_test(test_benchdnn_conv_gemm_int8
     cpu "--conv --batch=inputs/conv/test_conv_gemm_int8")
 register_benchdnn_test(test_benchdnn_conv_gemm_bf16
     cpu "--conv --batch=inputs/conv/test_conv_gemm_bfloat16")
+register_benchdnn_test(test_benchdnn_conv_gemm_nxc_bf16
+    cpu "--conv --batch=inputs/conv/test_conv_gemm_nxc_bfloat16")
 register_benchdnn_test(test_benchdnn_deconv
     cpu "--deconv --batch=inputs/deconv/test_deconv_all")
+register_benchdnn_test(test_benchdnn_deconv_nxc_f32
+    cpu "--deconv --batch=inputs/deconv/test_deconv_all_nxc_f32")
 register_benchdnn_test(test_benchdnn_deconv_bf16
     cpu "--deconv --batch=inputs/deconv/test_deconv_bfloat16")
+register_benchdnn_test(test_benchdnn_deconv_nxc_bf16
+    cpu "--deconv --batch=inputs/deconv/test_deconv_nxc_bfloat16")
 register_benchdnn_test(test_benchdnn_matmul
     cpu "--matmul --batch=inputs/matmul/test_matmul_all")
 register_benchdnn_test(test_benchdnn_resampling

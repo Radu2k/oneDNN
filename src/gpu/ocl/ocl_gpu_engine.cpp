@@ -16,6 +16,8 @@
 
 #include <CL/cl.h>
 
+#include "gpu/ocl/ocl_gpu_engine.hpp"
+
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
 #include "gpu/compute/kernel_list.hpp"
@@ -111,18 +113,34 @@ status_t ocl_gpu_engine_t::create_kernels(
     return ocl::create_kernels(this, kernel_list, kernel_ctx);
 }
 
+static status_t get_program_binaries(
+        cl_program program, std::vector<unsigned char> *binary) {
+
+    // Get the size of the program binary in bytes.
+    size_t binary_size = 0;
+    cl_int err = clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES,
+            sizeof(binary_size), &binary_size, nullptr);
+    OCL_CHECK(err);
+
+    // Binary is not available for the device.
+    if (binary_size == 0) return status::runtime_error;
+
+    // Get program binary.
+    binary->resize(binary_size);
+    unsigned char *binary_buffer = binary->data();
+    err = clGetProgramInfo(
+            program, CL_PROGRAM_BINARIES, binary_size, &binary_buffer, nullptr);
+    OCL_CHECK(err);
+
+    return status::success;
+}
+
 status_t ocl_gpu_engine_t::create_kernels_from_ocl_source(
         std::vector<compute::kernel_t> *kernels,
         const std::vector<const char *> &kernel_names,
         const char **code_strings,
         const compute::kernel_ctx_t &kernel_ctx) const {
     std::string options = kernel_ctx.options();
-
-    // XXX: Update options by adding macros for OpenCL extensions that are not
-    // handled properly by the OpenCL runtime
-    auto *dev_info
-            = utils::downcast<const ocl_gpu_device_info_t *>(device_info());
-    options += " " + dev_info->get_cl_ext_options();
 
     cl_int err;
     cl_program program = clCreateProgramWithSource(
@@ -149,11 +167,13 @@ status_t ocl_gpu_engine_t::create_kernels_from_ocl_source(
     }
 #endif
 
+    std::vector<unsigned char> binary;
+    CHECK(get_program_binaries(program, &binary));
+
     *kernels = std::vector<compute::kernel_t>(kernel_names.size());
     for (size_t i = 0; i < kernel_names.size(); ++i) {
-        cl_kernel ocl_kernel = clCreateKernel(program, kernel_names[i], &err);
-        OCL_CHECK(err);
-        (*kernels)[i] = compute::kernel_t(new ocl_gpu_kernel_t(ocl_kernel));
+        (*kernels)[i] = compute::kernel_t(
+                new ocl_gpu_kernel_t(binary, kernel_names[i]));
     }
 
     OCL_CHECK(clReleaseProgram(program));

@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef UTILS_HPP
-#define UTILS_HPP
+#ifndef COMMON_UTILS_HPP
+#define COMMON_UTILS_HPP
 
 #include <cassert>
 #include <cstddef>
@@ -26,10 +26,7 @@
 
 #include <memory>
 #include <string>
-
-#if defined(__x86_64__) || defined(_M_X64)
-#define DNNL_X86_64
-#endif
+#include <tuple>
 
 #define MSAN_ENABLED 0
 #define ATTR_NO_MSAN
@@ -499,6 +496,7 @@ bool get_jit_dump();
 unsigned get_jit_profiling_flags();
 std::string get_jit_profiling_jitdumpdir();
 FILE *fopen(const char *filename, const char *mode);
+int getpagesize();
 
 constexpr int msan_enabled = MSAN_ENABLED;
 inline void msan_unpoison(void *ptr, size_t size) {
@@ -525,6 +523,21 @@ public:
     }
     DNNL_DISALLOW_COPY_AND_ASSIGN(setting_t);
 };
+
+// XXX: Currently SYCL doesn't provide an API to get device UUID but
+// we need to be able to distinguish OpenCL device from Level0 device.
+// As a temporary solution the compound ID will be used for that.
+// Below is a table explaning what the numbers are for different backends:
+//
+// -------------------------------------------------------------
+//  Backend      | Compound ID
+// -------------------------------------------------------------
+//  Host         | <backend_t::host, 0, 0>
+//  OpenCL       | <backend_t::opencl, cl_device, 0>
+//  Level0       | <backend_t::level0, uuid[0-63], uuid[64-127]>
+//  Pure CPU     | <0, 0, 0>
+//  Pure GPU     | <0, cl_device, 0>
+using device_id_t = std::tuple<int, uint64_t, uint64_t>;
 
 } // namespace impl
 } // namespace dnnl

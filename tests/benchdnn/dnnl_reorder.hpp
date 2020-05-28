@@ -32,10 +32,10 @@ int execute_reorder(const dnn_mem_t &src, dnn_mem_t &dst,
     std::shared_ptr<const dnn_mem_t> r_src(&src, [](const dnn_mem_t *) {});
     std::shared_ptr<dnn_mem_t> r_dst(&dst, [](dnn_mem_t *) {});
 
-    dnnl_stream_t r_stream = stream_tgt;
+    engine_t engine_tgt(engine_tgt_kind);
 
     dnnl_primitive_desc_t r_pd = nullptr;
-    dnnl_primitive_t r;
+    dnnl_primitive_t r {};
 
     // Optimization to reduce testing time for GPU.
     //
@@ -50,10 +50,12 @@ int execute_reorder(const dnn_mem_t &src, dnn_mem_t &dst,
     //
     // This optimization is skipped when testing reorder, sum and concat
     // primitives because they are used specifically to test GPU reorders.
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+#if (DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL) \
+        || (DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL)
     std::string driver = std::string(driver_name);
     bool is_reorder_related_driver = (driver == std::string("reorder")
             || driver == std::string("sum") || driver == std::string("concat"));
+    engine_t engine_cpu(dnnl_cpu);
     if (!is_reorder_related_driver
             && (src.engine_kind() == dnnl_gpu
                     || dst.engine_kind() == dnnl_gpu)) {
@@ -63,10 +65,10 @@ int execute_reorder(const dnn_mem_t &src, dnn_mem_t &dst,
         if (status == dnnl_success) {
             // Create CPU memory objects wrapping mapped pointers of source and
             // destination
-            r_src.reset(new dnn_mem_t(src.md_, engine_cpu, (void *)src));
-            r_dst.reset(new dnn_mem_t(dst.md_, engine_cpu, (void *)dst));
-
-            r_stream = stream_cpu;
+            r_src.reset(new dnn_mem_t(dnn_mem_t::create_from_host_ptr(
+                    src.md_, engine_cpu, (void *)src)));
+            r_dst.reset(new dnn_mem_t(dnn_mem_t::create_from_host_ptr(
+                    dst.md_, engine_cpu, (void *)dst)));
         }
     }
 #endif
@@ -100,7 +102,7 @@ int execute_reorder(const dnn_mem_t &src, dnn_mem_t &dst,
     args.set(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zero_points_m);
     args.set(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zero_points_m);
 
-    DNN_SAFE(execute_and_wait(r, r_stream, args), CRIT);
+    DNN_SAFE(execute_and_wait(r, reorder_engine, args), CRIT);
     DNN_SAFE(dnnl_primitive_destroy(r), CRIT);
 
     return OK;

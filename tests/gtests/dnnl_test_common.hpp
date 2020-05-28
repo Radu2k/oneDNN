@@ -36,15 +36,17 @@
 #include "dnnl_debug.h"
 #include "dnnl_test_macros.hpp"
 
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL || DNNL_WITH_SYCL
 #include "dnnl_test_common_ocl.hpp"
 #endif
 
 #include "src/common/bfloat16.hpp"
-#include "src/common/dnnl_thread.hpp"
 #include "src/common/float16.hpp"
 #include "src/common/memory_desc_wrapper.hpp"
 #include "src/common/nstl.hpp"
+#include "tests/test_thread.hpp"
+
+#include "src/cpu/platform.hpp"
 
 #define for_ for
 
@@ -64,6 +66,23 @@ bool is_current_test_failed();
 #ifdef DNNL_TEST_WITH_ENGINE_PARAM
 dnnl::engine::kind get_test_engine_kind();
 dnnl::engine get_test_engine();
+#endif
+
+inline bool unsupported_data_type(memory::data_type dt, dnnl::engine eng) {
+    dnnl::engine::kind kind = eng.get_kind();
+
+    bool supported = true; // optimism
+    if (kind == dnnl::engine::kind::cpu)
+        supported = dnnl::impl::cpu::platform::has_data_type_support(
+                memory::convert_to_c(dt));
+
+    return !supported;
+}
+
+#ifdef DNNL_TEST_WITH_ENGINE_PARAM
+inline bool unsupported_data_type(memory::data_type dt) {
+    return unsupported_data_type(dt, get_test_engine());
+}
 #endif
 
 template <typename data_t>
@@ -537,7 +556,8 @@ static void test_free(char *ptr) {
 class test_memory {
 public:
     test_memory(const memory::desc &d, const dnnl::engine &e) {
-        bool is_cpu_native = (e.get_kind() == dnnl::engine::kind::cpu);
+        bool is_cpu_native = (e.get_kind() == dnnl::engine::kind::cpu)
+                && DNNL_CPU_RUNTIME != DNNL_RUNTIME_SYCL;
 
         size_ = d.get_size();
         if (is_cpu_native) {
@@ -550,6 +570,19 @@ public:
         mapped_ptr_t<char> ptr(&mem_);
         memset(ptr, 0xFF, size_);
     }
+
+    template <typename malloc_t, typename free_t>
+    test_memory(const memory::desc &d, const dnnl::engine &e,
+            const malloc_t &f_malloc, const free_t &f_free) {
+        size_ = d.get_size();
+        data_.reset(static_cast<char *>(f_malloc(size_)), f_free);
+        mem_ = memory(d, e, data_.get());
+
+        // Fill with a magic number to catch possible uninitialized access
+        mapped_ptr_t<char> ptr(&mem_);
+        memset(ptr, 0xFF, size_);
+    }
+
     size_t get_size() const { return size_; }
     const memory &get() const { return mem_; }
 
@@ -574,6 +607,18 @@ inline std::string to_string(dnnl_engine_kind_t engine_kind) {
         ss << "gpu";
     else
         ss << "unknown";
+
+    return ss.str();
+}
+
+inline std::string to_string(dnnl_stream_flags_t stream_flags) {
+    std::stringstream ss;
+    if (stream_flags & dnnl_stream_default_flags)
+        ss << "default";
+    else if (stream_flags & dnnl_stream_in_order)
+        ss << "in_order";
+    else if (stream_flags & dnnl_stream_out_of_order)
+        ss << "out_of_order";
 
     return ss.str();
 }
@@ -801,8 +846,7 @@ inline dnnl::stream make_stream(dnnl::engine engine,
     if (engine.get_kind() != dnnl::engine::kind::cpu)
         return dnnl::stream(engine, flags);
     dnnl::stream_attr stream_attr(dnnl::engine::kind::cpu);
-    stream_attr.set_threadpool(
-            dnnl::impl::threadpool_utils::get_active_threadpool());
+    stream_attr.set_threadpool(dnnl::testing::get_threadpool());
     return dnnl::stream(engine, flags, stream_attr);
 #else
     return dnnl::stream(engine, flags);

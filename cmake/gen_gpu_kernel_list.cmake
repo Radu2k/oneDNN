@@ -14,14 +14,14 @@
 # limitations under the License.
 #===============================================================================
 
-# Parses kernel names from OpenCL/CM files and updates KER_LIST_EXTERN and
+# Parses kernel names from OpenCL files and updates KER_LIST_EXTERN and
 # KER_LIST_ENTRIES variables with the parsed kernel names
 function(parse_kernels ker_name ker_path)
     set(entries "${KER_LIST_ENTRIES}")
 
     file(READ ${ker_path} contents)
     string(REGEX MATCHALL
-        "(kernel|_GENX_MAIN_)[ \n]+void[ \n]+([a-z0-9_]+)"
+	    "(kernel|_GENX_MAIN_)[ \n]+void[ \n]+([a-z0-9_]+)"
         kernels ${contents})
     set(cur_ker_names)
     foreach(k ${kernels})

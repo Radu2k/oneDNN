@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef STREAM_HPP
-#define STREAM_HPP
+#ifndef COMMON_STREAM_HPP
+#define COMMON_STREAM_HPP
 
 #include <assert.h>
 #include "dnnl.h"
@@ -42,6 +42,10 @@ struct dnnl_stream : public dnnl::impl::c_compatible {
 
     /** returns stream's kind */
     unsigned flags() const { return flags_; }
+
+    virtual dnnl::impl::status_t enqueue_primitive(
+            const primitive_iface_t *primitive_iface,
+            dnnl::impl::exec_ctx_t &ctx);
 
     /** blocks until all submitted primitives to the stream are completed */
     virtual dnnl::impl::status_t wait() = 0;

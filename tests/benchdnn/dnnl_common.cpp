@@ -23,10 +23,6 @@
 #include "dnnl_common.hpp"
 #include "dnnl_memory.hpp"
 
-#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
-#include "../testing_threadpool.hpp"
-#endif
-
 float round_to_nearest_representable(dnnl_data_type_t dt, float value) {
     switch (dt) {
         case dnnl_f32: break;
@@ -41,23 +37,17 @@ float round_to_nearest_representable(dnnl_data_type_t dt, float value) {
     return value;
 }
 
+// Engine used to run oneDNN primitives for simulation
+dnnl_engine_t engine_tgt;
+
+// Stream for target engine during simulation
+dnnl_stream_t stream_tgt;
+
 // Engine kind used to run oneDNN primitives for testing
 dnnl_engine_kind_t engine_tgt_kind = dnnl_cpu;
 
-// Engine used to run oneDNN primitives for testing
-dnnl_engine_t engine_tgt;
-
-// Stream for target engine
-dnnl_stream_t stream_tgt;
-
 // Scratchpad mode for oneDNN
-dnnl_scratchpad_mode_t scratchpad_mode;
-
-// Engine used to run reference implementations (fast-ref-gpu option)
-dnnl_engine_t engine_cpu;
-
-// Stream for CPU engine
-dnnl_stream_t stream_cpu;
+dnnl_scratchpad_mode_t scratchpad_mode = dnnl_scratchpad_mode_library;
 
 args_t &args_t::set(int arg, const dnn_mem_t &mem) {
     args_.push_back(std::make_pair(arg, &mem));
@@ -120,8 +110,8 @@ static bool is_null_memory(dnnl_memory_t mem) {
 }
 
 dnnl_status_t execute_and_wait(
-        dnnl_primitive_t prim, dnnl_stream_t stream, const args_t &args) {
-
+        dnnl_primitive_t prim, dnnl_engine_t engine, const args_t &args) {
+    stream_t stream(engine);
     std::vector<dnnl_exec_arg_t> dnnl_args;
     execute_unmap_args(args, dnnl_args);
 
@@ -279,12 +269,12 @@ inline bool should_stop(const benchdnn_timer_t &t) {
     return stop;
 }
 
-inline int measure_perf_individual(benchdnn_timer_t &t, dnnl_primitive_t prim,
-        std::vector<dnnl_exec_arg_t> &dnnl_args) {
+inline int measure_perf_individual(benchdnn_timer_t &t, dnnl_stream_t stream,
+        dnnl_primitive_t prim, std::vector<dnnl_exec_arg_t> &dnnl_args) {
     t.reset();
     while (true) {
-        DNN_SAFE(dnnl_primitive_execute(prim, stream_tgt, (int)dnnl_args.size(),
-                         dnnl_args.data()),
+        DNN_SAFE(dnnl_primitive_execute(
+                         prim, stream, (int)dnnl_args.size(), dnnl_args.data()),
                 WARN);
         t.stamp();
         if (should_stop(t)) break;
@@ -292,16 +282,16 @@ inline int measure_perf_individual(benchdnn_timer_t &t, dnnl_primitive_t prim,
     return OK;
 }
 
-inline int measure_perf_aggregate(benchdnn_timer_t &t, dnnl_primitive_t prim,
-        std::vector<dnnl_exec_arg_t> &dnnl_args) {
+inline int measure_perf_aggregate(benchdnn_timer_t &t, dnnl_stream_t stream,
+        dnnl_primitive_t prim, std::vector<dnnl_exec_arg_t> &dnnl_args) {
     const int max_batch_times = 10000;
 
     // Warm-up run
     t.reset();
     DNN_SAFE(dnnl_primitive_execute(
-                     prim, stream_tgt, (int)dnnl_args.size(), dnnl_args.data()),
+                     prim, stream, (int)dnnl_args.size(), dnnl_args.data()),
             WARN);
-    DNN_SAFE(dnnl_stream_wait(stream_tgt), WARN);
+    DNN_SAFE(dnnl_stream_wait(stream), WARN);
     t.stamp();
 
     int cur_batch_times
@@ -310,11 +300,11 @@ inline int measure_perf_aggregate(benchdnn_timer_t &t, dnnl_primitive_t prim,
 
     while (true) {
         for (int i = 0; i < cur_batch_times; i++) {
-            DNN_SAFE(dnnl_primitive_execute(prim, stream_tgt,
-                             (int)dnnl_args.size(), dnnl_args.data()),
+            DNN_SAFE(dnnl_primitive_execute(prim, stream, (int)dnnl_args.size(),
+                             dnnl_args.data()),
                     WARN);
         }
-        DNN_SAFE(dnnl_stream_wait(stream_tgt), WARN);
+        DNN_SAFE(dnnl_stream_wait(stream), WARN);
         t.stamp(cur_batch_times);
 
         if (should_stop(t)) break;
@@ -334,18 +324,23 @@ inline int measure_perf_aggregate(benchdnn_timer_t &t, dnnl_primitive_t prim,
     return OK;
 }
 
-int measure_perf(benchdnn_timer_t &t, dnnl_primitive_t prim, args_t &args) {
+int measure_perf(benchdnn_timer_t &t, dnnl_engine_t engine,
+        dnnl_primitive_t prim, args_t &args) {
+    dnnl_engine_kind_t engine_kind;
+    DNN_SAFE(dnnl_engine_get_kind(engine, &engine_kind), CRIT);
+
     int ret = OK;
     if (bench_mode & PERF) {
+        stream_t stream(engine);
         std::vector<dnnl_exec_arg_t> dnnl_args;
         execute_unmap_args(args, dnnl_args);
 
         // For CPU: measure indiividual iterations
         // For GPU: measure iterations in batches to hide driver overhead
-        if (engine_tgt_kind == dnnl_cpu)
-            ret = measure_perf_individual(t, prim, dnnl_args);
+        if (engine_kind == dnnl_cpu)
+            ret = measure_perf_individual(t, stream, prim, dnnl_args);
         else
-            ret = measure_perf_aggregate(t, prim, dnnl_args);
+            ret = measure_perf_aggregate(t, stream, prim, dnnl_args);
 
         if (ret == OK) execute_map_args(args);
     }

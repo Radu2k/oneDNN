@@ -163,11 +163,12 @@ inline float epsilon_dt(dnnl_data_type_t dt) {
 
 template <dnnl_data_type_t dt>
 inline float saturate(float val) {
-    return MAX2((float)dnnl::impl::nstl::numeric_limits<
-                        typename prec_traits<dt>::type>::lowest(),
+    auto res = MAX2((float)dnnl::impl::nstl::numeric_limits<
+                            typename prec_traits<dt>::type>::lowest(),
             MIN2((float)dnnl::impl::nstl::numeric_limits<
                          typename prec_traits<dt>::type>::max(),
-                    mxcsr_round(val)));
+                    val));
+    return mxcsr_round(res);
 }
 
 inline float maybe_saturate(dnnl_data_type_t dt, float value) {
@@ -192,10 +193,10 @@ float round_to_nearest_representable(dnnl_data_type_t dt, float value);
 
 /* simplification */
 extern dnnl_engine_kind_t engine_tgt_kind;
+extern dnnl_scratchpad_mode_t scratchpad_mode;
 
 extern dnnl_engine_t engine_tgt;
 extern dnnl_stream_t stream_tgt;
-extern dnnl_scratchpad_mode_t scratchpad_mode;
 struct dnn_mem_t;
 /* for fast-ref-gpu support */
 extern dnnl_engine_t engine_cpu;
@@ -307,18 +308,72 @@ private:
     std::vector<std::pair<int, const dnn_mem_t *>> args_;
 };
 
-dnnl_status_t execute_and_wait(
-        dnnl_primitive_t prim, dnnl_stream_t stream, const args_t &args);
+// this function is used to create a primitive and engine
+template <typename func_t, typename prb_t>
+int init_prim(dnnl_primitive_t *prim, const func_t &init_pd_func,
+        engine_t &engine, prb_t *p, res_t *r, dir_t dir = FLAG_FWD,
+        const_dnnl_primitive_desc_t hint = nullptr) {
+    // create 1st engine
+    engine.reset(engine_tgt_kind);
 
-int measure_perf(benchdnn_timer_t &t, dnnl_primitive_t prim, args_t &args);
+    dnnl_primitive_desc_t _pd {};
+    dnnl_primitive_t _prim {};
+
+    auto cleanup_pd = [&]() { dnnl_primitive_desc_destroy(_pd); };
+    auto cleanup_prim = [&]() { dnnl_primitive_destroy(_prim); };
+
+    int status = init_pd_func(engine, p, _pd, r, dir, hint);
+    if (status != OK) return status;
+    if (r->state == SKIPPED || r->state == UNIMPLEMENTED) return OK;
+
+    DNN_SAFE_CLEAN(dnnl_primitive_create(&_prim, _pd), WARN, cleanup_pd);
+
+#ifndef DNNL_DISABLE_PRIMITIVE_CACHE
+    // The idea is to create the requested primitive twice for different engines.
+    // Rationale:
+    // 1. Make sure that the primitive cache is robust for the cases when:
+    //   - CPU engine is re-created
+    //   - GPU engine is re-created for the same device but different context
+    // These 2 cases are commonly used or expected to be used in the frameworks.
+    // 2. (for GPU only) Identify context dependent parts in primitive implementations, e.g.
+    // if a primitive implementation contains memory_storage_t (for scales,
+    // zero points or buffers), which depends on a particular engine,
+    // then it should crash or fail at execution time
+
+    // TODO: add an internal API to be able to get information about cache hit
+    // e.g. bool from_cache = dnnl_primitive_get_cache_hit_state(prim) == true;
+    // If from_cache == true then this step can be skipped
+    DNN_SAFE_CLEAN(dnnl_primitive_desc_destroy(_pd), WARN, cleanup_prim);
+    DNN_SAFE(dnnl_primitive_destroy(_prim), WARN);
+
+    // create 2nd engine
+    engine.reset(engine_tgt_kind);
+    status = init_pd_func(engine, p, _pd, r, dir, hint);
+    if (status != OK) return status;
+
+    // this primitive comes from the cache
+    DNN_SAFE_CLEAN(dnnl_primitive_create(&_prim, _pd), WARN, cleanup_pd);
+    // XXX: maybe check if the primitive didn't come from the cache and
+    // return FAIL in that case?
+#endif
+    DNN_SAFE_CLEAN(dnnl_primitive_desc_destroy(_pd), WARN, cleanup_prim);
+    (*prim) = _prim;
+    return OK;
+}
+
+dnnl_status_t execute_and_wait(
+        dnnl_primitive_t prim, dnnl_engine_t engine, const args_t &args);
+
+int measure_perf(benchdnn_timer_t &t, dnnl_engine_t engine,
+        dnnl_primitive_t prim, args_t &args);
 
 void maybe_prepare_runtime_scales(dnn_mem_t &scales_m, const attr_t &attr,
-        int64_t scale_cnt, const float *scales, dnnl_engine_t engine);
+        int64_t scale_cnt, const float *scales, dnnl_engine_t engine_tgt);
 void maybe_prepare_runtime_scales(dnn_mem_t &scales_m,
-        const attr_bundle_t &attr_bundle, dnnl_engine_t engine);
+        const attr_bundle_t &attr_bundle, dnnl_engine_t engine_tgt);
 
 void maybe_prepare_runtime_zero_points(dnn_mem_t &zero_points_m,
-        const attr_t &attr, int arg, dnnl_engine_t engine);
+        const attr_t &attr, int arg, dnnl_engine_t engine_tgt);
 
 bool check_md_consistency_with_tag(
         const dnnl_memory_desc_t &md, const std::string &tag);
