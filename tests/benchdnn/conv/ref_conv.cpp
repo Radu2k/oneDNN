@@ -175,7 +175,7 @@ void compute_ref_direct_fwd(const prb_t *p, dnn_mem_t &src_m, dnn_mem_t &wei_m,
                 }
 
                 maybe_scale(conv_res, p->scales, g * OCG + oc, p->attr);
-                maybe_post_ops(conv_res, dst, p->attr);
+                maybe_post_ops(p->attr, conv_res, dst);
 
                 dst = conv_res;
             });
@@ -290,7 +290,7 @@ void compute_ref_direct_bwd_d(const prb_t *p, dnn_mem_t &diff_src_m,
                     conv_res += ((float *)bia_m)[bia_off];
                 }
                 maybe_scale(conv_res, p->scales, g * ICG + ic, p->attr);
-                maybe_post_ops(conv_res, ds, p->attr);
+                maybe_post_ops(p->attr, conv_res, ds);
 
                 ds = conv_res;
             });

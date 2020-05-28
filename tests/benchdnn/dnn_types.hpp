@@ -327,6 +327,6 @@ float compute_eltwise_fwd(attr_t::post_ops_t::kind_t kind, float src,
         float scale, float alpha, float beta);
 float compute_eltwise_bwd(attr_t::post_ops_t::kind_t kind, float d_dst,
         float src, float alpha, float beta);
-void maybe_post_ops(float &d, float dst, const attr_t &attr);
+void maybe_post_ops(const attr_t &attr, float &val, float sum_val = 0.f);
 
 #endif
