@@ -942,7 +942,7 @@ void maybe_post_ops(float &d, float dst, const attr_t &attr) {
     }
 }
 
-void engine_t::create_engine(dnnl_engine_kind_t engine_kind) {
+engine_t::engine_t(dnnl_engine_kind_t engine_kind) {
 #ifdef DNNL_SYCL_DPCPP
     if (engine_kind == dnnl_cpu) {
         static dnnl_engine_t inst = nullptr;
@@ -959,7 +959,7 @@ void engine_t::create_engine(dnnl_engine_kind_t engine_kind) {
 #endif
 }
 
-void engine_t::destroy_engine() {
+engine_t::~engine_t() {
 #ifdef DNNL_SYCL_DPCPP
     engine_ = NULL;
 #else
@@ -967,9 +967,9 @@ void engine_t::destroy_engine() {
 #endif
 }
 
-void stream_t::create_stream() {
+stream_t::stream_t(dnnl_engine_t engine) {
     dnnl_engine_kind_t engine_kind;
-    DNN_SAFE_V(dnnl_engine_get_kind(engine_, &engine_kind));
+    DNN_SAFE_V(dnnl_engine_get_kind(engine, &engine_kind));
 
     dnnl_stream_attr_t stream_attr;
     DNN_SAFE_V(dnnl_stream_attr_create(&stream_attr, engine_kind));
@@ -981,10 +981,10 @@ void stream_t::create_stream() {
 #endif
 
     DNN_SAFE_V(dnnl_stream_create_v2(
-            &stream_, engine_, dnnl_stream_default_flags, stream_attr));
+            &stream_, engine, dnnl_stream_default_flags, stream_attr));
     dnnl_stream_attr_destroy(stream_attr);
 }
 
-void stream_t::destroy_stream() {
+stream_t::~stream_t() {
     DNN_SAFE_V(dnnl_stream_destroy(stream_));
 }
