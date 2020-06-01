@@ -109,8 +109,17 @@ static bool is_null_memory(dnnl_memory_t mem) {
 }
 #endif
 
-dnnl_status_t execute_and_wait(
-        dnnl_primitive_t prim, dnnl_engine_t engine, const args_t &args) {
+dnnl_status_t execute_and_wait(dnnl_primitive_t prim, const args_t &args) {
+    const_dnnl_primitive_desc_t pd;
+    dnnl_engine_t engine;
+
+    dnnl_status_t status = dnnl_success;
+    status = dnnl_primitive_get_primitive_desc(prim, &pd);
+    if (status != dnnl_success) return status;
+
+    status = dnnl_primitive_desc_query(pd, dnnl_query_engine, 0, &engine);
+    if (status != dnnl_success) return status;
+
     stream_t stream(engine);
     std::vector<dnnl_exec_arg_t> dnnl_args;
     execute_unmap_args(args, dnnl_args);
@@ -130,7 +139,7 @@ dnnl_status_t execute_and_wait(
     }
 #endif
 
-    dnnl_status_t status = dnnl_primitive_execute(
+    status = dnnl_primitive_execute(
             prim, stream, (int)dnnl_args.size(), dnnl_args.data());
     if (status != dnnl_success) return status;
     status = dnnl_stream_wait(stream);
@@ -144,14 +153,8 @@ dnnl_status_t execute_and_wait(
 
     // Handle simulation for GPU
     bool is_gpu_prim = false;
-    const_dnnl_primitive_desc_t pd;
-    DNN_SAFE_V(dnnl_primitive_get_primitive_desc(prim, &pd));
-
-    dnnl_engine_t eng_q;
-    DNN_SAFE_V(dnnl_primitive_desc_query(pd, dnnl_query_engine, 0, &eng_q));
-
     dnnl_engine_kind_t eng_kind;
-    DNN_SAFE_V(dnnl_engine_get_kind(eng_q, &eng_kind));
+    DNN_SAFE_V(dnnl_engine_get_kind(engine, &eng_kind));
     is_gpu_prim = (eng_kind == dnnl_gpu);
 
     if (is_gpu_prim) {
