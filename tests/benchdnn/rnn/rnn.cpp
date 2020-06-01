@@ -936,7 +936,7 @@ int doit(const prb_t &p, res_t *r) {
         }
     }
 
-    measure_perf(r->timer, test_engine, c, args);
+    measure_perf(r->timer, c, args);
     cleanup();
 
     return OK;
