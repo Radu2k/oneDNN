@@ -336,15 +336,15 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
 #endif
         }
 
-        C00 = mmad8x8(S, W0, C00);
-        C10 = mmad8x8(S, W1, C10);
-        C20 = mmad8x8(S, W2, C20);
-        C30 = mmad8x8(S, W3, C30);
+        C00 = MMAD8X8(S, W0, C00);
+        C10 = MMAD8X8(S, W1, C10);
+        C20 = MMAD8X8(S, W2, C20);
+        C30 = MMAD8X8(S, W3, C30);
 #if OW_BLOCK == 12
-        C01 = mmad8x4(SS, W0, C01);
-        C11 = mmad8x4(SS, W1, C11);
-        C21 = mmad8x4(SS, W2, C21);
-        C31 = mmad8x4(SS, W3, C31);
+        C01 = MMAD8X4(SS, W0, C01);
+        C11 = MMAD8X4(SS, W1, C11);
+        C21 = MMAD8X4(SS, W2, C21);
+        C31 = MMAD8X4(SS, W3, C31);
 #endif
 
 #if OW_BLOCK == 16
@@ -369,10 +369,10 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
             S = 0;
         }
 
-        C01 = mmad8x8(S, W0, C01);
-        C11 = mmad8x8(S, W1, C11);
-        C21 = mmad8x8(S, W2, C21);
-        C31 = mmad8x8(S, W3, C31);
+        C01 = MMAD8X8(S, W0, C01);
+        C11 = MMAD8X8(S, W1, C11);
+        C21 = MMAD8X8(S, W2, C21);
+        C31 = MMAD8X8(S, W3, C31);
 #endif
         wei += OC_BLOCK * 8;
     }

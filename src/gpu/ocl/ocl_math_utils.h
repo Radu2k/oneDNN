@@ -146,6 +146,7 @@ inline float8 __dpasw(uint4 a, int8 b, float8 acc)
 
 #define MMAD8X4(_O, _I, _W) dpas_8_4(_O, _I, _W)
 #define MMAD8X8(_O, _I, _W) dpas_8_8(_O, _I, _W)
+
 #else // cl_intel_subgroup_matrix_multiply_accumulate
 
 inline int mmad_4(uchar4 input, char4 weight, int acc)

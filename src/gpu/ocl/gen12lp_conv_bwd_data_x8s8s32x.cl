@@ -114,15 +114,15 @@ conv_bwd_data_x8s8s32x(const __global uchar *src, const __global char *wei,
                             BLOCK_READ_WHT(W1, 8 * IC_BLOCK);
                             BLOCK_READ_WHT(W2, 16 * IC_BLOCK);
                             BLOCK_READ_WHT(W3, 24 * IC_BLOCK);
-                            C00 = mmad8x8(D0, W0, C00);
-                            C01 = mmad8x8(D0, W1, C01);
-                            C02 = mmad8x8(D0, W2, C02);
-                            C03 = mmad8x8(D0, W3, C03);
+                            C00 = MMAD8X8(D0, W0, C00);
+                            C01 = MMAD8X8(D0, W1, C01);
+                            C02 = MMAD8X8(D0, W2, C02);
+                            C03 = MMAD8X8(D0, W3, C03);
 #if MB > 8
-                            C10 = mmad8x8(D1, W0, C10);
-                            C11 = mmad8x8(D1, W1, C11);
-                            C12 = mmad8x8(D1, W2, C12);
-                            C13 = mmad8x8(D1, W3, C13);
+                            C10 = MMAD8X8(D1, W0, C10);
+                            C11 = MMAD8X8(D1, W1, C11);
+                            C12 = MMAD8X8(D1, W2, C12);
+                            C13 = MMAD8X8(D1, W3, C13);
 #endif // MB > 8
                         }
                     }
