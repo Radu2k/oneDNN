@@ -44,6 +44,8 @@ extern "C" int DNNL_API dnnl_memory_get_sim_id(
 }
 
 static void sim_register_ocl_mem_object(cl_mem ocl_mem) {
+    if (!ocl_mem) return;
+
     // Do not track simulation IDs unless running GPU simulation
     static bool is_gpu_sim = (bool)dnnl::impl::getenv_int("DNNL_GPU_SIM", 0);
     if (!is_gpu_sim) return;
