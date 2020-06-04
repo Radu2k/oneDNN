@@ -63,9 +63,7 @@ inline int __imad(uchar4 a, char4 b, int c) __attribute__((overloadable)) {
 
 #ifdef cl_intel_subgroup_matrix_multiply_accumulate
 inline int8 __dpas(uint8 a, int8 b, int8 acc) __attribute__((overloadable)) {
-    int8 __builtin_IB_sub_group_idpas_u8_s8_8_8(int8 acc, uint8 a, int8 b)
-            __attribute__((const));
-    return __builtin_IB_sub_group_idpas_u8_s8_8_8(acc, a, b);
+    return intel_sub_group_u8_i8_matrix_mad_k32(a, b, acc);
 }
 
 // TODO: put conversion builtins under appropriate extension
@@ -127,16 +125,12 @@ inline float16 convert_bf16_to_f32_vec16(ushort16 b) {
 #if DT_F16
 inline float8 __dpas(uint8 a, int8 b, float8 acc)
         __attribute__((overloadable)) {
-    float8 __builtin_IB_sub_group_fdpas_hf_hf_8_8(float8 acc, int8 a, int8 b)
-            __attribute__((const));
-    return __builtin_IB_sub_group_fdpas_hf_hf_8_8(acc, as_int8(a), b);
+    return intel_sub_group_f16_f16_matrix_mad_k16(as_int8(a), b, acc);
 }
 #elif DT_BF16 == 1
 inline float8 __dpas(uint8 a, int8 b, float8 acc)
         __attribute__((overloadable)) {
-    float8 __builtin_IB_sub_group_fdpas_bf_bf_8_8(float8 acc, int8 a, int8 b)
-            __attribute__((const));
-    return __builtin_IB_sub_group_fdpas_bf_bf_8_8(acc, as_int8(a), b);
+    return intel_sub_group_bf16_bf16_matrix_mad_k16(as_int8(a), b, acc);
 }
 
 inline float8 __dpasw(uint4 a, int8 b, float8 acc)
