@@ -77,6 +77,7 @@ Eltwise operations that support no alpha or beta:
   - `gelu_tanh`
   - `log`
   - `logistic`
+  - `round`
   - `sqrt`
   - `square`
   - `soft_relu`
@@ -100,7 +101,6 @@ convolution have a spatial size of 3 and padding 1. This post-op is currently
 only supported for 1x1 convolution.
   - `dw_k3s1p1` -- appends depthwise post-op with stride=1
   - `dw_k3s2p1` -- appends depthwise post-op with stride=2
-
 
 ## Examples:
 

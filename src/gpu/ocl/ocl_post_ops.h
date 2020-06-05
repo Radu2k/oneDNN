@@ -219,6 +219,10 @@ POST_OP_DATA_T gelu_erf_bwd(POST_OP_DATA_T dd, POST_OP_DATA_T s) {
     return dd * 0.5f * (1.f + erf(v) + v * two_over_sqrt_pi * exp(-v * v));
 }
 
+POST_OP_DATA_T round_fwd(POST_OP_DATA_T s) {
+    return (POST_OP_DATA_T)rint((float)s);
+}
+
 POST_OP_DATA_T fwd_eltwise(POST_OP_DATA_T x, POST_OP_DATA_T alpha_,
         POST_OP_DATA_T beta_, POST_OP_DATA_T scale_) {
 #ifdef ELTWISE_ALG
@@ -240,6 +244,7 @@ POST_OP_DATA_T fwd_eltwise(POST_OP_DATA_T x, POST_OP_DATA_T alpha_,
         case CLIP: return scale_ * clip_fwd(x, alpha_, beta_); break;
         case POW: return scale_ * pow_fwd(x, alpha_, beta_); break;
         case GELU_ERF: return scale_ * gelu_erf_fwd(x); break;
+        case ROUND: return scale_ * round_fwd(x); break;
 
         case RELU_DST: return scale_ * relu_fwd(x, alpha_); break;
         case LOGISTIC_DST: return scale_ * logistic_fwd(x); break;

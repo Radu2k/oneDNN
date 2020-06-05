@@ -9,6 +9,13 @@
 --tag=abx,axb,aBx8b,aBx16b
 --batch=harness_eltwise_all_alg
 
+--dir=FWD_D
+--dt=f32
+--tag=abx,axb,aBx8b
+--alpha=0 --beta=0
+--alg=round
+--batch=shapes_eltwise
+
 # s32, s8
 --reset
 --inplace=true,false
