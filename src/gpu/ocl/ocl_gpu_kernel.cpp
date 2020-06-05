@@ -43,12 +43,23 @@ extern "C" int DNNL_API dnnl_memory_get_sim_id(
     return sim_mem_ids[ocl_mem];
 }
 
+static cl_mem get_parent_mem_object(cl_mem ocl_mem) {
+    cl_mem parent;
+    cl_int err = clGetMemObjectInfo(ocl_mem, CL_MEM_ASSOCIATED_MEMOBJECT,
+            sizeof(cl_mem), &parent, nullptr);
+    [&]() { OCL_CHECK_V(err); }();
+    return parent;
+}
+
 static void sim_register_ocl_mem_object(cl_mem ocl_mem) {
     if (!ocl_mem) return;
 
     // Do not track simulation IDs unless running GPU simulation
     static bool is_gpu_sim = (bool)dnnl::impl::getenv_int("DNNL_GPU_SIM", 0);
     if (!is_gpu_sim) return;
+
+    cl_mem parent = get_parent_mem_object(ocl_mem);
+    if (parent) ocl_mem = parent;
 
     if (sim_mem_ids.count(ocl_mem) != 0) return;
 
