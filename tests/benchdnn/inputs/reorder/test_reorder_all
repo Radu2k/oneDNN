@@ -74,8 +74,6 @@
 32x32x3x3
 --oflag=conv_s8s8 32x32x3x3
 
---stag=wigo --oflag=gconv_s8s8
-=======
 --stag=oiw,wio --dtag=wio,OIw4i16o4i,OIw2i8o4i,OIw4o4i
 32x32x3
 --oflag=conv_s8s8 32x32x3

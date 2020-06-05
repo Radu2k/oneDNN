@@ -202,7 +202,6 @@ private:
     int initialize(const dnnl_memory_desc_t &md, dnnl_data_type_t dt,
             dnnl_format_tag_t tag, dnnl_engine_t engine,
             void *handle = DNNL_MEMORY_ALLOCATE) {
-
         is_mapped_ = false;
 
         if (tag == dnnl_format_tag_undef) {
@@ -277,7 +276,7 @@ private:
 
     int cleanup() {
         if (!active_) return OK;
-        if (is_mapped_) unmap();
+        unmap();
         DNN_SAFE(dnnl_memory_destroy(m_), CRIT);
         if (is_data_owner_) zfree(data_);
         return OK;

@@ -384,6 +384,7 @@ const format_tag_t oidhw = dnnl_oidhw;
 const format_tag_t dhwio = dnnl_dhwio;
 const format_tag_t odhwi = dnnl_odhwi;
 const format_tag_t idhwo = dnnl_idhwo;
+
 const format_tag_t iodhw = dnnl_iodhw;
 const format_tag_t goiw = dnnl_goiw;
 const format_tag_t goihw = dnnl_goihw;

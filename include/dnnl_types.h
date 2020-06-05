@@ -193,6 +193,7 @@ typedef enum {
     dnnl_ba, ///< permuted 2D tensor
     dnnl_bac, ///< permuted 3D tensor
     dnnl_bacd, ///< permuted 4D tensor
+
     dnnl_bacde, ///< permuted 5D tensor
     dnnl_bca, ///< permuted 3D tensor
     dnnl_bcda, ///< permuted 4D tensor
@@ -215,6 +216,7 @@ typedef enum {
     dnnl_aBc16b,
     dnnl_ABc16b16a,
     dnnl_Abc4a,
+
     /// 3D tensor blocked by 2nd dimension with block size 32
     dnnl_aBc32b,
     /// 3D tensor blocked by 2nd dimension with block size 4
@@ -242,6 +244,7 @@ typedef enum {
     dnnl_aBCd16b16c,
     dnnl_aBCd16c16b,
     dnnl_Abcd4a,
+
     /// 4D tensor blocked by 2nd dimension with block size 32
     dnnl_aBcd32b,
     /// 4D tensor blocked by 2nd dimension with block size 4
@@ -290,6 +293,7 @@ typedef enum {
     dnnl_aBCde16c16b,
     dnnl_aBCde2c8b4c,
     dnnl_Abcde4a,
+
     /// 5D tensor blocked by 2nd dimension with block size 32
     dnnl_aBcde32b,
     /// 5D tensor blocked by 2nd dimension with block size 4
@@ -463,6 +467,7 @@ typedef enum {
     dnnl_iohw = dnnl_bacd,
     /// 5D CNN weights tensor, an alias to #dnnl_abcde
     dnnl_oidhw = dnnl_abcde,
+
     /// 5D CNN weights tensor, an alias to #dnnl_bacde
     dnnl_iodhw = dnnl_bacde,
     /// 5D CNN weights tensor, an alias to #dnnl_cdeba

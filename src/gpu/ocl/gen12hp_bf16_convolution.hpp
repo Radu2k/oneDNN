@@ -65,11 +65,11 @@ struct gen12hp_bf16_convolution_bwd_weights_t : public gpu_primitive_t {
 
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
-
-            auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
-                    compute_engine->device_info());
-            is_gen12hp = dev_info->gpu_arch() == gpu_arch_t::gen12hp;
-
+            if (engine->runtime_kind() == dnnl_runtime_ocl) {
+                auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
+                        compute_engine->device_info());
+                is_gen12hp = dev_info->gpu_arch() == gpu_arch_t::gen12hp;
+            }
             return ok ? status::success : status::unimplemented;
         }
 

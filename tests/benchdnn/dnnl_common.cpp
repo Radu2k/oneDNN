@@ -99,7 +99,6 @@ static void destroy_dnn_mem_objects() {
     for (auto *mem : to_destroy)
         mem->~dnn_mem_t();
 }
-#endif
 
 static bool is_null_memory(dnnl_memory_t mem) {
     if (!mem) return true;
@@ -108,6 +107,7 @@ static bool is_null_memory(dnnl_memory_t mem) {
     DNN_SAFE_V(dnnl_memory_get_data_handle(mem, &handle));
     return !handle;
 }
+#endif
 
 dnnl_status_t execute_and_wait(
         dnnl_primitive_t prim, dnnl_engine_t engine, const args_t &args) {

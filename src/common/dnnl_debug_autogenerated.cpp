@@ -76,6 +76,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_ba) return "ba";
     if (v == dnnl_bac) return "bac";
     if (v == dnnl_bacd) return "bacd";
+
     if (v == dnnl_bacde) return "bacde";
     if (v == dnnl_bca) return "bca";
     if (v == dnnl_bcda) return "bcda";
@@ -94,6 +95,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_aBc32b) return "aBc32b";
     if (v == dnnl_ABc16b16a) return "ABc16b16a";
     if (v == dnnl_Abc4a) return "Abc4a";
+
     if (v == dnnl_aBc32b) return "aBc32b";
     if (v == dnnl_aBc4b) return "aBc4b";
     if (v == dnnl_ABc4b16a4b) return "ABc4b16a4b";
@@ -117,6 +119,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_aBCd16b16c) return "aBCd16b16c";
     if (v == dnnl_aBCd16c16b) return "aBCd16c16b";
     if (v == dnnl_Abcd4a) return "Abcd4a";
+
     if (v == dnnl_aBcd32b) return "aBcd32b";
     if (v == dnnl_aBcd4b) return "aBcd4b";
     if (v == dnnl_ABcd4b16a4b) return "ABcd4b16a4b";
@@ -158,6 +161,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_aBCde16c16b) return "aBCde16c16b";
     if (v == dnnl_aBCde2c8b4c) return "aBCde2c8b4c";
     if (v == dnnl_Abcde4a) return "Abcde4a";
+
     if (v == dnnl_aBcde32b) return "aBcde32b";
     if (v == dnnl_aBcde4b) return "aBcde4b";
     if (v == dnnl_ABcde4b4a) return "ABcde4b4a";
@@ -269,6 +273,9 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_aCBd4c8b8c4b) return "aCBd4c8b8c4b";
     if (v == dnnl_aCBde4c8b8c4b) return "aCBde4c8b8c4b";
     if (v == dnnl_aCBdef4c8b8c4b) return "aCBdef4c8b8c4b";
+
+    if (v == dnnl_BAcde16a16b) return "BAcde16a16b";
+    if (v == dnnl_aCBdef16b16c) return "aCBdef16b16c";
     if (v == dnnl_format_tag_last) return "format_tag_last";
     if (v == dnnl_x) return "x";
     if (v == dnnl_nc) return "nc";
@@ -297,6 +304,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_dhwio) return "dhwio";
     if (v == dnnl_odhwi) return "odhwi";
     if (v == dnnl_idhwo) return "idhwo";
+
     if (v == dnnl_iodhw) return "iodhw";
     if (v == dnnl_goiw) return "goiw";
     if (v == dnnl_wigo) return "wigo";
@@ -314,14 +322,17 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_ldio) return "ldio";
     if (v == dnnl_ldoi) return "ldoi";
     if (v == dnnl_ldgo) return "ldgo";
+
     if (v == dnnl_nCdhw32c) return "nCdhw32c";
     if (v == dnnl_nCdhw16c) return "nCdhw16c";
     if (v == dnnl_nCdhw4c) return "nCdhw4c";
     if (v == dnnl_nCdhw8c) return "nCdhw8c";
+
     if (v == dnnl_nChw32c) return "nChw32c";
     if (v == dnnl_nChw16c) return "nChw16c";
     if (v == dnnl_nChw4c) return "nChw4c";
     if (v == dnnl_nChw8c) return "nChw8c";
+
     if (v == dnnl_nCw32c) return "nCw32c";
     if (v == dnnl_nCw16c) return "nCw16c";
     if (v == dnnl_nCw4c) return "nCw4c";
