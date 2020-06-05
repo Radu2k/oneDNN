@@ -98,11 +98,16 @@ struct ref_binary_t : public primitive_t {
     ref_binary_t(const pd_t *apd) : primitive_t(apd) {}
 
     status_t init(engine_t *engine) override {
+        using namespace primitive_kind;
         const auto &po = pd()->attr()->post_ops_;
-        int e_idx = po.find(primitive_kind::eltwise);
-        if (e_idx != -1)
-            eltwise_ker_.reset(
-                    new ref_eltwise_scalar_fwd_t(po.entry_[e_idx].eltwise));
+        for (auto idx = 0; idx < po.len_; ++idx) {
+            if (po.contain(eltwise, idx))
+                eltwise_ker_[idx].reset(
+                        new ref_eltwise_scalar_fwd_t(po.entry_[idx].eltwise));
+            else if (po.contain(binary, idx))
+                binary_ker_[idx].reset(
+                        new ref_binary_scalar_t(po.entry_[idx].binary));
+        }
         return status::success;
     }
 
@@ -118,7 +123,9 @@ struct ref_binary_t : public primitive_t {
 private:
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
     void execute_ref(const exec_ctx_t &ctx) const;
-    std::unique_ptr<ref_eltwise_scalar_fwd_t> eltwise_ker_;
+    std::unique_ptr<ref_eltwise_scalar_fwd_t>
+            eltwise_ker_[dnnl_post_ops::capacity];
+    std::unique_ptr<ref_binary_scalar_t> binary_ker_[dnnl_post_ops::capacity];
 };
 
 } // namespace cpu

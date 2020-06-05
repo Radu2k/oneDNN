@@ -9,17 +9,23 @@
 --ddt=s8 --sdt=s8:u8
 --attr=post_ops='sum:0.5'
 --batch=shapes_common
+--attr=post_ops='add:f32:per_oc'
+--batch=shapes_common
 
 --ddt=s8 --sdt=s8:s8
 --attr=post_ops='logistic:0:0:0.5'
 --batch=shapes_common
-
---ddt=u8 --sdt=u8:u8
---attr=post_ops='linear:2:0.125'
+--attr=post_ops='mul:s8;linear:0.5:0.25'
 --batch=shapes_common
 
 --ddt=u8 --sdt=u8:s8
 --attr=post_ops='sum:0.25;relu:-0.01'
+--batch=shapes_common
+--attr=post_ops='sum:0.5;add:f32:common;abs;min:u8:per_oc'
+--batch=shapes_common
+
+--ddt=u8 --sdt=u8:u8
+--attr=post_ops='linear:2:0.125;sum'
 --batch=shapes_common
 
 ## scales

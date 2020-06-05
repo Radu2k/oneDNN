@@ -43,6 +43,25 @@ float compute_binary_scalar(alg_kind_t alg, float x, float y) {
     }
 }
 
+inline float cast_to_dt(data_type_t dt, const void *ptr, dim_t idx) {
+#define CASE(dt) \
+    case dt: return (float)(((typename prec_traits<dt>::type *)ptr)[idx]);
+
+    using namespace data_type;
+    switch (dt) {
+        CASE(bf16);
+        CASE(f16);
+        CASE(f32);
+        CASE(s32);
+        CASE(s8);
+        CASE(u8);
+        default: assert(!"bad data_type");
+    }
+
+#undef CASE
+    return 0;
+}
+
 template <data_type_t src0_type, data_type_t src1_type, data_type_t dst_type>
 void ref_binary_t<src0_type, src1_type, dst_type>::execute_ref(
         const exec_ctx_t &ctx) const {
@@ -105,7 +124,20 @@ void ref_binary_t<src0_type, src1_type, dst_type>::execute_ref(
             const auto &e = po.entry_[idx];
             switch (e.kind) {
                 case sum: acc += sum_scale * dst_f; break;
-                case eltwise: acc = eltwise_ker_->compute_scalar(acc); break;
+                case eltwise:
+                    acc = eltwise_ker_[idx]->compute_scalar(acc);
+                    break;
+                case binary: {
+                    const auto &b = e.binary;
+                    const memory_desc_wrapper po_src1_d(b.src1_desc);
+                    auto off_po = src0_d.off_m(
+                            po_src1_d, i, get_mask(po_src1_d.dims()));
+                    const auto attr_po_b = CTX_IN_MEM(
+                            const void *, DNNL_ARG_ATTR_POST_OP_0 + idx);
+                    auto val_po = cast_to_dt(
+                            po_src1_d.data_type(), attr_po_b, off_po);
+                    acc = binary_ker_[idx]->compute_scalar(acc, val_po);
+                } break;
                 default: assert("unsupported post op primitive kind!"); break;
             }
         }
