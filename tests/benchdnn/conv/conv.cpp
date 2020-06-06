@@ -532,6 +532,7 @@ inline int init_pd_custom(dnnl_engine_t engine, const prb_t *p,
     attr_args_t aa;
     aa.insert(DNNL_ARG_ATTR_OUTPUT_SCALES, p->oc, p->scales,
             p->attr.oscale.runtime);
+    aa.prepare_binary_post_op_mds(p->attr, p->ndims, dst_dims);
     auto dnnl_attr = create_dnnl_attr_v2(p->attr, aa);
 
     dnnl_status_t init_status
@@ -679,6 +680,10 @@ int doit(const prb_t *p, res_t *r) {
     dnn_mem_t bia_dt(bia_md, test_engine);
     dnn_mem_t scratchpad_dt(scratchpad_md, test_engine);
     dnn_mem_t scales;
+    std::vector<dnn_mem_t> binary_po_fp, binary_po_dt;
+    std::vector<int> binary_po_args;
+    SAFE(setup_binary(const_pd, binary_po_args, binary_po_dt, binary_po_fp),
+            WARN);
 
     dnn_mem_t src_fp(src_md, fp, src_tag, test_engine);
     dnn_mem_t wei_fp(wei_md, fp, wei_tag, test_engine);
@@ -700,11 +705,13 @@ int doit(const prb_t *p, res_t *r) {
         args.set(DNNL_ARG_DST, dst_dt);
         args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
         args.set(DNNL_ARG_ATTR_OUTPUT_SCALES, scales);
+        args.set(binary_po_args, binary_po_dt);
 
         DNN_SAFE(execute_and_wait(c, args), WARN);
 
         if (bench_mode & CORR) {
-            compute_ref_fwd(p, c_ref, src_fp, wei_fp, bia_fp, dst_fp);
+            compute_ref_fwd(
+                    p, c_ref, src_fp, wei_fp, bia_fp, binary_po_fp, dst_fp);
             dnn_mem_t dst(dst_dt, fp, src_tag, test_engine);
             SAFE(compare_dst(p, dst, dst_fp, r, true), WARN);
         }
