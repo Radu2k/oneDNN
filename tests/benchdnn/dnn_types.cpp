@@ -464,9 +464,10 @@ bool attr_t::post_ops_t::entry_t::is_eltwise_kind() const {
     return kind >= pk_t::ABS && kind < pk_t::KIND_TOTAL;
 }
 
-int attr_t::post_ops_t::eltwise_index() const {
-    for (int i = 0; i < len; ++i) {
-        if (attr_t::post_ops_t::entry[i].is_eltwise_kind()) return i;
+int attr_t::post_ops_t::eltwise_index(int start, int stop) const {
+    if (stop == -1) stop = len;
+    for (int idx = start; idx < stop; ++idx) {
+        if (entry[idx].is_eltwise_kind()) return idx;
     }
     return -1;
 }
@@ -475,9 +476,10 @@ bool attr_t::post_ops_t::entry_t::is_convolution_kind() const {
     return kind == pk_t::DW_K3S1P1 || kind == pk_t::DW_K3S2P1;
 }
 
-int attr_t::post_ops_t::convolution_index() const {
-    for (int i = 0; i < len; ++i) {
-        if (attr_t::post_ops_t::entry[i].is_convolution_kind()) return i;
+int attr_t::post_ops_t::convolution_index(int start, int stop) const {
+    if (stop == -1) stop = len;
+    for (int idx = start; idx < stop; ++idx) {
+        if (entry[idx].is_convolution_kind()) return idx;
     }
     return -1;
 }

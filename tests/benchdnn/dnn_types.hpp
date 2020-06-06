@@ -223,8 +223,8 @@ struct attr_t {
 
         bool is_def() const { return len == 0; }
         int find(kind_t kind, int start = 0, int stop = -1) const;
-        int eltwise_index() const;
-        int convolution_index() const;
+        int eltwise_index(int start = 0, int stop = -1) const;
+        int convolution_index(int start = 0, int stop = -1) const;
 
         enum { capacity = 4 };
         int len;
