@@ -66,7 +66,12 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
     DNN_SAFE(dnnl_binary_desc_init(&bd, alg, &src_d[0], &src_d[1], &dst_d),
             WARN);
 
-    auto dnnl_attr = create_dnnl_attr(p->attr);
+    auto src0_scale = p->attr.scales.get(DNNL_ARG_SRC_0).scale;
+    auto src1_scale = p->attr.scales.get(DNNL_ARG_SRC_1).scale;
+    attr_args_t aa;
+    aa.insert(DNNL_ARG_ATTR_ARG_SCALES | DNNL_ARG_SRC_0, 1, &src0_scale);
+    aa.insert(DNNL_ARG_ATTR_ARG_SCALES | DNNL_ARG_SRC_1, 1, &src1_scale);
+    auto dnnl_attr = create_dnnl_attr_v2(p->attr, aa);
 
     dnnl_status_t init_status
             = dnnl_primitive_desc_create(&bpd, &bd, dnnl_attr, engine, NULL);

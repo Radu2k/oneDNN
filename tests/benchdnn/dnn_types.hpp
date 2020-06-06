@@ -304,6 +304,49 @@ private:
     void init_zero_points();
 };
 
+// A container for additional data and info, not available from user's input at
+// parse time, but which are required to create the library attributes.
+struct attr_args_t {
+    struct entry_t {
+        entry_t() = default;
+
+        entry_t(int64_t acount, const float *avals, bool aruntime = false)
+            : count(acount), vals(avals), runtime(aruntime) {}
+
+        int64_t get_count(policy_t policy) const {
+            return (policy == policy_t::COMMON || runtime) ? 1 : count;
+        }
+
+        int get_mask(policy_t policy) const {
+            return mask == -1 ? attr_t::scale_t::get_default_mask(policy)
+                              : mask;
+        }
+
+        const float *get_scales() const {
+            return runtime ? &DNNL_RUNTIME_F32_VAL : vals;
+        }
+
+        int64_t count = 1;
+        int mask = -1;
+        const float *vals = NULL;
+        bool runtime = false;
+    };
+
+    attr_args_t() = default;
+
+    void insert(int aarg, int64_t acount, const float *avals,
+            bool aruntime = false) {
+        entries.insert(std::make_pair(aarg, entry_t(acount, avals, aruntime)));
+    }
+
+    entry_t operator[](int arg) const {
+        const auto it = entries.find(arg);
+        return it == entries.end() ? entry_t() : it->second;
+    }
+
+    std::map<int, entry_t> entries;
+};
+
 struct engine_t {
     engine_t(dnnl_engine_kind_t engine_kind);
     ~engine_t();
@@ -329,6 +372,9 @@ std::ostream &dump_global_params(std::ostream &s);
 dnnl_format_tag_t get_abx_tag(int ndims);
 dnnl_format_tag_t get_axb_tag(int ndims);
 dnnl_format_tag_t convert_tag(const std::string &tag_str, int ndims);
+
+dnnl_primitive_attr_t create_dnnl_attr_v2(
+        const attr_t &attr, const attr_args_t &attr_args);
 
 dnnl_primitive_attr_t create_dnnl_attr(const attr_t &attr, int64_t scale_cnt,
         int scale_mask, const float *scales);

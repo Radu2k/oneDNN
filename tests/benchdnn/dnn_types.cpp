@@ -677,6 +677,85 @@ int attr_bundle_t::generate(int scale_mask) {
     return OK;
 }
 
+dnnl_primitive_attr_t create_dnnl_attr_v2(
+        const attr_t &attr, const attr_args_t &attr_args) {
+    dnnl_primitive_attr_t dnnl_attr = NULL;
+    DNN_SAFE_V(dnnl_primitive_attr_create(&dnnl_attr));
+
+    if (!attr.oscale.is_def()) {
+        auto os_args = attr_args[DNNL_ARG_ATTR_OUTPUT_SCALES];
+
+        const auto &policy = attr.oscale.policy;
+        const auto count = os_args.get_count(policy);
+        const auto mask = os_args.get_mask(policy);
+        const auto scales = os_args.get_scales();
+
+        // TODO: remove me: check if it fails anywhere
+        if (scales == NULL) SAFE_V(FAIL);
+
+        DNN_SAFE_V(dnnl_primitive_attr_set_output_scales(
+                dnnl_attr, count, mask, scales));
+    } else if (!attr.scales.is_def()) {
+        // Only common policy is supported at this point
+        for (const auto &s : attr.scales.scales) {
+            const auto arg = s.first;
+            auto s_args = attr_args[DNNL_ARG_ATTR_ARG_SCALES | arg];
+
+            const auto &policy = s.second.policy;
+            const auto count = s_args.get_count(policy);
+            const auto mask = s_args.get_mask(policy);
+            const auto scales = s_args.get_scales();
+
+            DNN_SAFE_V(dnnl_primitive_attr_set_scales(
+                    dnnl_attr, arg, count, mask, scales));
+        }
+    }
+
+    if (!attr.zero_points.is_def()) {
+        for (const auto &zp : attr.zero_points) {
+            const auto arg = zp.first;
+            auto zp_args = attr_args[DNNL_ARG_ATTR_ZERO_POINTS | arg];
+
+            const auto &policy = policy_t::COMMON;
+            const auto count = zp_args.get_count(policy);
+            const auto mask = zp_args.get_mask(policy);
+            const auto vals = zp.second.runtime ? &DNNL_RUNTIME_S32_VAL
+                                                : &zp.second.value;
+            DNN_SAFE_V(dnnl_primitive_attr_set_zero_points(
+                    dnnl_attr, arg, count, mask, vals));
+        }
+    }
+
+    if (!attr.post_ops.is_def()) {
+        dnnl_post_ops_t ops;
+        DNN_SAFE_V(dnnl_post_ops_create(&ops));
+        for (int idx = 0; idx < attr.post_ops.len; ++idx) {
+            const auto &e = attr.post_ops.entry[idx];
+            if (e.kind == pk_t::SUM) {
+                DNN_SAFE_V(dnnl_post_ops_append_sum(ops, e.sum.scale));
+            } else if (e.is_eltwise_kind()) {
+                DNN_SAFE_V(dnnl_post_ops_append_eltwise(ops, e.eltwise.scale,
+                        e.eltwise.alg, e.eltwise.alpha, e.eltwise.beta));
+            } else {
+                assert(!"unknown attr::post_ops::kind");
+            }
+        }
+        DNN_SAFE_V(dnnl_primitive_attr_set_post_ops(dnnl_attr, ops));
+
+        const_dnnl_post_ops_t c_ops;
+        DNN_SAFE_V(dnnl_primitive_attr_get_post_ops(dnnl_attr, &c_ops));
+        SAFE_V(dnnl_post_ops_len(c_ops) == attr.post_ops.len ? OK : FAIL);
+
+        DNN_SAFE_V(dnnl_post_ops_destroy(ops));
+    }
+
+    DNN_SAFE_V(dnnl_primitive_attr_set_scratchpad_mode(
+            dnnl_attr, scratchpad_mode));
+
+    return dnnl_attr;
+}
+
+// TODO: remove me
 dnnl_primitive_attr_t create_dnnl_attr(const attr_t &attr, int64_t scale_cnt,
         int scale_mask, const float *scales) {
     dnnl_primitive_attr_t dnnl_attr = NULL;
