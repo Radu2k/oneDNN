@@ -2039,6 +2039,9 @@ typedef const struct dnnl_primitive *const_dnnl_primitive_t;
 /// Output scaling factors provided at execution time.
 #define DNNL_ARG_ATTR_OUTPUT_SCALES 513
 
+/// Future support: per argument scaling factors provided at execution time.
+#define DNNL_ARG_ATTR_ARG_SCALES 545
+
 /// Starting index for source arguments for primitives that take a variable
 /// number of source arguments.
 #define DNNL_ARG_MULTIPLE_SRC 1024
