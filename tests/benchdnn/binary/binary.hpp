@@ -123,7 +123,7 @@ private:
 };
 
 void compute_ref(const prb_t *p, const dnn_mem_t &src0, const dnn_mem_t &src1,
-        dnn_mem_t &dst);
+        const std::vector<dnn_mem_t> &binary_po, dnn_mem_t &dst);
 
 int doit(const prb_t *p, res_t *res);
 int bench(int argc, char **argv);

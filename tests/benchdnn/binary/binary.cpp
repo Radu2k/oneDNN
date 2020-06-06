@@ -71,6 +71,7 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
     attr_args_t aa;
     aa.insert(DNNL_ARG_ATTR_ARG_SCALES | DNNL_ARG_SRC_0, 1, &src0_scale);
     aa.insert(DNNL_ARG_ATTR_ARG_SCALES | DNNL_ARG_SRC_1, 1, &src1_scale);
+    aa.prepare_binary_post_op_mds(p->attr, p->ndims[0], p->sdims[0].data());
     auto dnnl_attr = create_dnnl_attr_v2(p->attr, aa);
 
     dnnl_status_t init_status
@@ -210,17 +211,22 @@ int doit(const prb_t *p, res_t *r) {
     dnn_mem_t &dst_dt = p->inplace ? src0_dt : placeholder_dst_dt;
 
     dnn_mem_t scratchpad_dt(scratchpad_md, test_engine);
+    std::vector<dnn_mem_t> binary_po_fp, binary_po_dt;
+    std::vector<int> binary_po_args;
+    SAFE(setup_binary(const_pd, binary_po_args, binary_po_dt, binary_po_fp),
+            WARN);
 
     args_t args;
     args.set(DNNL_ARG_SRC_0, src0_dt);
     args.set(DNNL_ARG_SRC_1, src1_dt);
     args.set(DNNL_ARG_DST, dst_dt);
     args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
+    args.set(binary_po_args, binary_po_dt);
 
     DNN_SAFE(execute_and_wait(b, args), WARN);
 
     if (bench_mode & CORR) {
-        compute_ref(p, src0_fp, src1_fp, dst_fp);
+        compute_ref(p, src0_fp, src1_fp, binary_po_fp, dst_fp);
         dnn_mem_t dst(dst_dt, fp, tag, test_engine);
         SAFE(compare(p, dst_fp, dst, r), WARN);
     }
