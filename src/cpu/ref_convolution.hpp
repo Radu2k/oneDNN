@@ -25,6 +25,7 @@
 #include "common/utils.hpp"
 
 #include "cpu/cpu_convolution_pd.hpp"
+#include "cpu/ref_binary.hpp"
 #include "cpu/ref_eltwise.hpp"
 
 namespace dnnl {
@@ -88,35 +89,30 @@ struct ref_convolution_fwd_t : public primitive_t {
             // the number and sequence of post op is limited
             using namespace dnnl::impl::primitive_kind;
             auto const &po = attr()->post_ops_;
-            auto is_eltwise
-                    = [&](int idx) { return po.entry_[idx].is_eltwise(); };
-
-            switch (po.len_) {
-                case 0: return true;
-                case 1: return is_eltwise(0) || po.contain(sum, 0);
-                case 2:
-                    return (po.contain(sum, 0) && is_eltwise(1))
-                            || (po.contain(sum, 1) && is_eltwise(0));
-                default: return false;
-            }
-            return false;
+            return po.find(convolution) == -1;
         }
     };
 
     ref_convolution_fwd_t(const pd_t *apd) : primitive_t(apd) {
-        for (int idx = 0; idx < dnnl_post_ops::capacity; ++idx)
+        for (int idx = 0; idx < dnnl_post_ops::capacity; ++idx) {
             eltwises_[idx] = nullptr;
+            binaries_[idx] = nullptr;
+        }
         auto &post_ops = pd()->attr()->post_ops_;
         for (int idx = 0; idx < post_ops.len_; ++idx) {
             const auto &e = post_ops.entry_[idx];
-            if (e.kind != dnnl_sum)
+            if (e.kind == dnnl_eltwise)
                 eltwises_[idx] = new ref_eltwise_scalar_fwd_t(e.eltwise);
+            else if (e.kind == dnnl_binary)
+                binaries_[idx] = new ref_binary_scalar_t(e.binary);
         }
     }
 
     ~ref_convolution_fwd_t() {
-        for (int idx = 0; idx < dnnl_post_ops::capacity; ++idx)
+        for (int idx = 0; idx < dnnl_post_ops::capacity; ++idx) {
             if (eltwises_[idx] != nullptr) delete eltwises_[idx];
+            if (binaries_[idx] != nullptr) delete binaries_[idx];
+        }
     }
 
     typedef typename prec_traits<src_type>::type src_data_t;
@@ -133,6 +129,7 @@ private:
     void execute_forward(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
     ref_eltwise_scalar_fwd_t *eltwises_[dnnl_post_ops::capacity];
+    ref_binary_scalar_t *binaries_[dnnl_post_ops::capacity];
 };
 
 template <impl::data_type_t diff_src_type, impl::data_type_t wei_type,

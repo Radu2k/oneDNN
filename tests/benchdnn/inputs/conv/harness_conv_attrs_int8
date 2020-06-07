@@ -39,3 +39,13 @@
 --cfg=s8s8f32,u8s8f32 --batch=shapes_yolov2
 --attr=post_ops='sum:0.5'
 --cfg=s8s8f32 --batch=shapes_3d
+
+# binary post operation
+--reset --dir=FWD_B --mb=2
+--cfg=s8s8s32
+--attr=post_ops='sum:0.5;add:f32:common;abs;min:u8:per_oc'
+--batch=shapes_tails
+
+--cfg=u8s8u8
+--attr=post_ops='add:s8:per_oc;mul:f32:common;min:s32:per_oc;max:s8:common'
+--batch=shapes_resnet_50

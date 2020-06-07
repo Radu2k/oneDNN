@@ -30,6 +30,27 @@ namespace cpu {
 
 using math::get_bias;
 
+namespace {
+float cast_to_dt(data_type_t dt, const void *ptr, dim_t idx) {
+#define CASE(dt) \
+    case dt: return (float)(((typename prec_traits<dt>::type *)ptr)[idx]);
+
+    using namespace data_type;
+    switch (dt) {
+        CASE(bf16);
+        CASE(f16);
+        CASE(f32);
+        CASE(s32);
+        CASE(s8);
+        CASE(u8);
+        default: assert(!"bad data_type");
+    }
+
+#undef CASE
+    return 0;
+}
+} // namespace
+
 template <data_type_t src_type, data_type_t wei_type, data_type_t dst_type,
         data_type_t acc_type>
 void ref_convolution_fwd_t<src_type, wei_type, dst_type,
@@ -86,15 +107,36 @@ void ref_convolution_fwd_t<src_type, wei_type, dst_type,
         d *= scales[(g * OC + oc) * scale_idx_mult];
     };
 
-    auto maybe_postops = [=](float &d, dst_data_t dst) {
-        // Sum and post ops:
-        const post_ops_t &ops = pd()->attr()->post_ops_;
-        for (int idx = 0; idx < ops.len_; ++idx) {
-            const auto &e = ops.entry_[idx];
-            if (e.kind == dnnl_sum)
-                d += e.sum.scale * dst;
-            else
-                d = eltwises_[idx]->compute_scalar(d);
+    auto get_mask = [&](const dims_t &src1_dims) {
+        const auto &src0_dims = dst_d.dims();
+
+        int broadcast_mask = 0;
+        for (int d = 0; d < dst_d.ndims(); ++d)
+            broadcast_mask += src0_dims[d] == src1_dims[d] ? (1 << d) : 0;
+        return broadcast_mask;
+    };
+
+    auto maybe_postops = [=](float &d, dst_data_t dst, dim_t l_offset) {
+        const post_ops_t &po = pd()->attr()->post_ops_;
+        for (auto idx = 0; idx < po.len_; ++idx) {
+            using namespace primitive_kind;
+            const auto &e = po.entry_[idx];
+            switch (e.kind) {
+                case sum: d += e.sum.scale * dst; break;
+                case eltwise: d = eltwises_[idx]->compute_scalar(d); break;
+                case binary: {
+                    const auto &b = e.binary;
+                    const memory_desc_wrapper po_src1_d(b.src1_desc);
+                    auto off_po = dst_d.off_m(
+                            po_src1_d, l_offset, get_mask(po_src1_d.dims()));
+                    const auto attr_po_b = CTX_IN_MEM(
+                            const void *, DNNL_ARG_ATTR_POST_OP_0 + idx);
+                    auto val_po = cast_to_dt(
+                            po_src1_d.data_type(), attr_po_b, off_po);
+                    d = binaries_[idx]->compute_scalar(d, val_po);
+                } break;
+                default: assert("unsupported post op primitive kind!"); break;
+            }
         }
     };
 
@@ -213,6 +255,8 @@ void ref_convolution_fwd_t<src_type, wei_type, dst_type,
         return d;
     };
 
+    const auto OSP = OD * OH * OW;
+
     parallel_nd(G, MB, OC, OD, OH, OW,
             [&](int g, int mb, int oc, int od, int oh, int ow) {
                 float a = bias ? get_bias(bias, bias_d.off(g * OC + oc),
@@ -235,8 +279,11 @@ void ref_convolution_fwd_t<src_type, wei_type, dst_type,
                 else
                     assert(false);
 
+                dim_t dst_l_off = (mb * OC * G + g * OC + oc) * OSP
+                        + od * OH * OW + oh * OW + ow;
+
                 maybe_oscale(a, g, oc);
-                maybe_postops(a, dst[dst_off]);
+                maybe_postops(a, dst[dst_off], dst_l_off);
 
                 if (is_int_conv)
                     dst[dst_off] = qz_a1b0<float, dst_data_t>()(a);
