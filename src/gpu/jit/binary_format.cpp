@@ -181,15 +181,18 @@ public:
 };
 
 status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
-    // Skip binary kernel check during simulation to avoid spurious kernel runs.
-    static bool is_gpu_sim = (bool)dnnl::impl::getenv_int("DNNL_GPU_SIM", 0);
-    if (is_gpu_sim) {
-        *ok = true;
-        return status::success;
-    }
+    // TODO: This function needs to be fixed,currently there are serveral
+    // issues:
+    // - DPC++/OpenCL and DPC++/L0 runtimes are not supported
+    // - This function is called on every engine creation hence overhead on
+    //   memory allocation and kernel compilation. Result caching is needed.
+    // - All nGEN primitives must call mayiuse_ngen_kernels().
+    //
+    // For now, always return true and assume that nGEN kernels can be used.
+    *ok = true;
+    return status::success;
 
-    *ok = false;
-
+#if 0
     auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine);
     if (!gpu_engine) return status::runtime_error;
 
@@ -257,6 +260,7 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     *ok = (result != 0);
 
     return status::success;
+#endif
 }
 
 } // namespace jit
