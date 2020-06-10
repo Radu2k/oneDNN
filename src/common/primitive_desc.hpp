@@ -72,7 +72,7 @@ struct primitive_desc_t : public c_compatible {
             return arg_usage_t::input;
         if (arg == DNNL_ARG_SCRATCHPAD && !is_zero_md(scratchpad_md()))
             return arg_usage_t::output;
-        for (int idx = 0; idx < attr()->post_ops_.len_; ++idx) {
+        for (int idx = 0; idx < attr()->post_ops_.len(); ++idx) {
             if (attr()->post_ops_.contain(primitive_kind::binary, idx)
                     && arg == DNNL_ARG_ATTR_POST_OP_0 + idx) {
                 return arg_usage_t::input;
@@ -180,7 +180,7 @@ struct primitive_desc_t : public c_compatible {
     virtual int n_outputs() const { return 0; }
     virtual int n_binary_po_inputs() const {
         int n_inputs = 0;
-        for (int idx = 0; idx < attr()->post_ops_.len_; ++idx) {
+        for (int idx = 0; idx < attr()->post_ops_.len(); ++idx) {
             if (attr()->post_ops_.contain(primitive_kind::binary, idx))
                 n_inputs++;
         }

@@ -117,13 +117,19 @@ void ref_convolution_fwd_t<src_type, wei_type, dst_type,
     };
 
     auto maybe_postops = [=](float &d, dst_data_t dst, dim_t l_offset) {
+        auto eltwise_it = eltwise_ker_.begin();
+        auto binary_it = binary_ker_.begin();
         const post_ops_t &po = pd()->attr()->post_ops_;
-        for (auto idx = 0; idx < po.len_; ++idx) {
+
+        for (auto idx = 0; idx < po.len(); ++idx) {
             using namespace primitive_kind;
             const auto &e = po.entry_[idx];
             switch (e.kind) {
                 case sum: d += e.sum.scale * dst; break;
-                case eltwise: d = eltwises_[idx]->compute_scalar(d); break;
+                case eltwise:
+                    d = (*eltwise_it)->compute_scalar(d);
+                    ++eltwise_it;
+                    break;
                 case binary: {
                     const auto &b = e.binary;
                     const memory_desc_wrapper po_src1_d(b.src1_desc);
@@ -133,7 +139,8 @@ void ref_convolution_fwd_t<src_type, wei_type, dst_type,
                             const void *, DNNL_ARG_ATTR_POST_OP_0 + idx);
                     auto val_po = cast_to_dt(
                             po_src1_d.data_type(), attr_po_b, off_po);
-                    d = binaries_[idx]->compute_scalar(d, val_po);
+                    d = (*binary_it)->compute_scalar(d, val_po);
+                    ++binary_it;
                 } break;
                 default: assert("unsupported post op primitive kind!"); break;
             }

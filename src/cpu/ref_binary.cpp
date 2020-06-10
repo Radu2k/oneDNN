@@ -118,14 +118,17 @@ void ref_binary_t<src0_type, src1_type, dst_type>::execute_ref(
         if (do_scale_src1) y_f *= scales[1].scales_[0];
 
         float acc = compute_binary_scalar(alg, x_f, y_f);
+        auto eltwise_it = eltwise_ker_.begin();
+        auto binary_it = binary_ker_.begin();
 
-        for (auto idx = 0; idx < po.len_; ++idx) {
+        for (auto idx = 0; idx < po.len(); ++idx) {
             using namespace primitive_kind;
             const auto &e = po.entry_[idx];
             switch (e.kind) {
                 case sum: acc += sum_scale * dst_f; break;
                 case eltwise:
-                    acc = eltwise_ker_[idx]->compute_scalar(acc);
+                    acc = (*eltwise_it)->compute_scalar(acc);
+                    ++eltwise_it;
                     break;
                 case binary: {
                     const auto &b = e.binary;
@@ -136,7 +139,8 @@ void ref_binary_t<src0_type, src1_type, dst_type>::execute_ref(
                             const void *, DNNL_ARG_ATTR_POST_OP_0 + idx);
                     auto val_po = cast_to_dt(
                             po_src1_d.data_type(), attr_po_b, off_po);
-                    acc = binary_ker_[idx]->compute_scalar(acc, val_po);
+                    acc = (*binary_it)->compute_scalar(acc, val_po);
+                    ++binary_it;
                 } break;
                 default: assert("unsupported post op primitive kind!"); break;
             }

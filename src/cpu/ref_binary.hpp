@@ -100,13 +100,14 @@ struct ref_binary_t : public primitive_t {
     status_t init(engine_t *engine) override {
         using namespace primitive_kind;
         const auto &po = pd()->attr()->post_ops_;
-        for (auto idx = 0; idx < po.len_; ++idx) {
+        for (auto idx = 0; idx < po.len(); ++idx) {
             if (po.contain(eltwise, idx))
-                eltwise_ker_[idx].reset(
-                        new ref_eltwise_scalar_fwd_t(po.entry_[idx].eltwise));
+                eltwise_ker_.push_back(
+                        utils::make_unique<ref_eltwise_scalar_fwd_t>(
+                                po.entry_[idx].eltwise));
             else if (po.contain(binary, idx))
-                binary_ker_[idx].reset(
-                        new ref_binary_scalar_t(po.entry_[idx].binary));
+                binary_ker_.push_back(utils::make_unique<ref_binary_scalar_t>(
+                        po.entry_[idx].binary));
         }
         return status::success;
     }
@@ -123,9 +124,8 @@ struct ref_binary_t : public primitive_t {
 private:
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
     void execute_ref(const exec_ctx_t &ctx) const;
-    std::unique_ptr<ref_eltwise_scalar_fwd_t>
-            eltwise_ker_[dnnl_post_ops::capacity];
-    std::unique_ptr<ref_binary_scalar_t> binary_ker_[dnnl_post_ops::capacity];
+    std::vector<std::unique_ptr<ref_eltwise_scalar_fwd_t>> eltwise_ker_;
+    std::vector<std::unique_ptr<ref_binary_scalar_t>> binary_ker_;
 };
 
 } // namespace cpu

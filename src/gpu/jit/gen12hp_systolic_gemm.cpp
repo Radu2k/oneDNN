@@ -72,11 +72,11 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
                 && (attr()->zero_points_.has_default_values(DNNL_ARG_DST)
                         || !attr()->zero_points_.defined(DNNL_ARG_DST))
                 && attr()->output_scales_.mask_ == 0
-                && attr()->post_ops_.len_ <= 2
-                && IMPLICATION(attr()->post_ops_.len_ == 1,
+                && attr()->post_ops_.len() <= 2
+                && IMPLICATION(attr()->post_ops_.len() == 1,
                         attr()->post_ops_.find(eltwise) != -1
                                 || attr()->post_ops_.find(sum) != -1)
-                && IMPLICATION(attr()->post_ops_.len_ == 2,
+                && IMPLICATION(attr()->post_ops_.len() == 2,
                         attr()->post_ops_.find(sum) == 0
                                 && attr()->post_ops_.find(eltwise) == 1);
 
