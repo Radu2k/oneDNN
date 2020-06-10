@@ -30,6 +30,38 @@ namespace impl {
 namespace gpu {
 namespace compute {
 
+enum class gpu_arch_t {
+    unknown,
+    gen9,
+    gen12lp,
+    gen12hp,
+};
+
+inline gpu_arch_t str2gpu_arch(const char *str) {
+#define CASE(_case) \
+    if (!strcmp(STRINGIFY(_case), str)) return gpu_arch_t::_case
+
+    CASE(gen9);
+    CASE(gen12lp);
+    CASE(gen12hp);
+    return gpu_arch_t::unknown;
+#undef CASE
+}
+
+inline const char *gpu_arch2str(gpu_arch_t arch) {
+#define CASE(_case) \
+    case gpu_arch_t::_case: return STRINGIFY(_case)
+
+    switch (arch) {
+        CASE(gen9);
+        CASE(gen12lp);
+        CASE(gen12hp);
+        CASE(unknown);
+    }
+    return "unknown";
+#undef CASE
+}
+
 enum class device_ext_t : int64_t {
     intel_subgroups = 1 << 0,
     intel_subgroups_short = 1 << 1,
@@ -128,6 +160,42 @@ public:
     virtual ~device_info_t() = default;
 
     virtual status_t init() = 0;
+
+    status_t init_arch() {
+        if (name().find("Gen9") != std::string::npos)
+            real_gpu_arch_ = gpu_arch_t::gen9;
+        else if (name().find("Gen12LP") != std::string::npos)
+            real_gpu_arch_ = gpu_arch_t::gen12lp;
+        else if (name().find("Gen12HP") != std::string::npos)
+            real_gpu_arch_ = gpu_arch_t::gen12hp;
+        else
+            real_gpu_arch_ = gpu_arch_t::unknown;
+
+        gpu_arch_t env_gpu_arch = gpu_arch_t::unknown;
+        char gpu_arch_str[32];
+        if (getenv("DNNL_GPU_ARCH", gpu_arch_str, sizeof(gpu_arch_str)) > 0) {
+            env_gpu_arch = str2gpu_arch(gpu_arch_str);
+        }
+
+        // GPU architecture is not overriden from environment, set and return.
+        if (env_gpu_arch == gpu_arch_t::unknown) {
+            gpu_arch_ = real_gpu_arch_;
+            return status::success;
+        }
+
+        // Environment GPU architecture is different from the detected one, use
+        // emulation.
+
+        // Do not allow emulating older architectures
+        if ((int)env_gpu_arch < (int)real_gpu_arch_) {
+            assert(!"not expected");
+            return status::runtime_error;
+        }
+        gpu_arch_ = env_gpu_arch;
+
+        return status::success;
+    }
+
     virtual bool has(device_ext_t ext) const = 0;
 
     virtual int eu_count() const = 0;
@@ -138,15 +206,19 @@ public:
         return runtime_version_;
     }
     const std::string &name() const { return name_; }
+    gpu_arch_t gpu_arch() const { return gpu_arch_; }
 
 protected:
     void set_runtime_version(const runtime_version_t &runtime_version) {
         runtime_version_ = runtime_version;
     }
 
+    gpu_arch_t real_gpu_arch() const { return real_gpu_arch_; }
     void set_name(const std::string &name) { name_ = name; }
 
 private:
+    gpu_arch_t gpu_arch_ = gpu_arch_t::unknown;
+    gpu_arch_t real_gpu_arch_ = gpu_arch_t::unknown;
     runtime_version_t runtime_version_;
     std::string name_;
 };

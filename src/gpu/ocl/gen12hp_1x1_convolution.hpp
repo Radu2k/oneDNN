@@ -75,12 +75,10 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
 
-            auto *compute_engine = utils::downcast<ocl_gpu_engine_t *>(engine);
-            if (engine->runtime_kind() == dnnl_runtime_ocl) {
-                auto *dev_info = utils::downcast<const ocl_gpu_device_info_t *>(
-                        compute_engine->device_info());
-                is_gen12hp = dev_info->gpu_arch() == gpu_arch_t::gen12hp;
-            }
+            auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine);
+            auto *dev_info = compute_engine->device_info();
+            is_gen12hp = dev_info->gpu_arch() == compute::gpu_arch_t::gen12hp;
 
             return ok ? status::success : status::unimplemented;
         }
