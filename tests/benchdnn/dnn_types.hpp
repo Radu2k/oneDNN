@@ -238,17 +238,39 @@ struct attr_t {
                 } binary;
             };
 
-            bool is_eltwise_kind() const;
+            bool is_sum_kind() const;
             bool is_convolution_kind() const;
+            bool is_eltwise_kind() const;
             bool is_binary_kind() const;
         };
 
-        post_ops_t() : len(0) {}
+        post_ops_t() : entry() {}
+
+        void append_sum(float ascale = 1.f);
+        void append_convolution(kind_t akind, dnnl_data_type_t adst_dt,
+                attr_t::scale_t aoscale);
+        void append_eltwise(kind_t akind, float aalpha = 0.f, float abeta = 0.f,
+                float ascale = 1.f);
+        void append_binary(kind_t akind, dnnl_data_type_t asrc1_dt,
+                scale_t::policy_t apolicy = scale_t::policy_t::COMMON);
 
         int from_str(const char *str, const char **end_s);
         void to_str(char *buffer, char **end_b) const;
 
-        bool is_def() const { return len == 0; }
+        int len() const { return (int)entry.size(); }
+        bool is_def() const { return len() == 0; }
+
+        static bool is_sum_kind(kind_t akind) { return akind == SUM; }
+        static bool is_convolution_kind(kind_t akind) {
+            return akind == DW_K3S1P1 || akind == DW_K3S2P1;
+        }
+        static bool is_eltwise_kind(kind_t akind) {
+            return akind > ELTWISE_START && akind < ELTWISE_END;
+        }
+        static bool is_binary_kind(kind_t akind) {
+            return akind > BINARY_START && akind < BINARY_END;
+        }
+
         int find(kind_t kind, int start = 0, int stop = -1) const;
         int eltwise_index(int start = 0, int stop = -1) const;
         int convolution_index(int start = 0, int stop = -1) const;
@@ -256,9 +278,7 @@ struct attr_t {
 
         std::vector<int> get_binary_po_masks() const;
 
-        enum { capacity = 4 };
-        int len;
-        entry_t entry[4];
+        std::vector<entry_t> entry;
     };
 
     scale_t oscale;

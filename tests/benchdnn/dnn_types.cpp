@@ -361,7 +361,7 @@ dnnl_alg_kind_t attr_t::post_ops_t::kind2dnnl_kind(pk_t kind) {
 
 std::vector<int> attr_t::post_ops_t::get_binary_po_masks() const {
     std::vector<int> v_masks;
-    for (int idx = 0; idx < len; ++idx) {
+    for (int idx = 0; idx < len(); ++idx) {
         const auto &e = this->entry[idx];
         if (!e.is_binary_kind()) continue;
 
@@ -387,7 +387,6 @@ int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
             ++s;
             return OK;
         }
-        if (len == capacity) return FAIL;
 
         for (const auto &table_entry : kind_table) {
             const auto k = table_entry.kind;
@@ -402,49 +401,38 @@ int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
             const char *ks = table_entry.kind_name;
 
             if (input_kind.compare(ks) == 0) {
-                auto &e = entry[len];
-
-                e.kind = k;
                 s += strlen(ks);
-                if (k == SUM) {
+                if (is_sum_kind(k)) {
+                    float scale = 1.f;
                     if (*s == ':') {
                         char *end;
-                        e.sum.scale = strtof(++s, &end);
+                        scale = strtof(++s, &end);
                         if (end == s) return FAIL;
                         s = end;
-                    } else {
-                        e.sum.scale = 1.f;
                     }
-                } else if (e.is_convolution_kind()) {
-                    e.convolution.dst_dt = dnnl_f32;
-                    e.convolution.stride = k == DW_K3S1P1 ? 1 : 2;
-                    e.convolution.oscale = attr_t::scale_t();
+                    this->append_sum(scale);
+                } else if (is_convolution_kind(k)) {
+                    dnnl_data_type_t dst_dt = dnnl_f32;
+                    scale_t oscale = attr_t::scale_t();
 
                     if (*s == ':') ++s;
                     auto *end = s;
                     while (*s && isalnum(*s))
                         ++s;
                     if (end != s) {
-                        e.convolution.dst_dt
-                                = str2dt(std::string(end, s - end).c_str());
+                        dst_dt = str2dt(std::string(end, s - end).c_str());
                         if (*s == ':') {
                             ++s;
-                            attr_t::scale_t oscale;
                             auto rc = oscale.str2scale(s, &s);
                             if (rc != OK) return rc;
-                            e.convolution.oscale = oscale;
                         }
                     }
-                } else if (e.is_eltwise_kind()) {
-                    e.eltwise.alg = kind2dnnl_kind(k);
-                    e.eltwise.scale = 1.f;
-                    e.eltwise.alpha = e.eltwise.beta = 0.f;
-
+                    this->append_convolution(k, dst_dt, oscale);
+                } else if (is_eltwise_kind(k)) {
+                    float scale = 1.f, alpha = 0.f, beta = 0.f;
                     for (int i = 0; i < 3; ++i) {
                         // :alpha:beta:scale
-                        float &val = i == 0
-                                ? e.eltwise.alpha
-                                : i == 1 ? e.eltwise.beta : e.eltwise.scale;
+                        float &val = i == 0 ? alpha : i == 1 ? beta : scale;
                         if (*s == ':') {
                             char *end;
                             val = strtof(++s, &end);
@@ -453,24 +441,21 @@ int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
                         } else {
                             break;
                         }
+                        if (scale <= 0) return FAIL;
                     }
+                    this->append_eltwise(k, alpha, beta, scale);
+                } else if (is_binary_kind(k)) {
+                    dnnl_data_type_t src1_dt = dnnl_data_type_undef;
+                    policy_t policy = policy_t::COMMON;
 
-                    if (e.eltwise.scale <= 0) return FAIL;
-                } else if (e.is_binary_kind()) {
-                    e.binary.alg = kind2dnnl_kind(k);
-                    e.binary.policy = policy_t::COMMON;
-
-                    // TODO: rework parser completely
                     if (*s == ':') ++s;
                     auto *end = s;
                     while (*s && isalnum(*s))
                         ++s;
                     if (end != s) {
                         // actually, dt is mandatory to avoid assumptions
-                        const auto dt_str = std::string(end, s - end).c_str();
-                        e.binary.src1_dt = str2dt(dt_str);
-                        if (e.binary.src1_dt == dnnl_data_type_undef)
-                            return FAIL;
+                        src1_dt = str2dt(std::string(end, s - end).c_str());
+                        if (src1_dt == dnnl_data_type_undef) return FAIL;
 
                         // optional mask can be passed
                         if (*s == ':') ++s;
@@ -478,18 +463,16 @@ int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
                         while (*s && (isalnum(*s) || *s == '_'))
                             ++s;
                         if (end != s) {
-                            const auto policy_str
-                                    = std::string(end, s - end).c_str();
-                            e.binary.policy
-                                    = attr_t::scale_t::str2policy(policy_str);
+                            policy = attr_t::scale_t::str2policy(
+                                    std::string(end, s - end).c_str());
                         }
                     }
+                    this->append_binary(k, src1_dt, policy);
                 }
 
                 break;
             }
         }
-        ++len;
 
         if (*s == ';') ++s;
     }
@@ -502,20 +485,62 @@ bool attr_t::is_def() const {
             && post_ops.is_def();
 }
 
+void attr_t::post_ops_t::append_sum(float ascale) {
+    entry_t e;
+    e.kind = SUM;
+    e.sum.scale = ascale;
+    entry.push_back(e);
+}
+
+void attr_t::post_ops_t::append_convolution(
+        kind_t akind, dnnl_data_type_t adst_dt, attr_t::scale_t aoscale) {
+    entry_t e;
+    e.kind = akind;
+    e.convolution.stride = e.kind == DW_K3S1P1 ? 1 : 2;
+    e.convolution.dst_dt = adst_dt;
+    e.convolution.oscale = aoscale;
+    entry.push_back(e);
+}
+
+void attr_t::post_ops_t::append_eltwise(
+        kind_t akind, float aalpha, float abeta, float ascale) {
+    entry_t e;
+    e.kind = akind;
+    e.eltwise.alg = kind2dnnl_kind(e.kind);
+    e.eltwise.alpha = aalpha;
+    e.eltwise.beta = abeta;
+    e.eltwise.scale = ascale;
+    entry.push_back(e);
+}
+
+void attr_t::post_ops_t::append_binary(
+        kind_t akind, dnnl_data_type_t asrc1_dt, scale_t::policy_t apolicy) {
+    entry_t e;
+    e.kind = akind;
+    e.binary.alg = kind2dnnl_kind(e.kind);
+    e.binary.src1_dt = asrc1_dt;
+    e.binary.policy = apolicy;
+    entry.push_back(e);
+}
+
 int attr_t::post_ops_t::find(pk_t kind, int start, int stop) const {
-    if (stop == -1) stop = len;
-    stop = MIN2(stop, len);
+    if (stop == -1) stop = len();
+    stop = MIN2(stop, len());
     for (int idx = start; idx < stop; ++idx)
         if (entry[idx].kind == kind) return idx;
     return -1;
 }
 
+bool attr_t::post_ops_t::entry_t::is_sum_kind() const {
+    return attr_t::post_ops_t::is_sum_kind(kind);
+}
+
 bool attr_t::post_ops_t::entry_t::is_eltwise_kind() const {
-    return kind > pk_t::ELTWISE_START && kind < pk_t::ELTWISE_END;
+    return attr_t::post_ops_t::is_eltwise_kind(kind);
 }
 
 int attr_t::post_ops_t::eltwise_index(int start, int stop) const {
-    if (stop == -1) stop = len;
+    if (stop == -1) stop = len();
     for (int idx = start; idx < stop; ++idx) {
         if (entry[idx].is_eltwise_kind()) return idx;
     }
@@ -523,11 +548,11 @@ int attr_t::post_ops_t::eltwise_index(int start, int stop) const {
 }
 
 bool attr_t::post_ops_t::entry_t::is_convolution_kind() const {
-    return kind == pk_t::DW_K3S1P1 || kind == pk_t::DW_K3S2P1;
+    return attr_t::post_ops_t::is_convolution_kind(kind);
 }
 
 int attr_t::post_ops_t::convolution_index(int start, int stop) const {
-    if (stop == -1) stop = len;
+    if (stop == -1) stop = len();
     for (int idx = start; idx < stop; ++idx) {
         if (entry[idx].is_convolution_kind()) return idx;
     }
@@ -535,11 +560,11 @@ int attr_t::post_ops_t::convolution_index(int start, int stop) const {
 }
 
 bool attr_t::post_ops_t::entry_t::is_binary_kind() const {
-    return kind > pk_t::BINARY_START && kind < pk_t::BINARY_END;
+    return attr_t::post_ops_t::is_binary_kind(kind);
 }
 
 int attr_t::post_ops_t::binary_index(int start, int stop) const {
-    if (stop == -1) stop = len;
+    if (stop == -1) stop = len();
     for (int idx = start; idx < stop; ++idx) {
         if (entry[idx].is_binary_kind()) return idx;
     }
@@ -637,7 +662,7 @@ std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t::kind_t &k) {
 std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t &post_ops) {
     s << "'";
 
-    for (int idx = 0; idx < post_ops.len; ++idx) {
+    for (int idx = 0; idx < post_ops.len(); ++idx) {
         if (idx > 0) s << ";";
 
         const auto &e = post_ops.entry[idx];
@@ -738,7 +763,7 @@ int attr_args_t::prepare_binary_post_op_mds(
         const attr_t &attr, int ndims, const dnnl_dims_t dims) {
     const auto &po = attr.post_ops;
     // iterate over all post ops and prepare md for each binary
-    for (int idx = 0; idx < po.len; ++idx) {
+    for (int idx = 0; idx < po.len(); ++idx) {
         const auto &e = po.entry[idx];
         if (!e.is_binary_kind()) continue;
 
@@ -811,10 +836,11 @@ dnnl_primitive_attr_t create_dnnl_attr_v2(
     }
 
     if (!attr.post_ops.is_def()) {
+        const auto &po = attr.post_ops;
         dnnl_post_ops_t ops;
         DNN_SAFE_V(dnnl_post_ops_create(&ops));
-        for (int idx = 0; idx < attr.post_ops.len; ++idx) {
-            const auto &e = attr.post_ops.entry[idx];
+        for (int idx = 0; idx < po.len(); ++idx) {
+            const auto &e = po.entry[idx];
             if (e.kind == pk_t::SUM) {
                 DNN_SAFE_V(dnnl_post_ops_append_sum(ops, e.sum.scale));
             } else if (e.is_eltwise_kind()) {
@@ -836,7 +862,7 @@ dnnl_primitive_attr_t create_dnnl_attr_v2(
 
         const_dnnl_post_ops_t c_ops;
         DNN_SAFE_V(dnnl_primitive_attr_get_post_ops(dnnl_attr, &c_ops));
-        SAFE_V(dnnl_post_ops_len(c_ops) == attr.post_ops.len ? OK : FAIL);
+        SAFE_V(dnnl_post_ops_len(c_ops) == po.len() ? OK : FAIL);
 
         DNN_SAFE_V(dnnl_post_ops_destroy(ops));
     }
@@ -898,10 +924,11 @@ dnnl_primitive_attr_t create_dnnl_attr(const attr_t &attr, int64_t scale_cnt,
     }
 
     if (!attr.post_ops.is_def()) {
+        const auto &po = attr.post_ops;
         dnnl_post_ops_t ops;
         DNN_SAFE_V(dnnl_post_ops_create(&ops));
-        for (int idx = 0; idx < attr.post_ops.len; ++idx) {
-            const auto &e = attr.post_ops.entry[idx];
+        for (int idx = 0; idx < po.len(); ++idx) {
+            const auto &e = po.entry[idx];
             if (e.kind == pk_t::SUM) {
                 DNN_SAFE_V(dnnl_post_ops_append_sum(ops, e.sum.scale));
             } else if (e.is_eltwise_kind()) {
@@ -915,7 +942,7 @@ dnnl_primitive_attr_t create_dnnl_attr(const attr_t &attr, int64_t scale_cnt,
 
         const_dnnl_post_ops_t c_ops;
         DNN_SAFE_V(dnnl_primitive_attr_get_post_ops(dnnl_attr, &c_ops));
-        SAFE_V(dnnl_post_ops_len(c_ops) == attr.post_ops.len ? OK : FAIL);
+        SAFE_V(dnnl_post_ops_len(c_ops) == po.len() ? OK : FAIL);
 
         DNN_SAFE_V(dnnl_post_ops_destroy(ops));
     }
@@ -1124,9 +1151,9 @@ void maybe_post_ops(const attr_t &attr, float &val, float sum_val,
     using namespace dnnl::impl::math;
 
     auto it_bin_po = v_binary_vals.begin();
-    const auto &ops = attr.post_ops;
-    for (int idx = 0; idx < ops.len; ++idx) {
-        const auto &e = ops.entry[idx];
+    const auto &po = attr.post_ops;
+    for (int idx = 0; idx < po.len(); ++idx) {
+        const auto &e = po.entry[idx];
 
         if (e.kind == pk_t::SUM) {
             val += e.sum.scale * sum_val;

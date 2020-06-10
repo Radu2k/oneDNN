@@ -136,30 +136,30 @@ static int check_str2attr() {
 }
 
 static int check_post_ops2str() {
-    attr_t::post_ops_t ops;
-    CHECK_EQ(ops.is_def(), true);
+    attr_t::post_ops_t po;
+    CHECK_EQ(po.is_def(), true);
+    CHECK_PRINT_EQ(po, "''");
 
-    CHECK_PRINT_EQ(ops, "''");
+    po.append_sum(2.f);
+    CHECK_EQ(po.len(), 1);
+    CHECK_PRINT_EQ(po, "'sum:2'");
 
-    ops.len = 4;
-    for (int i = 0; i < 2; ++i) {
-        ops.entry[2 * i + 0].kind = attr_t::post_ops_t::SUM;
-        ops.entry[2 * i + 0].sum.scale = 2. + i;
-        ops.entry[2 * i + 1].kind = attr_t::post_ops_t::RELU;
-        ops.entry[2 * i + 1].eltwise.scale = 1.;
-        ops.entry[2 * i + 1].eltwise.alpha = (i == 0 ? 0. : 5.);
-        ops.entry[2 * i + 1].eltwise.beta = 0.;
-    }
-    CHECK_PRINT_EQ(ops, "'sum:2;relu;sum:3;relu:5'");
+    po.append_eltwise(attr_t::post_ops_t::RELU, 0.f, 0.f, 1.f);
+    CHECK_EQ(po.len(), 2);
+    CHECK_PRINT_EQ(po, "'sum:2;relu'");
 
-    ops.len = 3;
-    CHECK_PRINT_EQ(ops, "'sum:2;relu;sum:3'");
+    po.append_sum();
+    CHECK_EQ(po.len(), 3);
+    CHECK_PRINT_EQ(po, "'sum:2;relu;sum'");
 
-    ops.len = 2;
-    CHECK_PRINT_EQ(ops, "'sum:2;relu'");
+    po.append_eltwise(attr_t::post_ops_t::RELU, 5.f, 0.f, 1.f);
+    CHECK_EQ(po.len(), 4);
+    CHECK_PRINT_EQ(po, "'sum:2;relu;sum;relu:5'");
 
-    ops.len = 1;
-    CHECK_PRINT_EQ(ops, "'sum:2'");
+    po.append_binary(attr_t::post_ops_t::ADD, dnnl_s8,
+            attr_t::scale_t::policy_t::PER_OC);
+    CHECK_EQ(po.len(), 5);
+    CHECK_PRINT_EQ(po, "'sum:2;relu;sum;relu:5;add:s8:per_oc'");
 
     return OK;
 }
