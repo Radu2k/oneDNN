@@ -33,7 +33,9 @@ namespace {
 #define INSTANCE(...) __VA_ARGS__::pd_t::create
 static const spd_create_f sum_impl_list[] = {
         INSTANCE(cm::simple_sum_t),
-        INSTANCE(jit::gen9_simple_sum_t),
+        // TODO: Re-enable nGEN-based implementation after architecture
+        // dispatching is implemented.
+        // INSTANCE(jit::gen9_simple_sum_t),
         INSTANCE(ocl::simple_sum_t<data_type::f32>),
         INSTANCE(ocl::ref_sum_t),
         nullptr,
