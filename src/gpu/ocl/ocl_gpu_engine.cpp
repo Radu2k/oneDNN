@@ -142,6 +142,12 @@ status_t ocl_gpu_engine_t::create_kernels_from_ocl_source(
         const compute::kernel_ctx_t &kernel_ctx) const {
     std::string options = kernel_ctx.options();
 
+    // XXX: Update options by adding macros for OpenCL extensions that are not
+    // handled properly by the OpenCL runtime
+    auto *dev_info
+            = utils::downcast<const ocl_gpu_device_info_t *>(device_info());
+    options += " " + dev_info->get_cl_ext_options();
+
     cl_int err;
     cl_program program = clCreateProgramWithSource(
             context(), count_lines(code_strings), code_strings, nullptr, &err);
