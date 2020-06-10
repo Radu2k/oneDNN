@@ -32,24 +32,27 @@
 #define BLOCK_READ_WEI_FROM_SLM(data, idx) \
     data = READ_LOCAL_US_8((__local ushort *)&wei_slm[idx]);
 
-#define INPUT_PIXEL_WIDTH_OFFSET (IC_BLOCK * MB_BLOCK)
-#define INPUT_PIXEL_HEIGHT_OFFSET (INPUT_PIXEL_WIDTH_OFFSET * IW)
-#define INPUT_CHANNEL_BLOCK_OFFSET (INPUT_PIXEL_HEIGHT_OFFSET * IH) // For NChw
+int off_NChw32n16c(int n, int c, int h, int w, int C, int H, int W) {
+    int off = 0;
+    off += (n / 32) * (C / 16) * H * W * 32 * 16;
+    off += (c / 16) * H * W * 32 * 16;
+    off += h * W * 32 * 16;
+    off += w * 32 * 16;
+    off += (n % 32) * 16;
+    off += (c % 16);
+    return off;
+}
 
-#define OUTPUT_PIXEL_WIDTH_OFFSET (IC_BLOCK * MB_BLOCK)
-#define OUTPUT_PIXEL_HEIGHT_OFFSET (OUTPUT_PIXEL_WIDTH_OFFSET * OW)
-#define OUTPUT_CHANNEL_BLOCK_OFFSET \
-    (OUTPUT_PIXEL_HEIGHT_OFFSET * OH) // For NChw
-
-// Weights offsets
-#define KERNEL_BLOCK_OFFSET (4 * 8 * 8 * 2)
-#define NEXT_KERNEL_OFFSET (KERNEL_BLOCK_OFFSET * IC_NCHUNK * 2)
-
-#define OC_BLOCK_NUMBER (2)
-#define WEI_IC_NCHUNK (IC_NCHUNK * 2)
-#define WEI_IC_BLOCK (8)
-#define WEI_IC_BLOCK_NUMBER (2)
-#define OC_PER_WI (4)
+int off_OI4o8i8o2i(int o, int i, int I) {
+    int off = 0;
+    off += (o / 32) * (I / 16) * 4 * 8 * 8 * 2;
+    off += (i / 16) * 4 * 8 * 8 * 2;
+    off += ((o % 32) / 8) * 8 * 8 * 2;
+    off += ((i % 16) / 2) * 8 * 2;
+    off += (o % 8) * 2;
+    off += (i % 2);
+    return off;
+}
 
 #if DST_DT_F16
 #define TO_DST(_x) as_ushort8(convert_half8(_x))
@@ -150,20 +153,10 @@ gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
     const uint iw = ow * SW;
     const uint ih = oh * SH;
 
-    // Source (At ic = 0)
-    src += mb_group_id * INPUT_CHANNEL_BLOCK_OFFSET * IC_NCHUNK; // MB off
-    src += ih * INPUT_PIXEL_HEIGHT_OFFSET; // height offset
-    src += iw * INPUT_PIXEL_WIDTH_OFFSET; // width offset
-
-    // Destination
-    dst += mb_group_id * OUTPUT_CHANNEL_BLOCK_OFFSET * OC_NCHUNK; // MB off
-    dst += OUTPUT_CHANNEL_BLOCK_OFFSET * oc_group_id
-            * OC_BLOCK_NUMBER; //OC offset
-    dst += oh * OUTPUT_PIXEL_HEIGHT_OFFSET; // height offset
-    dst += ow * OUTPUT_PIXEL_WIDTH_OFFSET; // width offset
-
-    // Weights
-    wei += oc_group_id * KERNEL_BLOCK_OFFSET * IC_NCHUNK;
+    src += off_NChw32n16c(mb_group_id * MB_BLOCK, 0, ih, iw, IC, IH, IW);
+    dst += off_NChw32n16c(
+            mb_group_id * MB_BLOCK, oc_group_id * OC_BLOCK, oh, ow, OC, OH, OW);
+    wei += off_OI4o8i8o2i(oc_group_id * OC_BLOCK, 0, IC);
 
 #ifdef XF16_SRC_SLM
     __local ushort src_slm[IC_BLOCK * MB_BLOCK * LWS_1];
@@ -301,8 +294,8 @@ gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
             C33 = MMAD8X8(S3, W3, C33);
         }
 
-        src += INPUT_CHANNEL_BLOCK_OFFSET;
-        wei += KERNEL_BLOCK_OFFSET;
+        src += off_NChw32n16c(0, IC_BLOCK, 0, 0, IC, IH, IW);
+        wei += off_OI4o8i8o2i(0, IC_BLOCK, IC);
     }
 
     float8 dst_val[2];
@@ -357,7 +350,7 @@ gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
         // Write results from MB(24-31) of 2 Output Channels
         PACK_AND_WRITE(C03, C13, bias_val_1, 3 * WRITE_OFFSET)
 
-        dst += OUTPUT_CHANNEL_BLOCK_OFFSET;
+        dst += off_NChw32n16c(0, 16, 0, 0, OC, OH, OW);
 
         // Write results from MB(0-7) of 2 Output Channels
         PACK_AND_WRITE(C20, C30, bias_val_2, 0)
