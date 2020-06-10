@@ -219,7 +219,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
                             trans, ab_zero_points_, clear_sum);
             if (status != status::success) return status;
 
-            gpu_engine->create_kernel(&copy_kernel_[copy_b][clear_sum],
+            create_kernel(gpu_engine, &copy_kernel_[copy_b][clear_sum],
                     "gen12hp_systolic_gemm_copy", kernel_ctx);
             if (!copy_kernel_[copy_b][clear_sum]) return status::runtime_error;
         }
@@ -280,14 +280,14 @@ gen12hp_systolic_gemm_t::get_blocking() const {
 }
 
 status_t gen12hp_systolic_gemm_t::launch_copy(
-        compute::compute_stream_t *compute_stream, int64_t r, int64_t c,
+        const gemm_exec_ctx_t &ctx, int64_t r, int64_t c,
         const memory_storage_t &src, int64_t offset_src, int64_t ld_src,
         const memory_storage_t &dst, int32_t offset_dst, int32_t ld_dst,
         bool copyb) const {
 
     if (ab_zero_points_) {
         auto status = launch_clear_sum(
-                compute_stream, r, c, dst, offset_dst, ld_dst, copyb);
+                ctx, r, c, dst, offset_dst, ld_dst, copyb);
         if (status) return status;
     }
 
@@ -338,11 +338,11 @@ status_t gen12hp_systolic_gemm_t::launch_copy(
 
     auto nd_range = compute::nd_range_t(gws, lws);
 
-    return compute_stream->parallel_for(nd_range, kernel, arg_list);
+    return parallel_for(ctx, nd_range, kernel, arg_list);
 }
 
 status_t gen12hp_systolic_gemm_t::launch_clear_sum(
-        compute::compute_stream_t *compute_stream, int64_t r, int64_t c,
+        const gemm_exec_ctx_t &ctx, int64_t r, int64_t c,
         const memory_storage_t &dst, int32_t offset_dst, int32_t ld_dst,
         bool copyb) const {
 
@@ -369,11 +369,11 @@ status_t gen12hp_systolic_gemm_t::launch_clear_sum(
 
     auto nd_range = compute::nd_range_t(gws, lws);
 
-    return compute_stream->parallel_for(nd_range, kernel, arg_list);
+    return parallel_for(ctx, nd_range, kernel, arg_list);
 }
 
 status_t gen12hp_systolic_gemm_t::launch_compute(
-        compute::compute_stream_t *compute_stream, int32_t m, int32_t n,
+        const gemm_exec_ctx_t &ctx, int32_t m, int32_t n,
         int32_t k, const memory_storage_t &ap, int64_t offset_a, int32_t lda,
         const memory_storage_t &bp, int64_t offset_b, int32_t ldb,
         const memory_storage_t &c, int64_t offset_c, int32_t ldc, float alpha,
@@ -431,13 +431,10 @@ status_t gen12hp_systolic_gemm_t::launch_compute(
 
     auto nd_range = compute::nd_range_t(gws, lws);
 
-    return compute_stream->parallel_for(nd_range, kernel, arg_list);
+    return parallel_for(ctx, nd_range, kernel, arg_list);
 }
 
 status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
-
-    auto *compute_stream
-            = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
     auto a_type = pd()->desc()->a_type;
     auto b_type = pd()->desc()->b_type;
@@ -503,7 +500,7 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
             auto off_a = off_a0 + (!transa ? (Bm + Bk * lda) : (Bk + Bm * lda));
             auto off_a_packed = 0;
 
-            status = launch_copy(compute_stream, size_m, size_k, a, off_a, lda,
+            status = launch_copy(ctx, size_m, size_k, a, off_a, lda,
                     *a_packed_, off_a_packed, lda_packed, false);
             if (status) return status;
 
@@ -516,7 +513,7 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
                 auto off_b_packed = 0;
 
                 if ((Bm == 0) || (n > block_n)) {
-                    status = launch_copy(compute_stream, size_k, size_n, b,
+                    status = launch_copy(ctx, size_k, size_n, b,
                             off_b, ldb, *b_packed_, off_b_packed, ldb_packed,
                             true);
                     if (status) return status;
@@ -531,7 +528,7 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
                 }
 
                 float this_beta = first_k_block ? beta : 1.0f;
-                status = launch_compute(compute_stream, size_m, size_n, size_k,
+                status = launch_compute(ctx, size_m, size_n, size_k,
                         *a_packed_, off_a_packed, lda_packed, *b_packed_,
                         off_b_packed, ldb_packed, c, off_c, ldc, alpha,
                         this_beta, ao, bo, co, off_co, first_k_block,
