@@ -56,9 +56,9 @@
 #else
 #define GEMM_IC_blk(o, i) \
     do { \
-        ACC[o][2 * i] \
-                = MMAD8X8(as_uint8(D[o]), as_int8(S[i][0]), ACC[o][2 * i]); \
-        ACC[o][2 * i + 1] = MMAD8X8( \
+        ACC[o][2 * i] = mmad8x8_bf16( \
+                as_uint8(D[o]), as_int8(S[i][0]), ACC[o][2 * i]); \
+        ACC[o][2 * i + 1] = mmad8x8_bf16( \
                 as_uint8(D[o]), as_int8(S[i][1]), ACC[o][2 * i + 1]); \
     } while (0)
 #endif
@@ -68,19 +68,19 @@
 #if OC_BLK_SUBGROUP == 2
 #define READ_DST() \
     do { \
-        D[0] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
-        D[1] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+        D[0] = block_read4(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
+        D[1] = block_read4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + INT_PER_READ]); \
-        D[2] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+        D[2] = block_read4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + 2 * INT_PER_READ]); \
-        D[3] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+        D[3] = block_read4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + 3 * INT_PER_READ]); \
     } while (0)
 #else // OC_BLK_SUBGROUP == 1
 #define READ_DST() \
     do { \
-        D[0] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
-        D[1] = READ_LOCAL_4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+        D[0] = block_read4(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
+        D[1] = block_read4(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + INT_PER_READ]); \
     } while (0)
 #endif
@@ -90,19 +90,19 @@
 #if OC_BLK_SUBGROUP == 2
 #define READ_DST() \
     do { \
-        D[0] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
-        D[1] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+        D[0] = block_read8(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
+        D[1] = block_read8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + INT_PER_READ]); \
-        D[2] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+        D[2] = block_read8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + 2 * INT_PER_READ]); \
-        D[3] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+        D[3] = block_read8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + 3 * INT_PER_READ]); \
     } while (0)
 #else // OC_BLK_SUBGROUP == 1
 #define READ_DST() \
     do { \
-        D[0] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
-        D[1] = READ_LOCAL_8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
+        D[0] = block_read8(&diff_dst_loc_read[loc_dst_compute_blk_offset]); \
+        D[1] = block_read8(&diff_dst_loc_read[loc_dst_compute_blk_offset \
                 + INT_PER_READ]); \
     } while (0)
 #endif // OC_BLK_SUBGROUP
@@ -110,16 +110,16 @@
 
 #define READ_SRC(i_c) \
     do { \
-        S[i_c][0] = READ_LOCAL_8(&src_loc_read[loc_src_compute_blk_offset \
+        S[i_c][0] = block_read8(&src_loc_read[loc_src_compute_blk_offset \
                 + 2 * i_c * INT_PER_READ]); \
-        S[i_c][1] = READ_LOCAL_8(&src_loc_read[loc_src_compute_blk_offset \
+        S[i_c][1] = block_read8(&src_loc_read[loc_src_compute_blk_offset \
                 + (2 * i_c + 1) * INT_PER_READ]); \
     } while (0)
 
 #define PACK(i) as_uint((short2)(D_tmp[0][i], D_tmp[1][i]))
 
 #if WITH_BIAS
-#define CONVERT_TO_F32(x) convert_bf16_to_f32(x)
+#define CONVERT_TO_F32(x) cvt_bf16_to_f32(x)
 
 #define READ_DST_GLOBAL() \
     do { \
@@ -195,12 +195,12 @@
     } while (0)
 #define WRITE_SRC() \
     do { \
-        WRITE_LOCAL_8(src_loc_write[buf_num], \
+        block_write8(src_loc_write[buf_num], \
                 (uint8)(as_uint(Dt[0].s02), as_uint(Dt[0].s46), \
                         as_uint(Dt[0].s8A), as_uint(Dt[0].sCE), \
                         as_uint(Dt[1].s02), as_uint(Dt[1].s46), \
                         as_uint(Dt[1].s8A), as_uint(Dt[1].sCE))); \
-        WRITE_LOCAL_8(&src_loc_write[buf_num][INT_PER_READ], \
+        block_write8(&src_loc_write[buf_num][INT_PER_READ], \
                 (uint8)(as_uint(Dt[0].s13), as_uint(Dt[0].s57), \
                         as_uint(Dt[0].s9B), as_uint(Dt[0].sDF), \
                         as_uint(Dt[1].s13), as_uint(Dt[1].s57), \

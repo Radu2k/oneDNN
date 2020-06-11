@@ -24,13 +24,21 @@
     data = intel_sub_group_block_read8((__global uint *)&src[idx]);
 
 #define BLOCK_READ_SRC_FROM_SLM(data, idx) \
-    data = READ_LOCAL_8((__local uint *)&src_slm[idx]);
+    data = block_read8((__local uint *)&src_slm[idx]);
 
 #define BLOCK_READ_WEI(data, idx) \
     data = intel_sub_group_block_read_us8((__global ushort *)&wei[idx]);
 
 #define BLOCK_READ_WEI_FROM_SLM(data, idx) \
-    data = READ_LOCAL_US_8((__local ushort *)&wei_slm[idx]);
+    data = block_read_us8((__local ushort *)&wei_slm[idx]);
+
+#if DT_F16
+#define MMAD8X8 mmad8x8_f16
+#elif DT_BF16
+#define MMAD8X8 mmad8x8_bf16
+#else
+#error "Not expected"
+#endif
 
 int off_NChw32n16c(int n, int c, int h, int w, int C, int H, int W) {
     int off = 0;
@@ -60,7 +68,7 @@ int off_OI4o8i8o2i(int o, int i, int I) {
 #if DST_DT_F32
 #define TO_DST(_x) as_uint8(_x)
 #else
-#define TO_DST(_x) convert_f32_to_bf16_vec8(_x)
+#define TO_DST(_x) cvt_f32_to_bf16(_x)
 #endif
 #endif
 
@@ -229,7 +237,7 @@ gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
             slm_src_ptr = SLM_SRC_GR_OFFSET + src_slm
                     + (slm_oc_group_id * SUB_GROUP_SIZE * IC_BLOCK);
             glob_src_ptr = src + slm_oc_group_id * (SUB_GROUP_SIZE * IC_BLOCK);
-            WRITE_LOCAL_8((__local uint *)&slm_src_ptr[0],
+            block_write8((__local uint *)&slm_src_ptr[0],
                     intel_sub_group_block_read8(
                             (__global uint *)&glob_src_ptr[0]));
         }
@@ -237,7 +245,7 @@ gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
 
 #if XF16_WEI_SLM
 #define BLOCK_READ_WEI(data, idx) \
-    data = as_int8(READ_LOCAL_8((__local uint *)&wei_tmp[idx]));
+    data = as_int8(block_read8((__local uint *)&wei_tmp[idx]));
 #else
 #define BLOCK_READ_WEI(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
@@ -246,7 +254,7 @@ gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
 #if XF16_WEI_SLM
         slm_wei_ptr = wei_tmp + (sp_local_id * 8 * SUB_GROUP_SIZE);
         glob_wei_ptr = wei + (sp_local_id * 8 * SUB_GROUP_SIZE);
-        WRITE_LOCAL_4((__local uint *)&slm_wei_ptr[0],
+        block_write4((__local uint *)&slm_wei_ptr[0],
                 intel_sub_group_block_read4((__global uint *)&glob_wei_ptr[0]));
 #endif
 

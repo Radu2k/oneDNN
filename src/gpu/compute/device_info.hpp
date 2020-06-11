@@ -72,6 +72,7 @@ enum class device_ext_t : int64_t {
     intel_subgroup_matrix_multiply_accumulate = 1 << 6,
     intel_subgroup_split_matrix_multiply_accumulate = 1 << 7,
     intel_global_float_atomics = 1 << 8,
+    future_bf16_cvt = 1 << 9,
     last
 };
 
@@ -88,6 +89,7 @@ static inline const char *ext2cl_str(compute::device_ext_t ext) {
         CASE(intel_global_float_atomics);
         CASE(khr_fp16);
         CASE(khr_int64_base_atomics);
+        CASE(future_bf16_cvt);
         default: return nullptr;
     }
 #undef CASE

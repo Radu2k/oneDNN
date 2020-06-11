@@ -23,7 +23,7 @@
 #if SLM_WEI
 #define WEI wei_tmp
 #define BLOCK_READ_WEI(data, idx) \
-    data = as_int8(READ_LOCAL_8((__local uint *)&WEI[idx]));
+    data = as_int8(block_read8((__local uint *)&WEI[idx]));
 #else
 #define WEI wei
 #define BLOCK_READ_WEI(data, idx) \
@@ -43,8 +43,16 @@
             intel_sub_group_block_read_us4((__global ushort *)&bias[idx])));
 #elif BIA_DT_BF16
 #define BLOCK_READ_BIA(data, idx) \
-    data = convert_bf16_to_f32_vec4( \
+    data = cvt_bf16_to_f32( \
             intel_sub_group_block_read_us4((__global ushort *)&bias[idx]));
+#endif
+
+#if DT_F16
+#define MMAD8X8 mmad8x8_f16
+#elif DT_BF16
+#define MMAD8X8 mmad8x8_bf16
+#else
+#define MMAD8X8 mmad8x8
 #endif
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
@@ -105,7 +113,7 @@ gen12hp_conv_bwd_data(__global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
         __local WEI_DATA_T *wei_copy_to = wei_loc_base \
                 + sp * KW * WEI_BLOCK / LWS_1 + read_ind * KW * WEI_BLOCK; \
         for (int bl = 0; bl < KW; bl++) { \
-            WRITE_LOCAL_4((__local uint *)&wei_copy_to[bl * 4 * IC_BLOCK], \
+            block_write4((__local uint *)&wei_copy_to[bl * 4 * IC_BLOCK], \
                     intel_sub_group_block_read4((__global uint \
                                     *)&wei_copy_from[bl * 4 * IC_BLOCK])); \
         } \
@@ -124,7 +132,7 @@ gen12hp_conv_bwd_data(__global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
     __local WEI_DATA_T *wei_copy_to \
             = wei_loc_base + sp * KW * WEI_BLOCK / LWS_1; \
     for (int bl = 0; bl < KW; bl++) { \
-        WRITE_LOCAL_4((__local uint *)&wei_copy_to[bl * 4 * IC_BLOCK], \
+        block_write4((__local uint *)&wei_copy_to[bl * 4 * IC_BLOCK], \
                 intel_sub_group_block_read4( \
                         (__global uint *)&wei_copy_from[bl * 4 * IC_BLOCK])); \
     } \

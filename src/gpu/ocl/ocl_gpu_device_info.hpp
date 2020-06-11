@@ -40,6 +40,7 @@ static compute::device_ext_t get_extensions(compute::gpu_arch_t gpu_arch) {
                     intel_subgroup_split_matrix_multiply_accumulate;
             extensions |= (uint64_t)
                     compute::device_ext_t::intel_global_float_atomics;
+            extensions |= (uint64_t)compute::device_ext_t::future_bf16_cvt;
         case compute::gpu_arch_t::gen12lp:
             extensions |= (uint64_t)compute::device_ext_t::intel_dot_accumulate;
             extensions |= (uint64_t)
@@ -122,7 +123,8 @@ public:
                         device_ext_t::intel_subgroup_matrix_multiply_accumulate,
                         device_ext_t::
                                 intel_subgroup_split_matrix_multiply_accumulate,
-                        device_ext_t::intel_global_float_atomics))
+                        device_ext_t::intel_global_float_atomics,
+                        device_ext_t::future_bf16_cvt))
                 opts += std::string("-D") + ext2cl_str(ext) + " ";
         }
         if (!opts.empty()) { opts[opts.size() - 1] = '\0'; }
@@ -134,7 +136,6 @@ public:
     size_t llc_cache_size() const override { return llc_cache_size_; }
 
 private:
-
     status_t init_extensions() {
         // Handle extensions provided by the OpenCL runtime
         size_t size_ext {0};

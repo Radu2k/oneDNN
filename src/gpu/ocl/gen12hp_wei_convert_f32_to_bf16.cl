@@ -36,15 +36,15 @@ gen12hp_wei_convert_f32_to_bf16(const __global float *wei_f32,
     const int g = (gid[1] / (OC / LWS_1)) * OC * IC * KD * KH * KW;
     float2 tmp = as_float2(intel_sub_group_block_read2(
             (const __global uint *)(wei_f32 + g + oc + ic + kd + kh + kw)));
-    intel_sub_group_block_write_us2(wei_bf16 + g + oc + ic + kd + kh + kw,
-            convert_f32_to_bf16_vec2(tmp));
+    intel_sub_group_block_write_us2(
+            wei_bf16 + g + oc + ic + kd + kh + kw, cvt_f32_to_bf16(tmp));
 #endif
 
 #if WITH_BIAS && BIA_DT_BF16
     if (gid[0] == 0 && sg_loc_id == 0) {
         const int bia_off = gid[1] / (OC / OC_BLOCK) * OC
                 + (gid[1] % (OC / OC_BLOCK)) * OC_BLOCK + sg_id;
-        bia_bf16[bia_off] = convert_f32_to_bf16(bia_f32[bia_off]);
+        bia_bf16[bia_off] = cvt_f32_to_bf16(bia_f32[bia_off]);
     }
 #endif
 }
