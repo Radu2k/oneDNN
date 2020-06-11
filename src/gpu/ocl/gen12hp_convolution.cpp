@@ -85,9 +85,23 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf() {
                         format_tag::OIhw4o8i8o2i, format_tag::OIdhw4o8i8o2i);
     }
 
-    conf.src_tag = src_tag;
-    conf.wei_tag = wei_tag;
-    conf.dst_tag = dst_tag;
+    const memory_desc_wrapper src_mdw(src_md());
+    const memory_desc_wrapper weights_mdw(weights_md());
+    const memory_desc_wrapper dst_mdw(dst_md());
+
+    conf.src_tag = src_mdw.format_kind() == format_kind::any
+            ? src_tag
+            : src_mdw.matches_one_of_tag(src_tag);
+    conf.wei_tag = weights_mdw.format_kind() == format_kind::any
+            ? wei_tag
+            : weights_mdw.matches_one_of_tag(wei_tag);
+    conf.dst_tag = dst_mdw.format_kind() == format_kind::any
+            ? dst_tag
+            : dst_mdw.matches_one_of_tag(dst_tag);
+
+    if (conf.src_tag != src_tag || conf.wei_tag != wei_tag
+            || conf.dst_tag != dst_tag)
+        return status::unimplemented;
 
     conf.wei_slm_size = conf.kw * 32 * 32 * utils::div_up(conf.lws_d[0], 8);
 
@@ -232,9 +246,23 @@ status_t gen12hp_convolution_bwd_data_t::pd_t::init_conf() {
                         format_tag::IOhw4i8o8i2o, format_tag::IOdhw4i8o8i2o);
     }
 
-    conf.src_tag = src_tag;
-    conf.wei_tag = wei_tag;
-    conf.dst_tag = dst_tag;
+    const memory_desc_wrapper src_mdw(diff_src_md());
+    const memory_desc_wrapper weights_mdw(weights_md());
+    const memory_desc_wrapper dst_mdw(diff_dst_md());
+
+    conf.src_tag = src_mdw.format_kind() == format_kind::any
+            ? src_tag
+            : src_mdw.matches_one_of_tag(src_tag);
+    conf.wei_tag = weights_mdw.format_kind() == format_kind::any
+            ? wei_tag
+            : weights_mdw.matches_one_of_tag(wei_tag);
+    conf.dst_tag = dst_mdw.format_kind() == format_kind::any
+            ? dst_tag
+            : dst_mdw.matches_one_of_tag(dst_tag);
+
+    if (conf.src_tag != src_tag || conf.wei_tag != wei_tag
+            || conf.dst_tag != dst_tag)
+        return status::unimplemented;
 
     conf.wei_slm_size = conf.kw * 32 * 32 * utils::div_up(conf.lws_d[0], 8);
 

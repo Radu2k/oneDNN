@@ -38,6 +38,9 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_conf() {
     status_t status = status::success;
 
     const memory_desc_wrapper src_mdw(src_md());
+    const memory_desc_wrapper weights_mdw(weights_md());
+    const memory_desc_wrapper dst_mdw(dst_md());
+
     bool is_bf16 = src_mdw.data_type() == data_type::bf16;
     bool is_fp16 = src_mdw.data_type() == data_type::f16;
     bool is_int8 = src_mdw.data_type() == data_type::u8;
@@ -111,9 +114,19 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_conf() {
         assert(!"not expected");
     }
 
-    conf.src_tag = src_tag;
-    conf.wei_tag = wei_tag;
-    conf.dst_tag = dst_tag;
+    conf.src_tag = src_mdw.format_kind() == format_kind::any
+            ? src_tag
+            : src_mdw.matches_one_of_tag(src_tag);
+    conf.wei_tag = weights_mdw.format_kind() == format_kind::any
+            ? wei_tag
+            : weights_mdw.matches_one_of_tag(wei_tag);
+    conf.dst_tag = dst_mdw.format_kind() == format_kind::any
+            ? dst_tag
+            : dst_mdw.matches_one_of_tag(dst_tag);
+
+    if (conf.src_tag != src_tag || conf.wei_tag != wei_tag
+            || conf.dst_tag != dst_tag)
+        return status::unimplemented;
 
     return status;
 }

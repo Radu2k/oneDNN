@@ -40,13 +40,31 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_conf() {
 
     using namespace dnnl::impl::format_tag;
 
-    conf.src_tag
+    format_tag_t src_tag
             = utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
-    conf.dst_tag
+    format_tag_t dst_tag
             = utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
-    conf.wei_tag = conf.with_groups
+    format_tag_t wei_tag = conf.with_groups
             ? utils::pick(conf.ndims - 3, gOIw16o16i, gOIhw16o16i, gOIdhw16o16i)
             : utils::pick(conf.ndims - 3, OIw16o16i, OIhw16o16i, OIdhw16o16i);
+
+    const memory_desc_wrapper src_mdw(src_md());
+    const memory_desc_wrapper weights_mdw(diff_weights_md());
+    const memory_desc_wrapper dst_mdw(diff_dst_md());
+
+    conf.src_tag = src_mdw.format_kind() == format_kind::any
+            ? src_tag
+            : src_mdw.matches_one_of_tag(src_tag);
+    conf.wei_tag = weights_mdw.format_kind() == format_kind::any
+            ? wei_tag
+            : weights_mdw.matches_one_of_tag(wei_tag);
+    conf.dst_tag = dst_mdw.format_kind() == format_kind::any
+            ? dst_tag
+            : dst_mdw.matches_one_of_tag(dst_tag);
+
+    if (conf.src_tag != src_tag || conf.wei_tag != wei_tag
+            || conf.dst_tag != dst_tag)
+        return status::unimplemented;
 
     // TODO: try workgroup size 32
     //  1 tile with 4thr/EU can dispatch maximum 2048 subgroups,
