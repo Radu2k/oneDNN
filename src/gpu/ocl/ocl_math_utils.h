@@ -62,7 +62,10 @@ inline int __imad(uchar4 a, char4 b, int c) __attribute__((overloadable)) {
 #endif
 
 #ifdef cl_intel_subgroup_matrix_multiply_accumulate
-inline int8 __dpas(uint8 a, int8 b, int8 acc) __attribute__((overloadable)) {
+inline int8 dpas_8_8(uint8 a, int8 b, int8 acc) __attribute__((overloadable)) {
+    return intel_sub_group_u8_i8_matrix_mad_k32(a, b, acc);
+}
+inline int4 dpas_8_4(uint4 a, int8 b, int4 acc) __attribute__((overloadable)) {
     return intel_sub_group_u8_i8_matrix_mad_k32(a, b, acc);
 }
 
@@ -123,12 +126,12 @@ inline float16 convert_bf16_to_f32_vec16(ushort16 b) {
 }
 
 #if DT_F16
-inline float8 __dpas(uint8 a, int8 b, float8 acc)
+inline float8 dpas_8_8(uint8 a, int8 b, float8 acc)
         __attribute__((overloadable)) {
     return intel_sub_group_f16_f16_matrix_mad_k16(as_int8(a), b, acc);
 }
 #elif DT_BF16 == 1
-inline float8 __dpas(uint8 a, int8 b, float8 acc)
+inline float8 dpas_8_8(uint8 a, int8 b, float8 acc)
         __attribute__((overloadable)) {
     return intel_sub_group_bf16_bf16_matrix_mad_k16(as_int8(a), b, acc);
 }
@@ -141,8 +144,8 @@ inline float8 __dpasw(uint4 a, int8 b, float8 acc)
 }
 #endif
 
-#define MMAD8X8(_O, _I, _W) __dpas(_O, _I, _W)
-
+#define MMAD8X4(_O, _I, _W) dpas_8_4(_O, _I, _W)
+#define MMAD8X8(_O, _I, _W) dpas_8_8(_O, _I, _W)
 #else // cl_intel_subgroup_matrix_multiply_accumulate
 
 inline int mmad_4(uchar4 input, char4 weight, int acc)
@@ -439,6 +442,7 @@ inline float8 mmad8x8(uint8 A_vectors, int8 B_vectors, float8 acc)
 
 #endif
 
+#define MMAD8X4(_O, _I, _W) mmad8x4(_O, _I, _W)
 #define MMAD8X8(_O, _I, _W) mmad8x8(_O, _I, _W)
 
 #endif
