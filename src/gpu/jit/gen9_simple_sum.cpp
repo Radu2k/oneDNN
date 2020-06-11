@@ -32,8 +32,11 @@ status_t gen9_simple_sum_t::init(engine_t *engine) {
     if (!gpu_engine) return status::runtime_error;
 
     auto kernel = gen9_simple_sum_kernel_f32_t();
+    const auto &ngen_bin
+            = kernel.getBinary(gpu_engine->context(), gpu_engine->device());
     kernel_ = compute::kernel_t(new ocl::ocl_gpu_kernel_t(
-            kernel.getKernel(gpu_engine->context(), gpu_engine->device())));
+            ngen_bin, kernel.getExternalName().c_str()));
+    register_kernels({kernel_});
     return status::success;
 }
 

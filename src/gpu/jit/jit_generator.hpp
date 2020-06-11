@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -65,7 +65,7 @@ constexpr gpu_gen_t gpu_gen12hp = ngen::HW::Gen12HP;
 //      arg_list.set(1, dst);
 //      arg_list.set(2, dbg_mem, kernel_arg_t::kind_t::svm);
 //      ...
-//      compute_stream->parallel_for(nd_range, kernel_, arg_list);
+//      parallel_for(ctx, nd_range, kernel_, arg_list);
 //  }
 //
 //  ngen_kernel_t() : jit_generator<...>() {

@@ -78,6 +78,12 @@ struct gpu_primitive_t : public primitive_t {
         return status;
     }
 
+    void register_kernels(const std::vector<compute::kernel_t> &kernels) {
+        for (const auto &k : kernels) {
+            registered_kernels_.push_back(k);
+        }
+    }
+
 protected:
     virtual primitive_list_t nested_primitives() const { return {}; }
 
@@ -114,12 +120,6 @@ private:
 
         CHECK(compute_stream->parallel_for(range, realized_kernel, arg_list));
         return status::success;
-    }
-
-    void register_kernels(const std::vector<compute::kernel_t> &kernels) {
-        for (const auto &k : kernels) {
-            registered_kernels_.push_back(k);
-        }
     }
 
     std::vector<compute::kernel_t> registered_kernels_;

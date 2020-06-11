@@ -196,11 +196,18 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
                     cfg_copy.beta1 = true;
                 }
                 if (!last_k_block) cfg_copy.c_bias = kernel_t::bias_t::none;
-
                 auto kernel = kernel_t(cfg_copy);
-                kernel_[first_k_block][last_k_block] = compute::kernel_t(
-                        new ocl::ocl_gpu_kernel_t(kernel.getKernel(
-                                gpu_engine->context(), gpu_engine->device())));
+
+                const auto &ngen_bin = kernel.getBinary(
+                        gpu_engine->context(), gpu_engine->device());
+
+                // TODO : refactor compute::engine_t to allow this part to be runtime agnostic
+                // (this will not work with SYCL runtime)
+                kernel_[first_k_block][last_k_block]
+                        = compute::kernel_t(new ocl::ocl_gpu_kernel_t(
+                                ngen_bin, kernel.getExternalName().c_str()));
+
+                register_kernels({kernel_[first_k_block][last_k_block]});
             }
         }
     }
@@ -279,15 +286,14 @@ gen12hp_systolic_gemm_t::get_blocking() const {
     return std::make_tuple(block_m, block_n, block_k);
 }
 
-status_t gen12hp_systolic_gemm_t::launch_copy(
-        const gemm_exec_ctx_t &ctx, int64_t r, int64_t c,
-        const memory_storage_t &src, int64_t offset_src, int64_t ld_src,
-        const memory_storage_t &dst, int32_t offset_dst, int32_t ld_dst,
-        bool copyb) const {
+status_t gen12hp_systolic_gemm_t::launch_copy(const gemm_exec_ctx_t &ctx,
+        int64_t r, int64_t c, const memory_storage_t &src, int64_t offset_src,
+        int64_t ld_src, const memory_storage_t &dst, int32_t offset_dst,
+        int32_t ld_dst, bool copyb) const {
 
     if (ab_zero_points_) {
-        auto status = launch_clear_sum(
-                ctx, r, c, dst, offset_dst, ld_dst, copyb);
+        auto status
+                = launch_clear_sum(ctx, r, c, dst, offset_dst, ld_dst, copyb);
         if (status) return status;
     }
 
@@ -341,10 +347,9 @@ status_t gen12hp_systolic_gemm_t::launch_copy(
     return parallel_for(ctx, nd_range, kernel, arg_list);
 }
 
-status_t gen12hp_systolic_gemm_t::launch_clear_sum(
-        const gemm_exec_ctx_t &ctx, int64_t r, int64_t c,
-        const memory_storage_t &dst, int32_t offset_dst, int32_t ld_dst,
-        bool copyb) const {
+status_t gen12hp_systolic_gemm_t::launch_clear_sum(const gemm_exec_ctx_t &ctx,
+        int64_t r, int64_t c, const memory_storage_t &dst, int32_t offset_dst,
+        int32_t ld_dst, bool copyb) const {
 
     auto &kernel = copy_kernel_[copyb][true];
 
@@ -372,13 +377,13 @@ status_t gen12hp_systolic_gemm_t::launch_clear_sum(
     return parallel_for(ctx, nd_range, kernel, arg_list);
 }
 
-status_t gen12hp_systolic_gemm_t::launch_compute(
-        const gemm_exec_ctx_t &ctx, int32_t m, int32_t n,
-        int32_t k, const memory_storage_t &ap, int64_t offset_a, int32_t lda,
-        const memory_storage_t &bp, int64_t offset_b, int32_t ldb,
-        const memory_storage_t &c, int64_t offset_c, int32_t ldc, float alpha,
-        float beta, int16_t ao, int16_t bo, const memory_storage_t &co,
-        int32_t offset_co, bool first_k_block, bool last_k_block) const {
+status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
+        int32_t m, int32_t n, int32_t k, const memory_storage_t &ap,
+        int64_t offset_a, int32_t lda, const memory_storage_t &bp,
+        int64_t offset_b, int32_t ldb, const memory_storage_t &c,
+        int64_t offset_c, int32_t ldc, float alpha, float beta, int16_t ao,
+        int16_t bo, const memory_storage_t &co, int32_t offset_co,
+        bool first_k_block, bool last_k_block) const {
 
     using kernel_t = gen12hp_systolic_gemm_kernel_t;
     auto unroll_m = kernel_t::unroll_m;
@@ -500,8 +505,8 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
             auto off_a = off_a0 + (!transa ? (Bm + Bk * lda) : (Bk + Bm * lda));
             auto off_a_packed = 0;
 
-            status = launch_copy(ctx, size_m, size_k, a, off_a, lda,
-                    *a_packed_, off_a_packed, lda_packed, false);
+            status = launch_copy(ctx, size_m, size_k, a, off_a, lda, *a_packed_,
+                    off_a_packed, lda_packed, false);
             if (status) return status;
 
             for (int64_t Bn = 0; Bn < n; Bn += block_n) {
@@ -513,9 +518,8 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
                 auto off_b_packed = 0;
 
                 if ((Bm == 0) || (n > block_n)) {
-                    status = launch_copy(ctx, size_k, size_n, b,
-                            off_b, ldb, *b_packed_, off_b_packed, ldb_packed,
-                            true);
+                    status = launch_copy(ctx, size_k, size_n, b, off_b, ldb,
+                            *b_packed_, off_b_packed, ldb_packed, true);
                     if (status) return status;
                 }
 
@@ -528,11 +532,10 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
                 }
 
                 float this_beta = first_k_block ? beta : 1.0f;
-                status = launch_compute(ctx, size_m, size_n, size_k,
-                        *a_packed_, off_a_packed, lda_packed, *b_packed_,
-                        off_b_packed, ldb_packed, c, off_c, ldc, alpha,
-                        this_beta, ao, bo, co, off_co, first_k_block,
-                        last_k_block);
+                status = launch_compute(ctx, size_m, size_n, size_k, *a_packed_,
+                        off_a_packed, lda_packed, *b_packed_, off_b_packed,
+                        ldb_packed, c, off_c, ldc, alpha, this_beta, ao, bo, co,
+                        off_co, first_k_block, last_k_block);
                 if (status) return status;
             }
         }

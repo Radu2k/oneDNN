@@ -64,8 +64,6 @@ struct gen9_simple_sum_t : public gpu_primitive_t {
     virtual status_t init(engine_t *engine);
 
     virtual status_t execute(const exec_ctx_t &ctx) const {
-        compute::compute_stream_t *compute_stream
-                = utils::downcast<compute::compute_stream_t *>(ctx.stream());
         auto &output = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
         const int num_arrs = pd()->n_inputs();
@@ -85,8 +83,7 @@ struct gen9_simple_sum_t : public gpu_primitive_t {
             size_t gws[3] = {nelems, 1, 1};
             size_t lws[3] = {1, 1, 1};
             auto nd_range = compute::nd_range_t(gws, lws);
-            status_t status
-                    = compute_stream->parallel_for(nd_range, kernel_, arg_list);
+            status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
             if (status != status::success) return status;
         }
         return status::success;
