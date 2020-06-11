@@ -33,6 +33,25 @@ namespace dnnl {
 namespace impl {
 namespace cpu {
 
+float compute_binary_scalar(alg_kind_t alg, float x, float y);
+
+struct ref_binary_scalar_t {
+public:
+    ref_binary_scalar_t(alg_kind_t alg) : alg_(alg) {
+        assert(utils::one_of(alg_, alg_kind::binary_add, alg_kind::binary_max,
+                alg_kind::binary_min, alg_kind::binary_mul));
+    }
+
+    template <typename src0_data_t = float, typename src1_data_t = src0_data_t,
+            typename dst_data_t = src0_data_t>
+    dst_data_t compute_scalar(src0_data_t src0, src1_data_t src1) {
+        return (dst_data_t)compute_binary_scalar(
+                alg_, (float)src0, (float)src1);
+    }
+
+    const alg_kind_t alg_;
+};
+
 template <data_type_t src0_type, data_type_t src1_type = src0_type,
         data_type_t dst_type = src0_type>
 struct ref_binary_t : public primitive_t {
@@ -58,8 +77,7 @@ struct ref_binary_t : public primitive_t {
                             attr()->has_default_values(
                                     sm::post_ops | sm::scales))
                     && IMPLICATION(!attr()->scales_.has_default_values(),
-                            check_scales_mask())
-                    && attr_post_ops_ok();
+                            check_scales_mask());
             if (!ok) return status::unimplemented;
 
             return status::success;
@@ -77,10 +95,11 @@ struct ref_binary_t : public primitive_t {
     ref_binary_t(const pd_t *apd) : primitive_t(apd) {}
 
     status_t init(engine_t *engine) override {
-        int e_idx = pd()->attr()->post_ops_.find(primitive_kind::eltwise);
+        const auto &po = pd()->attr()->post_ops_;
+        int e_idx = po.find(primitive_kind::eltwise);
         if (e_idx != -1)
-            eltwise_ker_.reset(new ref_eltwise_scalar_fwd_t(
-                    pd()->attr()->post_ops_.entry_[e_idx].eltwise));
+            eltwise_ker_.reset(
+                    new ref_eltwise_scalar_fwd_t(po.entry_[e_idx].eltwise));
         return status::success;
     }
 

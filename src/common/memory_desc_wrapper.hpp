@@ -340,6 +340,30 @@ struct memory_desc_wrapper : public c_compatible {
         return off_v(pos, is_pos_padded);
     }
 
+    /* TODO: add doc */
+    dim_t off_m(const memory_desc_wrapper &mdw_with_right_strides,
+            dim_t l_offset, int mask = 0, bool is_pos_padded = false) const {
+        assert(is_blocking_desc());
+        dims_t pos;
+        for (int rd = 0; rd < ndims(); ++rd) {
+            const int d = ndims() - 1 - rd;
+            const dim_t cur_dim = is_pos_padded ? padded_dims()[d] : dims()[d];
+            /* switch to faster 32-bit division when possible. */
+            if (l_offset <= INT32_MAX && cur_dim <= INT32_MAX) {
+                pos[d] = (int32_t)l_offset % (int32_t)cur_dim;
+                l_offset = (int32_t)l_offset / (int32_t)cur_dim;
+            } else {
+                pos[d] = l_offset % cur_dim;
+                l_offset /= cur_dim;
+            }
+        }
+        for (int rd = 0; rd < ndims(); ++rd) {
+            pos[rd] = (mask & (1 << rd)) ? pos[rd] : 0;
+        }
+        // TODO: try an idea of re-computing strides by calling init_by_strides
+        return mdw_with_right_strides.off_v(pos, is_pos_padded);
+    }
+
     /** returns physical offset by logical one. logical offset is represented by
      * a tuple of indices (\param xn, ..., \param x1, \param x0) */
     template <typename... Args>
