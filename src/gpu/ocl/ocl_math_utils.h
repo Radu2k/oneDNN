@@ -340,12 +340,14 @@ float8 mmad8x8_bf16(uint8 a, int8 b, float8 acc) {
     return intel_sub_group_bf16_bf16_matrix_mad_k16(as_int8(a), b, acc);
 }
 
+#ifdef cl_intel_subgroup_split_matrix_multiply_accumulate
+
 float8 mmad8x8_bf16_split(uint4 a, int8 b, float8 acc) {
-    float8 __builtin_IB_sub_group_fdpasw_bf_bf_8_8(float8 acc, int4 a, int8 b)
-            __attribute__((const));
-    return __builtin_IB_sub_group_fdpasw_bf_bf_8_8(acc, as_int4(a), b);
+    return intel_sub_group_f16_f16_split_matrix_mad_k16(as_int4(a), b, acc);
 }
-#endif
+
+#endif //cl_intel_subgroup_split_matrix_multiply_accumulate
+#endif //cl_intel_subgroup_matrix_multiply_accumulate
 
 #else
 
