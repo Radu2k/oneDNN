@@ -92,10 +92,6 @@ public:
     ocl_gpu_device_info_t(cl_device_id device) : device_(device) {}
 
     status_t init() override {
-        CHECK(init_arch());
-        CHECK(init_extensions());
-        CHECK(init_attributes());
-
         // Device name
         size_t size_name {0};
         cl_int err = clGetDeviceInfo(
