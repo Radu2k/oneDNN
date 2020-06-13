@@ -9,7 +9,6 @@
 --mb=2                     --batch=ip_all
 --mb=0                     --batch=shapes_non-spatial
 
-                           --batch=harness_tag
 # int8
 --reset
 --dir=FWD_B,FWD_D
