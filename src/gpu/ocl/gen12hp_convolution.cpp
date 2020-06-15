@@ -39,6 +39,7 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf() {
     if (conf.is_depthwise) return status::unimplemented;
 
     if (conf.mb < 8) return status::unimplemented;
+    if (conf.ic <= 4) return status::unimplemented;
 
     conf.mb_block = 32;
     conf.oc_block = (utils::one_of(conf.src_data_type, u8, s8)) ? 32 : 16;
