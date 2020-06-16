@@ -39,6 +39,8 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     assert(engine->kind() == engine_kind::gpu);
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
 
+    if (!compute_engine->mayiuse_ngen_kernels()) return status::unimplemented;
+
     const auto d = desc();
 
     // LIMITATIONS:

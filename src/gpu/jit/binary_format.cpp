@@ -188,8 +188,8 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     //   memory allocation and kernel compilation. Result caching is needed.
     // - All nGEN primitives must call mayiuse_ngen_kernels().
     //
-    // For now, always return true and assume that nGEN kernels can be used.
-    *ok = true;
+    // DO_NOT_PROMOTE : Return false unless flag is set to nonzero value
+    *ok = dnnl::impl::getenv_int("DNNL_ENABLE_NGEN", 0) != 0;
     return status::success;
 
 #if 0
