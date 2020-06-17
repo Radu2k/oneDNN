@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -188,8 +188,8 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     //   memory allocation and kernel compilation. Result caching is needed.
     // - All nGEN primitives must call mayiuse_ngen_kernels().
     //
-    // DO_NOT_PROMOTE : Return false unless flag is set to nonzero value
-    *ok = dnnl::impl::getenv_int("DNNL_ENABLE_NGEN", 0) != 0;
+    // DO_NOT_PROMOTE : Return true unless flag is set to zero value
+    *ok = dnnl::impl::getenv_int("DNNL_ENABLE_NGEN", 1) != 0;
     return status::success;
 
 #if 0
