@@ -46,9 +46,8 @@
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 conv_fwd_mb_block_x8s8s32x(const __global uchar *src, const __global char *wei,
-        const __global float *bias, __global DST_DATA_T *dst,
-        float eltwise_alpha, float eltwise_beta, float eltwise_scale,
-        float sum_scale, float scale, const __global float *scales_per_oc) {
+        const __global float *bias, __global DST_DATA_T *dst POST_OP_ARGS,
+        float scale, const __global float *scales_per_oc) {
 #ifdef MB_FULL_BLOCK
     const int mb_blocks = 1;
 #else // MB_FULL_BLOCK
@@ -62,6 +61,7 @@ conv_fwd_mb_block_x8s8s32x(const __global uchar *src, const __global char *wei,
     // XXX: Each work-group calculates 16 mb instead of 32
     const int mb = get_group_id(2) % mb_blocks;
     const int sub_group_id = get_sub_group_id();
+    const int ocl_local_id = get_local_id(0);
     const int oc = (sub_group_id % OC_GROUP);
     const int sp = (sub_group_id / OC_GROUP);
 
@@ -204,40 +204,7 @@ conv_fwd_mb_block_x8s8s32x(const __global uchar *src, const __global char *wei,
     *(DST_DATA16_T *)(D3 + 4) = BLOCK_READ_DST16(dst + 28 * OC_BLOCK);
 #endif // MB_FULL_BLOCK
 #endif // MB > 8
-
-#define DO_SUM(d) \
-    do { \
-        float4 df = convert_float4(d); \
-        tmp = fma(df, (float4)sum_scale, tmp); \
-    } while (0)
-
-#else
-#define DO_SUM(d) ;
 #endif // with_sum
-
-#define ELTWISE() \
-    do { \
-        tmp[0] = fwd_eltwise( \
-                tmp[0], eltwise_alpha, eltwise_beta, eltwise_scale); \
-        tmp[1] = fwd_eltwise( \
-                tmp[1], eltwise_alpha, eltwise_beta, eltwise_scale); \
-        tmp[2] = fwd_eltwise( \
-                tmp[2], eltwise_alpha, eltwise_beta, eltwise_scale); \
-        tmp[3] = fwd_eltwise( \
-                tmp[3], eltwise_alpha, eltwise_beta, eltwise_scale); \
-    } while (0)
-
-#if WITH_ELTWISE && !WITH_POST_SUM_ELTWISE
-#define DO_ELTWISE() ELTWISE();
-#else
-#define DO_ELTWISE() ;
-#endif
-
-#if WITH_POST_SUM_ELTWISE
-#define DO_POST_SUM_ELTWISE() ELTWISE();
-#else
-#define DO_POST_SUM_ELTWISE() ;
-#endif
 
 #define PACK(C0, C1, C2, C3, idx) \
     do { \
@@ -257,9 +224,20 @@ conv_fwd_mb_block_x8s8s32x(const __global uchar *src, const __global char *wei,
         for (int n_i = 0; n_i < 8; n_i++) { \
             PACK(C0, C1, C2, C3, n_i); \
             QUANTIZE_ADD_BIAS(); \
-            DO_ELTWISE(); \
-            DO_SUM(D[n_i]); \
-            DO_POST_SUM_ELTWISE(); \
+            for (int didx = 0; didx < 4; ++didx) { \
+                float tmp_i = tmp[didx]; \
+                DST_DATA_T d_i = D[n_i][didx]; \
+                const int po_mb \
+                        = (group_mb * MB_BLOCK + mb * MB_BLOCK / mb_blocks \
+                                  + mb_stride + n_i) \
+                        % MB; \
+                const int po_oc = (group_oc * OC_BLOCK + didx * SUB_GROUP_SIZE \
+                                          + ocl_local_id) \
+                        % (OC * G); \
+                APPLY_POST_OPS(tmp_i, float, d_i, DST_DATA_T, po_mb, 1, po_oc, \
+                        1, 0, 1, 0, 1, 0, 1, 0, 1); \
+                tmp[didx] = tmp_i; \
+            } \
             CONVERT_PACK(n_i); \
         } \
         BLOCK_WRITE_DST16( \

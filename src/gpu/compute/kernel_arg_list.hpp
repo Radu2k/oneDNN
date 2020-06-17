@@ -222,7 +222,7 @@ public:
     }
 
 private:
-    static constexpr int max_args = 32;
+    static constexpr int max_args = 64;
 
     int nargs_ = 0;
     kernel_arg_t args_[max_args];

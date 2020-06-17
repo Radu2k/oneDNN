@@ -88,30 +88,6 @@ int off_OI4o8i8o2i(int o, int i, int I) {
 #define CONVERT_BIAS(_bias) CONVERT_FLOAT2_T(_bias)
 #endif
 
-inline float8 POST_OPS_PASS(float8 val, float2 bias, float sum_scale,
-        float alpha, float beta, float scale, __global DST_DATA_T *dst) {
-#if WITH_BIAS
-    val[0] += bias[0];
-    val[2] += bias[0];
-    val[4] += bias[0];
-    val[6] += bias[0];
-    val[1] += bias[1];
-    val[3] += bias[1];
-    val[5] += bias[1];
-    val[7] += bias[1];
-#endif // WITH_BIAS
-
-#if ELTWISE_IDX == 0
-    val[0] = fwd_eltwise(val[0], alpha, beta, scale);
-    val[1] = fwd_eltwise(val[1], alpha, beta, scale);
-    val[2] = fwd_eltwise(val[2], alpha, beta, scale);
-    val[3] = fwd_eltwise(val[3], alpha, beta, scale);
-    val[4] = fwd_eltwise(val[4], alpha, beta, scale);
-    val[5] = fwd_eltwise(val[5], alpha, beta, scale);
-    val[6] = fwd_eltwise(val[6], alpha, beta, scale);
-    val[7] = fwd_eltwise(val[7], alpha, beta, scale);
-#endif // WITH_ELTWISE
-
 #if DT_F16
 #define SUM_CONVERT(_sum) CONVERT_FLOAT8_T(as_half8(_sum))
 #else DT_BF16
@@ -122,31 +98,45 @@ inline float8 POST_OPS_PASS(float8 val, float2 bias, float sum_scale,
 #endif
 #endif
 
-#if WITH_SUM
-    val += SUM_CONVERT(DST_BLOCK_READ_8((__global ushort *)&dst[0]))
-            * sum_scale;
-#endif // WITH_SUM
-
-#if ELTWISE_IDX == 1
-    val[0] = fwd_eltwise(val[0], alpha, beta, scale);
-    val[1] = fwd_eltwise(val[1], alpha, beta, scale);
-    val[2] = fwd_eltwise(val[2], alpha, beta, scale);
-    val[3] = fwd_eltwise(val[3], alpha, beta, scale);
-    val[4] = fwd_eltwise(val[4], alpha, beta, scale);
-    val[5] = fwd_eltwise(val[5], alpha, beta, scale);
-    val[6] = fwd_eltwise(val[6], alpha, beta, scale);
-    val[7] = fwd_eltwise(val[7], alpha, beta, scale);
-#endif // WITH_SUM_ELTWISE
-
-    return val;
-}
+#define POST_OPS_PASS(mb_batch, ch_batch, channel_offset, val, bias, dst) \
+    ({ \
+        if (WITH_BIAS) { \
+            val[0] += bias[0]; \
+            val[2] += bias[0]; \
+            val[4] += bias[0]; \
+            val[6] += bias[0]; \
+            val[1] += bias[1]; \
+            val[3] += bias[1]; \
+            val[5] += bias[1]; \
+            val[7] += bias[1]; \
+        } \
+        float8 d; \
+        if (WITH_SUM) { \
+            d = SUM_CONVERT(DST_BLOCK_READ_8((__global ushort *)(dst))); \
+        } \
+        for (int n_i = 0; n_i < 8; ++n_i) { \
+            int sg_local_id = get_sub_group_local_id(); \
+            const int po_mb = (mb_group_id * MB_BLOCK + n_i / 2 + 4 * ch_batch \
+                                      + 8 * mb_batch) \
+                    % MB; \
+            const int po_oc \
+                    = (oc_group_id * OC_BLOCK + sg_local_id \
+                              + (n_i % 2) * SUB_GROUP_SIZE + channel_offset) \
+                    % OC; \
+            float val_i = val[n_i]; \
+            float d_i = d[n_i]; \
+            APPLY_POST_OPS(val_i, float, d_i, float, po_mb, 1, po_oc, 1, 0, 1, \
+                    0, 1, 0, 1, 0, 1); \
+            val[n_i] = val_i; \
+        } \
+        val; \
+    })
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) // attr:no-format
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
-        const __global BIA_DATA_T *bias, __global DST_DATA_T *dst,
-        float eltwise_alpha, float eltwise_beta, float eltwise_scale,
-        float sum_scale) {
+        const __global BIA_DATA_T *bias,
+        __global DST_DATA_T *dst POST_OP_ARGS) {
 
     // Groups:
     const uint oc_group_id = get_global_id(0) / 8;
@@ -325,17 +315,17 @@ gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
 #endif
 #endif
 
-#define PACK_AND_WRITE(_acc0, _acc1, _bias_val, _dst_offset) \
+#define PACK_AND_WRITE( \
+        mb_batch, channel_offset, _acc0, _acc1, _bias_val, _dst_offset) \
     dst_val[0] = (float8)(_acc0[0], _acc1[0], _acc0[1], _acc1[1], _acc0[2], \
             _acc1[2], _acc0[3], _acc1[3]); \
     dst_val[1] = (float8)(_acc0[4], _acc1[4], _acc0[5], _acc1[5], _acc0[6], \
             _acc1[6], _acc0[7], _acc1[7]); \
 \
-    dst_val[0] = POST_OPS_PASS(dst_val[0], CONVERT_BIAS(_bias_val), sum_scale, \
-            eltwise_alpha, eltwise_beta, eltwise_scale, dst + _dst_offset); \
-    dst_val[1] = POST_OPS_PASS(dst_val[1], CONVERT_BIAS(_bias_val), sum_scale, \
-            eltwise_alpha, eltwise_beta, eltwise_scale, \
-            dst + _dst_offset + 64); \
+    dst_val[0] = POST_OPS_PASS(mb_batch, 0, channel_offset, dst_val[0], \
+            CONVERT_BIAS(_bias_val), dst + _dst_offset); \
+    dst_val[1] = POST_OPS_PASS(mb_batch, 1, channel_offset, dst_val[1], \
+            CONVERT_BIAS(_bias_val), dst + _dst_offset + 64); \
 \
     DST_BLOCK_WRITE_8( \
             (__global DST_BLOCK_TYPE *)&dst[_dst_offset], TO_DST(dst_val[0])); \
@@ -347,29 +337,29 @@ gen12hp_1x1_conv_fwd_x16(const __global DATA_T *src, const __global DATA_T *wei,
 
     if (ow < OW) {
         // Write results from MB(0-7) of 2 Output Channels
-        PACK_AND_WRITE(C00, C10, bias_val_1, 0)
+        PACK_AND_WRITE(0, 0, C00, C10, bias_val_1, 0)
 
         // Write results from MB(8-15) of 2 Output Channels
-        PACK_AND_WRITE(C01, C11, bias_val_1, WRITE_OFFSET)
+        PACK_AND_WRITE(1, 0, C01, C11, bias_val_1, WRITE_OFFSET)
 
         // Write results from MB(16-23) of 2 Output Channels
-        PACK_AND_WRITE(C02, C12, bias_val_1, 2 * WRITE_OFFSET)
+        PACK_AND_WRITE(2, 0, C02, C12, bias_val_1, 2 * WRITE_OFFSET)
 
         // Write results from MB(24-31) of 2 Output Channels
-        PACK_AND_WRITE(C03, C13, bias_val_1, 3 * WRITE_OFFSET)
+        PACK_AND_WRITE(3, 0, C03, C13, bias_val_1, 3 * WRITE_OFFSET)
 
         dst += off_NChw32n16c(0, 16, 0, 0, OC, OH, OW);
 
         // Write results from MB(0-7) of 2 Output Channels
-        PACK_AND_WRITE(C20, C30, bias_val_2, 0)
+        PACK_AND_WRITE(0, 16, C20, C30, bias_val_2, 0)
 
         // Write results from MB(8-15) of 2 Output Channels
-        PACK_AND_WRITE(C21, C31, bias_val_2, WRITE_OFFSET)
+        PACK_AND_WRITE(1, 16, C21, C31, bias_val_2, WRITE_OFFSET)
 
         // Write results from MB(16-23) of 2 Output Channels
-        PACK_AND_WRITE(C22, C32, bias_val_2, 2 * WRITE_OFFSET)
+        PACK_AND_WRITE(2, 16, C22, C32, bias_val_2, 2 * WRITE_OFFSET)
 
         // Write results from MB(24-31) of 2 Output Channels
-        PACK_AND_WRITE(C23, C33, bias_val_2, 3 * WRITE_OFFSET)
+        PACK_AND_WRITE(3, 16, C23, C33, bias_val_2, 3 * WRITE_OFFSET)
     }
 }

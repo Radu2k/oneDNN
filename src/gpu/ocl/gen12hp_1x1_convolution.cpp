@@ -197,14 +197,13 @@ status_t gen12hp_1x1_convolution_fwd_t::execute_forward(
     arg_list.set(1, weights);
     arg_list.set(2, bias);
     arg_list.set(3, dst);
-    arg_list.set(4, conf.attr_info.eltwise_alpha);
-    arg_list.set(5, conf.attr_info.eltwise_beta);
-    arg_list.set(6, conf.attr_info.eltwise_scale);
-    arg_list.set(7, conf.attr_info.sum_scale);
+
+    unsigned arg_idx = append_post_ops_to_arg_list(
+            ctx, arg_list, 4, conf.attr_info.all_post_ops);
 
     if (conf.src_data_type == data_type::u8) {
         float scales = pd()->attr()->output_scales_.scales_[0];
-        arg_list.set(8, scales);
+        arg_list.set(arg_idx, scales);
     }
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);

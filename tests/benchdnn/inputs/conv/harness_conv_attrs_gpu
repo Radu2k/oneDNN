@@ -47,3 +47,10 @@
 --attr=post_ops='sum:2.5;relu:0.5' --batch=shapes_resnet_50
 --attr=post_ops='sum;linear:0.5:1.5' --batch=shapes_resnet_50
 --attr=post_ops='linear:0.5:1.5:2.0' --batch=shapes_resnet_50
+
+# binary post op testing
+--reset
+--cfg=u8s8s8
+--mb=4
+--attr=post_ops='sum:2.5;min:f32:per_dim_01;add:s8:per_oc'
+--batch=shapes_resnet_50

@@ -130,8 +130,7 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
         const __global char *wei, const __global float *bias,
-        __global DST_DATA_T *dst, float eltwise_alpha, float eltwise_beta,
-        float eltwise_scale, float sum_scale, float scale,
+        __global DST_DATA_T *dst POST_OP_ARGS, float scale,
         const __global float *scales_per_oc) {
 
     // Groups:
@@ -322,40 +321,7 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
             block_read_dst(BLOCK1, D1, dst + 8 * OC_BLOCK);
         }
     }
-
-#define DO_SUM(d) \
-    do { \
-        float4 df = convert_float4(d); \
-        tmp = fma(df, (float4)sum_scale, tmp); \
-    } while (0)
-
-#else
-#define DO_SUM(d)
 #endif // with_sum
-
-#define ELTWISE() \
-    do { \
-        tmp[0] = fwd_eltwise( \
-                tmp[0], eltwise_alpha, eltwise_beta, eltwise_scale); \
-        tmp[1] = fwd_eltwise( \
-                tmp[1], eltwise_alpha, eltwise_beta, eltwise_scale); \
-        tmp[2] = fwd_eltwise( \
-                tmp[2], eltwise_alpha, eltwise_beta, eltwise_scale); \
-        tmp[3] = fwd_eltwise( \
-                tmp[3], eltwise_alpha, eltwise_beta, eltwise_scale); \
-    } while (0)
-
-#if WITH_ELTWISE && !WITH_POST_SUM_ELTWISE
-#define DO_ELTWISE() ELTWISE();
-#else
-#define DO_ELTWISE()
-#endif
-
-#if WITH_POST_SUM_ELTWISE
-#define DO_POST_SUM_ELTWISE() ELTWISE();
-#else
-#define DO_POST_SUM_ELTWISE()
-#endif
 
 #define PACK(C0, C1, C2, C3, idx) \
     do { \
@@ -370,14 +336,27 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
         dst_pack[idx] = CONVERT_DST_DATA4_T(tmp); \
     } while (0)
 
-#define STORE_DST(n, C0, C1, C2, C3, D, dst_ptr) \
+#define STORE_DST(n, C0, C1, C2, C3, D, dst_ptr, mb_stride) \
     do { \
         for (int n_i = 0; n_i < n; n_i++) { \
             PACK(C0, C1, C2, C3, n_i); \
             QUANTIZE_ADD_BIAS(); \
-            DO_ELTWISE(); \
-            DO_SUM(D[n_i]); \
-            DO_POST_SUM_ELTWISE(); \
+            for (int didx = 0; didx < 4; ++didx) { \
+                float tmp_i = tmp[didx]; \
+                DATA_T dni_i = D[n_i][didx]; \
+                int po_mb; \
+                if (MB_BLOCK == 32) \
+                    po_mb = (mb_group_id * MB_BLOCK / 2 + mb_stride * 8 + n_i) \
+                            % MB; \
+                else \
+                    po_mb = mb_group_id % MB; \
+                const int po_oc = (oc_group_id * OC_BLOCK + sg_local_id \
+                                          + didx * SUB_GROUP_SIZE) \
+                        % (OC * G); \
+                APPLY_POST_OPS(tmp_i, float, dni_i, DATA_T, po_mb, 1, po_oc, \
+                        1, 0, 1, 0, 1, 0, 1, 0, 1); \
+                tmp[didx] = tmp_i; \
+            } \
             CONVERT_PACK(n_i); \
         } \
         block_write_dst(n, dst_pack, dst_ptr); \
@@ -387,13 +366,14 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
     if (sp < OW * OH) {
 #endif
         if (OUT_SP_TAIL && sp + SP_BLOCK > OW * OH) {
-            STORE_DST(min(BLOCK0, OUT_SP_TAIL), C00, C01, C02, C03, D0, dst);
+            STORE_DST(min(BLOCK0, OUT_SP_TAIL), C00, C01, C02, C03, D0, dst, 0);
             STORE_DST(OUT_SP_TAIL - 8, C10, C11, C12, C13, D1,
-                    dst + 8 * OC_BLOCK);
+                    dst + 8 * OC_BLOCK, 1);
         } else {
-            STORE_DST(BLOCK0, C00, C01, C02, C03, D0, dst);
+            STORE_DST(BLOCK0, C00, C01, C02, C03, D0, dst, 0);
             if (SP_BLOCK > 8 || (MB_BLOCK == 32 && MB > 8))
-                STORE_DST(BLOCK1, C10, C11, C12, C13, D1, dst + 8 * OC_BLOCK);
+                STORE_DST(
+                        BLOCK1, C10, C11, C12, C13, D1, dst + 8 * OC_BLOCK, 1);
         }
 #if INT8_WEI_SLM && SP_TAIL
     }

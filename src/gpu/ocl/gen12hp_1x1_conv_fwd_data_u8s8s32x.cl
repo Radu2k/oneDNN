@@ -51,8 +51,7 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 gen12hp_1x1_conv_fwd_u8s8s32x(const __global uchar *src,
         const __global char *wei, const __global float *bias,
-        __global DATA_T *dst, float eltwise_alpha, float eltwise_beta,
-        float eltwise_scale, float sum_scale, float scales) {
+        __global DATA_T *dst POST_OP_ARGS, float scales) {
 
     // Groups:
     const uint oc_group_id = get_group_id(0);
@@ -174,42 +173,6 @@ gen12hp_1x1_conv_fwd_u8s8s32x(const __global uchar *src,
 #define QUANTIZE_ADD_BIAS() tmp *= scales;
 #endif
 
-#if WITH_SUM
-#define DO_SUM(d_pack) \
-    do { \
-        DATA4_T d = AS_DATA4_T(d_pack); \
-        float4 df = convert_float4(d); \
-        tmp = fma(df, (float4)sum_scale, tmp); \
-    } while (0)
-
-#else
-#define DO_SUM(d) ;
-#endif // with_sum
-
-#define ELTWISE() \
-    do { \
-        tmp[0] = fwd_eltwise( \
-                tmp[0], eltwise_alpha, eltwise_beta, eltwise_scale); \
-        tmp[1] = fwd_eltwise( \
-                tmp[1], eltwise_alpha, eltwise_beta, eltwise_scale); \
-        tmp[2] = fwd_eltwise( \
-                tmp[2], eltwise_alpha, eltwise_beta, eltwise_scale); \
-        tmp[3] = fwd_eltwise( \
-                tmp[3], eltwise_alpha, eltwise_beta, eltwise_scale); \
-    } while (0)
-
-#if ELTWISE_IDX == 0
-#define DO_ELTWISE() ELTWISE();
-#else
-#define DO_ELTWISE() ;
-#endif
-
-#if ELTWISE_IDX == 1
-#define DO_POST_SUM_ELTWISE() ELTWISE();
-#else
-#define DO_POST_SUM_ELTWISE() ;
-#endif
-
 #define PACK(C0, C1, C2, C3, idx) \
     do { \
         tmp[0] = C0[idx]; \
@@ -231,9 +194,19 @@ gen12hp_1x1_conv_fwd_u8s8s32x(const __global uchar *src,
         for (int n_i = 0; n_i < 8; n_i++) { \
             PACK(C0, C1, C2, C3, n_i); \
             QUANTIZE_ADD_BIAS(); \
-            DO_ELTWISE(); \
-            DO_SUM(D[n_i]); \
-            DO_POST_SUM_ELTWISE(); \
+            DATA4_T dn_i = AS_DATA4_T(D[n_i]); \
+            for (int didx = 0; didx < 4; ++didx) { \
+                float tmp_i = tmp[didx]; \
+                DATA_T dni_i = dn_i[didx]; \
+                const int po_mb \
+                        = (mb_group_id * MB_BLOCK + mb_stride + n_i) % MB; \
+                const int po_oc = (oc_group_id * OC_BLOCK + sg_local_id \
+                                          + didx * SUB_GROUP_SIZE) \
+                        % OC; \
+                APPLY_POST_OPS(tmp_i, float, dni_i, DATA_T, po_mb, 1, po_oc, \
+                        1, 0, 1, 0, 1, 0, 1, 0, 1); \
+                tmp[didx] = tmp_i; \
+            } \
             CONVERT_PACK(n_i); \
         } \
         intel_sub_group_block_write_uc16( \
