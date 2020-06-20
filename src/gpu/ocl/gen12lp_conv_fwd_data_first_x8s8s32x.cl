@@ -96,7 +96,7 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
 
     __local uint S_slice[SRC_SLM_SIZE * KH * KD];
     __local uint *S_part = S_slice + (sp * SW * OW_BLOCK + PW);
-    __local MMAD_DATA_T *S_work = S_slice + (sp * SW * OW_BLOCK);
+    __local SRC_MMAD_DATA_T *S_work = S_slice + (sp * SW * OW_BLOCK);
 
     dst += OC_BLOCK * OD * OH * OW * MB_BLOCK * (group_oc + oc);
     dst += OC_BLOCK * OD * OH * OW * OC_NCHUNK * G * MB_BLOCK

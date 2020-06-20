@@ -18,8 +18,8 @@
 #include "gpu/ocl/ocl_post_ops.h"
 #include "gpu/ocl/ocl_types.h"
 
-#define SRC_DATA_BLOCK_T MMAD_DATA8_T
-#define AS_SRC_DATA_BLOCK_T AS_MMAD_DATA8_T
+#define SRC_DATA_BLOCK_T SRC_MMAD_DATA8_T
+#define AS_SRC_DATA_BLOCK_T AS_SRC_MMAD_DATA8_T
 
 #define BLOCK_READ_SRC(data, idx) \
     data = AS_SRC_DATA_BLOCK_T( \

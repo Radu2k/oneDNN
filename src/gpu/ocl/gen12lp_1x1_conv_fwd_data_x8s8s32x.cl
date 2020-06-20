@@ -27,9 +27,9 @@
 #if SP_BLOCK == 4
 #define BLOCK0 4
 #define ACC_DATA_BLOCK int4
-#define SRC_DATA_BLOCK_T MMAD_DATA4_T
+#define SRC_DATA_BLOCK_T SRC_MMAD_DATA4_T
 #define BLOCK_READ_SRC(data, idx) \
-    data = AS_MMAD_DATA4_T( \
+    data = AS_SRC_MMAD_DATA4_T( \
             intel_sub_group_block_read4((__global uint *)&src[idx]));
 
 DECLARE_MMAD_EMU(mmad_tail0, idot4, IC_NBLOCKS_TAIL, 4, SRC_DATA_BLOCK_T, int8,
@@ -40,9 +40,9 @@ DECLARE_MMAD_EMU(mmad_tail0, idot4, IC_NBLOCKS_TAIL, 4, SRC_DATA_BLOCK_T, int8,
 #else
 #define BLOCK0 8
 #define ACC_DATA_BLOCK int8
-#define SRC_DATA_BLOCK_T MMAD_DATA8_T
+#define SRC_DATA_BLOCK_T SRC_MMAD_DATA8_T
 #define BLOCK_READ_SRC(data, idx) \
-    data = AS_MMAD_DATA8_T( \
+    data = AS_SRC_MMAD_DATA8_T( \
             intel_sub_group_block_read8((__global uint *)&src[idx]));
 
 DECLARE_MMAD_EMU(mmad_tail0, idot4, IC_NBLOCKS_TAIL, 8, SRC_DATA_BLOCK_T, int8,
@@ -55,10 +55,10 @@ DECLARE_MMAD_EMU(mmad_tail0, idot4, IC_NBLOCKS_TAIL, 8, SRC_DATA_BLOCK_T, int8,
 #if SP_BLOCK == 12
 #define BLOCK1 4
 #define ACC_DATA_BLOCK1 int4
-#define SRC_DATA_BLOCK_T1 MMAD_DATA4_T
+#define SRC_DATA_BLOCK_T1 SRC_MMAD_DATA4_T
 #define DST_DATA_BLOCK_T1 uint4
 #define BLOCK_READ_SRC1(data, idx) \
-    data = AS_MMAD_DATA4_T( \
+    data = AS_SRC_MMAD_DATA4_T( \
             intel_sub_group_block_read4((__global uint *)&src[idx]));
 
 DECLARE_MMAD_EMU(mmad_tail1, idot4, IC_NBLOCKS_TAIL, 4, SRC_DATA_BLOCK_T1, int8,
@@ -69,10 +69,10 @@ DECLARE_MMAD_EMU(mmad_tail1, idot4, IC_NBLOCKS_TAIL, 4, SRC_DATA_BLOCK_T1, int8,
 #else
 #define BLOCK1 8
 #define ACC_DATA_BLOCK1 int8
-#define SRC_DATA_BLOCK_T1 MMAD_DATA8_T
+#define SRC_DATA_BLOCK_T1 SRC_MMAD_DATA8_T
 #define DST_DATA_BLOCK_T1 uint8
 #define BLOCK_READ_SRC1(data, idx) \
-    data = AS_MMAD_DATA8_T( \
+    data = AS_SRC_MMAD_DATA8_T( \
             intel_sub_group_block_read8((__global uint *)&src[idx]));
 DECLARE_MMAD_EMU(mmad_tail1, idot4, IC_NBLOCKS_TAIL, 8, SRC_DATA_BLOCK_T1, int8,
         ACC_DATA_BLOCK1)
@@ -214,14 +214,14 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
 #if OUT_SP_TAIL < 8
                 S0 = 0;
                 for (int i = 0; i < OUT_SP_TAIL; ++i) {
-                    S0[i] = AS_MMAD_DATA_T(intel_sub_group_block_read(
+                    S0[i] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read(
                             (__global uint *)&src[i * IC_BLOCK]));
                 }
 #else
             BLOCK_READ_SRC(S0, 0 * IC_BLOCK);
             S1 = 0;
             for (int i = 8; i < OUT_SP_TAIL; ++i) {
-                S1[i - 8] = AS_MMAD_DATA_T(intel_sub_group_block_read(
+                S1[i - 8] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read(
                         (__global uint *)&src[i * IC_BLOCK]));
             }
 #endif
