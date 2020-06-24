@@ -25,10 +25,6 @@ namespace ocl {
 
 using namespace dnnl::impl::format_tag;
 
-static constexpr bool use_int8_slm_impl = false;
-static constexpr bool use_xf16_src_slm_impl = false;
-static constexpr bool use_xf16_wei_slm_impl = true;
-
 status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_conf() {
     const convolution_desc_t &cd = *desc();
 
@@ -41,77 +37,105 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_conf() {
     const memory_desc_wrapper weights_mdw(weights_md());
     const memory_desc_wrapper dst_mdw(dst_md());
 
-    bool is_bf16 = src_mdw.data_type() == data_type::bf16;
-    bool is_fp16 = src_mdw.data_type() == data_type::f16;
-    bool is_int8 = src_mdw.data_type() == data_type::u8;
+    bool is_int8 = src_mdw.data_type() == data_type::u8
+            || src_mdw.data_type() == data_type::s8;
 
     format_tag_t src_tag = dnnl_format_tag_undef;
     format_tag_t dst_tag = dnnl_format_tag_undef;
     format_tag_t wei_tag = dnnl_format_tag_undef;
 
-    if (conf.is_depthwise != false || (conf.with_groups && conf.ngroups > 1)
-            || conf.kh != 1 || conf.kw != 1)
+    conf.calc_block = 32;
+    conf.oc_block = (is_int8) ? 32 : 16;
+    conf.ic_block = (is_int8) ? 32 : 16;
+    conf.nchunk = utils::div_up(conf.oc * conf.ngroups, conf.calc_block);
+    if (conf.is_depthwise != false || conf.kd != 1 || conf.kh != 1
+            || conf.kw != 1)
+        return status::unimplemented;
+    if (conf.with_groups && conf.ngroups > 1
+            && (conf.oc % conf.oc_block != 0 || conf.ic % conf.ic_block != 0))
         return status::unimplemented;
 
-    if (is_int8) {
-        if (conf.oc % 32 != 0 || conf.ic % 32 != 0)
-            return status::unimplemented;
+    const bool is_stride1
+            = conf.stride_d == 1 && conf.stride_h == 1 && conf.stride_w == 1;
 
+    if (is_stride1) {
+        // reshape to nCxc
+        conf.iw = conf.iw * conf.ih * conf.id;
+        conf.ow = conf.ow * conf.oh * conf.od;
+        conf.ih = conf.id = 1;
+        conf.oh = conf.od = 1;
+    }
+
+    if (conf.mb == 8 || conf.mb == 16 || conf.mb % 32 == 0) {
         conf.mb_block = 32;
-        conf.oc_block = 32;
-        conf.ic_block = 32;
+        conf.sp_block = 1;
+    } else {
+        conf.mb_block = 1;
+        conf.sp_block = 4;
+        // TODO: compute sp_block
+        /*
+        auto approx_clocks = [&](const int block) {
+            int ic_chunks = utils::div_up(conf.ic, conf.ic_block);
+            bool use_slm = utils::div_up(conf.ow, block) % 8 == 0;
+            int mem_clocks = ic_chunks * (16 - use_slm * 6)
+                    + block / 2 * (ic_chunks + 1);
+            int compute_clocks = 32 * block * ic_chunks;
+            int num_threads = conf.nchunk * conf.mb * conf.od * conf.oh
+                    * utils::div_up(conf.ow, block);
+            return utils::div_up(num_threads, dev_info->hw_threads())
+                    * (compute_clocks + mem_clocks);
+        };
+        auto clock_compare = [&](const int &block1, const int &block2) {
+            return approx_clocks(block1) < approx_clocks(block2);
+        };
+        std::vector<int> sorted_blocks = {4, 8, 12, 16};
+        std::sort(sorted_blocks.begin(), sorted_blocks.end(), clock_compare);
+        conf.sp_block = sorted_blocks[0]; */
+    }
 
-        conf.sub_group_size = 8;
-        conf.lws_d[0] = conf.sub_group_size;
-        if (use_int8_slm_impl)
-            conf.lws_d[1] = 8;
-        else
-            conf.lws_d[1] = 1;
-        conf.lws_d[2] = 1;
+    const int ow_group
+            = (conf.mb_block == 32
+                      || utils::div_up(conf.ow, conf.sp_block) % 8 == 0)
+            ? 8
+            : 1;
 
-        conf.gws_d[0] = conf.oc / conf.oc_block * conf.sub_group_size;
-        if (use_int8_slm_impl)
-            conf.gws_d[1] = utils::rnd_up(conf.ow, conf.lws_d[1]) * conf.oh;
-        else
-            conf.gws_d[1] = conf.ow * conf.oh;
-        conf.gws_d[2] = utils::div_up(conf.mb, conf.mb_block);
+    conf.sub_group_size = 8;
+    conf.lws_d[0] = conf.sub_group_size;
+    conf.lws_d[1] = ow_group;
+    conf.lws_d[2] = 1;
 
-        src_tag = utils::pick(conf.ndims - 3, NCw32n32c, NChw32n32c);
-        dst_tag = utils::pick(conf.ndims - 3, NCw32n32c, NChw32n32c);
+    const int num_sp_threads
+            = utils::div_up(conf.ow, conf.sp_block) * conf.oh * conf.od;
+    conf.gws_d[0] = utils::rnd_up(conf.nchunk * 8, conf.lws_d[0]);
+    conf.gws_d[1] = utils::rnd_up(num_sp_threads, conf.lws_d[1]);
+    conf.gws_d[2] = utils::div_up(conf.mb, conf.mb_block);
+
+    conf.with_bias = cd.bias_desc.format_kind != format_kind::undef;
+
+    if (is_int8) {
+        if (conf.mb_block == 32) {
+            src_tag = utils::pick(conf.ndims - 3, NCw32n32c, NChw32n32c);
+            dst_tag = utils::pick(conf.ndims - 3, NCw32n32c, NChw32n32c);
+        } else {
+            src_tag = utils::pick(conf.ndims - 3, nCw32c, nChw32c);
+            dst_tag = utils::pick(conf.ndims - 3, nCw32c, nChw32c);
+        }
+
         wei_tag = conf.with_groups
                 ? utils::pick(conf.ndims - 3, gOIw4o8i8o4i, gOIhw4o8i8o4i)
                 : utils::pick(conf.ndims - 3, OIw4o8i8o4i, OIhw4o8i8o4i);
-
-    } else if (is_fp16 || is_bf16) {
-        if (conf.oc % 32 != 0 || conf.ic % 16 != 0)
-            return status::unimplemented;
-
-        conf.mb_block = 32;
-        conf.oc_block = 32;
-        conf.ic_block = 16;
-
-        conf.sub_group_size = 8;
-        if (use_xf16_src_slm_impl
-                && ((conf.oc / conf.oc_block * conf.sub_group_size) % 32 == 0))
-            conf.lws_d[0] = conf.sub_group_size * 4;
-        else
-            conf.lws_d[0] = conf.sub_group_size;
-        conf.lws_d[1] = 8;
-        conf.lws_d[2] = 1;
-
-        conf.gws_d[0] = conf.oc / conf.oc_block * conf.sub_group_size;
-        conf.gws_d[1] = utils::rnd_up(conf.ow, conf.lws_d[1]) * conf.oh;
-        conf.gws_d[2] = utils::div_up(conf.mb, conf.mb_block);
-
-        src_tag = utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c);
-        dst_tag = utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c);
-        wei_tag = conf.with_groups
-                ? utils::pick(conf.ndims - 3, format_tag::gOIw4o8i8o2i,
-                        format_tag::gOIhw4o8i8o2i, format_tag::gOIdhw4o8i8o2i)
-                : utils::pick(conf.ndims - 3, format_tag::OIw4o8i8o2i,
-                        format_tag::OIhw4o8i8o2i, format_tag::OIdhw4o8i8o2i);
     } else {
-        assert(!"not expected");
+        if (conf.mb_block == 32) {
+            src_tag = utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c);
+            dst_tag = utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c);
+        } else {
+            src_tag = utils::pick(conf.ndims - 3, nCw16c, nChw16c);
+            dst_tag = utils::pick(conf.ndims - 3, nCw16c, nChw16c);
+        }
+
+        wei_tag = conf.with_groups
+                ? utils::pick(conf.ndims - 3, gOIw4o8i8o2i, gOIhw4o8i8o2i)
+                : utils::pick(conf.ndims - 3, OIw4o8i8o2i, OIhw4o8i8o2i);
     }
 
     conf.src_tag = src_mdw.format_kind() == format_kind::any
@@ -133,23 +157,26 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_conf() {
 
 status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
         compute::kernel_ctx_t &kernel_ctx) const {
+    kernel_ctx.define_int("G", conf.ngroups);
     kernel_ctx.define_int("MB", conf.mb);
     kernel_ctx.define_int("IC", conf.ic_without_padding);
+    kernel_ctx.define_int("ID", conf.id);
     kernel_ctx.define_int("IH", conf.ih);
     kernel_ctx.define_int("IW", conf.iw);
     kernel_ctx.define_int("OC", conf.oc_without_padding);
+    kernel_ctx.define_int("OD", conf.od);
     kernel_ctx.define_int("OH", conf.oh);
     kernel_ctx.define_int("OW", conf.ow);
-    kernel_ctx.define_int("KH", conf.kh);
-    kernel_ctx.define_int("KW", conf.kw);
+
+    kernel_ctx.define_int("SD", conf.stride_d);
     kernel_ctx.define_int("SH", conf.stride_h);
     kernel_ctx.define_int("SW", conf.stride_w);
 
-    kernel_ctx.define_int("OW_PADDED", utils::rnd_up(conf.ow, conf.lws_d[1]));
-
+    kernel_ctx.define_int("SP_BLOCK", conf.sp_block);
     kernel_ctx.define_int("MB_BLOCK", conf.mb_block);
     kernel_ctx.define_int("OC_BLOCK", conf.oc_block);
     kernel_ctx.define_int("IC_BLOCK", conf.ic_block);
+    kernel_ctx.define_int("OC_CALC_BLOCK", conf.calc_block);
 
     kernel_ctx.define_int("WITH_BIAS", conf.with_bias);
     def_attr_info(kernel_ctx, conf.attr_info);
@@ -160,26 +187,27 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);
     kernel_ctx.define_int("LWS_2", conf.lws_d[2]);
 
-    kernel_ctx.define_int("OC_NCHUNK", conf.oc / conf.oc_block);
-    kernel_ctx.define_int("IC_NCHUNK", conf.ic / conf.ic_block);
+    kernel_ctx.define_int("OC_NCHUNK", utils::div_up(conf.oc, conf.oc_block));
+    kernel_ctx.define_int("IC_NCHUNK", utils::div_up(conf.ic, conf.ic_block));
 
-    if (conf.src_data_type == data_type::u8)
-        kernel_ctx.set_data_type(conf.dst_data_type);
-    else
-        kernel_ctx.set_data_type(conf.src_data_type);
+    kernel_ctx.define_int("USE_WEI_SLM",
+            conf.mb_block == 32
+                    || utils::div_up(conf.ow, conf.sp_block) % 8 == 0);
+    kernel_ctx.define_int("SP_TAIL",
+            utils::div_up(conf.ow, conf.sp_block) % conf.lws_d[1] != 0);
+    kernel_ctx.define_int("OUT_SP_TAIL", conf.ow % conf.sp_block);
 
+    kernel_ctx.set_data_type(conf.dst_data_type);
+
+    def_data_type(kernel_ctx, conf.src_data_type, "SRC");
     def_data_type(kernel_ctx, conf.dst_data_type, "DST");
-    def_data_type(kernel_ctx, conf.dst_data_type, "BIA");
+    def_data_type(kernel_ctx, conf.weights_data_type, "WEI");
+    def_data_type(kernel_ctx, conf.bias_data_type, "BIA");
     def_data_type(kernel_ctx,
             conf.attr_info.sum_data_type == dnnl_data_type_undef
                     ? conf.dst_data_type
                     : conf.attr_info.sum_data_type,
             "SUM");
-
-    if (use_int8_slm_impl) kernel_ctx.define_int("INT8_SLM", 1);
-    if (use_xf16_src_slm_impl && (conf.gws_d[0] % 32 == 0))
-        kernel_ctx.define_int("XF16_SRC_SLM", 1);
-    if (use_xf16_wei_slm_impl) kernel_ctx.define_int("XF16_WEI_SLM", 1);
 
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
@@ -193,9 +221,12 @@ status_t gen12hp_1x1_convolution_fwd_t::execute_forward(
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
     auto &bias = CTX_IN_STORAGE(DNNL_ARG_BIAS);
+    auto &oscales = CTX_IN_STORAGE(DNNL_ARG_ATTR_OUTPUT_SCALES);
     auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     const auto &conf = pd()->conf;
+    bool is_int8 = conf.src_data_type == data_type::u8
+            || conf.src_data_type == data_type::s8;
 
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, src);
@@ -205,10 +236,20 @@ status_t gen12hp_1x1_convolution_fwd_t::execute_forward(
 
     unsigned arg_idx = append_post_ops_to_arg_list(
             ctx, arg_list, 4, conf.attr_info.all_post_ops);
-
-    if (conf.src_data_type == data_type::u8) {
+    if (conf.attr_info.common_oscales) {
         float scales = pd()->attr()->output_scales_.scales_[0];
-        arg_list.set(arg_idx, scales);
+        arg_list.set(arg_idx++, scales);
+    } else {
+        arg_list.set(arg_idx++, 1.0f);
+    }
+
+    if (conf.attr_info.with_per_oc_oscales) {
+        if (conf.attr_info.with_runtime_oscales)
+            arg_list.set(arg_idx++, oscales);
+        else
+            arg_list.set(arg_idx++, CTX_GPU_RES_STORAGE(SCALES_));
+    } else {
+        arg_list.set(arg_idx++, memory_storage_t::empty_storage());
     }
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);

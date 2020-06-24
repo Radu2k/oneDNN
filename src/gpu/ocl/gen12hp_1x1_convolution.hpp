@@ -45,34 +45,47 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
             using namespace data_type;
             assert(engine->kind() == engine_kind::gpu);
 
-            const auto attr_skip_mask = primitive_attr_t::skip_mask_t::oscale
-                    | primitive_attr_t::skip_mask_t::post_ops
-                    | primitive_attr_t::skip_mask_t::sum_dt;
+            const auto attr_skip_mask
+                    = primitive_attr_t::skip_mask_t::oscale_runtime
+                    | primitive_attr_t::skip_mask_t::post_ops;
 
             bool ok = utils::one_of(desc()->prop_kind, forward_training,
                               forward_inference)
                     && desc()->alg_kind == alg_kind::convolution_direct
-                    && utils::one_of(
-                            desc()->dst_desc.data_type, bf16, f16, s8, u8)
+                    && utils::one_of(desc()->dst_desc.data_type, bf16, f16, s8,
+                            u8, s32, f32)
                     && utils::one_of(true,
-                            expect_data_types(u8, s8, f32,
-                                    desc()->dst_desc.data_type, s32),
-                            expect_data_types(bf16, bf16,
-                                    desc()->dst_desc.data_type,
-                                    desc()->dst_desc.data_type, f32),
-                            expect_data_types(f16, f16, f16,
-                                    desc()->dst_desc.data_type, f16))
+                            expect_data_types(f16, f16, f16, f16, f16),
+                            expect_data_types(bf16, bf16, bf16, bf16, f32),
+                            expect_data_types(bf16, bf16, f32, bf16, f32),
+                            expect_data_types(bf16, bf16, bf16, f32, f32),
+                            expect_data_types(bf16, bf16, f32, f32, f32),
+                            expect_data_types(u8, s8, f32, u8, s32),
+                            expect_data_types(u8, s8, f32, s8, s32),
+                            expect_data_types(u8, s8, f32, s32, s32),
+                            expect_data_types(u8, s8, f32, f32, s32),
+                            expect_data_types(s8, s8, f32, u8, s32),
+                            expect_data_types(s8, s8, f32, s8, s32),
+                            expect_data_types(s8, s8, f32, s32, s32),
+                            expect_data_types(s8, s8, f32, f32, s32))
                     && attr()->has_default_values(
                             attr_skip_mask, desc()->dst_desc.data_type)
                     && post_ops_ok(attr())
                     && IMPLICATION(!attr()->output_scales_.has_default_values(),
                             utils::one_of(src_md_.data_type, s8, u8)
-                                    && attr()->output_scales_.mask_ == 0);
+                                    && utils::one_of(
+                                            attr()->output_scales_.mask_, 0,
+                                            1 << 1));
 
             if (!ok) return status::unimplemented;
 
             status_t status = init_conf();
+
+            attr_info_ = attr_info_t::create(attr());
             if (status != status::success) return status;
+
+            auto scales_status = init_scales_md();
+            if (scales_status != status::success) return scales_status;
 
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
@@ -87,19 +100,28 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
         status_t init_conf();
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
+        const memory_desc_t *scales_md() const { return &scales_md_; }
+
         conv_conf_t conf;
+
+        attr_info_t attr_info_ = {};
         bool is_gen12hp = false;
+
+    private:
+        status_t init_scales_md() {
+            if (!attr_info_.with_per_oc_oscales) return status::success;
+
+            scales_md_.data_type = data_type::f32;
+            scales_md_.ndims = 1;
+            scales_md_.dims[0] = attr()->output_scales_.count_;
+            return memory_desc_init_by_tag(scales_md_, format_tag::x);
+        }
+
+        memory_desc_t scales_md_;
     };
 
     status_t init(engine_t *engine) {
-        const char *kernel_name = nullptr;
-        if (pd()->desc()->src_desc.data_type == data_type::f16
-                || pd()->desc()->src_desc.data_type == data_type::bf16)
-            kernel_name = "gen12hp_1x1_conv_fwd_x16";
-        else if (pd()->desc()->src_desc.data_type == data_type::u8)
-            kernel_name = "gen12hp_1x1_conv_fwd_u8s8s32x";
-        else
-            assert(!"not expected");
+        const char *kernel_name = "gen12hp_1x1_conv_fwd";
 
         compute::kernel_ctx_t kernel_ctx;
         auto status = pd()->init_kernel_ctx(kernel_ctx);
@@ -117,11 +139,35 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
         return execute_forward(ctx);
     }
 
+protected:
+    status_t init_res_storage(
+            engine_t *engine, gpu_resource_t *r) const override {
+        if (!pd()->conf.attr_info.with_per_oc_oscales
+                || pd()->conf.attr_info.with_runtime_oscales)
+            return status::success;
+
+        memory_desc_wrapper scales_mdw(pd()->scales_md());
+        memory_storage_t *tmp_mem_storage_ptr;
+        CHECK(engine->create_memory_storage(
+                &tmp_mem_storage_ptr, scales_mdw.nelems() * sizeof(float)));
+
+        std::unique_ptr<memory_storage_t> tmp_mem_storage(tmp_mem_storage_ptr);
+        void *scales_ptr = nullptr;
+        CHECK(tmp_mem_storage->map_data(&scales_ptr, nullptr));
+        utils::array_copy((float *)scales_ptr,
+                pd()->attr()->output_scales_.scales_,
+                pd()->attr()->output_scales_.count_);
+        CHECK(tmp_mem_storage->unmap_data(scales_ptr, nullptr));
+        r->add_memory_storage(SCALES_, std::move(tmp_mem_storage));
+        return status::success;
+    }
+
 private:
     status_t execute_forward(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 
     compute::kernel_t kernel_;
+    enum { SCALES_ = 0 };
 };
 
 } // namespace ocl

@@ -146,6 +146,7 @@
 #define MMAD_DATA_T uint
 #define MMAD_DATA4_T uint4
 #define MMAD_DATA8_T uint8
+#define MMAD_ACC_DATA4_T float4
 #define MMAD_ACC_DATA8_T float8
 #elif DT_BF16 == 1
 #define DATA_T ushort
@@ -206,6 +207,7 @@
 #define MMAD_DATA_T uint
 #define MMAD_DATA4_T uint4
 #define MMAD_DATA8_T uint8
+#define MMAD_ACC_DATA4_T float4
 #define MMAD_ACC_DATA8_T float8
 #elif DT_S8 == 1
 #define DATA_T char
@@ -268,6 +270,7 @@
 #define MMAD_DATA_T int
 #define MMAD_DATA4_T int4
 #define MMAD_DATA8_T int8
+#define MMAD_ACC_DATA4_T int4
 #define MMAD_ACC_DATA8_T int8
 #elif DT_U8 == 1
 #define DATA_T uchar
@@ -330,6 +333,7 @@
 #define MMAD_DATA_T uint
 #define MMAD_DATA4_T uint4
 #define MMAD_DATA8_T uint8
+#define MMAD_ACC_DATA4_T int4
 #define MMAD_ACC_DATA8_T int8
 #elif DT_S32 == 1
 #define DATA_T int
@@ -423,15 +427,24 @@
 #define SRC_DATA4_T CONCAT2(SRC_DATA_T, 4)
 #define SRC_DATA8_T CONCAT2(SRC_DATA_T, 8)
 #define SRC_DATA16_T CONCAT2(SRC_DATA_T, 16)
-#ifdef SRC_DT_U8
-#define SRC_MMAD_DATA_T uint
-#define SRC_MMAD_DATA4_T uint4
-#define SRC_MMAD_DATA8_T uint8
-#elif SRC_DT_S8
+#ifdef SRC_DT_S8
 #define SRC_MMAD_DATA_T int
 #define SRC_MMAD_DATA4_T int4
 #define SRC_MMAD_DATA8_T int8
+#else
+#define SRC_MMAD_DATA_T uint
+#define SRC_MMAD_DATA4_T uint4
+#define SRC_MMAD_DATA8_T uint8
 #endif
+
+#if defined(SRC_DT_U8) || defined(SRC_DT_S8)
+#define SRC_MMAD_ACC_DATA4_T int4
+#define SRC_MMAD_ACC_DATA8_T int8
+#else
+#define SRC_MMAD_ACC_DATA4_T float4
+#define SRC_MMAD_ACC_DATA8_T float8
+#endif
+
 #define AS_SRC_DATA2_T CONCAT2(as_, SRC_DATA2_T)
 #define AS_SRC_DATA4_T CONCAT2(as_, SRC_DATA4_T)
 #define AS_SRC_DATA16_T CONCAT2(as_, SRC_DATA16_T)
@@ -573,6 +586,10 @@
 
 // Block read/write macros for dst.
 #if DST_DT_U8 || DST_DT_S8
+#define BLOCK_READ_DST2(ptr) \
+    AS_DST_DATA2_T(intel_sub_group_block_read_uc2((__global uchar *)ptr))
+#define BLOCK_WRITE_DST2(ptr, v) \
+    intel_sub_group_block_write_uc2((__global uchar *)ptr, as_uchar2(v))
 
 #define BLOCK_READ_DST4(ptr) \
     AS_DST_DATA4_T(intel_sub_group_block_read_uc4((__global uchar *)ptr))
@@ -589,7 +606,38 @@
 #define BLOCK_WRITE_DST16(ptr, v) \
     intel_sub_group_block_write_uc16((__global uchar *)ptr, as_uchar16(v))
 
+#elif DST_DT_F16 || DST_DT_BF16
+
+#define BLOCK_READ_DST2(ptr) \
+    AS_DST_DATA2_T(intel_sub_group_block_read_us2((__global ushort *)ptr))
+#define BLOCK_WRITE_DST2(ptr, v) \
+    intel_sub_group_block_write_us2((__global ushort *)ptr, as_ushort2(v))
+
+#define BLOCK_READ_DST4(ptr) \
+    AS_DST_DATA4_T(intel_sub_group_block_read_us4((__global ushort *)ptr))
+#define BLOCK_WRITE_DST4(ptr, v) \
+    intel_sub_group_block_write_us4((__global ushort *)ptr, as_ushort4(v))
+
+#define BLOCK_READ_DST8(ptr) \
+    AS_DST_DATA8_T(intel_sub_group_block_read_us8((__global ushort *)ptr))
+#define BLOCK_WRITE_DST8(ptr, v) \
+    intel_sub_group_block_write_us8((__global ushort *)ptr, as_ushort8(v))
+
+#define BLOCK_READ_DST16(ptr) \
+    (DST_DATA16_T)( \
+            BLOCK_READ_DST8(ptr), BLOCK_READ_DST8(ptr + 8 * SUB_GROUP_SIZE))
+#define BLOCK_WRITE_DST16(ptr, v) \
+    do { \
+        BLOCK_WRITE_DST8(ptr, (v).s01234567); \
+        BLOCK_WRITE_DST8(ptr + 8 * SUB_GROUP_SIZE, (v).s89abcdef); \
+    } while (0)
+
 #elif DST_DT_S32 || DST_DT_F32
+
+#define BLOCK_READ_DST2(ptr) \
+    AS_DST_DATA2_T(intel_sub_group_block_read2((__global uint *)ptr))
+#define BLOCK_WRITE_DST2(ptr, v) \
+    intel_sub_group_block_write2((__global uint *)ptr, as_uint2(v))
 
 #define BLOCK_READ_DST4(ptr) \
     AS_DST_DATA4_T(intel_sub_group_block_read4((__global uint *)ptr))
@@ -644,8 +692,8 @@
 #endif
 #if DST_DT_BF16
 #define TO_DST(x) cvt_f32_to_bf16(x)
-#define TO_DST2(x) cvt_f32_to_bf16(convert_float8(x))
-#define TO_DST4(x) cvt_f32_to_bf16(convert_float8(x))
+#define TO_DST2(x) cvt_f32_to_bf16(convert_float2(x))
+#define TO_DST4(x) cvt_f32_to_bf16(convert_float4(x))
 #define TO_DST8(x) cvt_f32_to_bf16(convert_float8(x))
 #elif DST_DT_F16
 #define TO_DST(x) convert_half(x)
