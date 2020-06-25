@@ -136,6 +136,7 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("OW_PADDED", utils::rnd_up(conf.ow, conf.lws_d[1]));
     kernel_ctx.define_int("MB_BLOCK", conf.mb_block);
     kernel_ctx.define_int("OC_BLOCK", conf.oc_block);
+    kernel_ctx.define_int("OC_PADDED", utils::rnd_up(conf.oc, conf.oc_block));
     kernel_ctx.define_int("OC_CALC_BLOCK", conf.calc_block);
     kernel_ctx.define_int("WEI_BLOCK", conf.wei_block);
     kernel_ctx.define_int("IC_BLOCK", conf.ic_block);

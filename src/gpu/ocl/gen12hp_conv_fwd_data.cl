@@ -36,15 +36,37 @@
 
 #if BIA_DT_F32
 #define BLOCK_READ_BIA(data, idx) \
-    data = as_float4(intel_sub_group_block_read4((__global uint *)&bias[idx]));
+    if (OC % OC_CALC_BLOCK == 0 || OC % OC_CALC_BLOCK > OC_BLOCK \
+            || OC_CALC_BLOCK * (group_oc + oc) + OC_CALC_BLOCK <= OC_PADDED) { \
+        data = as_float4( \
+                intel_sub_group_block_read4((__global uint *)&bias[idx])); \
+    } else { \
+        float2 tmp = as_float2( \
+                intel_sub_group_block_read2((__global uint *)&bias[idx])); \
+        data = (float4)(tmp.s0, tmp.s1, 0.0f, 0.0f); \
+    }
 #elif BIA_DT_F16
 #define BLOCK_READ_BIA(data, idx) \
-    data = convert_float4(as_half4( \
-            intel_sub_group_block_read_us4((__global ushort *)&bias[idx])));
+    if (OC % OC_CALC_BLOCK == 0 || OC % OC_CALC_BLOCK > OC_BLOCK \
+            || OC_CALC_BLOCK * (group_oc + oc) + OC_CALC_BLOCK <= OC_PADDED) { \
+        data = convert_float4(as_half4(intel_sub_group_block_read_us4( \
+                (__global ushort *)&bias[idx]))); \
+    } else { \
+        float2 tmp = convert_float2(as_half2(intel_sub_group_block_read_us2( \
+                (__global ushort *)&bias[idx]))); \
+        data = (float4)(tmp.s0, tmp.s1, 0.0f, 0.0f); \
+    }
 #elif BIA_DT_BF16
 #define BLOCK_READ_BIA(data, idx) \
-    data = cvt_bf16_to_f32( \
-            intel_sub_group_block_read_us4((__global ushort *)&bias[idx]));
+    if (OC % OC_CALC_BLOCK == 0 || OC % OC_CALC_BLOCK > OC_BLOCK \
+            || OC_CALC_BLOCK * (group_oc + oc) + OC_CALC_BLOCK <= OC_PADDED) { \
+        data = cvt_bf16_to_f32(intel_sub_group_block_read_us4( \
+                (__global ushort *)&bias[idx])); \
+    } else { \
+        float2 tmp = cvt_bf16_to_f32(intel_sub_group_block_read_us2( \
+                (__global ushort *)&bias[idx])); \
+        data = (float4)(tmp.s0, tmp.s1, 0.0f, 0.0f); \
+    }
 #endif
 
 #if DT_F16
@@ -278,9 +300,14 @@ gen12hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
     do { \
         BLOCK_WRITE_DST(dst, dst_pack0.s0123, 0) \
         BLOCK_WRITE_DST(dst, dst_pack0.s4567, 4 * OC_BLOCK) \
-        __global DST_DATA_T *dst1 = dst + OC_BLOCK * MB_BLOCK * OD * OH * OW; \
-        BLOCK_WRITE_DST(dst1, dst_pack1.s0123, 0) \
-        BLOCK_WRITE_DST(dst1, dst_pack1.s4567, 4 * OC_BLOCK) \
+        if (OC % OC_CALC_BLOCK == 0 || OC % OC_CALC_BLOCK > OC_BLOCK \
+                || OC_CALC_BLOCK * (group_oc + oc) + OC_CALC_BLOCK \
+                        <= OC_PADDED) { \
+            __global DST_DATA_T *dst1 \
+                    = dst + OC_BLOCK * MB_BLOCK * OD * OH * OW; \
+            BLOCK_WRITE_DST(dst1, dst_pack1.s0123, 0) \
+            BLOCK_WRITE_DST(dst1, dst_pack1.s4567, 4 * OC_BLOCK) \
+        } \
     } while (0)
 #else
 #define CONVERT_PACK(idx) \
@@ -344,36 +371,52 @@ gen12hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
         D00.s0123 = BLOCK_READ_DST(0);
         D00.s4567 = BLOCK_READ_DST(4 * OC_BLOCK);
 #if DT_F16 || DT_BF16
-        D10.s0123 = BLOCK_READ_DST(OC_BLOCK * MB_BLOCK * OD * OH * OW);
-        D10.s4567 = BLOCK_READ_DST(
-                4 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        if (OC % OC_CALC_BLOCK == 0 || OC % OC_CALC_BLOCK > OC_BLOCK
+                || OC_CALC_BLOCK * (group_oc + oc) + OC_CALC_BLOCK
+                        <= OC_PADDED) {
+            D10.s0123 = BLOCK_READ_DST(OC_BLOCK * MB_BLOCK * OD * OH * OW);
+            D10.s4567 = BLOCK_READ_DST(
+                    4 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        }
 #endif
 #if MB > 8
         D01.s0123 = BLOCK_READ_DST(8 * OC_BLOCK);
         D01.s4567 = BLOCK_READ_DST(12 * OC_BLOCK);
 #if DT_F16 || DT_BF16
-        D11.s0123 = BLOCK_READ_DST(
-                8 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
-        D11.s4567 = BLOCK_READ_DST(
-                12 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        if (OC % OC_CALC_BLOCK == 0 || OC % OC_CALC_BLOCK > OC_BLOCK
+                || OC_CALC_BLOCK * (group_oc + oc) + OC_CALC_BLOCK
+                        <= OC_PADDED) {
+            D11.s0123 = BLOCK_READ_DST(
+                    8 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+            D11.s4567 = BLOCK_READ_DST(
+                    12 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        }
 #endif
 #if MB > 16
         D02.s0123 = BLOCK_READ_DST(16 * OC_BLOCK);
         D02.s4567 = BLOCK_READ_DST(20 * OC_BLOCK);
 #if DT_F16 || DT_BF16
-        D12.s0123 = BLOCK_READ_DST(
-                16 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
-        D12.s4567 = BLOCK_READ_DST(
-                20 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        if (OC % OC_CALC_BLOCK == 0 || OC % OC_CALC_BLOCK > OC_BLOCK
+                || OC_CALC_BLOCK * (group_oc + oc) + OC_CALC_BLOCK
+                        <= OC_PADDED) {
+            D12.s0123 = BLOCK_READ_DST(
+                    16 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+            D12.s4567 = BLOCK_READ_DST(
+                    20 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        }
 #endif
 #if MB > 24
         D03.s0123 = BLOCK_READ_DST(24 * OC_BLOCK);
         D03.s4567 = BLOCK_READ_DST(28 * OC_BLOCK);
 #if DT_F16 || DT_BF16
-        D13.s0123 = BLOCK_READ_DST(
-                24 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
-        D13.s4567 = BLOCK_READ_DST(
-                28 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        if (OC % OC_CALC_BLOCK == 0 || OC % OC_CALC_BLOCK > OC_BLOCK
+                || OC_CALC_BLOCK * (group_oc + oc) + OC_CALC_BLOCK
+                        <= OC_PADDED) {
+            D13.s0123 = BLOCK_READ_DST(
+                    24 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+            D13.s4567 = BLOCK_READ_DST(
+                    28 * OC_BLOCK + OC_BLOCK * MB_BLOCK * OD * OH * OW);
+        }
 #endif
 #endif // MB > 24
 #endif // MB > 16
