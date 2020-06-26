@@ -289,7 +289,6 @@ gen9_conv_nhwc_fwd(const __global DATA_T *src, const __global DATA_T *wei,
 
 #endif // WITH_SUM
 
-
     for (int didx = 0; didx < OW_BLOCK; ++didx) {
         DATA_T accum = blockC00[didx];
         DATA_T sum = blockS00[didx];
