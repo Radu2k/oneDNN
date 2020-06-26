@@ -81,7 +81,7 @@ static void fwd_compute_block_sizes(
                                          : utils::max_div(conf.oc / 16, 8) * 16;
 }
 
-status_t gen9_convolution_fwd_t::pd_t::init_conf() {
+status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
 
     const convolution_desc_t &cd = *desc();
     const memory_desc_wrapper src_mdw(src_md());
@@ -146,6 +146,8 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf() {
         return status::unimplemented;
     }
 
+    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+
     switch (conf.ver) {
         case ver_nhwc: {
             conf.mb_block = 1;
@@ -199,14 +201,14 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf() {
         case ver_16mb16c: {
             fwd_compute_block_sizes(conf, this);
             conf.sub_group_size = 16;
-            conf.lws_d[0] = 16;
-            conf.lws_d[1] = 1;
-            conf.lws_d[2] = 1;
             conf.gws_d[0] = conf.ngroups * conf.ocb / (conf.oc_block / 16);
             conf.gws_d[1] = conf.od * conf.oh
                     * utils::div_up(conf.ow, conf.ow_block)
                     * (conf.omb / conf.mb_block);
             conf.gws_d[2] = (conf.oc / conf.ocb) * (conf.mb / conf.omb);
+            conf.lws_d[0] = compute_engine->is_gen12hp() ? 32 : 16;
+            conf.lws_d[1] = 1;
+            conf.lws_d[2] = 1;
             break;
         }
         default: return status::unimplemented;
@@ -383,6 +385,8 @@ status_t gen9_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("LWS_2", conf.lws_d[2]);
 
     def_attr_info(kernel_ctx, conf.attr_info);
+
+    kernel_ctx.add_option("-cl-std=CL2.0");
 
     kernel_ctx.print_options();
     return status::success;

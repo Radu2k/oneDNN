@@ -74,7 +74,7 @@ struct gen9_convolution_fwd_t : public gpu_primitive_t {
                     && post_ops_ok(attr());
             if (!ok) return status::unimplemented;
 
-            status_t status = init_conf();
+            status_t status = init_conf(engine);
             if (status != status::success) return status;
 
             ok = set_default_formats_common(
@@ -82,7 +82,7 @@ struct gen9_convolution_fwd_t : public gpu_primitive_t {
             return ok ? status::success : status::unimplemented;
         }
 
-        status_t init_conf();
+        status_t init_conf(engine_t *engine);
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
         conv_conf_t conf;

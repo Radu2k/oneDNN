@@ -254,7 +254,7 @@ int dst_idx(int mb_block, int oc_outer, int ow_block) {
         if ((n) == 16 && (stride) == 1) { \
             (block)[0] = _BLOCK_READ((ptr)); \
         } else { \
-            int local_id = get_local_id(0); \
+            int local_id = get_sub_group_local_id(); \
             (block)[0] = (local_id < (n)) ? (ptr)[local_id * (stride)] : 0; \
         } \
     } while (0)
@@ -387,7 +387,7 @@ int dst_idx(int mb_block, int oc_outer, int ow_block) {
 #define read_src_buf(buf, ptr, iw) \
     do { \
         for (int iw_outer = 0; iw_outer < IW_OUTER; iw_outer++) { \
-            int iw_inner = (C_VEC ? 0 : get_local_id(0)); \
+            int iw_inner = (C_VEC ? 0 : get_sub_group_local_id()); \
             int iw_block = iw_outer * IW_INNER + iw_inner; \
             if (HAS_PAD_W && ((iw) + iw_block < 0 || (iw) + iw_block >= IW)) \
                 continue; \
@@ -625,8 +625,8 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) __kernel void
 gen9_conv_fwd(const __global DATA_T *src, const __global DATA_T *wei,
         const __global DATA_T *bia, __global DATA_T *dst POST_OP_ARGS) {
 
-    int local_id = get_local_id(0);
-    int g_ocb = get_group_id(0);
+    int local_id = get_sub_group_local_id();
+    int g_ocb = get_group_id(0) * (LWS_0 / SUB_GROUP_SIZE) + get_sub_group_id();
     int g = g_ocb / (OCB / OC_BLOCK);
     int ocb = g_ocb % (OCB / OC_BLOCK) * OC_BLOCK;
 
