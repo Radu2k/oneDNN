@@ -77,8 +77,7 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
 
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
-            auto *dev_info = compute_engine->device_info();
-            is_gen12hp = dev_info->gpu_arch() == compute::gpu_arch_t::gen12hp;
+            is_gen12hp = compute_engine->is_gen12hp();
 
             return ok ? status::success : status::unimplemented;
         }

@@ -83,6 +83,16 @@ public:
 
     bool mayiuse(device_ext_t ext) const { return device_info_->has(ext); }
 
+    bool is_gen9() const {
+        return device_info_->gpu_arch() == gpu_arch_t::gen9;
+    }
+    bool is_gen12lp() const {
+        return device_info_->gpu_arch() == gpu_arch_t::gen12lp;
+    }
+    bool is_gen12hp() const {
+        return device_info_->gpu_arch() == gpu_arch_t::gen12hp;
+    }
+
     dispatch_t create_dispatch(const memory_desc_t *md = nullptr) const {
         return dispatch_t(this, md);
     }

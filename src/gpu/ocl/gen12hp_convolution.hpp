@@ -73,8 +73,7 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
 
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
-            auto *dev_info = compute_engine->device_info();
-            is_gen12hp = dev_info->gpu_arch() == compute::gpu_arch_t::gen12hp;
+            is_gen12hp = compute_engine->is_gen12hp();
 
             return ok ? status::success : status::unimplemented;
         }
@@ -151,8 +150,7 @@ struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
 
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
-            auto *dev_info = compute_engine->device_info();
-            is_gen12hp = dev_info->gpu_arch() == compute::gpu_arch_t::gen12hp;
+            is_gen12hp = compute_engine->is_gen12hp();
 
             return ok ? status::success : status::unimplemented;
         }
