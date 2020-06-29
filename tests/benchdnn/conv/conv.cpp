@@ -655,11 +655,18 @@ int doit(const prb_t *p, res_t *r) {
     const auto src_tag = get_abx_tag(p->ndims);
     const auto wei_tag = get_abx_tag(p->ndims + p->has_groups);
 
-    // Try to use CPU primitive as the reference in GPU testing to reduce
-    // testing time
+    // Try to use CPU primitive as reference in GPU testing to reduce testing
+    // time
     dnnl_primitive_t c_ref {};
 
-    if (bench_mode & CORR && engine_tgt_kind == dnnl_gpu && fast_ref_gpu) {
+    // Do not use CPU primitive for reference if any of these is true.
+    bool with_binary_post_op = (p->attr.post_ops.binary_index() != -1);
+    bool with_user_scratchpad = (scratchpad_mode = dnnl_scratchpad_mode_user);
+    bool with_runtime_oscale = p->attr.oscale.runtime;
+
+    if ((bench_mode & CORR) && engine_tgt_kind == dnnl_gpu && fast_ref_gpu
+            && !with_binary_post_op && !with_user_scratchpad
+            && !with_runtime_oscale) {
         dnnl_primitive_desc_t cpd_ref = nullptr;
         SAFE(init_pd_custom(get_cpu_engine(), p, cpd_ref, nullptr, fp, fp, fp,
                      fp, fp, src_tag, wei_tag, dnnl_x, src_tag),
