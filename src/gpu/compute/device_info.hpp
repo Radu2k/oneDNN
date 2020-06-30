@@ -24,6 +24,7 @@
 #include "common/c_types_map.hpp"
 #include "common/utils.hpp"
 #include "common/z_magic.hpp"
+#include "cpu/platform.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -76,9 +77,13 @@ enum class device_ext_t : int64_t {
     last
 };
 
-static inline const char *ext2cl_str(compute::device_ext_t ext) {
+static bool has(uint64_t extensions, device_ext_t ext) {
+    return extensions & (uint64_t)ext;
+}
+
+static inline const char *ext2cl_str(device_ext_t ext) {
 #define CASE(x) \
-    case compute::device_ext_t::x: return STRINGIFY(CONCAT2(cl_, x));
+    case device_ext_t::x: return STRINGIFY(CONCAT2(cl_, x));
     switch (ext) {
         CASE(intel_subgroups);
         CASE(intel_subgroups_short);
@@ -93,6 +98,29 @@ static inline const char *ext2cl_str(compute::device_ext_t ext) {
         default: return nullptr;
     }
 #undef CASE
+}
+
+static device_ext_t get_extensions(gpu_arch_t gpu_arch) {
+    uint64_t extensions = 0;
+    switch (gpu_arch) {
+        case gpu_arch_t::gen12hp:
+            extensions |= (uint64_t)
+                    device_ext_t::intel_subgroup_matrix_multiply_accumulate;
+            extensions |= (uint64_t)device_ext_t::
+                    intel_subgroup_split_matrix_multiply_accumulate;
+            extensions |= (uint64_t)device_ext_t::intel_global_float_atomics;
+            extensions |= (uint64_t)device_ext_t::future_bf16_cvt;
+        case gpu_arch_t::gen12lp:
+            extensions |= (uint64_t)device_ext_t::intel_dot_accumulate;
+            extensions |= (uint64_t)device_ext_t::intel_subgroup_local_block_io;
+        case gpu_arch_t::gen9:
+            extensions |= (uint64_t)device_ext_t::khr_fp16;
+            extensions |= (uint64_t)device_ext_t::intel_subgroups;
+            extensions |= (uint64_t)device_ext_t::intel_subgroups_short;
+            break;
+        case gpu_arch_t::unknown: break;
+    }
+    return (device_ext_t)extensions;
 }
 
 struct runtime_version_t {
@@ -161,7 +189,23 @@ struct device_info_t {
 public:
     virtual ~device_info_t() = default;
 
-    virtual status_t init() = 0;
+    virtual status_t init_runtime_version(runtime_version_t &ret) const = 0;
+    virtual status_t init_name(std::string &ret) const = 0;
+    virtual status_t init_eu_count(int &ret) const = 0;
+    virtual status_t init_extension_string(std::string &ret) const = 0;
+
+    virtual status_t init() {
+        CHECK(init_runtime_version(runtime_version_));
+        CHECK(init_name(name_));
+        CHECK(init_eu_count(eu_count_));
+        CHECK(init_extension_string(extension_string_));
+
+        CHECK(init_arch());
+        CHECK(init_extensions());
+        CHECK(init_attributes());
+
+        return status::success;
+    }
 
     status_t init_arch() {
         if (name().find("Gen9") != std::string::npos)
@@ -198,31 +242,83 @@ public:
         return status::success;
     }
 
-    virtual bool has(device_ext_t ext) const = 0;
-
-    virtual int eu_count() const = 0;
-    virtual int hw_threads() const = 0;
-    virtual size_t llc_cache_size() const = 0;
-
     const runtime_version_t &runtime_version() const {
         return runtime_version_;
     }
     const std::string &name() const { return name_; }
+    int eu_count() const { return eu_count_; }
+
+    int hw_threads() const { return hw_threads_; }
+    size_t llc_cache_size() const { return llc_cache_size_; }
+
     gpu_arch_t gpu_arch() const { return gpu_arch_; }
+    gpu_arch_t real_gpu_arch() const { return real_gpu_arch_; }
+
+    bool has(device_ext_t ext) const { return compute::has(extensions_, ext); }
 
 protected:
-    void set_runtime_version(const runtime_version_t &runtime_version) {
-        runtime_version_ = runtime_version;
+    status_t init_extensions() {
+        for (uint64_t i_ext = 1; i_ext < (uint64_t)device_ext_t::last;
+                i_ext <<= 1) {
+            const char *s_ext = ext2cl_str((device_ext_t)i_ext);
+            if (s_ext && extension_string_.find(s_ext) != std::string::npos) {
+                extensions_ |= i_ext;
+                real_extensions_ |= i_ext;
+            }
+        }
+
+        // This is to handle extensions that are not yet properly supported by
+        // OpenCL/Level Zero/DPC++ runtimes.
+        extensions_ |= (uint64_t)get_extensions(gpu_arch());
+        real_extensions_ |= (uint64_t)get_extensions(real_gpu_arch());
+
+        return status::success;
     }
 
-    gpu_arch_t real_gpu_arch() const { return real_gpu_arch_; }
-    void set_name(const std::string &name) { name_ = name; }
+    status_t init_attributes() {
+        // Assume 7 threads by default
+        int32_t threads_per_eu = 7;
 
-private:
-    gpu_arch_t gpu_arch_ = gpu_arch_t::unknown;
-    gpu_arch_t real_gpu_arch_ = gpu_arch_t::unknown;
+        switch (gpu_arch()) {
+            case gpu_arch_t::gen9: threads_per_eu = 7; break;
+            case gpu_arch_t::gen12lp: threads_per_eu = 7; break;
+            case gpu_arch_t::gen12hp:
+                // Default is 8 threads, 128 GRF registers per thread. But we
+                // set 4 threads configuration (with 256 registers) for better
+                // performance.
+                threads_per_eu = 4;
+                break;
+            default: break;
+        }
+
+        hw_threads_ = eu_count_ * threads_per_eu;
+
+        // TODO: Fix for discrete GPUs. The code below is written for
+        // integrated GPUs assuming that last-level cache for GPU is shared
+        // with CPU.
+        size_t cache_size = cpu::platform::get_per_core_cache_size(3)
+                * cpu::platform::get_num_cores();
+        llc_cache_size_ = (size_t)cache_size;
+        return status::success;
+    }
+
     runtime_version_t runtime_version_;
     std::string name_;
+    int32_t eu_count_ = 0;
+    std::string extension_string_;
+
+    int32_t hw_threads_ = 0;
+    size_t llc_cache_size_ = 0;
+
+    // Effective extensions.
+    uint64_t extensions_ = 0;
+    // Effective GPU architecture.
+    gpu_arch_t gpu_arch_ = gpu_arch_t::unknown;
+
+    // Real extensions.
+    uint64_t real_extensions_ = 0;
+    // Real GPU architecture.
+    gpu_arch_t real_gpu_arch_ = gpu_arch_t::unknown;
 };
 
 } // namespace compute
