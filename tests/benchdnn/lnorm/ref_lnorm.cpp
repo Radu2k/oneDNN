@@ -35,7 +35,7 @@ void compute_ref_fwd(const prb_t *p, const dnn_mem_t &src, dnn_mem_t &mean,
             auto off = n * p->c + c;
             float res = gamma * (((float *)src)[off] - smean) + beta;
             maybe_post_ops(p->attr, res);
-            dst.set_elem(off, maybe_saturate(p->dt, res));
+            dst.set_elem(off, res);
         }
     });
 }
