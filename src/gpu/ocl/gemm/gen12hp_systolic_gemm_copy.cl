@@ -108,7 +108,7 @@ __attribute__((overloadable)) inline int sum(int4 v) {
     if ((2 * cc + 1) < crem) { \
         if (lid < rrem) regs[cc] = vload2(0, p); \
     } else if ((2 * cc) < crem) { \
-        if (lid < rrem) regs[cc].s0 = *p; \
+        if (lid < rrem) regs[cc].s0 = *(p); \
     }
 #elif ELEMENT_SIZE == 1
 #define PARTIAL_LOAD(regs, rrem, crem, cc, p) \
@@ -119,7 +119,7 @@ __attribute__((overloadable)) inline int sum(int4 v) {
     } else if ((4 * cc + 1) < crem) { \
         if (lid < rrem) regs[cc].s01 = vload2(0, p); \
     } else if (4 * cc < crem) { \
-        if (lid < rrem) regs[cc].s0 = *p; \
+        if (lid < rrem) regs[cc].s0 = *(p); \
     }
 #endif
 

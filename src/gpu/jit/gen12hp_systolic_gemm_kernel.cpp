@@ -37,7 +37,8 @@ void gen12hp_systolic_gemm_kernel_t::scattered_setup_c(int stride, bool load) {
     mov<uint16_t>(4, uheaders[15],
             Immediate::uv(0 * stride, 1 * stride, 2 * stride, 3 * stride, 0, 0,
                     0, 0));
-    add<uint64_t>(4, uheaders[0], uc_base, uheaders[15].uw());
+    mov<uint16_t>(4, uheaders[15][0](4), uheaders[15][0](1));
+    add<uint64_t>(4, uheaders[0], uc_base, uheaders[15].uw(0)(4));
     add<uint64_t>(4, uheaders[1], uheaders[0], uint16_t(stride * 4));
     add<uint64_t>(8, uheaders[2], uheaders[0], uint16_t(stride * 8));
     add<uint64_t>(8, uheaders[4], uheaders[0], uint16_t(stride * 16));
@@ -248,12 +249,23 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
                 || (cfg.c_type == DataType::hf)) {
             for (int jj = 0; jj < 4; jj++) {
                 for (int ii = 0; ii < 4; ii += 2) {
-                    auto old_hf = get_load_reg(cfg.c_type, ii, jj);
+                    auto old_c = get_load_reg(cfg.c_type, ii, jj);
                     auto old_f = get_load_reg(cur_acc_type, ii, jj);
-                    mov(16, old_f, old_hf);
+                    mov(16, old_f, old_c);
                 }
             }
             old_type = cur_acc_type;
+        }
+
+        // Non-packed bfloat16 must also be upconverted. Can't use mov for this.
+        if (!c_align16 && (cfg.c_type == DataType::bf)) {
+            for (int jj = 0; jj < 4; jj++) {
+                for (int ii = 0; ii < 4; ii += 2) {
+                    auto old_ud = get_load_reg(DataType::ud, ii, jj);
+                    shl(16, old_ud, old_ud, uint16_t(16));
+                }
+            }
+            old_type = DataType::f;
         }
 
         // Main alpha/beta scaling.
