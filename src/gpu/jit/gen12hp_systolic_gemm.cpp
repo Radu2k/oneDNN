@@ -59,28 +59,27 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     bool dt_int_ok = (utils::one_of(d->a_type, u8, s8)
             && utils::one_of(d->b_type, u8, s8) && (d->c_type == s32));
 
-    const auto attr_skip_mask = dt_int_ok
-            ? smask_t::oscale | smask_t::post_ops | smask_t::zero_points_runtime
-            : smask_t::none;
+    auto attr_skip_mask = smask_t::oscale | smask_t::post_ops;
+
+    if (dt_int_ok) attr_skip_mask |= smask_t::zero_points_runtime;
 
     bool ok = true && limits_ok && (dt_float_ok || dt_int_ok)
             && compute_engine->mayiuse(compute::device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate)
-            && attr()->has_default_values(attr_skip_mask);
+            && attr()->has_default_values(attr_skip_mask)
+            && attr()->output_scales_.mask_ == 0 && attr()->post_ops_.len() <= 2
+            && IMPLICATION(attr()->post_ops_.len() == 1,
+                    attr()->post_ops_.find(eltwise) != -1
+                            || attr()->post_ops_.find(sum) != -1)
+            && IMPLICATION(attr()->post_ops_.len() == 2,
+                    attr()->post_ops_.find(sum) == 0
+                            && attr()->post_ops_.find(eltwise) == 1);
 
     if (dt_int_ok) {
         ok &= attr()->zero_points_.defined(DNNL_ARG_SRC)
                 && attr()->zero_points_.defined(DNNL_ARG_WEIGHTS)
                 && (attr()->zero_points_.has_default_values(DNNL_ARG_DST)
-                        || !attr()->zero_points_.defined(DNNL_ARG_DST))
-                && attr()->output_scales_.mask_ == 0
-                && attr()->post_ops_.len() <= 2
-                && IMPLICATION(attr()->post_ops_.len() == 1,
-                        attr()->post_ops_.find(eltwise) != -1
-                                || attr()->post_ops_.find(sum) != -1)
-                && IMPLICATION(attr()->post_ops_.len() == 2,
-                        attr()->post_ops_.find(sum) == 0
-                                && attr()->post_ops_.find(eltwise) == 1);
+                        || !attr()->zero_points_.defined(DNNL_ARG_DST));
 
         int cmask = 0;
         attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
