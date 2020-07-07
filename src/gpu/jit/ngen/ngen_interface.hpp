@@ -267,6 +267,12 @@ void NEOInterfaceHandler::generateDummyCL(std::ostream &stream) const
     if (scratchSize > 0)    stream << "    volatile char scratch[" << scratchSize << "] = {0};\n";
     if (slmSize > 0)        stream << "    volatile local char slm[" << slmSize << "]; slm[0]++;\n";
 
+    if (hw >= HW::Gen12HP) for (const auto &assignment : assignments) {
+        // Force IGC to assume stateless accesses could occur.
+        if (assignment.exttype == ExternalArgumentType::GlobalPtr)
+            stream << "    __asm__ volatile(\"\" :: \"rw.u\"(" << assignment.name << "));\n";
+    }
+
     stream << "}\n";
 }
 
