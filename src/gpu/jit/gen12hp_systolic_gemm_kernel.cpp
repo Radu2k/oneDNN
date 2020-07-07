@@ -82,12 +82,12 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
     bool alpha1 = cfg.alpha1;
     bool beta0 = cfg.beta0;
     bool beta1 = cfg.beta1;
-    bool float_update = !(alpha1 && (beta0 || beta1));
+    bool float_update = !(alpha1 && (beta0 || beta1)) || cfg.have_post_op();
 
     const auto c_elem_bytes = getBytes(cfg.c_type);
     bool c32 = (c_elem_bytes == 4);
 
-    if (beta0 && alpha1) return; // Nothing to do.
+    if (beta0 && alpha1 && !cfg.have_post_op()) return; // Nothing to do.
 
     // Get the bank ID for a given register.
     auto bank = [](const RegData &r) { return (r.getBase() & 2) >> 1; };
@@ -191,6 +191,9 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
     // Get first load ready.
     c_load(0);
 
+    // Prepare post op scratch space.
+    if (cfg.have_post_op()) post_op_injector->prepare();
+
     for (int j0 = 0; j0 < 48; j0 += 4) {
         int j0_4 = j0 & 4;
 
@@ -284,6 +287,14 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
                         mad(8, a_reg, o_reg, a_reg, ualpha_regs[b]);
                 } else
                     mad(8, a_reg, a_reg, o_reg, ubeta_regs[b]);
+            }
+        }
+
+        // Post-ops.
+        if (cfg.have_post_op()) {
+            for (int ii = 0; ii < 4; ii++) {
+                auto range_start = get_acc_reg(cur_acc_type, ii, 0);
+                post_op_injector->compute(GRFRange(range_start.getBase(), 4));
             }
         }
 
@@ -895,7 +906,15 @@ void gen12hp_systolic_gemm_kernel_t::epilogue() {
 
 gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     : cfg(cfg_) {
+
     if (!cfg.valid()) assert(!"Invalid configuration");
+
+    if (cfg.have_post_op()) {
+        auto inj_ptr = new injector_t(this, cfg.post_op, cfg.eltwise_alpha,
+                cfg.eltwise_beta, cfg.eltwise_scale, upost_op_scratch);
+        assert(inj_ptr);
+        post_op_injector.reset(inj_ptr);
+    }
 
     setDefaultNoMask();
 
@@ -992,6 +1011,9 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
 
     setDefaultAutoSWSB(true);
     prologue();
+
+    // Enable IEEE f32->s32 rounding and f32/f16 denorms.
+    or_(1, cr0, cr0, uint16_t(0x1480));
 
     // Find our threadgroup's position within the matrix.
     shl(1, global_m0, global_id_x, uint16_t(7));

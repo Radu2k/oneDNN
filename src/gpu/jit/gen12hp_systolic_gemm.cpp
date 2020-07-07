@@ -86,6 +86,12 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
         ok &= utils::one_of(cmask, 0, 1 << 0, 1 << 1);
     }
 
+    attr_info_ = attr_info_t::create(attr());
+
+    if (attr_info()->with_eltwise)
+        ok &= jit_eltwise_injector_f32<gpu_gen12hp>::is_supported(
+                attr_info()->eltwise_alg);
+
     if (!ok) return status::unimplemented;
 
     return status::success;
@@ -141,6 +147,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
 
     // Initialize compute kernels (assembly)
     kernel_t::config_t cfg;
+    auto attr_info = pd()->attr_info();
 
     cfg.a_type = convert_dnnl_type_to_ngen(a_type);
     cfg.b_type = convert_dnnl_type_to_ngen(b_type);
@@ -149,6 +156,12 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     cfg.alpha1 = (pd()->alpha() == 1.0f);
     cfg.beta0 = (pd()->beta() == 0.0f);
     cfg.beta1 = (pd()->beta() == 1.0f);
+    if (attr_info->with_eltwise) {
+        cfg.post_op = attr_info->eltwise_alg;
+        cfg.eltwise_alpha = attr_info->eltwise_alpha;
+        cfg.eltwise_beta = attr_info->eltwise_beta;
+        cfg.eltwise_scale = attr_info->eltwise_scale;
+    }
     cfg.a_bias = cfg.b_bias = ab_zero_points_;
 
     co_type_ = 'N';
@@ -182,7 +195,8 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
         for (bool last_k_block : {false, true}) {
             if ((!first_k_block || !last_k_block) && !may_k_block) continue;
             if (may_k_block && last_k_block
-                    && (cfg.c_bias == kernel_t::bias_t::none))
+                    && (cfg.c_bias == kernel_t::bias_t::none)
+                    && !cfg.have_post_op())
                 kernel_[first_k_block][last_k_block]
                         = kernel_[first_k_block][false];
             else if (may_k_block && first_k_block && cfg.beta1)
@@ -194,7 +208,10 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
                     cfg_copy.beta0 = false;
                     cfg_copy.beta1 = true;
                 }
-                if (!last_k_block) cfg_copy.c_bias = kernel_t::bias_t::none;
+                if (!last_k_block) {
+                    cfg_copy.c_bias = kernel_t::bias_t::none;
+                    cfg_copy.post_op = alg_kind::undef;
+                }
                 auto kernel = kernel_t(cfg_copy);
 
                 const auto &ngen_bin = kernel.getBinary(

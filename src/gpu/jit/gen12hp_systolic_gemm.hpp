@@ -28,6 +28,7 @@
 #include "gpu/compute/compute.hpp"
 #include "gpu/gemm/gpu_gemm.hpp"
 #include "gpu/gpu_gemm_pd.hpp"
+#include "gpu/primitive_conf.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -61,6 +62,11 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
             const auto &p = attr()->post_ops_;
             return p.contain(sum, 0) ? p.entry_[0].sum.scale : 0.f;
         }
+
+        const attr_info_t *attr_info() const { return &attr_info_; }
+
+    private:
+        attr_info_t attr_info_ = {};
     };
 
     status_t init(engine_t *engine);

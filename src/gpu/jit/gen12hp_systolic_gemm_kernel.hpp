@@ -21,15 +21,15 @@
 
 #include "common/c_types_map.hpp"
 #include "common/type_helpers.hpp"
-#include "gpu/jit/ngen/ngen_opencl.hpp"
+#include "gpu/jit/jit_eltwise_injector.hpp"
+#include "gpu/jit/jit_generator.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace jit {
 
-class gen12hp_systolic_gemm_kernel_t
-    : public ngen::OpenCLCodeGenerator<ngen::HW::Gen12HP> {
+class gen12hp_systolic_gemm_kernel_t : public jit_generator<gpu_gen12hp> {
 public:
     enum class bias_t { none, fixed, row, column };
 
@@ -48,7 +48,13 @@ public:
         bool pad_a = true;
         bool fulsim = true;
 
-        bool valid() {
+        alg_kind_t post_op = alg_kind::undef;
+        bool post_op_is_fwd = true;
+        float eltwise_alpha, eltwise_beta, eltwise_scale;
+
+        bool have_post_op() const { return (post_op != alg_kind::undef); }
+
+        bool valid() const {
             using ngen::DataType;
 
             bool ok = true;
@@ -64,6 +70,7 @@ public:
                 ok &= !a_bias && !b_bias && (c_bias == bias_t::none);
             }
             ok &= (alt_barriers || use_slm_fence);
+            if (have_post_op()) ok &= injector_t::is_supported(post_op);
             return ok;
         }
     };
@@ -96,7 +103,10 @@ public:
     }
 
 private:
+    using injector_t = jit_eltwise_injector_f32<gpu_gen12hp>;
+
     config_t cfg;
+    std::unique_ptr<injector_t> post_op_injector;
 
     // Surface assignments
     int ap_surface, bp_surface, co_surface;
@@ -144,15 +154,16 @@ private:
     // Register assignments (C update)
     ngen::GRFRange utemp = r32 - r63;
     ngen::GRFRange uheaders = r0 - r15;
+    ngen::GRFRange upost_op_scratch = r16 - r21;
     ngen::GRFRange uoffset = r22 - r27;
 
-    ngen::Subregister uldc_x2 = r18.ud(1);
-    ngen::Subregister uldc_x4 = r18.ud(2);
-    ngen::Subregister uldc_x8 = r18.ud(3);
+    ngen::Subregister uldc_x2 = r31.ud(1);
+    ngen::Subregister uldc_x4 = r31.ud(2);
+    ngen::Subregister uldc_x8 = r31.ud(3);
 
-    ngen::Subregister uc_base = r17.uq(0);
-    ngen::Subregister uoff_co2 = r17.ud(2);
-    ngen::Subregister uao_bo_k = r19.ud(0);
+    ngen::Subregister uc_base = r29.uq(0);
+    ngen::Subregister uoff_co2 = r29.ud(2);
+    ngen::Subregister uao_bo_k = r30.ud(0);
     ngen::GRF ubase = r28.ud();
     ngen::Subregister uldc = r28.ud(1);
     ngen::Subregister uoff_co = r28.ud(2);
