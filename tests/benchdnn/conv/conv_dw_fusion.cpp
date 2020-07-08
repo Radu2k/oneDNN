@@ -70,7 +70,7 @@ dnnl_primitive_attr_t create_dnnl_fusion_attr(
         DNN_SAFE_V(dnnl_post_ops_create(&ops));
         for (int idx = 0; idx < po.len(); ++idx) {
             const auto &e = po.entry[idx];
-            if (e.kind == attr_t::post_ops_t::kind_t::SUM) {
+            if (e.is_sum_kind()) {
                 DNN_SAFE_V(dnnl_post_ops_append_sum(ops, e.sum.scale));
             } else if (e.is_convolution_kind()) {
                 const auto &os = e.convolution.oscale;

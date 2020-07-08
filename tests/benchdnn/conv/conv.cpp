@@ -69,11 +69,9 @@ inline bool post_ops_require_integral_check(const prb_t *p) {
     const auto &po = p->attr.post_ops;
     if (po.len() == 0) return false;
 
-    // assumptions: at most 1 eltwise, scale = 1.
     for (int idx = 0; idx < po.len(); ++idx) {
         const auto &e = po.entry[idx];
         using pk_t = attr_t::post_ops_t::kind_t;
-
         if (e.kind == pk_t::SUM || e.kind == pk_t::ABS) continue;
         if (e.kind == pk_t::RELU && e.eltwise.alpha == 0.f) continue;
         return true;

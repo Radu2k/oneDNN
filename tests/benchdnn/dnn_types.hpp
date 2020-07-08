@@ -214,7 +214,25 @@ struct attr_t {
         static dnnl_alg_kind_t kind2dnnl_kind(kind_t kind);
 
         struct entry_t {
-            entry_t() {}
+            entry_t(kind_t akind) : kind(akind) {
+                if (is_sum_kind()) {
+                    sum.scale = 1.f;
+                    sum.dt = dnnl_data_type_undef;
+                } else if (is_eltwise_kind()) {
+                    eltwise.alg = kind2dnnl_kind(kind);
+                    eltwise.alpha = 0.f;
+                    eltwise.beta = 0.f;
+                    eltwise.scale = 1.f;
+                } else if (is_convolution_kind()) {
+                    convolution.stride = kind == DW_K3S1P1 ? 1 : 2;
+                    convolution.dst_dt = dnnl_f32;
+                    convolution.oscale = scale_t();
+                } else if (is_binary_kind()) {
+                    binary.alg = kind2dnnl_kind(kind);
+                    binary.src1_dt = dnnl_data_type_undef;
+                    binary.policy = scale_t::policy_t::COMMON;
+                }
+            }
 
             kind_t kind;
             union {
@@ -224,7 +242,7 @@ struct attr_t {
                 } sum;
                 struct {
                     dnnl_alg_kind_t alg;
-                    float scale, alpha, beta;
+                    float alpha, beta, scale;
                 } eltwise;
                 struct {
                     int stride;
@@ -256,26 +274,14 @@ struct attr_t {
                 scale_t::policy_t apolicy = scale_t::policy_t::COMMON);
 
         int from_str(const char *str, const char **end_s);
-        void to_str(char *buffer, char **end_b) const;
 
         int len() const { return (int)entry.size(); }
         bool is_def() const { return len() == 0; }
 
-        static bool is_sum_kind(kind_t akind) { return akind == SUM; }
-        static bool is_convolution_kind(kind_t akind) {
-            return akind == DW_K3S1P1 || akind == DW_K3S2P1;
-        }
-        static bool is_eltwise_kind(kind_t akind) {
-            return akind > ELTWISE_START && akind < ELTWISE_END;
-        }
-        static bool is_binary_kind(kind_t akind) {
-            return akind > BINARY_START && akind < BINARY_END;
-        }
-
         int find(kind_t kind, int start = 0, int stop = -1) const;
-        int eltwise_index(int start = 0, int stop = -1) const;
-        int convolution_index(int start = 0, int stop = -1) const;
-        int binary_index(int start = 0, int stop = -1) const;
+        int eltwise_index() const;
+        int convolution_index() const;
+        int binary_index() const;
 
         std::vector<int> get_binary_po_masks() const;
 
