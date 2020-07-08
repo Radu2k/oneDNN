@@ -190,6 +190,10 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("OC_NCHUNK", utils::div_up(conf.oc, conf.oc_block));
     kernel_ctx.define_int("IC_NCHUNK", utils::div_up(conf.ic, conf.ic_block));
 
+    kernel_ctx.define_int("IC_LOOP_GROUPS",
+            utils::max_div(utils::div_up(conf.ic, conf.ic_block), 4));
+
+    kernel_ctx.define_int("USE_DOUBLE_BUFFER", 0);
     kernel_ctx.define_int("USE_WEI_SLM",
             conf.mb_block == 32
                     || utils::div_up(conf.ow, conf.sp_block) % 8 == 0);
@@ -225,8 +229,6 @@ status_t gen12hp_1x1_convolution_fwd_t::execute_forward(
     auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     const auto &conf = pd()->conf;
-    bool is_int8 = conf.src_data_type == data_type::u8
-            || conf.src_data_type == data_type::s8;
 
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, src);

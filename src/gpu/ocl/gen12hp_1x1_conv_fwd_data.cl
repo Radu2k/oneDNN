@@ -106,11 +106,13 @@
     data = as_int(block_read((__local uint *)&wei_tmp[idx]));
 #define BLOCK_READ_WHT_8x32(data, idx) \
     data = as_int8(block_read8((__local uint *)&wei_tmp[idx]));
+#define WEI wei_tmp
 #else
 #define BLOCK_READ_WHT_1x32(data, idx) \
     data = as_int(intel_sub_group_block_read((__global uint *)&wei[idx]));
 #define BLOCK_READ_WHT_8x32(data, idx) \
     data = as_int8(intel_sub_group_block_read8((__global uint *)&wei[idx]));
+#define WEI wei
 #endif
 
 #if BIA_DT_F32
@@ -209,23 +211,57 @@ gen12hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
     ACC_DATA_BLOCK1 C20 = 0, C21 = 0, C22 = 0, C23 = 0;
 
     ACC_DATA_BLOCK1 C30 = 0, C31 = 0, C32 = 0, C33 = 0;
-
+#define WEI_LOOP_STRIDE (IC_LOOP_GROUPS * WEI_BLOCK_STRIDE)
 #if USE_WEI_SLM
+
+#if USE_DOUBLE_BUFFER
+#define READ_SLM() \
+    barrier(CLK_LOCAL_MEM_FENCE); \
+    if (wei_last > wei) { \
+        const __global WEI_DATA_T *wei_copy_from \
+                = wei + sp_local_id * WEI_LOOP_STRIDE / LWS_1; \
+        __local WEI_DATA_T *wei_copy_to = wei_slm \
+                + sp_local_id * WEI_LOOP_STRIDE / LWS_1 \
+                + read_ind * WEI_LOOP_STRIDE; \
+        for (int bl = 0; bl < IC_LOOP_GROUPS; bl++) { \
+            block_write4((__local uint *)&wei_copy_to[bl * 4 * IC_BLOCK], \
+                    intel_sub_group_block_read4((__global uint \
+                                    *)&wei_copy_from[bl * 4 * IC_BLOCK])); \
+        } \
+    } \
+    __local WEI_DATA_T *wei_tmp = wei_slm + calc_ind * WEI_LOOP_STRIDE; \
+    read_ind ^= 1; \
+    calc_ind ^= 1;
+
+    __local WEI_DATA_T wei_slm[WEI_LOOP_STRIDE * 2];
+    const __global WEI_DATA_T *wei_last = wei + WEI_BLOCK_STRIDE * IC_NCHUNK;
+    int read_ind = 0;
+    int calc_ind = 1;
+    READ_SLM()
+    wei += WEI_LOOP_STRIDE;
+
+#else
+
 #define READ_SLM() \
     barrier(CLK_LOCAL_MEM_FENCE); \
     const __global WEI_DATA_T *wei_copy_from \
-            = wei + sp_local_id * WEI_BLOCK_STRIDE / LWS_1; \
+            = wei + sp_local_id * WEI_LOOP_STRIDE / LWS_1; \
     __local WEI_DATA_T *wei_copy_to \
-            = wei_slm + sp_local_id * WEI_BLOCK_STRIDE / LWS_1; \
-    block_write4((__local uint *)wei_copy_to, \
-            intel_sub_group_block_read4((__global uint *)wei_copy_from)); \
+            = wei_slm + sp_local_id * WEI_LOOP_STRIDE / LWS_1; \
+    for (int bl = 0; bl < IC_LOOP_GROUPS; bl++) { \
+        block_write4((__local uint *)&wei_copy_to[bl * 4 * IC_BLOCK], \
+                intel_sub_group_block_read4( \
+                        (__global uint *)&wei_copy_from[bl * 4 * IC_BLOCK])); \
+    } \
     __local WEI_DATA_T *wei_tmp = wei_slm; \
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    __local WEI_DATA_T wei_slm[WEI_BLOCK_STRIDE];
+    __local WEI_DATA_T wei_slm[WEI_LOOP_STRIDE];
+#endif
 #endif // USE_WEI_SLM
 
-    for (uint ic_block_id = 0; ic_block_id < IC_NCHUNK; ++ic_block_id) {
+    for (uint ic_block_id = 0; ic_block_id < IC_NCHUNK / IC_LOOP_GROUPS;
+            ++ic_block_id) {
 #if USE_WEI_SLM
         READ_SLM()
 #if SP_TAIL
@@ -238,95 +274,101 @@ gen12hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
             SRC_DATA_BLOCK_T1 S1;
             SRC_DATA_BLOCK_T1 S2;
             SRC_DATA_BLOCK_T1 S3;
+            __attribute__((opencl_unroll_hint)) // attr:no-format
+            for (int i = 0; i < IC_LOOP_GROUPS; ++i) {
 
 #if OUT_SP_TAIL
-            if (ow + SP_BLOCK > OW) {
+                if (ow + SP_BLOCK > OW) {
 #if OUT_SP_TAIL < 8
-                S0 = 0;
-                for (int i = 0; i < OUT_SP_TAIL; ++i) {
-                    S0[i] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read(
-                            (__global uint *)&src[i * SW * IC_BLOCK]));
-                }
+                    S0 = 0;
+                    for (int i = 0; i < OUT_SP_TAIL; ++i) {
+                        S0[i] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read(
+                                (__global uint *)&src[i * SW * IC_BLOCK]));
+                    }
 #else
-                BLOCK_READ_SRC(S0, 0 * IC_BLOCK);
-                S1 = 0;
-                for (int i = 8; i < OUT_SP_TAIL; ++i) {
-                    S1[i - 8] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read(
-                            (__global uint *)&src[i * SW * IC_BLOCK]));
-                }
+                    BLOCK_READ_SRC(S0, 0 * IC_BLOCK);
+                    S1 = 0;
+                    for (int i = 8; i < OUT_SP_TAIL; ++i) {
+                        S1[i - 8] = AS_SRC_MMAD_DATA_T(
+                                intel_sub_group_block_read((__global uint
+                                                *)&src[i * SW * IC_BLOCK]));
+                    }
 #endif
-            } else
+                } else
 #endif // OUT_SP_TAIL
 
-            {
-                BLOCK_READ_SRC(S0, 0 * IC_BLOCK);
+                {
+                    BLOCK_READ_SRC(S0, 0 * IC_BLOCK);
 #if (MB_BLOCK == 32 && MB > 8)
-                BLOCK_READ_SRC1(S1, 8 * IC_BLOCK);
+                    BLOCK_READ_SRC1(S1, 8 * IC_BLOCK);
 #elif SP_BLOCK > 8
-                BLOCK_READ_SRC1(S1, 8 * SW * IC_BLOCK);
+                    BLOCK_READ_SRC1(S1, 8 * SW * IC_BLOCK);
 #endif
 
 #if (MB_BLOCK == 32 && MB > 16)
-                BLOCK_READ_SRC1(S2, 16 * IC_BLOCK);
+                    BLOCK_READ_SRC1(S2, 16 * IC_BLOCK);
 #endif
 
 #if (MB_BLOCK == 32 && MB > 24)
-                BLOCK_READ_SRC1(S3, 24 * IC_BLOCK);
+                    BLOCK_READ_SRC1(S3, 24 * IC_BLOCK);
 #endif
-            }
+                }
 
-            int8 W0 = 0, W1 = 0, W2 = 0, W3 = 0;
+                int8 W0 = 0, W1 = 0, W2 = 0, W3 = 0;
 
 #if IC % IC_BLOCK != 0
-            if (ic_block_id == IC_NCHUNK - 1) {
-                unroll_for(int i = 0; i < IC_NBLOCKS_TAIL; ++i)
-                        BLOCK_READ_WHT_1x32(W0[i], (i + 0) * IC_BLOCK);
-                if (OC > 8)
+                if (ic_block_id == IC_NCHUNK - 1) {
                     unroll_for(int i = 0; i < IC_NBLOCKS_TAIL; ++i)
-                            BLOCK_READ_WHT_1x32(W1[i], (i + 8) * IC_BLOCK);
-                if (OC > 16)
-                    unroll_for(int i = 0; i < IC_NBLOCKS_TAIL; ++i)
-                            BLOCK_READ_WHT_1x32(W2[i], (i + 16) * IC_BLOCK);
-                if (OC > 24)
-                    unroll_for(int i = 0; i < IC_NBLOCKS_TAIL; ++i)
-                            BLOCK_READ_WHT_1x32(W3[i], (i + 24) * IC_BLOCK);
-            } else
+                            BLOCK_READ_WHT_1x32(W0[i], (i + 0) * IC_BLOCK);
+                    if (OC > 8)
+                        unroll_for(int i = 0; i < IC_NBLOCKS_TAIL; ++i)
+                                BLOCK_READ_WHT_1x32(W1[i], (i + 8) * IC_BLOCK);
+                    if (OC > 16)
+                        unroll_for(int i = 0; i < IC_NBLOCKS_TAIL; ++i)
+                                BLOCK_READ_WHT_1x32(W2[i], (i + 16) * IC_BLOCK);
+                    if (OC > 24)
+                        unroll_for(int i = 0; i < IC_NBLOCKS_TAIL; ++i)
+                                BLOCK_READ_WHT_1x32(W3[i], (i + 24) * IC_BLOCK);
+                } else
 #endif // IC % IC_BLOCK != 0
-            {
-                BLOCK_READ_WHT_8x32(W0, 0);
-                if (OC > 8) BLOCK_READ_WHT_8x32(W1, 8 * IC_BLOCK);
-                if (OC > 16) BLOCK_READ_WHT_8x32(W2, 16 * IC_BLOCK);
-                if (OC > 24) BLOCK_READ_WHT_8x32(W3, 24 * IC_BLOCK);
-            }
+                {
+                    BLOCK_READ_WHT_8x32(W0, 0);
+                    if (OC > 8) BLOCK_READ_WHT_8x32(W1, 8 * IC_BLOCK);
+                    if (OC > 16) BLOCK_READ_WHT_8x32(W2, 16 * IC_BLOCK);
+                    if (OC > 24) BLOCK_READ_WHT_8x32(W3, 24 * IC_BLOCK);
+                }
 
-            C00 = MMAD_FULL0(S0, W0, C00);
-            if (OC > 8) C01 = MMAD_FULL0(S0, W1, C01);
-            if (OC > 16) C02 = MMAD_FULL0(S0, W2, C02);
-            if (OC > 24) C03 = MMAD_FULL0(S0, W3, C03);
+                C00 = MMAD_FULL0(S0, W0, C00);
+                if (OC > 8) C01 = MMAD_FULL0(S0, W1, C01);
+                if (OC > 16) C02 = MMAD_FULL0(S0, W2, C02);
+                if (OC > 24) C03 = MMAD_FULL0(S0, W3, C03);
 #if (MB_BLOCK == 32 && MB > 8) || SP_BLOCK > 8
-            C10 = MMAD_FULL1(S1, W0, C10);
-            if (OC > 8) C11 = MMAD_FULL1(S1, W1, C11);
-            if (OC > 16) C12 = MMAD_FULL1(S1, W2, C12);
-            if (OC > 24) C13 = MMAD_FULL1(S1, W3, C13);
+                C10 = MMAD_FULL1(S1, W0, C10);
+                if (OC > 8) C11 = MMAD_FULL1(S1, W1, C11);
+                if (OC > 16) C12 = MMAD_FULL1(S1, W2, C12);
+                if (OC > 24) C13 = MMAD_FULL1(S1, W3, C13);
 #endif
 
 #if MB_BLOCK == 32 && MB > 16
-            C20 = MMAD_FULL1(S2, W0, C20);
-            if (OC > 8) C21 = MMAD_FULL1(S2, W1, C21);
-            if (OC > 16) C22 = MMAD_FULL1(S2, W2, C22);
-            if (OC > 24) C23 = MMAD_FULL1(S2, W3, C23);
+                C20 = MMAD_FULL1(S2, W0, C20);
+                if (OC > 8) C21 = MMAD_FULL1(S2, W1, C21);
+                if (OC > 16) C22 = MMAD_FULL1(S2, W2, C22);
+                if (OC > 24) C23 = MMAD_FULL1(S2, W3, C23);
 #endif
 
 #if MB_BLOCK == 32 && MB > 24
-            C30 = MMAD_FULL1(S3, W0, C30);
-            if (OC > 8) C31 = MMAD_FULL1(S3, W1, C31);
-            if (OC > 16) C32 = MMAD_FULL1(S3, W2, C32);
-            if (OC > 24) C33 = MMAD_FULL1(S3, W3, C33);
+                C30 = MMAD_FULL1(S3, W0, C30);
+                if (OC > 8) C31 = MMAD_FULL1(S3, W1, C31);
+                if (OC > 16) C32 = MMAD_FULL1(S3, W2, C32);
+                if (OC > 24) C33 = MMAD_FULL1(S3, W3, C33);
 #endif
+                src += SRC_ICB_STRIDE;
+                WEI += WEI_BLOCK_STRIDE;
+            }
         }
-
-        src += SRC_ICB_STRIDE;
-        wei += WEI_BLOCK_STRIDE;
+#if USE_WEI_SLM
+        wei += WEI_LOOP_STRIDE;
+#endif
     }
 
     float2 tmp2;
