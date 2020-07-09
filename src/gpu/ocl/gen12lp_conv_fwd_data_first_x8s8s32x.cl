@@ -265,7 +265,7 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
 #endif
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    MMAD_DATA8_T S;
+    SRC_MMAD_DATA8_T S;
     int8 W0, W1, W2, W3;
     int W00, W10, W20, W30;
     int8 C00 = 0;
@@ -273,7 +273,7 @@ conv_fwd_first_x8s8s32x(const __global uchar *src, const __global char *wei,
     int8 C20 = 0;
     int8 C30 = 0;
 #if OW_BLOCK == 12
-    MMAD_DATA4_T SS;
+    SRC_MMAD_DATA4_T SS;
     int4 C01 = 0;
     int4 C11 = 0;
     int4 C21 = 0;

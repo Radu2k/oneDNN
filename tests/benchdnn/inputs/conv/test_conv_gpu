@@ -26,6 +26,7 @@
 # i8 - 1x1 tests
 --reset --cfg=u8s8u8,u8s8s8,u8s8s32
 --dir=FWD_I,FWD_B
+mb16ic3ih14oc1024oh14kh3ph1n
 mb16ic256ih14oc1024oh14kh1ph0n
 mb16ic32ih14oc32oh14kh1ph0n
 mb16ic32ih7oc512oh7kh1ph0n
