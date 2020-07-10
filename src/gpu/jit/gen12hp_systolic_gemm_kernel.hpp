@@ -35,11 +35,13 @@ public:
 
     struct config_t {
         ngen::DataType a_type, b_type, c_type, acc_type;
+        ngen::DataType co_type = ngen::DataType::invalid;
         bool alpha1, beta0, beta1;
 
         bool a_bias = false;
         bool b_bias = false;
         bias_t c_bias = bias_t::none;
+        bool early_c_bias = false;
 
         bool alt_barriers = true;
         bool use_slm_fence = false;
@@ -67,10 +69,16 @@ public:
                 ok &= (a_type == DataType::bf || a_type == DataType::hf);
                 ok &= (c_type == DataType::f || c_type == a_type);
                 ok &= (acc_type == DataType::f);
-                ok &= !a_bias && !b_bias && (c_bias == bias_t::none);
+                ok &= !a_bias && !b_bias;
             }
             ok &= (alt_barriers || use_slm_fence);
+            ok &= (c_bias == bias_t::none
+                    || early_c_bias
+                            && (co_type == acc_type || co_type == a_type)
+                    || co_type == c_type);
+
             if (have_post_op()) ok &= injector_t::is_supported(post_op);
+
             return ok;
         }
     };
@@ -202,12 +210,16 @@ private:
 
     int interleave(int j);
 
-    void load_c_bias();
+    void load_c_bias_scattered(bool remainder);
+    void load_c_bias_block();
+    void load_c_bias(bool remainder);
+    void convert_c_bias(ngen::DataType dst_type);
     void add_c_bias();
     bool merge_abc_bias();
     void add_ab_bias();
 
-    void load_c(bool remainder, bool c_align16);
+    void load_update_c_internal(bool remainder, bool c_align16);
+    void load_update_c(bool remainder, bool c_align16);
     void store_c(bool remainder, bool c_align16);
     void update_c(bool remainder);
     void update_c();

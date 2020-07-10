@@ -63,6 +63,13 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
             return p.contain(sum, 0) ? p.entry_[0].sum.scale : 0.f;
         }
 
+        bool with_bias() const { return desc()->bias_type != data_type::undef; }
+
+        int bias_cmask() const {
+            unsigned char to_cmask[4] = {0, 2, 1, 3};
+            return with_bias() ? to_cmask[(desc()->bias_mask >> 1) & 3] : -1;
+        }
+
         const attr_info_t *attr_info() const { return &attr_info_; }
 
     private:
@@ -101,7 +108,7 @@ private:
     std::unique_ptr<memory_storage_t> a_packed_;
     std::unique_ptr<memory_storage_t> b_packed_;
 
-    char co_type_;
+    char co_kind_;
     bool ab_zero_points_;
 
     const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }

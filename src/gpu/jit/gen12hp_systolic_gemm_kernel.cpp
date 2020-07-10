@@ -75,7 +75,8 @@ int gen12hp_systolic_gemm_kernel_t::interleave(int j) {
     return ((j & ~3) << 1) + (int(second) << 2) + (j & 3);
 }
 
-void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
+void gen12hp_systolic_gemm_kernel_t::load_update_c_internal(
+        bool remainder, bool c_align16) {
     Label done;
 
     // Get configuration options.
@@ -317,6 +318,13 @@ void gen12hp_systolic_gemm_kernel_t::load_c(bool remainder, bool c_align16) {
     mark(done);
 }
 
+void gen12hp_systolic_gemm_kernel_t::load_update_c(
+        bool remainder, bool c_align16) {
+    if (cfg.early_c_bias) add_c_bias();
+    load_update_c_internal(remainder, c_align16);
+    if (!cfg.early_c_bias) add_c_bias();
+}
+
 void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
     Label done;
 
@@ -432,8 +440,17 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
     mark(done);
 }
 
-void gen12hp_systolic_gemm_kernel_t::load_c_bias() {
+void gen12hp_systolic_gemm_kernel_t::load_c_bias(bool remainder) {
+    // To fix: co accesses may go out of bounds.
+    if (!remainder && getBytes(cfg.co_type) == 4)
+        load_c_bias_block();
+    else
+        load_c_bias_scattered(remainder);
+}
+
+void gen12hp_systolic_gemm_kernel_t::load_c_bias_block() {
     assert(uoff_co.getOffset() == 2 && uoff_co2.getOffset() == 2);
+
     switch (cfg.c_bias) {
         case bias_t::none: break;
         case bias_t::fixed:
@@ -454,24 +471,140 @@ void gen12hp_systolic_gemm_kernel_t::load_c_bias() {
     }
 }
 
+void gen12hp_systolic_gemm_kernel_t::load_c_bias_scattered(bool remainder) {
+    auto bytes = getBytes(cfg.co_type);
+    auto lg2_bytes = ngen::utils::log2(bytes);
+
+    switch (cfg.c_bias) {
+        case bias_t::none: break;
+        case bias_t::fixed:
+            mov(1, uheaders[0].ud(0), uoff_co);
+            load(1, uoffset[0], scattered_byte(bytes), Surface(co_surface),
+                    uheaders[0]);
+            break;
+        case bias_t::row:
+        case bias_t::column: {
+            bool column = (cfg.c_bias == bias_t::column);
+            auto index_vec = uheaders[6].uw();
+            auto index_plus_16 = uheaders[7].uw();
+            auto index_plus_32 = uheaders[8].uw();
+
+            mov(8, index_vec[0](1), Immediate::uv(0, 1, 2, 3, 4, 5, 6, 7));
+            mov(8, index_vec[8](1),
+                    Immediate::uv(8, 9, 10, 11, 12, 13, 14, 15));
+
+            InstructionModifier flag[3];
+            if (remainder) {
+                if (column) {
+                    add(16, index_plus_16, index_vec, uint16_t(16));
+                    add(16, index_plus_32, index_vec, uint16_t(32));
+                    cmp(32 | gt | f1[0], un_rem.uw(), index_vec);
+                    flag[0] |= f1[0];
+                    flag[1] |= f1[1];
+                    flag[2] |= f1[0];
+                } else {
+                    // Reuse saved row mask.
+                    flag[0] |= f0[0];
+                    flag[1] |= f0[1];
+                }
+            }
+
+            if (bytes > 1)
+                shl<uint16_t>(16, index_vec, index_vec, uint16_t(lg2_bytes));
+
+            add(16, uheaders[0].ud(), uoff_co, index_vec);
+            add3(16, uheaders[2].ud(), uoff_co, index_vec,
+                    uint16_t(16 * bytes));
+            if (column)
+                add3(16, uheaders[4].ud(), uoff_co, index_vec,
+                        uint16_t(32 * bytes));
+
+            load(16 | flag[0], uoffset[0], scattered_byte(bytes),
+                    Surface(co_surface), uheaders[0]);
+            load(16 | flag[1], uoffset[2], scattered_byte(bytes),
+                    Surface(co_surface), uheaders[2]);
+
+            if (column) {
+                if (remainder) cmp(16 | gt | f1[0], un_rem.uw(), index_plus_32);
+                load(16 | flag[2], uoffset[4], scattered_byte(bytes),
+                        Surface(co_surface), uheaders[4]);
+            }
+
+            break;
+        }
+    }
+}
+
+void gen12hp_systolic_gemm_kernel_t::convert_c_bias(ngen::DataType dst_type) {
+    auto src_type = cfg.co_type;
+
+    auto convert = [&](int simd, RegData dst, RegData src) {
+        if (src_type == DataType::bf && dst_type == DataType::f) {
+            // Must convert bf->f by hand.
+            src.setType(DataType::uw);
+            dst.setType(DataType::ud);
+            shl(simd, dst, src, uint16_t(16));
+        } else
+            mov(simd, dst, src);
+    };
+
+    if (src_type != dst_type) {
+        switch (cfg.c_bias) {
+            case bias_t::none: break;
+            case bias_t::fixed:
+                convert(1, uoffset[0].sub(0, dst_type),
+                        uoffset[0].sub(0, src_type));
+                break;
+            case bias_t::row:
+            case bias_t::column: {
+                assert(getBytes(dst_type) == 4);
+                int nreg = (cfg.c_bias == bias_t::column) ? 6 : 4;
+                auto src_stride = 4 / getBytes(src_type);
+                for (int q = 0; q < nreg; q += 2)
+                    convert(16, uoffset[q].sub(0, dst_type)(1),
+                            uoffset[q].sub(0, src_type)(src_stride));
+                break;
+            }
+        }
+    }
+}
+
 void gen12hp_systolic_gemm_kernel_t::add_c_bias() {
-    auto co_fixed = uoffset[0].sub(0, cfg.acc_type);
+    auto cur_type = cfg.early_c_bias ? cfg.acc_type : cfg.c_type;
+
+    convert_c_bias(cur_type);
+
+    auto co_fixed = uoffset[0].sub(0, cur_type);
     if (merge_abc_bias()) add(1, co_fixed, co_fixed, uao_bo_k);
 
     for (int ii = 0; ii < 4; ii++) {
         for (int j = 0; j < 48; j += 2) {
-            auto a_reg = c_regs[interleave(j) + ii * acc_stride].retype(
-                    cfg.acc_type);
+            auto a_reg
+                    = c_regs[interleave(j) + ii * acc_stride].retype(cur_type);
             switch (cfg.c_bias) {
                 case bias_t::none: break;
                 case bias_t::fixed: add(16, a_reg, a_reg, co_fixed); break;
                 case bias_t::row:
-                    add(16, a_reg, a_reg,
-                            uoffset[ii].sub(0, cfg.acc_type)(0, 8, 1));
+                    if (cur_type != DataType::f) {
+                        add(16, a_reg, a_reg,
+                                uoffset[ii].sub(0, cur_type)(0, 8, 1));
+                    } else {
+                        // No region support on FPU pipe.
+                        add(8, a_reg, a_reg, uoffset[ii].sub(0, cur_type)(1));
+                        add(8, a_reg + 1, a_reg + 1,
+                                uoffset[ii].sub(0, cur_type)(1));
+                    }
                     break;
                 case bias_t::column:
-                    add(16, a_reg, a_reg,
-                            uoffset[j >> 3].sub(j & 7, cfg.acc_type)(1, 8, 0));
+                    if (cur_type != DataType::f) {
+                        add(16, a_reg, a_reg,
+                                uoffset[j >> 3].sub(j & 7, cur_type)(1, 8, 0));
+                    } else {
+                        add(8, a_reg, a_reg,
+                                uoffset[j >> 3].sub(j & 7, cur_type)(0));
+                        add(8, a_reg + 1, a_reg + 1,
+                                uoffset[j >> 3].sub((j + 1) & 7, cur_type)(0));
+                    }
                     break;
             }
         }
@@ -577,28 +710,24 @@ void gen12hp_systolic_gemm_kernel_t::update_c(bool remainder) {
 
     Label unaligned_c;
 
-    load_c_bias();
+    load_c_bias(remainder);
     if (!cfg.c_align16_check) {
         // Assume 16-byte alignment.
-        load_c(remainder, true);
-        add_c_bias();
+        load_update_c(remainder, true);
         store_c(remainder, true);
     } else if (!c32 && remainder) {
         // C not 32-bit, remainder. Only one (unaligned) path.
-        load_c(remainder, false);
-        add_c_bias();
+        load_update_c(remainder, false);
         store_c(remainder, false);
     } else {
         // Two full paths, one with aligned C, one without.
         check_c_align(16);
         jmpi(1 | ~f1[1], unaligned_c);
-        load_c(remainder, true);
-        add_c_bias();
+        load_update_c(remainder, true);
         store_c(remainder, true);
         epilogue();
         mark(unaligned_c);
-        load_c(remainder, false);
-        add_c_bias();
+        load_update_c(remainder, false);
         store_c(remainder, false);
     }
 }
@@ -1036,6 +1165,7 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     //   - C += m0 + n0 * ldc [save for later]
     uint16_t lg2_a_elem_bytes = ngen::utils::log2(getBytes(cfg.a_type));
     uint16_t lg2_c_elem_bytes = ngen::utils::log2(getBytes(cfg.c_type));
+    uint16_t lg2_co_elem_bytes = ngen::utils::log2(getBytes(cfg.co_type));
     auto this_unroll_k = unroll_k_bytes / getBytes(cfg.a_type);
 
     mov(1, k_copy, k);
@@ -1074,7 +1204,7 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     add(1, b_ptr_mem, bp, offset_b);
     add(1, c_ptr_mem, c_ptr, offset_c);
     if (utils::one_of(cfg.c_bias, bias_t::row, bias_t::column))
-        shl(1, off_co_copy, off_co_copy, uint16_t(lg2_c_elem_bytes));
+        shl(1, off_co_copy, off_co_copy, uint16_t(lg2_co_elem_bytes));
 
     and_(1, temp, local_id_x, uint16_t(8));
     shr(2, suboffset_a(1), suboffset_a(1), uint16_t(4));

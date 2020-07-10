@@ -46,11 +46,9 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     // LIMITATIONS:
     // - batch is not supported
     // - runtime dims are not supported
-    // - bias is not supported for f16/bf16
     bool limits_ok = d->batch == 1
             && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m, d->n, d->k, d->lda,
-                    d->ldb, d->ldc)
-            && d->bias_type == data_type::undef;
+                    d->ldb, d->ldc);
 
     bool dt_float_ok
             = (d->a_type == d->b_type && utils::one_of(d->a_type, bf16, f16)
@@ -73,7 +71,10 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
                             || attr()->post_ops_.find(sum) != -1)
             && IMPLICATION(attr()->post_ops_.len() == 2,
                     attr()->post_ops_.find(sum) == 0
-                            && attr()->post_ops_.find(eltwise) == 1);
+                            && attr()->post_ops_.find(eltwise) == 1)
+            && IMPLICATION(with_bias(),
+                    dt_float_ok && utils::one_of(d->bias_type, d->a_type, f32)
+                            && utils::one_of(bias_cmask(), 0, 1 << 0, 1 << 1));
 
     if (dt_int_ok) {
         ok &= attr()->zero_points_.defined(DNNL_ARG_SRC)
@@ -164,29 +165,35 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     }
     cfg.a_bias = cfg.b_bias = ab_zero_points_;
 
-    co_type_ = 'N';
-    if (c_type == s32) {
-        int cmask = 0;
-        pd()->attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
+    int cmask = -1;
 
-        switch (cmask) {
-            case 0:
-                cfg.c_bias = kernel_t::bias_t::fixed;
-                co_type_ = 'F';
-                break;
-            case (1 << 1):
-                cfg.c_bias = kernel_t::bias_t::row;
-                co_type_ = 'R';
-                break;
-            case (1 << 0):
-                cfg.c_bias = kernel_t::bias_t::column;
-                co_type_ = 'C';
-                break;
-            default:
-                cfg.c_bias = kernel_t::bias_t::none;
-                co_type_ = 'N';
-                break;
-        }
+    if (c_type == s32) {
+        cfg.co_type = cfg.c_type;
+        pd()->attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
+    } else if (pd()->with_bias()) {
+        cfg.early_c_bias = true;
+        cfg.co_type = convert_dnnl_type_to_ngen(pd()->desc()->bias_type);
+        cmask = pd()->bias_cmask();
+    }
+
+    switch (cmask) {
+        case 0:
+            cfg.c_bias = kernel_t::bias_t::fixed;
+            co_kind_ = 'F';
+            break;
+        case (1 << 1):
+            cfg.c_bias = kernel_t::bias_t::row;
+            co_kind_ = 'R';
+            break;
+        case (1 << 0):
+            cfg.c_bias = kernel_t::bias_t::column;
+            co_kind_ = 'C';
+            break;
+        case -1:
+        default:
+            cfg.c_bias = kernel_t::bias_t::none;
+            co_kind_ = 'N';
+            break;
     }
 
     bool may_k_block = (pd()->desc()->k > default_block_k(a_type));
@@ -439,7 +446,8 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
         uint32_t abo = (uint16_t(ao) | (uint16_t(bo) << 16));
         arg_list.set(argn++, abo);
     }
-    if (last_k_block && (pd()->desc()->c_type == data_type::s32)) {
+    if (last_k_block
+            && (pd()->with_bias() || pd()->desc()->c_type == data_type::s32)) {
         arg_list.set(argn++, co);
         arg_list.set(argn++, offset_co);
     }
@@ -460,6 +468,8 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     auto a_type = pd()->desc()->a_type;
     auto b_type = pd()->desc()->b_type;
     auto c_type = pd()->desc()->c_type;
+    auto bias_type = pd()->desc()->bias_type;
+    auto co_type = c_type;
 
     auto m = pd()->desc()->m;
     auto n = pd()->desc()->n;
@@ -478,7 +488,9 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     auto &a = GEMM_CTX_ARG_STORAGE(a);
     auto &b = GEMM_CTX_ARG_STORAGE(b);
     auto &c = GEMM_CTX_ARG_STORAGE(c);
-    auto &co = GEMM_CTX_ARG_STORAGE(c_zero_point);
+    auto &c_zp = GEMM_CTX_ARG_STORAGE(c_zero_point);
+    auto &bias = GEMM_CTX_ARG_STORAGE(bias);
+    auto *co = &c_zp;
 
     int32_t ao = 0, bo = 0;
 
@@ -488,6 +500,7 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
             = b.offset() / types::data_type_size(b_type) + pd()->dyn_offset_b;
     size_t off_c0
             = c.offset() / types::data_type_size(c_type) + pd()->dyn_offset_c;
+    size_t off_co0 = 0;
 
     if (c_type == data_type::s32) {
         const int *ao_i32 = nullptr;
@@ -497,6 +510,10 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
                 DNNL_ARG_WEIGHTS, nullptr, nullptr, &bo_i32);
         ao = -*ao_i32;
         bo = -*bo_i32;
+    } else if (pd()->with_bias()) {
+        off_co0 = bias.offset() / types::data_type_size(bias_type);
+        co = &bias;
+        co_type = bias_type;
     }
 
     int64_t block_m = 0, block_n = 0, block_k = 0;
@@ -540,18 +557,18 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
                 }
 
                 auto off_c = off_c0 + Bm + Bn * ldc;
-                auto off_co = 0;
-                switch (co_type_) {
-                    case 'R': off_co = Bm; break;
-                    case 'C': off_co = Bn; break;
-                    default: off_co = 0; break;
+                auto off_co = int32_t(off_co0);
+                switch (co_kind_) {
+                    case 'R': off_co += Bm; break;
+                    case 'C': off_co += Bn; break;
+                    default: break;
                 }
 
                 float this_beta = first_k_block ? beta : 1.0f;
                 status = launch_compute(ctx, size_m, size_n, size_k, *a_packed_,
                         off_a_packed, lda_packed, *b_packed_, off_b_packed,
-                        ldb_packed, c, off_c, ldc, alpha, this_beta, ao, bo, co,
-                        off_co, first_k_block, last_k_block);
+                        ldb_packed, c, off_c, ldc, alpha, this_beta, ao, bo,
+                        *co, off_co, first_k_block, last_k_block);
                 if (status) return status;
             }
         }
