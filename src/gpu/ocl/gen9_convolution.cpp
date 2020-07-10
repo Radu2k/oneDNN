@@ -147,6 +147,9 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     }
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+    const bool is_gen12hp = compute_engine->is_gen12hp();
+
+    const bool is_fp16 = src_mdw.data_type() == data_type::f16;
 
     switch (conf.ver) {
         case ver_nhwc: {
@@ -206,7 +209,7 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
                     * utils::div_up(conf.ow, conf.ow_block)
                     * (conf.omb / conf.mb_block);
             conf.gws_d[2] = (conf.oc / conf.ocb) * (conf.mb / conf.omb);
-            conf.lws_d[0] = compute_engine->is_gen12hp() ? 32 : 16;
+            conf.lws_d[0] = is_gen12hp ? 32 : 16;
             conf.lws_d[1] = 1;
             conf.lws_d[2] = 1;
             break;
@@ -238,10 +241,18 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
             break;
         case ver_1stconv:
             src_tag = utils::pick(conf.ndims - 3, ncw, nchw, ncdhw);
-            dst_tag = conf.mb % 16 == 0
-                    ? utils::pick(
-                            conf.ndims - 3, NCw16n16c, NChw16n16c, NCdhw16n16c)
-                    : utils::pick(conf.ndims - 3, nCw16c, nChw16c, nCdhw16c);
+            if (is_gen12hp && is_fp16) {
+                dst_tag = (conf.mb == 8 || conf.mb == 16 || conf.mb % 32 == 0)
+                        ? utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c,
+                                NCdhw32n16c)
+                        : utils::pick(
+                                conf.ndims - 3, nCw16c, nChw16c, nCdhw16c);
+            } else {
+                dst_tag = conf.mb % 16 == 0 ? utils::pick(conf.ndims - 3,
+                                  NCw16n16c, NChw16n16c, NCdhw16n16c)
+                                            : utils::pick(conf.ndims - 3,
+                                                    nCw16c, nChw16c, nCdhw16c);
+            }
             wei_tag = conf.with_groups
                     ? utils::pick(conf.ndims - 3, gOwi16o, gOhwi16o, gOdhwi16o)
                     : utils::pick(conf.ndims - 3, Owi16o, Ohwi16o, Odhwi16o);
@@ -375,10 +386,12 @@ status_t gen9_convolution_fwd_t::pd_t::init_kernel_ctx(
             utils::one_of(conf.wei_tag, gIOw16i16o, gIOhw16i16o, gIOdhw16i16o,
                     IOw16i16o, IOhw16i16o, IOdhw16i16o));
 
-    kernel_ctx.define_int("DST_16N16C",
-            utils::one_of(conf.dst_tag, NCw16n16c, NChw16n16c, NCdhw16n16c));
     kernel_ctx.define_int(
             "DST_W16C", utils::one_of(conf.dst_tag, nCw16c, nChw16c, nCdhw16c));
+    kernel_ctx.define_int("DST_16N16C",
+            utils::one_of(conf.dst_tag, NCw16n16c, NChw16n16c, NCdhw16n16c));
+    kernel_ctx.define_int("DST_32N16C",
+            utils::one_of(conf.dst_tag, NCw32n16c, NChw32n16c, NCdhw32n16c));
 
     kernel_ctx.define_int("LWS_0", conf.lws_d[0]);
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);

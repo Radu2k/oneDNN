@@ -98,6 +98,19 @@ int off_NCdhw16n16c(
     return off;
 }
 
+int off_NCdhw32n16c(
+        int n, int c, int d, int h, int w, int C, int D, int H, int W) {
+    int off = 0;
+    off += (n / 32) * (C / 16) * D * H * W * 32 * 16;
+    off += (c / 16) * D * H * W * 32 * 16;
+    off += d * H * W * 32 * 16;
+    off += h * W * 32 * 16;
+    off += w * 32 * 16;
+    off += (n % 32) * 16;
+    off += (c % 16);
+    return off;
+}
+
 int off_gOdhwi16o(int g, int o, int i, int d, int h, int w, int O, int I, int D,
         int H, int W) {
     int off = 0;
@@ -158,6 +171,7 @@ int wei_off(int g, int o, int i, int d, int h, int w) {
 int dst_off(int n, int c, int d, int h, int w) {
     if (DST_W16C) return off_nCdhw16c(n, c, d, h, w, G * OC, OD, OH, OW);
     if (DST_16N16C) return off_NCdhw16n16c(n, c, d, h, w, G * OC, OD, OH, OW);
+    if (DST_32N16C) return off_NCdhw32n16c(n, c, d, h, w, G * OC, OD, OH, OW);
     return 0;
 }
 
@@ -216,7 +230,7 @@ int wei_idx(int oc_outer, int ic_outer) {
 // - cwn[16c] for NCdhw16n16c (16c is mapped to sub-group)
 // - ncw[16c] for nCdhw16c (16c is mapped to sub-group)
 int dst_idx(int mb_block, int oc_outer, int ow_block) {
-    if (DST_16N16C)
+    if (DST_16N16C || DST_32N16C)
         return oc_outer * OW_BLOCK * MB_BLOCK + ow_block * MB_BLOCK + mb_block;
     return mb_block * OC_OUTER * OW_BLOCK + oc_outer * OW_BLOCK + ow_block;
 }
@@ -541,6 +555,19 @@ DATA_T shuffle_a_value(int mb_block, int ic_block, int ow_outer, int ow_inner,
                                 mb_block, oc_outer * 16, 0, 0, ow_block); \
                         int idx = dst_idx(mb_block, oc_outer, ow_block); \
                         unrolled_write(min(16, MB_BLOCK), &(block)[idx], \
+                                &(ptr)[off]); \
+                    } \
+        } else if (DST_32N16C) { \
+            int ow_bound = (OW % OW_BLOCK == 0) ? OW_BLOCK \
+                                                : min(OW_BLOCK, OW - (ow)); \
+            for (int ow_block = 0; ow_block < ow_bound; ow_block++) \
+                for (int oc_outer = 0; oc_outer < OC_OUTER; oc_outer++) \
+                    for (int mb_block = 0; mb_block < MB_BLOCK; \
+                            mb_block += 32) { \
+                        int off = dst_off( \
+                                mb_block, oc_outer * 16, 0, 0, ow_block); \
+                        int idx = dst_idx(mb_block, oc_outer, ow_block); \
+                        unrolled_write(min(32, MB_BLOCK), &(block)[idx], \
                                 &(ptr)[off]); \
                     } \
         } \
