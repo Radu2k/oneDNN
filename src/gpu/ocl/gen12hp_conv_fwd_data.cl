@@ -77,11 +77,23 @@
 #define MMAD8X8 mmad8x8
 #endif
 
+#define BLOCK_READ_SCALES(data, idx) \
+    data = as_float4(intel_sub_group_block_read4( \
+            (__global uint *)&scales_per_oc[idx]));
+
+#if SCALES_PER_OC
+#define SCALE scales
+#elif SCALES_COMMON
+#define SCALE scale
+#else
+#define SCALE 1
+#endif
+
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) // attr:no-format
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
 gen12hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
         const __global BIA_DATA_T *bias, __global DST_DATA_T *dst POST_OP_ARGS,
-        float scales) {
+        float scale, const __global float *scales_per_oc) {
     const int group_oc = get_group_id(0) * OC_GROUP;
     const int group_mb = get_group_id(2) * MB_GROUP;
     const int group_sp = get_group_id(1) * SP_GROUP;
@@ -228,13 +240,18 @@ gen12hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
         src += IC_BLOCK * MB_BLOCK * (ID - KD * (1 + DD)) * IH * IW;
     }
 
+#if SCALES_PER_OC
+    float4 scales;
+    BLOCK_READ_SCALES(scales, (group_oc + oc) * OC_CALC_BLOCK);
+#endif
+
 #if WITH_BIAS
     float4 bia;
     BLOCK_READ_BIA(bia, (group_oc + oc) * OC_CALC_BLOCK);
-    bia *= scales;
-#define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)scales, bia);
+    bia *= SCALE;
+#define QUANTIZE_ADD_BIAS() tmp = fma(tmp, (float4)SCALE, bia);
 #else
-#define QUANTIZE_ADD_BIAS() tmp *= scales;
+#define QUANTIZE_ADD_BIAS() tmp *= SCALE;
 #endif
 
 #if DT_F16 || DT_BF16

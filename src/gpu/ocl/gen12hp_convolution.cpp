@@ -178,6 +178,7 @@ status_t gen12hp_convolution_fwd_t::execute_forward(
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
     auto &bias = CTX_IN_STORAGE(DNNL_ARG_BIAS);
+    auto &oscales = CTX_IN_STORAGE(DNNL_ARG_ATTR_OUTPUT_SCALES);
     auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     const auto &conf = pd()->conf;
@@ -191,8 +192,21 @@ status_t gen12hp_convolution_fwd_t::execute_forward(
     unsigned arg_idx = append_post_ops_to_arg_list(
             ctx, arg_list, 4, conf.attr_info.all_post_ops);
 
-    float scales = pd()->attr()->output_scales_.scales_[0];
-    arg_list.set(arg_idx, scales);
+    if (conf.attr_info.common_oscales) {
+        float scales = pd()->attr()->output_scales_.scales_[0];
+        arg_list.set(arg_idx++, scales);
+    } else {
+        arg_list.set(arg_idx++, 1.0f);
+    }
+
+    if (conf.attr_info.with_per_oc_oscales) {
+        if (conf.attr_info.with_runtime_oscales)
+            arg_list.set(arg_idx++, oscales);
+        else
+            arg_list.set(arg_idx++, CTX_GPU_RES_STORAGE(SCALES_));
+    } else {
+        arg_list.set(arg_idx++, memory_storage_t::empty_storage());
+    }
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
     status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);

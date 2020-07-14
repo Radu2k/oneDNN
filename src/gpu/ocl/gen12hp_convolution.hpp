@@ -43,7 +43,8 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
             using namespace data_type;
             assert(engine->kind() == engine_kind::gpu);
 
-            const auto attr_skip_mask = primitive_attr_t::skip_mask_t::oscale
+            const auto attr_skip_mask
+                    = primitive_attr_t::skip_mask_t::oscale_runtime
                     | primitive_attr_t::skip_mask_t::post_ops
                     | primitive_attr_t::skip_mask_t::sum_dt;
 
@@ -63,15 +64,20 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
                             expect_data_types(s8, s8, f32, s8, s32))
                     && attr()->has_default_values(
                             attr_skip_mask, desc()->dst_desc.data_type)
-                    && post_ops_ok(attr());
+                    && post_ops_ok(attr())
+                    && IMPLICATION(!attr()->output_scales_.has_default_values(),
+                            utils::one_of(
+                                    attr()->output_scales_.mask_, 0, 1 << 1));
             if (!ok) return status::unimplemented;
 
             status_t status = init_conf();
             if (status != status::success) return status;
 
-            ok = !conf.attr_info.with_per_oc_oscales
-                    && set_default_formats_common(
-                            conf.src_tag, conf.wei_tag, conf.dst_tag);
+            auto scales_status = init_scales_md();
+            if (scales_status != status::success) return scales_status;
+
+            ok = set_default_formats_common(
+                    conf.src_tag, conf.wei_tag, conf.dst_tag);
 
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
@@ -84,7 +90,21 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
         status_t init_conf();
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
+        const memory_desc_t *scales_md() const { return &scales_md_; }
+
         conv_conf_t conf;
+
+    private:
+        status_t init_scales_md() {
+            if (!conf.attr_info.with_per_oc_oscales) return status::success;
+
+            scales_md_.data_type = data_type::f32;
+            scales_md_.ndims = 1;
+            scales_md_.dims[0] = attr()->output_scales_.count_;
+            return memory_desc_init_by_tag(scales_md_, format_tag::x);
+        }
+
+        memory_desc_t scales_md_;
     };
 
     status_t init(engine_t *engine) override {
@@ -106,11 +126,35 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
         return execute_forward(ctx);
     }
 
+protected:
+    status_t init_res_storage(
+            engine_t *engine, gpu_resource_t *r) const override {
+        if (!pd()->conf.attr_info.with_per_oc_oscales
+                || pd()->conf.attr_info.with_runtime_oscales)
+            return status::success;
+
+        memory_desc_wrapper scales_mdw(pd()->scales_md());
+        memory_storage_t *tmp_mem_storage_ptr;
+        CHECK(engine->create_memory_storage(
+                &tmp_mem_storage_ptr, scales_mdw.nelems() * sizeof(float)));
+
+        std::unique_ptr<memory_storage_t> tmp_mem_storage(tmp_mem_storage_ptr);
+        void *scales_ptr = nullptr;
+        CHECK(tmp_mem_storage->map_data(&scales_ptr, nullptr));
+        utils::array_copy((float *)scales_ptr,
+                pd()->attr()->output_scales_.scales_,
+                pd()->attr()->output_scales_.count_);
+        CHECK(tmp_mem_storage->unmap_data(scales_ptr, nullptr));
+        r->add_memory_storage(SCALES_, std::move(tmp_mem_storage));
+        return status::success;
+    }
+
 private:
     status_t execute_forward(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 
     compute::kernel_t kernel_;
+    enum { SCALES_ = 0 };
 };
 
 struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
