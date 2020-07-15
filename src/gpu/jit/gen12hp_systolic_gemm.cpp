@@ -23,7 +23,6 @@
 #include "gpu/jit/gen12hp_systolic_gemm_kernel.hpp"
 #include "gpu/jit/ngen_type_bridge.hpp"
 #include "gpu/ocl/gemm/gen12hp_systolic_gemm_copy_kernel.hpp"
-#include "gpu/ocl/ocl_gpu_engine.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -118,9 +117,6 @@ dim_t gen12hp_systolic_gemm_t::pd_t::k_aligned() const {
 status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     using namespace data_type;
     using kernel_t = gen12hp_systolic_gemm_kernel_t;
-
-    auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine);
-    if (!gpu_engine) return status::out_of_memory;
 
     auto a_type = pd()->desc()->a_type;
     auto b_type = pd()->desc()->b_type;
@@ -221,16 +217,8 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
                 }
                 auto kernel = kernel_t(cfg_copy);
 
-                const auto &ngen_bin = kernel.getBinary(
-                        gpu_engine->context(), gpu_engine->device());
-
-                // TODO : refactor compute::engine_t to allow this part to be runtime agnostic
-                // (this will not work with SYCL runtime)
-                kernel_[first_k_block][last_k_block]
-                        = compute::kernel_t(new ocl::ocl_gpu_kernel_t(
-                                ngen_bin, kernel.getExternalName().c_str()));
-
-                register_kernels({kernel_[first_k_block][last_k_block]});
+                create_kernel(
+                        engine, &kernel_[first_k_block][last_k_block], kernel);
             }
         }
     }
@@ -249,7 +237,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
                             trans, ab_zero_points_, clear_sum);
             if (status != status::success) return status;
 
-            create_kernel(gpu_engine, &copy_kernel_[copy_b][clear_sum],
+            create_kernel(engine, &copy_kernel_[copy_b][clear_sum],
                     "gen12hp_systolic_gemm_copy", kernel_ctx);
             if (!copy_kernel_[copy_b][clear_sum]) return status::runtime_error;
         }

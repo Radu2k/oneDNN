@@ -56,6 +56,16 @@ struct gpu_primitive_t : public primitive_t {
         return status::success;
     }
 
+    status_t create_kernel(engine_t *engine, compute::kernel_t *kernel,
+            jit::jit_generator_base &jitter) {
+
+        auto *compute_engine
+                = utils::downcast<compute::compute_engine_t *>(engine);
+        CHECK(compute_engine->create_kernel(kernel, jitter));
+        register_kernels({*kernel});
+        return status::success;
+    }
+
     status_t create_kernels(engine_t *engine,
             std::vector<compute::kernel_t> *kernels,
             const std::vector<const char *> &kernel_names,

@@ -17,6 +17,7 @@
 #ifndef GPU_JIT_JIT_GENERATOR_HPP
 #define GPU_JIT_JIT_GENERATOR_HPP
 
+#include "gpu/jit/jit_generator_base.hpp"
 #include "gpu/jit/ngen/ngen_opencl.hpp"
 
 namespace dnnl {
@@ -26,7 +27,6 @@ namespace jit {
 
 using gpu_gen_t = ngen::HW;
 constexpr gpu_gen_t gpu_gen9 = ngen::HW::Gen9;
-constexpr gpu_gen_t gpu_gen10 = ngen::HW::Gen10;
 constexpr gpu_gen_t gpu_gen11 = ngen::HW::Gen11;
 constexpr gpu_gen_t gpu_gen12lp = ngen::HW::Gen12LP;
 constexpr gpu_gen_t gpu_gen12hp = ngen::HW::Gen12HP;
@@ -88,7 +88,8 @@ template <gpu_gen_t hw>
 struct jit_eltwise_injector_f32;
 
 template <gpu_gen_t hw>
-class jit_generator : public ngen::OpenCLCodeGenerator<hw> {
+class jit_generator : public ngen::OpenCLCodeGenerator<hw>,
+                      public jit_generator_base {
     friend struct jit_eltwise_injector_f32<hw>;
 
 private:
@@ -103,6 +104,15 @@ private:
 
 public:
     jit_generator() = default;
+
+    std::vector<unsigned char> get_binary(
+            cl_context context, cl_device_id device) override {
+        return ngen::OpenCLCodeGenerator<hw>::getBinary(context, device);
+    }
+
+    const char *kernel_name() const override {
+        return ngen::OpenCLCodeGenerator<hw>::getExternalName().c_str();
+    }
 
     void dbg_alloc(cl_context context);
     void *dbg_memory() const { return dbg_memory_.get(); }
@@ -122,4 +132,4 @@ void jit_generator<hw>::dbg_alloc(cl_context context) {
 } // namespace impl
 } // namespace dnnl
 
-#endif // JIT_GENERATOR_HPP
+#endif // GPU_JIT_JIT_GENERATOR_HPP
