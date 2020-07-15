@@ -82,7 +82,6 @@ public:
 
     virtual status_t create_kernel(gpu::compute::kernel_t *kernel,
             gpu::jit::jit_generator_base &jitter) const override {
-
         if (kind() != engine_kind::gpu) {
             assert("not expected");
             return status::invalid_arguments;
@@ -98,7 +97,6 @@ public:
 
         *kernel = gpu::compute::kernel_t(
                 new sycl_ocl_gpu_kernel_t(binary, kernel_name));
-
         return status::success;
     }
 
@@ -149,7 +147,7 @@ public:
         return sycl_device_id(device_);
     }
 
-    virtual bool mayiuse_ngen_kernels() const override {
+    virtual bool mayiuse_ngen_kernels() override {
         return enable_ngen_kernels_;
     }
 

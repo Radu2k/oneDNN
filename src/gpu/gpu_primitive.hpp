@@ -64,7 +64,6 @@ struct gpu_primitive_t : public primitive_t {
         auto *compute_engine
                 = utils::downcast<compute::compute_engine_t *>(engine);
         CHECK(compute_engine->create_kernel(kernel, jitter));
-
         register_kernels({*kernel});
         return status::success;
     }
