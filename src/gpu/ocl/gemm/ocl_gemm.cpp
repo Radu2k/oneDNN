@@ -110,11 +110,11 @@ dnnl_status_t gemm_generic(cl_command_queue queue, const char *transa,
     status = create_gemm_memory_desc(&c_desc, &op_desc, 2, c_type);
     assert(status == status::success);
 
+    std::unique_ptr<primitive_desc_iface_t> pd;
     primitive_attr_t attr;
     if (alpha != 1.0f) attr.output_scales_.set(alpha);
     if (beta != 0.0f) attr.post_ops_.append_sum(beta);
 
-    std::unique_ptr<primitive_desc_iface_t> pd;
     primitive_desc_iface_t *pd_ptr;
     status = dnnl_primitive_desc_create(
             &pd_ptr, &op_desc, &attr, engine.get(), nullptr);

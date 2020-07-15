@@ -54,6 +54,7 @@ public:
         return status;
     }
 
+
     virtual status_t create_kernel(compute::kernel_t *kernel,
             jit::jit_generator_base &jitter) const = 0;
 

@@ -147,6 +147,7 @@ public:
         return sycl_device_id(device_);
     }
 
+
     virtual bool mayiuse_ngen_kernels() const override {
         return enable_ngen_kernels_;
     }

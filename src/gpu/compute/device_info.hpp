@@ -63,6 +63,7 @@ inline const char *gpu_arch2str(gpu_arch_t arch) {
 #undef CASE
 }
 
+
 enum class device_ext_t : int64_t {
     intel_subgroups = 1 << 0,
     intel_subgroups_short = 1 << 1,
@@ -77,11 +78,13 @@ enum class device_ext_t : int64_t {
     last
 };
 
+
 static bool has(uint64_t extensions, device_ext_t ext) {
     return extensions & (uint64_t)ext;
 }
 
 static inline const char *ext2cl_str(device_ext_t ext) {
+
 #define CASE(x) \
     case device_ext_t::x: return STRINGIFY(CONCAT2(cl_, x));
     switch (ext) {
@@ -228,6 +231,7 @@ public:
             gpu_arch_ = real_gpu_arch_;
             return status::success;
         }
+
 
         // Environment GPU architecture is different from the detected one, use
         // emulation.

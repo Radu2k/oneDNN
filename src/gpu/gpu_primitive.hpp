@@ -62,6 +62,7 @@ struct gpu_primitive_t : public primitive_t {
         auto *compute_engine
                 = utils::downcast<compute::compute_engine_t *>(engine);
         CHECK(compute_engine->create_kernel(kernel, jitter));
+
         register_kernels({*kernel});
         return status::success;
     }
@@ -115,6 +116,12 @@ protected:
             const compute::kernel_arg_list_t &arg_list) const {
         return parallel_for(ctx.get_resource_mapper(), ctx.stream(), range,
                 kernel, arg_list);
+    }
+
+    void register_kernels(const std::vector<compute::kernel_t> &kernels) {
+        for (const auto &k : kernels) {
+            registered_kernels_.push_back(k);
+        }
     }
 
 private:

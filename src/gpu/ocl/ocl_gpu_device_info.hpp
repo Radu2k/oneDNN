@@ -30,6 +30,26 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
+
+
+static compute::device_ext_t get_extensions(compute::gpu_arch_t gpu_arch) {
+    uint64_t extensions = 0;
+    switch (gpu_arch) {
+        case compute::gpu_arch_t::gen12lp:
+            extensions |= (uint64_t)
+                    compute::device_ext_t::intel_subgroup_local_block_io;
+        case compute::gpu_arch_t::gen9:
+            extensions |= (uint64_t)compute::device_ext_t::khr_fp16;
+            extensions |= (uint64_t)compute::device_ext_t::intel_subgroups;
+            extensions
+                    |= (uint64_t)compute::device_ext_t::intel_subgroups_short;
+            break;
+        case compute::gpu_arch_t::unknown: break;
+    }
+    return (compute::device_ext_t)extensions;
+}
+
+
 class ocl_gpu_device_info_t : public compute::device_info_t {
 public:
     ocl_gpu_device_info_t(cl_device_id device) : device_(device) {}
@@ -68,12 +88,14 @@ public:
         return status::success;
     }
 
+
     status_t init_eu_count(int &ret) const override {
         cl_uint max_units;
         cl_int err = clGetDeviceInfo(device_, CL_DEVICE_MAX_COMPUTE_UNITS,
                 sizeof(cl_uint), &max_units, nullptr);
         OCL_CHECK(err);
         ret = (int)max_units;
+
         return status::success;
     }
 
@@ -93,6 +115,7 @@ public:
     std::string get_cl_ext_options() const {
         using namespace compute;
 
+
         std::string opts;
         for (uint64_t i_ext = 1; i_ext < (uint64_t)device_ext_t::last;
                 i_ext <<= 1) {
@@ -110,6 +133,7 @@ public:
                         device_ext_t::intel_global_float_atomics,
                         device_ext_t::future_bf16_cvt))
                 opts += std::string("-D") + ext2cl_str(ext) + " ";
+
         }
         if (!opts.empty()) { opts[opts.size() - 1] = '\0'; }
         return opts;
@@ -117,6 +141,7 @@ public:
 
 private:
     cl_device_id device_ = nullptr;
+
 };
 
 } // namespace ocl
