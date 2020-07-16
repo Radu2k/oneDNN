@@ -22,7 +22,6 @@
                            12x12:1x12
 
 --stag=aBx16b:aBx16b       4x16x5x7:4x16x5x7
-
                            8x15x5x7:8x15x1x1
                            8x15x5x7:1x1x1x1
                            8x15x5x8:8x15x1x1

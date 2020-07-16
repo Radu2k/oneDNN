@@ -25,7 +25,7 @@
 
 --inplace=true,false
 --alg=ADD,MUL,MAX,MIN
---attr=post_ops='sum:0.75;add:f32;min:u8:per_dim_01;relu;mul:f32:per_dim_0;add:f32:per_dim_01;max:f16;mul:s8;add:f32:per_oc'
+--attr-post-ops='sum:0.75;add:f32;min:u8:per_dim_01;relu;mul:f32:per_dim_0;add:f32:per_dim_01;max:f16;mul:s8;add:f32:per_oc'
 
 --ddt=s8
 --sdt=s8:u8
