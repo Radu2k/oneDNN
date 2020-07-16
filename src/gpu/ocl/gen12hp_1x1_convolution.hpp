@@ -47,7 +47,8 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
 
             const auto attr_skip_mask
                     = primitive_attr_t::skip_mask_t::oscale_runtime
-                    | primitive_attr_t::skip_mask_t::post_ops;
+                    | primitive_attr_t::skip_mask_t::post_ops
+                    | primitive_attr_t::skip_mask_t::sum_dt;
 
             bool ok = utils::one_of(desc()->prop_kind, forward_training,
                               forward_inference)
