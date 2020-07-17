@@ -22,6 +22,7 @@
 #include "common/c_types_map.hpp"
 #include "common/memory_desc_wrapper.hpp"
 #include "common/primitive_attr.hpp"
+#include "common/primitive_exec_types.hpp"
 #include "common/utils.hpp"
 #include "gpu/compute/compute.hpp"
 

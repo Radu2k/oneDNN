@@ -17,7 +17,8 @@
 #include "gpu/gpu_impl_list.hpp"
 
 #include "gpu/jit/binary_format.hpp"
-#include "gpu/jit/gen12hp_systolic_gemm.hpp"
+#include "gpu/jit/gemm/gen12hp_systolic_gemm.hpp"
+#include "gpu/jit/gemm/gen_gemm.hpp"
 #include "gpu/ocl/convolution_inner_product.hpp"
 #include "gpu/ocl/gemm/gen12lp_gemm.hpp"
 #include "gpu/ocl/gemm/gen9_gemm.hpp"
@@ -116,6 +117,7 @@ static const pd_create_f gpu_impl_list[] = {
 
         // GEMM (internal)
         INSTANCE(jit::gen12hp_systolic_gemm_t),
+        INSTANCE(jit::gen_gemm_t),
         INSTANCE(ocl::gen12lp_gemm_t),
         INSTANCE(ocl::gen9_gemm_x8x8s32_t),
         INSTANCE(ocl::gen9_gemm_t),
