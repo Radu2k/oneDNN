@@ -46,16 +46,16 @@ union BinaryOperand12 {
 union TernaryOperand12 {
     uint16_t bits;
     struct {
-        unsigned hs : 2;                    // sdepth for dst with dpas
+        unsigned hs : 2;
         unsigned regFile : 1;
-        unsigned subRegNum : 5;             // mme# for math
+        unsigned subRegNum : 5;         // mme# for math
         unsigned regNum : 8;
     } direct;
 };
 
 union Instruction12 {
     struct {                            // Lower 35 bits are essentially common.
-        unsigned opcode : 8;            // High bit reserved, will use for auto-SWSB flag.
+        unsigned opcode : 8;            // High bit reserved, used for auto-SWSB flag.
         unsigned swsb : 8;
         unsigned execSize : 3;
         unsigned execOffset : 3;
@@ -120,8 +120,8 @@ union Instruction12 {
         unsigned src0 : 16;
         unsigned src2Type : 3;
         unsigned src1VS0 : 1;
-        unsigned src2Mods : 2;          // subBytePrecision (DPAS)
-        unsigned src1Mods : 2;          // subBytePrecision (DPAS)
+        unsigned src2Mods : 2;
+        unsigned src1Mods : 2;
         unsigned src1Type : 3;
         unsigned src1VS1 : 1;
         unsigned cmod : 4;              // same location as binary
@@ -483,7 +483,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
     RegData rd;
 
     switch (op) {
-        case Opcode::nop:
+        case Opcode::nop_gen12:
         case Opcode::illegal:
             return false;
         case Opcode::dpas:
@@ -538,12 +538,12 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                 region = DependencyRegion(GRFRange(base, len));
             return true;
         }
-        case Opcode::add3:
-        case Opcode::bfe:
-        case Opcode::bfi2:
-        case Opcode::bfn:
-        case Opcode::csel:
         case Opcode::dp4a:
+        case Opcode::add3:
+        case Opcode::bfn:
+        case Opcode::bfe_gen12:
+        case Opcode::bfi2_gen12:
+        case Opcode::csel_gen12:
         case Opcode::mad:
         case Opcode::madm: {  // ternary
             TernaryOperand12 o;
@@ -620,7 +620,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
     }
 
     auto esize = 1 << common.execSize;
-    rd.fixup(esize, DataType::invalid, opNum < 0);
+    rd.fixup(esize, DataType::invalid, opNum < 0, 2);
     region = DependencyRegion(esize, rd);
     return true;
 }
@@ -649,18 +649,18 @@ bool Instruction12::getARFType(ARFType &arfType, int opNum) const
     switch (opcode()) {
         case Opcode::nop:
         case Opcode::illegal:
-        case Opcode::dpas:
-        case Opcode::dpasw:
         case Opcode::send:
         case Opcode::sendc:
-        case Opcode::add3:
         case Opcode::bfe:
         case Opcode::bfi2:
-        case Opcode::bfn:
         case Opcode::csel:
-        case Opcode::dp4a:
         case Opcode::mad:
         case Opcode::madm:
+        case Opcode::dp4a:
+        case Opcode::add3:
+        case Opcode::bfn:
+        case Opcode::dpas:
+        case Opcode::dpasw:
             return false;
         default: {
             BinaryOperand12 o;

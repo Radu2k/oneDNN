@@ -171,14 +171,16 @@ class NEOInterfaceHandler : public InterfaceHandler
 public:
     NEOInterfaceHandler(HW hw_) : hw(hw_)       {}
 
-    void requireBarrier()                       { needBarrier = true; }
-    void requireDPAS()                          { needDPAS = true; }
-    void requireGRF(int grfs)                   { needGRF = grfs; }
-    void requireLocalSize()                     { needLocalSize = true; }
-    void requireScratch(size_t bytes = 1)       { scratchSize = bytes; }
-    void requireSLM(size_t bytes)               { slmSize = bytes; }
+    void requireBarrier()                                { needBarrier = true; }
+    void requireDPAS()                                   { needDPAS = true; }
+    void requireGRF(int grfs)                            { needGRF = grfs; }
+    void requireNonuniformWGs()                          { needNonuniformWGs = true; }
+    void requireLocalSize()                              { needLocalSize = true; }
+    void requireScratch(size_t bytes = 1)                { scratchSize = bytes; }
+    void requireSLM(size_t bytes)                        { slmSize = bytes; }
     inline void requireType(DataType type);
-    template <typename T> void requireType()    { requireType(getDataType<T>()); }
+    template <typename T> void requireType()             { requireType(getDataType<T>()); }
+    void requireWorkgroup(size_t x, size_t y, size_t z)  { wg[0] = x; wg[1] = y; wg[2] = z; }
 
     inline void finalize();
 
@@ -199,10 +201,12 @@ protected:
     bool needDPAS = false;
     int32_t needGRF = 128;
     bool needLocalSize = false;
+    bool needNonuniformWGs = false;
     bool needHalf = false;
     bool needDouble = false;
     size_t scratchSize = 0;
     size_t slmSize = 0;
+    size_t wg[3] = {0, 0, 0};
 
     int crossthreadGRFs = 0;
     inline int getCrossthreadGRFs() const;
@@ -238,6 +242,8 @@ void NEOInterfaceHandler::generateDummyCL(std::ostream &stream) const
     if (needHalf)   stream << "#pragma OPENCL EXTENSION cl_khr_fp16 : enable\n";
     if (needDouble) stream << "#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n";
 
+    if (wg[0] > 0 && wg[1] > 0 && wg[2] > 0)
+        stream << "__attribute__((reqd_work_group_size(" << wg[0] << ',' << wg[1] << ',' << wg[2] << ")))\n";
     stream << "__attribute__((intel_reqd_sub_group_size(" << simd << ")))\n";
     stream << "kernel void " << kernelName << '(';
 
@@ -345,14 +351,21 @@ void NEOInterfaceHandler::finalize()
     if (scratchSize > 0)
         newArgument(scratchSizeArg, DataType::uq, ExternalArgumentType::Hidden);
 
-    // Add local size arguments.
-    if (needLocalSize)
+    // Add enqueued local size arguments.
+    if (needLocalSize && needNonuniformWGs)
         for (int dim = 0; dim < 3; dim++)
             newArgument(localSizeArgs[dim], DataType::ud, ExternalArgumentType::Hidden);
 
     assignArgsOfType(ExternalArgumentType::Hidden);
 
     crossthreadGRFs = base.getBase() - getCrossthreadBase().getBase() + 1;
+
+    // Manually add regular local size arguments.
+    if (needLocalSize && !needNonuniformWGs)
+        for (int dim = 0; dim < 3; dim++)
+            assignments.push_back({localSizeArgs[dim], DataType::ud, ExternalArgumentType::Hidden,
+                                   GRF(getCrossthreadBase()).ud(dim + 3), -1});
+
     finalized = true;
 }
 

@@ -23,8 +23,6 @@
 
 namespace ngen {
 
-static constexpr int register_count(ngen::HW hw) { return 128; }
-
 // Gen registers are organized in banks of bundles.
 // Each bundle is modeled as groups of contiguous registers separated by a stride.
 struct Bundle {
@@ -63,6 +61,7 @@ struct Bundle {
 };
 
 // Gen register allocator.
+template <int register_count = 128>
 class RegisterAllocator {
 public:
     explicit RegisterAllocator(ngen::HW hw_) : hw(hw_) { init(); }
@@ -77,6 +76,17 @@ public:
 
     ngen::FlagRegister alloc_flag();
 
+    // Attempted allocation. Return value is invalid if allocation failed.
+    ngen::GRFRange try_alloc_range(int nregs, Bundle base_bundle = Bundle());
+    ngen::GRF try_alloc(Bundle bundle = Bundle()) { return alloc_range(1, bundle)[0]; }
+
+    ngen::Subregister try_alloc_sub(ngen::DataType type, Bundle bundle = Bundle());
+    template <typename T>
+    ngen::Subregister try_alloc_sub(Bundle bundle = Bundle()) { return try_alloc_sub(ngen::getDataType<T>(), bundle); }
+
+    ngen::FlagRegister try_alloc_flag();
+
+    // Release a previous allocation or claim.
     void release(ngen::GRF reg);
     void release(ngen::GRFRange range);
     void release(ngen::Subregister subreg);
@@ -94,10 +104,10 @@ public:
     void dump(std::ostream &str);
 
 protected:
-    ngen::HW hw;                        // HW generation.
-    uint8_t free_whole[256 / 8];        // Bitmap of free whole GRFs.
-    uint8_t free_sub[256];              // Bitmap of free partial GRFs, at dword granularity.
-    uint8_t free_flag;                  // Bitmap of free flag registers.
+    ngen::HW hw;                            // HW generation.
+    uint8_t free_whole[register_count / 8]; // Bitmap of free whole GRFs.
+    uint8_t free_sub[register_count];       // Bitmap of free partial GRFs, at dword granularity.
+    uint8_t free_flag;                      // Bitmap of free flag registers.
 
     void init();
     void claim_sub(int r, int o, int dw);

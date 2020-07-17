@@ -127,14 +127,13 @@ void _workaround_() {
     (void) Breakpoint.getAll();
     (void) sat.getAll();
     (void) NoMask.getAll();
-    (void) Mask.getAll();
-    (void) ForceMask.getAll();
     (void) Serialize.getAll();
     (void) EOT.getAll();
     (void) Align1.getAll();
     (void) Align16.getAll();
-    (void) Switch.getAll();
     (void) Atomic.getAll();
+    (void) Switch.getAll();
+    (void) NoPreempt.getAll();
 
     (void) x_repl.getAll();
     (void) y_repl.getAll();

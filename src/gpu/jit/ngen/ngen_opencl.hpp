@@ -52,7 +52,7 @@ public:
     inline std::vector<uint8_t> getBinary(cl_context context, cl_device_id device, const std::string &options = "-cl-std=CL2.0", const std::vector<uint8_t> &patches = std::vector<uint8_t>{});
     inline cl_kernel getKernel(cl_context context, cl_device_id device, const std::string &options = "-cl-std=CL2.0", const std::vector<uint8_t> &patches = std::vector<uint8_t>{});
     static inline HW detectHW(cl_context context, cl_device_id device);
-    const std::string &getExternalName() const         { return interface_.getExternalName(); }
+    const std::string &getExternalName() const { return interface_.getExternalName(); }
 
 protected:
     NEOInterfaceHandler interface_{hw};
@@ -63,6 +63,7 @@ protected:
     void requireGRF(int grfs)                                            { interface_.requireGRF(grfs); }
     void requireLocalID(int dimensions)                                  { interface_.requireLocalID(dimensions); }
     void requireLocalSize()                                              { interface_.requireLocalSize(); }
+    void requireNonuniformWGs()                                          { interface_.requireNonuniformWGs(); }
     void requireScratch(size_t bytes = 1)                                { interface_.requireScratch(bytes); }
     void requireSIMD(int simd_)                                          { interface_.requireSIMD(simd_); }
     void requireSLM(size_t bytes)                                        { interface_.requireSLM(bytes); }
@@ -92,10 +93,10 @@ protected:
 #define NGEN_FORWARD_OPENCL(hw) NGEN_FORWARD(hw) \
 template <typename... Targs> void externalName(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::externalName(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireBarrier(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::requireBarrier(std::forward<Targs>(args)...); } \
-template <typename... Targs> void requireDPAS(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::requireDPAS(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireGRF(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::requireGRF(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireLocalID(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::requireLocalID(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireLocalSize(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::requireLocalSize(std::forward<Targs>(args)...); } \
+template <typename... Targs> void requireNonuniformWGs(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::requireNonuniformWGs(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireScratch(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::requireScratch(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireSIMD(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::requireSIMD(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireSLM(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::requireSLM(std::forward<Targs>(args)...); } \
@@ -108,7 +109,11 @@ template <typename... Targs> ngen::Subregister getArgumentIfExists(Targs&&... ar
 template <typename... Targs> int getArgumentSurface(Targs&&... args) { return ngen::OpenCLCodeGenerator<hw>::getArgumentSurface(std::forward<Targs>(args)...); } \
 template <typename... Targs> ngen::GRF getLocalID(Targs&&... args) { return ngen::OpenCLCodeGenerator<hw>::getLocalID(std::forward<Targs>(args)...); } \
 template <typename... Targs> ngen::Subregister getLocalSize(Targs&&... args) { return ngen::OpenCLCodeGenerator<hw>::getLocalSize(std::forward<Targs>(args)...); } \
-void prologue() { ngen::OpenCLCodeGenerator<hw>::prologue(); } \
+NGEN_FORWARD_OPENCL_EXTRA
+
+#define NGEN_FORWARD_OPENCL_EXTRA \
+template <typename... Targs> void requireDPAS(Targs&&... args) { ngen::OpenCLCodeGenerator<hw>::requireDPAS(std::forward<Targs>(args)...); } \
+void prologue() { ngen::OpenCLCodeGenerator<hw>::prologue(); }
 
 namespace detail {
 
