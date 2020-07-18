@@ -135,8 +135,7 @@ struct attr_info_t {
         attr_info.with_per_oc_oscales
                 = attr_info.with_oscales && (scales_mask == (1 << 1));
 
-        attr_info.with_runtime_oscales = attr_info.with_per_oc_oscales
-                && !attr->output_scales_.defined();
+        attr_info.with_runtime_oscales = !attr->output_scales_.defined();
 
         const auto &src0_scales = attr->scales_.get(DNNL_ARG_SRC_0);
         attr_info.with_src0_scale = !src0_scales.has_default_values();
@@ -254,6 +253,9 @@ struct conv_conf_t {
     int workgroups_along_k;
     int num_buffers;
     int calc_block;
+
+    int oc_group;
+    int ow_group;
 
     size_t gws_d[3], lws_d[3];
     compute::dispatch_t dispatch;

@@ -17,6 +17,8 @@
 #ifndef GPU_GPU_PRIMITIVE_HPP
 #define GPU_GPU_PRIMITIVE_HPP
 
+#include <cassert>
+
 #include "common/primitive.hpp"
 #include "common/utils.hpp"
 #include "gpu/compute/compute.hpp"
@@ -99,6 +101,28 @@ protected:
 
     virtual status_t init_res_storage(
             engine_t *engine, gpu_resource_t *r) const {
+        return status::success;
+    }
+
+    status_t init_output_scales_res_storage(engine_t *engine, gpu_resource_t *r,
+            gpu_resource_t::key_memory_t storage_key) const {
+        auto &oscales = pd()->attr()->output_scales_;
+        if (oscales.has_default_values() || !oscales.defined())
+            return status::success;
+        if (oscales.mask_ == 0 && oscales.defined()) return status::success;
+
+        assert(utils::one_of(oscales.mask_, 0, 1 << 1));
+
+        memory_storage_t *tmp_mem_storage_ptr;
+        CHECK(engine->create_memory_storage(
+                &tmp_mem_storage_ptr, oscales.count_ * sizeof(float)));
+
+        std::unique_ptr<memory_storage_t> tmp_mem_storage(tmp_mem_storage_ptr);
+        void *scales_ptr = nullptr;
+        CHECK(tmp_mem_storage->map_data(&scales_ptr, nullptr));
+        utils::array_copy((float *)scales_ptr, oscales.scales_, oscales.count_);
+        CHECK(tmp_mem_storage->unmap_data(scales_ptr, nullptr));
+        r->add_memory_storage(storage_key, std::move(tmp_mem_storage));
         return status::success;
     }
 

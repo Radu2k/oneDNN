@@ -398,5 +398,6 @@ void RegisterAllocator<register_count>::dump(std::ostream &str)
 }
 
 template class RegisterAllocator<128>;
+template class RegisterAllocator<256>;
 
 } /* namespace ngen */
