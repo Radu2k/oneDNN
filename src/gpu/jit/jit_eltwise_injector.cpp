@@ -57,11 +57,15 @@ int jit_eltwise_injector_f32<hw>::preferred_scratch_regs() {
 template <gpu_gen_t hw>
 int jit_eltwise_injector_f32<hw>::max_batch_size() {
     using namespace alg_kind;
-    auto ss = scratch_.getLen() - 1;
+    auto ss = scratch_.getLen();
 
     if (is_fwd_) {
         switch (alg_) {
-            case eltwise_relu: return ss;
+            case eltwise_relu:
+                if (alpha_ == 0.)
+                    break;
+                else
+                    return ss;
             default: break;
         }
     }
