@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GPU_JIT_GEMM_GEN_KERNEL_GENERATOR_HPP
-#define GPU_JIT_GEMM_GEN_KERNEL_GENERATOR_HPP
+#ifndef GPU_JIT_GEMM_GEN_GEMM_KERNEL_GENERATOR_HPP
+#define GPU_JIT_GEMM_GEN_GEMM_KERNEL_GENERATOR_HPP
 
 /* Embargo support */
 #define STANDALONE 0
@@ -54,6 +54,7 @@ public:
         s16 = 0x870201,
         u32 = 0x880402,
         s32 = 0x890402,
+        bf16 = 0x0C0201,
     };
 
 private:
@@ -89,7 +90,7 @@ public:
         static const DataType table[16] = {DataType::hf, DataType::f,
                 DataType::df, DataType::invalid, DataType::ub, DataType::b,
                 DataType::uw, DataType::w, DataType::ud, DataType::d,
-                DataType::invalid, DataType::invalid, DataType::invalid,
+                DataType::invalid, DataType::invalid, DataType::bf,
                 DataType::invalid, DataType::invalid, DataType::invalid};
         return table[(uint32_t(val) >> 16) & 0xF];
     }
@@ -579,7 +580,7 @@ struct GEMMStrategy : public CommonStrategy {
     CommonDriverInfo driverInfo(const GEMMProblem &problem) const;
 
     void sanityCheck(ngen::HW hw, const GEMMProblem &problem);
-    bool minimize(const GEMMProblem &problem);
+    bool minimize(ngen::HW hw, const GEMMProblem &problem);
 
     int slmABufBlockSize(Type Ta) const {
         return int(slmA) * Ta * unroll[LoopM] * unrollKSLM;
@@ -672,10 +673,6 @@ struct GEMMState : public CommonState {
     } fused;
 
     GEMMState(ngen::HW hw) : CommonState(hw) {}
-
-#ifdef ASM_OUTPUT
-    void dump();
-#endif
 };
 
 // GEMM superkernel strategy parameters.
@@ -787,15 +784,6 @@ struct CopyState : public CommonState {
     void dump();
 };
 
-#ifdef BINARY_OUTPUT
-template <ngen::HW hw>
-class gemm_kernel_generator_t : public ngen::BinaryCodeGenerator<hw> {
-public:
-    using super = ngen::BinaryCodeGenerator<hw>;
-    gemm_kernel_generator_t() {}
-
-    NGEN_FORWARD(hw);
-#else
 template <ngen::HW hw>
 class gemm_kernel_generator_t : public ngen::OpenCLCodeGenerator<hw> {
 public:
@@ -803,7 +791,6 @@ public:
     gemm_kernel_generator_t() {}
 
     NGEN_FORWARD_OPENCL(hw);
-#endif
 
     void gemm(GEMMProblem problem, GEMMStrategy strategy,
             const ngen::NEOInterfaceHandler &interface_);
@@ -818,13 +805,7 @@ protected:
 
     std::exception_ptr lastException;
 
-    std::ostream &getOutStream() const {
-#ifdef ASM_OUTPUT
-        return std::cout;
-#else
-        return std::cerr;
-#endif
-    }
+    std::ostream &getOutStream() const { return std::cerr; }
 
     std::ostream &noteStream() const { return getOutStream(); }
 
@@ -847,23 +828,10 @@ protected:
 
         template <typename T>
         status_stream &operator<<(const T &obj) {
-#ifdef ASM_OUTPUT
-            if (lineStart) line << "\x1B[1;3" << cc << 'm';
-            line << obj;
-            lineStart = false;
-#endif
             return *this;
         }
 
-        status_stream &operator<<(const Endl &e) {
-#ifdef ASM_OUTPUT
-            line << "\x1B[0m";
-            lineStart = true;
-            parent.comment(line.str());
-            line.str(std::string());
-#endif
-            return *this;
-        }
+        status_stream &operator<<(const Endl &e) { return *this; }
     } status {*this};
 
 #ifdef SHOW_DISCARDS

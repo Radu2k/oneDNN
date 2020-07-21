@@ -94,6 +94,10 @@ const gemm_recipe_t gemm_recipes[] = {
     {ngen::HW::Gen12LP, "HHH", "TNN", {}, 32, 32, "as4 as8 ab k8 ra4 l4 vnc"},
     {ngen::HW::Gen12LP, "HHH", "TTN", {}, 32, 16, "as8 ab4x2 ab k16 ra8 l4 int"},
     {ngen::HW::Gen12LP, "HHH", "TTN", {}, 32, 32, "as8 ab2x2 ab k16 ra8 l4 vnc"},
+    {ngen::HW::Gen12HP, "HHH", "NNN", {}, 32, 32, "ab4/1x2 as4/1x2 ab l4 cb1 wg 8x2 cs nmk"},
+    {ngen::HW::Gen12HP, "HHH", "NTN", {}, 32, 32, "ab4/1x2 ab2/1x2 ab l4 cs"},
+    {ngen::HW::Gen12HP, "HHH", "TNN", {}, 16, 16, "as8 as32 ab l4 cab1 wg 4x4 cs"},
+    {ngen::HW::Gen12HP, "HHH", "TTN", {}, 32, 32, "as4/1x2 ab4/1x2 ab l4 ca1 wg 2x8 cs nmk"},
 };
 // clang-format on
 

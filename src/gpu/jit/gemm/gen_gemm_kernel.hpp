@@ -65,6 +65,7 @@ protected:
         switch (arch) {
             case compute::gpu_arch_t::gen9: return ngen::HW::Gen9;
             case compute::gpu_arch_t::gen12lp: return ngen::HW::Gen12LP;
+            case compute::gpu_arch_t::gen12hp: return ngen::HW::Gen12HP;
             default: return ngen::HW::Unknown;
         }
     }

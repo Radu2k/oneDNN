@@ -45,6 +45,7 @@ struct gen_gemm_t : public gpu_gemm_t {
             using namespace data_type;
             using namespace primitive_kind;
             using smask_t = primitive_attr_t::skip_mask_t;
+            using arch_t = compute::gpu_arch_t;
 
             assert(engine->kind() == engine_kind::gpu);
             auto *compute_engine
@@ -62,8 +63,7 @@ struct gen_gemm_t : public gpu_gemm_t {
                             d->lda, d->ldb, d->ldc, d->batch)
                     && d->bias_type == data_type::undef;
 
-            bool ok = limits_ok
-                    && utils::one_of(d->c_type, data_type::f32, data_type::f16)
+            bool ok = limits_ok && utils::one_of(d->c_type, f32, f16)
                     && d->a_type == d->c_type && d->b_type == d->c_type
                     && d->acc_type == d->c_type
                     && compute_engine->mayiuse_ngen_kernels()
@@ -79,8 +79,11 @@ struct gen_gemm_t : public gpu_gemm_t {
 
             arch_ = dev_info->gpu_arch();
 
-            ok &= utils::one_of(arch_, compute::gpu_arch_t::gen9,
-                    compute::gpu_arch_t::gen12lp);
+            ok &= utils::one_of(
+                    arch_, arch_t::gen9, arch_t::gen12lp, arch_t::gen12hp);
+
+            // Only f16 enabled on Gen12HP for now.
+            ok &= IMPLICATION(arch_ == arch_t::gen12hp, d->c_type == f16);
 
             if (!ok) return status::unimplemented;
 
