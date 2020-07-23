@@ -16,10 +16,14 @@
 
 #include "gpu/jit/jit_eltwise_injector.hpp"
 
+#include <limits>
+
 namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace jit {
+
+using namespace ngen;
 
 template <gpu_gen_t hw>
 int jit_eltwise_injector_f32<hw>::min_scratch_regs() {
@@ -29,6 +33,9 @@ int jit_eltwise_injector_f32<hw>::min_scratch_regs() {
             case eltwise_relu: return (alpha_ == 0.f) ? 0 : 1;
             case eltwise_abs: return 0;
             case eltwise_square: return 0;
+            case eltwise_round: return 0;
+            case eltwise_linear: return 0;
+            case eltwise_clip: return 0;
             default: assert(!"unsupported eltwise algorithm");
         }
     } else {
@@ -36,6 +43,8 @@ int jit_eltwise_injector_f32<hw>::min_scratch_regs() {
             case eltwise_relu: return 1;
             case eltwise_abs: return 1;
             case eltwise_square: return 0;
+            case eltwise_linear: return 0;
+            case eltwise_clip: return 1;
             default: assert(!"unsupported eltwise algorithm");
         }
     }
@@ -80,11 +89,14 @@ int jit_eltwise_injector_f32<hw>::phase_count() {
     if (is_fwd_) {
         switch (alg_) {
             case eltwise_relu: return (alpha_ == 0) ? 1 : 2;
+            case eltwise_linear: return 2;
+            case eltwise_clip: return 2;
             default: break;
         }
     } else {
         switch (alg_) {
             case eltwise_abs: return 2;
+            case eltwise_clip: return 4;
             default: break;
         }
     }
@@ -122,6 +134,32 @@ void jit_eltwise_injector_f32<hw>::square_compute_fwd(
 }
 
 template <gpu_gen_t hw>
+void jit_eltwise_injector_f32<hw>::round_compute_fwd(
+        int simd, const ngen::GRF &r) {
+    h->rnde(simd, r, r);
+}
+
+template <gpu_gen_t hw>
+void jit_eltwise_injector_f32<hw>::linear_compute_fwd(
+        int simd, const ngen::GRF &r, int phase) {
+    switch (phase) {
+        case 0: h->mul(simd, r, r, alpha_); break;
+        case 1: h->add(simd, r, r, beta_); break;
+        default: assert(!"invalid phase");
+    }
+}
+
+template <gpu_gen_t hw>
+void jit_eltwise_injector_f32<hw>::clip_compute_fwd(
+        int simd, const ngen::GRF &r, int phase) {
+    switch (phase) {
+        case 0: h->max_(simd, r, r, alpha_); break;
+        case 1: h->min_(simd, r, r, beta_); break;
+        default: assert(!"invalid phase");
+    }
+}
+
+template <gpu_gen_t hw>
 void jit_eltwise_injector_f32<hw>::relu_prepare_bwd() {
     auto neg_slope = scratch_[0].f(0);
     auto pos_slope = scratch_[0].f(4);
@@ -146,6 +184,17 @@ void jit_eltwise_injector_f32<hw>::abs_prepare_bwd() {
 }
 
 template <gpu_gen_t hw>
+void jit_eltwise_injector_f32<hw>::clip_prepare_bwd() {
+    auto pos_inf_imm = Immediate(std::numeric_limits<float>::infinity());
+    auto zero = scratch_[0].f(0);
+    auto one = scratch_[0].f(1);
+    auto pos_inf = scratch_[0].f(2);
+    h->mov(1, zero, 0.f);
+    h->mov(1, one, 1.f);
+    h->mov(1, pos_inf, pos_inf_imm);
+}
+
+template <gpu_gen_t hw>
 void jit_eltwise_injector_f32<hw>::abs_compute_bwd(
         int simd, const ngen::GRF &r, int phase) {
     auto neg_one = scratch_[0].f(0);
@@ -161,6 +210,31 @@ template <gpu_gen_t hw>
 void jit_eltwise_injector_f32<hw>::square_compute_bwd(
         int simd, const ngen::GRF &r) {
     h->add(simd, r, r, r);
+}
+
+template <gpu_gen_t hw>
+void jit_eltwise_injector_f32<hw>::linear_compute_bwd(
+        int simd, const ngen::GRF &r) {
+    h->mov(simd, r, alpha_);
+}
+
+template <gpu_gen_t hw>
+void jit_eltwise_injector_f32<hw>::clip_compute_bwd(
+        int simd, const ngen::GRF &r, int phase) {
+    auto zero = scratch_[0].f(0);
+    auto one = scratch_[0].f(1);
+    auto pos_inf = scratch_[0].f(2);
+    switch (phase) {
+        // r[i] = r[i] - alpha
+        case 0: h->add(simd, r, r, -alpha_); break;
+        // r[i] <= 0 => r[i] = infinity
+        case 1: h->csel(simd | le | f0[0], r, pos_inf, r, r); break;
+        // r[i] = (r[i] + alpha) - beta
+        case 2: h->add(simd, r, r, alpha_ - beta_); break;
+        // r[i] = (r[i] <= 0 ? 1 : 0)
+        case 3: h->csel(simd | le | f0[0], r, one, zero, r); break;
+        default: assert(!"invalid phase");
+    }
 }
 
 template <gpu_gen_t hw>
@@ -191,6 +265,15 @@ void jit_eltwise_injector_f32<hw>::compute(const ngen::GRFRange &regs) {
                         case eltwise_square:
                             square_compute_fwd(simd, base);
                             break;
+                        case eltwise_round:
+                            round_compute_fwd(simd, base);
+                            break;
+                        case eltwise_linear:
+                            linear_compute_fwd(simd, base, phase);
+                            break;
+                        case eltwise_clip:
+                            clip_compute_fwd(simd, base, phase);
+                            break;
                         default: assert(!"unsupported eltwise algorithm");
                     }
                 } else {
@@ -202,8 +285,18 @@ void jit_eltwise_injector_f32<hw>::compute(const ngen::GRFRange &regs) {
                         case eltwise_square:
                             square_compute_bwd(simd, base);
                             break;
+                        case eltwise_linear:
+                            linear_compute_bwd(simd, base);
+                            break;
+                        case eltwise_clip:
+                            clip_compute_bwd(simd, base, phase);
+                            break;
                         default: assert(!"unsupported eltwise algorithm");
                     }
+                }
+                // Apply scale.
+                if (phase == phases - 1 && scale_ != 1.f) {
+                    h->mul(simd, base, base, scale_);
                 }
             }
         }
@@ -222,6 +315,7 @@ void jit_eltwise_injector_f32<hw>::prepare() {
         switch (alg_) {
             case eltwise_relu: relu_prepare_bwd(); break;
             case eltwise_abs: abs_prepare_bwd(); break;
+            case eltwise_clip: clip_prepare_bwd(); break;
             default: break;
         }
     }

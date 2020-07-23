@@ -48,7 +48,8 @@ struct jit_eltwise_injector_f32 {
 
     static bool is_supported(alg_kind_t alg) {
         using namespace alg_kind;
-        return utils::one_of(alg, eltwise_relu, eltwise_square, eltwise_abs);
+        return utils::one_of(alg, eltwise_relu, eltwise_square, eltwise_abs,
+                eltwise_round, eltwise_linear, eltwise_clip);
     }
 
     int min_scratch_regs();
@@ -75,15 +76,21 @@ private:
 
     void relu_prepare_bwd();
     void abs_prepare_bwd();
+    void clip_prepare_bwd();
 
     void relu_zero_ns_compute_fwd(int simd, const ngen::GRF &r);
     void relu_compute_fwd(int simd, const ngen::GRF &r, int phase, int off);
     void abs_compute_fwd(int simd, const ngen::GRF &r);
     void square_compute_fwd(int simd, const ngen::GRF &r);
+    void round_compute_fwd(int simd, const ngen::GRF &r);
+    void linear_compute_fwd(int simd, const ngen::GRF &r, int phase);
+    void clip_compute_fwd(int simd, const ngen::GRF &r, int phase);
 
     void relu_compute_bwd(int simd, const ngen::GRF &r);
     void abs_compute_bwd(int simd, const ngen::GRF &r, int phase);
     void square_compute_bwd(int simd, const ngen::GRF &r);
+    void linear_compute_bwd(int simd, const ngen::GRF &r);
+    void clip_compute_bwd(int simd, const ngen::GRF &r, int phase);
 
     const ngen::InstructionModifier le = jit_generator<hw>::le;
     const ngen::InstructionModifier lt = jit_generator<hw>::lt;
