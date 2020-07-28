@@ -835,11 +835,14 @@ void gen12hp_systolic_gemm_kernel_t::multiply(int buffer, bool last_multiply) {
     // Rows 0-7
     multiply_chunk(0, 0, true, sb0.dst, sb3);
 
+    // Rows 8-15
+    multiply_chunk(8, 8, false, sb4.dst, sb4);
+
     // Load third quarter of A (8x32)
     load(16 | SWSB(sb3, 2), a_regs[0], block_oword(16), SLM, addr1);
 
-    // Rows 8-15
-    multiply_chunk(8, 8, false, sb4.dst, sb4);
+    // Rows 16-23
+    multiply_chunk(0, 16, false, sb3.dst);
 
     // Load last quarter of A (8x32)
     load(16 | SWSB(sb4, 1), a_regs[8], block_oword(16), SLM, addr2);
@@ -851,9 +854,6 @@ void gen12hp_systolic_gemm_kernel_t::multiply(int buffer, bool last_multiply) {
     else
         add(2 | swsb, slm_a_offset_load(1), slm_a_offset_load(1),
                 uint16_t(slm_buf_size() / 16));
-
-    // Rows 16-23
-    multiply_chunk(0, 16, false, sb3.dst);
 
     // Rows 24-32
     multiply_chunk(8, 24, false, sb4.dst, sb5);
@@ -978,42 +978,30 @@ void gen12hp_systolic_gemm_kernel_t::body() {
 
     copy_load(2); // L2
     multiply(0); // M0
+    if (!cfg.alt_barriers) barrierwait(); // Wait 0 ready
     copy_store(2); // S2
-
-    if (!cfg.alt_barriers) {
-        barrierwait(); // Wait 1 ready
-        store_signal(); // Signal 2 ready
-    }
+    if (!cfg.alt_barriers) store_signal(); // Signal 2 ready
 
     copy_load(0); // L0
     multiply(1); // M1
+    if (!cfg.alt_barriers) barrierwait(); // Wait 2 ready
     copy_store(0); // S0
-
-    if (!cfg.alt_barriers) {
-        barrierwait(); // Wait 2 ready
-        store_signal(); // Signal 0 ready
-    }
+    if (!cfg.alt_barriers) store_signal(); // Signal 0 ready
 
     copy_load(1); // L1
     multiply(2); // M2
+    if (!cfg.alt_barriers) barrierwait(); // Wait 0 ready
     copy_store(1); // S1
-
-    if (!cfg.alt_barriers) {
-        barrierwait(); // Wait 0 ready
-        store_signal(); // Signal 1 ready
-    }
+    if (!cfg.alt_barriers) store_signal(); // Signal 1 ready
 
     jmpi(1 | f0[1], top);
     mark(bottom);
 
     copy_load(2); // L2
     multiply(0); // M0
+    if (!cfg.alt_barriers) barrierwait(); // Wait 1 ready
     copy_store(2); // S2
-
-    if (!cfg.alt_barriers) {
-        barrierwait(); // Wait 1 ready
-        store_signal(); // Signal 2 ready
-    }
+    if (!cfg.alt_barriers) store_signal(); // Signal 2 ready
 
     multiply(1); // M1
 
