@@ -19,7 +19,8 @@ oneAPI Deep Neural Network Library (oneDNN) is an open-source cross-platform
 performance library of basic building blocks for deep learning applications.
 The library is optimized for Intel Architecture Processors, Intel Processor
 Graphics and Xe architecture-based Graphics. Support for other architectures
-such as Arm\* 64-bit Architecture (AArch64) is experimental.
+such as Arm\* 64-bit Architecture (AArch64) and OpenPOWER\* Power ISA (PPC64)
+is experimental.
 See the [System Requirements](#system-requirements) section below.
 
 This is a development branch for oneDNN v2.0 Beta. This is pre-production software
@@ -35,6 +36,7 @@ applications enabled with oneDNN:
 * [Caffe\* Optimized for Intel Architecture](https://github.com/intel/caffe)
 * [Chainer\*](https://chainer.org)
 * [DeepLearning4J\*](https://deeplearning4j.org)
+* [Korali](https://github.com/cselab/korali)
 * [MATLAB\* Deep Learning Toolbox](https://www.mathworks.com/help/deeplearning/)
 * [Menoh\*](https://github.com/pfnet-research/menoh)
 * [Microsoft\* Cognitive Toolkit (CNTK)](https://docs.microsoft.com/en-us/cognitive-toolkit)
@@ -96,11 +98,12 @@ If the configuration you need is not available, you can
 oneDNN supports platforms based on the following architectures:
 - [Intel 64 or AMD64](https://en.wikipedia.org/wiki/X86-64),
 - [Arm 64-bit Architecture (AArch64)](https://developer.arm.com/architectures/cpu-architecture/a-profile).
+- [OpenPOWER](https://openpowerfoundation.org/) / [IBM Power ISA](https://en.wikipedia.org/wiki/Power_ISA).
 
 > **WARNING**
 >
-> Arm 64-bit Architecture (AArch64) support is **experimental** with limited
-> testing validation.
+> Arm 64-bit Architecture (AArch64) and Power ISA (PPC64) support
+> is **experimental** with limited testing validation.
 
 The library is optimized for the following CPUs:
 * Intel Atom processor with Intel SSE4.1 support
@@ -108,12 +111,17 @@ The library is optimized for the following CPUs:
 * Intel(R) Xeon(R) processor E3, E5, and E7 family (formerly Sandy Bridge,
   Ivy Bridge, Haswell, and Broadwell)
 * Intel(R) Xeon Phi(TM) processor (formerly Knights Landing and Knights Mill)
-* Intel Xeon Scalable processor (formerly Skylake and Cascade Lake)
-* future Intel Xeon Scalable processor (code name Cooper Lake)
+* Intel Xeon Scalable processor (formerly Skylake, Cascade Lake, and Cooper
+  Lake)
+* future Intel Xeon Scalable processor (code name Sapphire Rapids)
 
 On a CPU based on Intel 64 or on AMD64 architecture, oneDNN detects
 the instruction set architecture (ISA) at runtime and uses just-in-time (JIT)
 code generation to deploy the code optimized for the latest supported ISA.
+Future ISAs may have initial support in the library disabled by default and
+require the use of run-time controls to enable them. See
+[CPU dispatcher control](https://oneapi-src.github.io/oneDNN/dev_guide_cpu_dispatcher_control.html)
+for more details.
 
 > **WARNING**
 >
@@ -131,7 +139,7 @@ The library is optimized for the following GPUs:
 ## Requirements for Building from Source
 
 oneDNN supports systems meeting the following requirements:
-* Operating system with Intel 64 architecture support
+* Operating system with Intel 64 / Arm 64 / Power architecture support
 * C++ compiler with C++11 standard support
 * [CMake](https://cmake.org/download/) 2.8.11 or later
 * [Doxygen](http://www.doxygen.nl/download.html#srcbin) 1.8.5 or later
@@ -143,8 +151,8 @@ dependencies.
 ### CPU Engine
 
 oneDNN CPU engine is used to execute primitives on Intel Architecture
-Processors, 64-bit Arm Architecture (AArch64) processors, and compatible
-devices.
+Processors, 64-bit Arm Architecture (AArch64) processors,
+64-bit Power ISA (PPC64) processors, and compatible devices.
 
 The CPU engine is built by default and cannot be disabled at build time. The
 engine can be configured to use the OpenMP, TBB or DPCPP runtime. The
@@ -167,7 +175,7 @@ Intel Processor Graphics and Xe architecture-based Graphics are supported by
 the oneDNN GPU engine. The GPU engine is disabled in the default build
 configuration. The following additional requirements apply when GPU engine
 is enabled:
-* OCL runtime requires
+* OpenCL runtime requires
     * OpenCL\* runtime library (OpenCL version 1.2 or later)
     * OpenCL driver (with kernel language support for OpenCL C 2.0 or later)
       with Intel subgroups extension support
@@ -293,11 +301,12 @@ at dnnl.maintainers@intel.com.
 We welcome community contributions to oneDNN. If you have an idea on how
 to improve the library:
 
-* For changes impacting the public API, submit
-  an [RFC pull request](CONTRIBUTING.md#RFC_pull_requests).
+* For changes impacting the public API or library overall, such as adding new
+  primitives or changes to the architecture, submit an
+  [RFC pull request](https://github.com/oneapi-src/oneDNN/tree/rfcs).
 * Ensure that the changes are consistent with the
- [code contribution guidelines](CONTRIBUTING.md#code_contribution_guidelines)
- and [coding style](CONTRIBUTING.md#coding_style).
+  [code contribution guidelines](CONTRIBUTING.md#code_contribution_guidelines)
+  and [coding style](CONTRIBUTING.md#coding_style).
 * Ensure that you can build the product and run all the examples with your
   patch.
 * Submit a [pull request](https://github.com/oneapi-src/oneDNN/pulls).
@@ -328,6 +337,10 @@ Apache License Version 2.0:
 
 Boost Software License, Version 1.0:
 * [Boost C++ Libraries](https://www.boost.org/)
+
+MIT License:
+* [Intel Graphics Compute Runtime for oneAPI Level Zero and OpenCL Driver](https://github.com/intel/compute-runtime)
+* [Intel Graphics Compiler](https://github.com/intel/intel-graphics-compiler)
 
 This third party software, even if included with the distribution of
 the Intel software, may be governed by separate license terms, including

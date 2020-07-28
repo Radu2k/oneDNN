@@ -46,16 +46,11 @@ struct bitcast {
     constexpr operator U() const { return to; }
 };
 
-#ifdef _MSC_VER
-typedef unsigned long bitscan_index_t;
-#else
-typedef uint32_t bitscan_index_t;
-#endif
 
 template <typename T> static inline constexpr14 int bsf(T x)
 {
-#ifdef _MSC_VER
-    bitscan_index_t index;
+#if defined(_MSC_VER) && !defined(__clang__)
+    unsigned long index;
     if (sizeof(T) > 4)
         (void) _BitScanForward64(&index, x);
     else
@@ -71,8 +66,8 @@ template <typename T> static inline constexpr14 int bsf(T x)
 
 template <typename T> static inline constexpr14 int bsr(T x)
 {
-#ifdef _MSC_VER
-    bitscan_index_t index;
+#if defined(_MSC_VER) && !defined(__clang__)
+    unsigned long index;
     if (sizeof(T) > 4)
         (void) _BitScanReverse64(&index, x);
     else
@@ -88,11 +83,11 @@ template <typename T> static inline constexpr14 int bsr(T x)
 
 template <typename T> static inline constexpr14 int popcnt(T x)
 {
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
     if (sizeof(T) > 4)
-        return _mm_popcnt_u64(x);
+        return __popcnt64(x);
     else
-        return _mm_popcnt_u32(x);
+        return __popcnt(x);
 #else
     if (sizeof(T) > 4)
         return __builtin_popcountll(x);

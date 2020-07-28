@@ -199,30 +199,14 @@ struct jit_avx512_core_bf16_convolution_bwd_weights_t : public primitive_t {
                             dnnl_get_max_threads());
             if (status != status::success) return status;
 
-            init_balancers();
-
             auto scratchpad = scratchpad_registry().registrar();
             jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_scratchpad(
                     scratchpad, jcp_);
 
-            auto reducer_bia_scratchpad = memory_tracking::registrar_t(
-                    scratchpad, memory_tracking::names::prefix_reducer_bia);
-            reducer_bia_conf_.init_scratchpad(reducer_bia_scratchpad);
             return status;
         }
 
         jit_conv_conf_t jcp_;
-        typename cpu_reducer_t<data_type::f32>::conf_t reducer_bia_conf_;
-
-    private:
-        void init_balancers() {
-            const size_t max_buffer_size = jcp_.nthr * 3 * 5 * 5 * 16 * 16;
-            if (with_bias()) {
-                reducer_bia_conf_.init(reduce_balancer_t(jcp_.nthr,
-                        jcp_.oc_block, jcp_.ngroups * jcp_.nb_oc, jcp_.mb,
-                        max_buffer_size, true));
-            }
-        }
     };
 
     jit_avx512_core_bf16_convolution_bwd_weights_t(const pd_t *apd);
@@ -231,7 +215,6 @@ struct jit_avx512_core_bf16_convolution_bwd_weights_t : public primitive_t {
         delete trans_kernel_;
         delete trans_dst_kernel_;
         delete acc_ker_;
-        delete reducer_bias_;
     }
 
     typedef typename prec_traits<data_type::bf16>::type src_data_t;
@@ -249,8 +232,7 @@ private:
     void compute_diff_weights_2d(const thread_info_t *) const;
     void compute_diff_weights_3d(const thread_info_t *) const;
     void compute_diff_weights(const thread_info_t *) const;
-    void reduce_and_convert_diff_weights(const thread_info_t *) const;
-    void compute_diff_bias(const thread_info_t *, const exec_ctx_t &ctx) const;
+    void reduce_and_convert_diff_weights_and_bias(const thread_info_t *) const;
 
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
 
@@ -261,18 +243,18 @@ private:
     void trans_dst(diff_dst_data_t *tr_diff_dst1,
             const diff_dst_data_t *diff_dst1, int my_work) const;
     void trans_src_nxc(src_data_t *tr_src, const src_data_t *src_base,
-            int spatial_start, dim_t spatial_start_offset, dim_t channel_shift,
-            int my_work) const;
+            int spatial_start, dim_t spatial_start_offset, int icb_start,
+            dim_t chb_stride, int my_work) const;
     void trans_dst_nxc(diff_dst_data_t *tr_diff_dst,
             const diff_dst_data_t *diff_dst_base, int spatial_start,
-            dim_t spatial_start_offset, dim_t channel_shift, int my_work) const;
+            dim_t spatial_start_offset, int ocb_start, dim_t chb_stride,
+            int my_work) const;
 
     int nthr_, nthr_mb_, nthr_g_, nthr_oc_b_, nthr_ic_b_;
 
     jit_avx512_core_bf16_conv_bwd_weights_kernel_f32 *kernel_;
 
     cpu_accumulator_1d_t<data_type::f32> *acc_ker_;
-    cpu_reducer_t<data_type::f32> *reducer_bias_;
 
     jit_trans_src_t *trans_kernel_;
     jit_trans_dst_t *trans_dst_kernel_;

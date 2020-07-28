@@ -46,6 +46,7 @@ union BinaryOperand12 {
 union TernaryOperand12 {
     uint16_t bits;
     struct {
+
         unsigned hs : 2;                    // sdepth for dst with dpas
         unsigned regFile : 1;
         unsigned subRegNum : 5;             // mme# for math
@@ -55,6 +56,7 @@ union TernaryOperand12 {
 
 union Instruction12 {
     struct {                            // Lower 35 bits are essentially common.
+
         unsigned opcode : 8;            // High bit reserved, will use for auto-SWSB flag.
         unsigned swsb : 8;
         unsigned execSize : 3;
@@ -122,6 +124,7 @@ union Instruction12 {
         unsigned src1VS0 : 1;
         unsigned src2Mods : 2;          // subBytePrecision (DPAS)
         unsigned src1Mods : 2;          // subBytePrecision (DPAS)
+
         unsigned src1Type : 3;
         unsigned src1VS1 : 1;
         unsigned cmod : 4;              // same location as binary
@@ -237,8 +240,10 @@ static_assert(sizeof(Instruction12) == 16, "Internal error: Instruction12 has be
 
 static inline unsigned getTypecode12(DataType type)
 {
+
     // :bf = 0b1101 (not in BSpec)
     static const uint8_t conversionTable[16] = {2,6,1,5,0,4,11,10,3,7,9,13,2,0,4,8};
+
     return conversionTable[static_cast<unsigned>(type) & 0xF];
 }
 
@@ -538,6 +543,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                 region = DependencyRegion(GRFRange(base, len));
             return true;
         }
+
         case Opcode::add3:
         case Opcode::bfe:
         case Opcode::bfi2:
@@ -620,7 +626,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
     }
 
     auto esize = 1 << common.execSize;
-    rd.fixup(esize, DataType::invalid, opNum < 0);
+    rd.fixup(esize, DataType::invalid, opNum < 0, 2);
     region = DependencyRegion(esize, rd);
     return true;
 }

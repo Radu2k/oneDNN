@@ -24,6 +24,15 @@ add_subdirectory (gtest)
 set(APP_NAME "gtest")
 set(MAIN_SRC_GTEST ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 list(APPEND MAIN_SRC_GTEST ${TEST_THREAD})
+list(APPEND MAIN_SRC_GTEST ${CMAKE_CURRENT_SOURCE_DIR}/test_malloc.cpp)
+
+# Windows does not support weak/strong symbols and no guarrantees by the linker
+# for out_of_memory testing to work. Not tested on macOS
+if(UNIX)
+    if(DNNL_ENABLE_MEM_DEBUG)
+        add_definitions(-DDNNL_ENABLE_MEM_DEBUG)
+    endif()
+endif()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}
                     ${CMAKE_CURRENT_SOURCE_DIR}/gtest
@@ -33,7 +42,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}
                     )
 if(WIN32)
     # Correct 'jnl' macro/jit issue
-    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel")
+    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel" AND ${CMAKE_CXX_COMPILER_VERSION} LESS 19.1)
         append(CMAKE_CXX_FLAGS "/Qlong-double")
     endif()
 endif()
@@ -48,6 +57,7 @@ file(GLOB PRIM_TEST_CASES_SRC
                               test_iface_stream_attr.cpp
                               test_iface_runtime_dims.cpp
                               test_iface_runtime_attr.cpp
+                              test_iface_wino_convolution.cpp
                               test_dnnl_threading.cpp
                               test_memory.cpp
                               test_sum.cpp
@@ -93,10 +103,17 @@ file(GLOB PRIM_TEST_CASES_SRC
                               test_global_scratchpad.cpp
                               )
 
-# Clang sanitizer complains about a large memory allocation
-# Exclude this test as the allocation is intentional
 if(NOT DNNL_USE_CLANG_SANITIZER)
-    list(APPEND PRIM_TEST_CASES_SRC test_alloc_scratchpad.cpp)
+    # Due to the following tests have long run-time, move them to Nightly set
+    if(DNNL_TEST_SET GREATER DNNL_TEST_SET_CI)
+        file(GLOB LARGE_PRIM_TEST_CASES_SRC
+            test_ip_formats.cpp
+            test_reorder_formats.cpp
+            )
+        foreach(TEST_FILE ${LARGE_PRIM_TEST_CASES_SRC})
+            list(APPEND PRIM_TEST_CASES_SRC "${TEST_FILE}")
+        endforeach()
+    endif()
 endif()
 
 # Add X64-specific tests

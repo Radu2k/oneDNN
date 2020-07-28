@@ -72,7 +72,9 @@ struct ref_eltwise_fwd_t : public primitive_t {
 
             bool ok = is_fwd() && data_type == desc()->data_desc.data_type
                     && platform::has_data_type_support(data_type)
-                    && attr()->has_default_values();
+                    && attr()->has_default_values()
+                    && IMPLICATION(desc()->data_desc.data_type == dnnl_u8,
+                            desc()->alg_kind == dnnl_eltwise_relu);
             if (!ok) return status::unimplemented;
 
             return status::success;
@@ -120,10 +122,12 @@ struct ref_eltwise_bwd_t : public primitive_t {
             if (!ok) return status::unimplemented;
 
             const memory_desc_wrapper diff_dst_d(diff_dst_md());
-            const bool same_fmt_ = diff_dst_d == memory_desc_wrapper(src_md());
 
-            use_dense_ = same_fmt_ && diff_dst_d.is_dense(true)
-                    && is_zero_preserved() && !has_zero_dim_memory();
+            use_dense_ = diff_dst_d.is_dense()
+                    || (diff_dst_d.is_dense(true) && is_zero_preserved());
+
+            if (has_zero_dim_memory()) use_dense_ = false;
+            if (diff_dst_d != memory_desc_wrapper(src_md())) use_dense_ = false;
 
             if (data_type == data_type::bf16) init_scratchpad();
 

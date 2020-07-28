@@ -51,15 +51,12 @@ foreach(f ${sources})
     endif()
 endforeach()
 
-# Skip CPU examples that do not work with SYCL
+# In case of SYCL, skip CPU examples that directly work with raw pointers
 if(DNNL_CPU_SYCL)
-    foreach(f
-            cpu_cnn_training_f32.c
-            cpu_rnn_inference_int8.cpp
-            cpu_rnn_inference_f32.cpp)
-        get_filename_component(f_path
-                ${CMAKE_CURRENT_LIST_DIR}/${f} ABSOLUTE)
-        list(REMOVE_ITEM sources "${f_path}")
+    foreach(f ${sources})
+        if(${f} MATCHES "cpu_")
+            list(REMOVE_ITEM sources "${f}")
+        endif()
     endforeach()
 endif()
 
@@ -67,13 +64,6 @@ endif()
 if(DNNL_SYCL_COMPUTECPP)
     list(REMOVE_ITEM sources "${CMAKE_CURRENT_LIST_DIR}/sycl_interop_usm.cpp")
 endif()
-
-# Skip matmul examples with SYCL
-foreach(f ${sources})
-    if(DNNL_WITH_SYCL AND ${f} MATCHES "matmul")
-        list(REMOVE_ITEM sources "${f}")
-    endif()
-endforeach()
 
 foreach(src ${sources})
     file(RELATIVE_PATH src_rel_path ${CMAKE_CURRENT_SOURCE_DIR} ${src})
@@ -90,6 +80,10 @@ foreach(src ${sources})
         # Example name contains cross-engine, cpu or gpu
         if(NOT ${example_name} MATCHES ".*opencl" OR DNNL_GPU_RUNTIME STREQUAL "OCL")
             register_exe(${example_name} ${src} "test" ${LIBM})
+        endif()
+        if(DNNL_SYCL_DPCPP AND ${example_name} MATCHES "cross-engine-reorder-cpp")
+            register_exe("usm-${example_name}" ${src} "test" ${LIBM})
+            target_compile_definitions("usm-${example_name}" PUBLIC -DDNNL_USE_DPCPP_USM)
         endif()
     else()
         set(cpu_rt_pattern "(SEQ|OMP|TBB|SYCL|DPCPP)")

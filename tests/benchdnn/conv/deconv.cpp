@@ -99,15 +99,7 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
     dnnl_dim_t strides_nd[] = {p->sd, p->sh, p->sw};
     dnnl_dim_t dilates_nd[] = {p->dd, p->dh, p->dw};
     dnnl_dim_t padding_nd[] = {p->pd, p->ph, p->pw};
-
-    auto bph = [&](int64_t ih, int64_t oh, int64_t kh, int64_t sh, int64_t ph,
-                       int64_t dh) {
-        return (oh - 1) * sh - ih + ((kh - 1) * (dh + 1) + 1) - ph;
-    };
-
-    dnnl_dim_t padding_r_nd[] = {bph(p->od, p->id, p->kd, p->sd, p->pd, p->dd),
-            bph(p->oh, p->ih, p->kh, p->sh, p->ph, p->dh),
-            bph(p->ow, p->iw, p->kw, p->sw, p->pw, p->dw)};
+    dnnl_dim_t padding_r_nd[] = {p->pd_r, p->ph_r, p->pw_r};
 
     dnnl_dim_t *strides = strides_nd + (5 - p->ndims);
     dnnl_dim_t *dilates = dilates_nd + (5 - p->ndims);
@@ -278,7 +270,7 @@ int doit(const prb_t *p, res_t *r) {
         args.set(DNNL_ARG_DST, dst_dt);
         args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
 
-        DNN_SAFE(execute_and_wait(d, args), WARN);
+        SAFE(execute_and_wait(d, args), WARN);
 
         if (bench_mode & CORR) {
             compute_ref_bwd_d(
@@ -292,12 +284,13 @@ int doit(const prb_t *p, res_t *r) {
         args.set(DNNL_ARG_DIFF_SRC, src_dt);
         args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
 
-        DNN_SAFE(execute_and_wait(d, args), WARN);
+        SAFE(execute_and_wait(d, args), WARN);
 
         if (bench_mode & CORR) {
             dnn_mem_t zero_fp;
             compute_ref_fwd(&p_tr, nullptr, dst_fp, wei_tr_fp, zero_fp,
                     std::vector<dnn_mem_t>(), src_fp);
+
             dnn_mem_t src(src_dt, fp, src_tag, test_engine);
             SAFE(compare_src(p, src, src_fp, r, true), WARN);
         }
@@ -308,7 +301,7 @@ int doit(const prb_t *p, res_t *r) {
         args.set(DNNL_ARG_DIFF_BIAS, bia_dt);
         args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
 
-        DNN_SAFE(execute_and_wait(d, args), WARN);
+        SAFE(execute_and_wait(d, args), WARN);
 
         if (bench_mode & CORR) {
             compute_ref_bwd_weights(&p_tr, dst_fp, wei_tr_fp, src_fp);

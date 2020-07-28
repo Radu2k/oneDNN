@@ -93,7 +93,6 @@ class jit_generator : public ngen::OpenCLCodeGenerator<hw>,
                       public jit_generator_base {
     friend struct jit_eltwise_injector_f32<hw>;
 
-
 private:
 #ifdef CL_VERSION_2_0
     struct svm_deleter {
@@ -118,7 +117,6 @@ public:
         return ngen::OpenCLCodeGenerator<hw>::getExternalName().c_str();
     }
 
-
 #ifdef CL_VERSION_2_0
     void dbg_alloc(cl_context context);
     void *dbg_memory() const { return dbg_memory_.get(); }
@@ -126,6 +124,7 @@ public:
 };
 
 #ifdef CL_VERSION_2_0
+
 template <gpu_gen_t hw>
 void jit_generator<hw>::dbg_alloc(cl_context context) {
     constexpr size_t size = 1048576;

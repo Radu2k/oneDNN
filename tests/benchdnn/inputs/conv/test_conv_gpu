@@ -18,40 +18,37 @@
 --mb=2,16
 --dir=BWD_D --batch=shapes_resnet_50
 
---mb=32
---cfg=bf16bf16bf16,bf16f32bf16
---dir=BWD_WB --batch=set_gpu
+#--mb=32
+#--cfg=bf16f32bf16,bf16bf16bf16
+#--dir=BWD_WB --batch=set_gpu
 
 # i8
 # i8 - 1x1 tests
 --reset --cfg=u8s8u8,u8s8s8,u8s8s32
+--stag=any,axb
 --dir=FWD_I,FWD_B
-mb16ic3ih14oc1024oh14kh3ph1n
-mb16ic256ih14oc1024oh14kh1ph0n
-mb16ic32ih14oc32oh14kh1ph0n
-mb16ic32ih7oc512oh7kh1ph0n
-mb16ic512ih14oc32oh14kh1ph0n
-
---reset --cfg=u8s8u8,u8s8s8
---dir=BWD_D
-mb16ic256ih14oc1024oh14kh1ph0n
-mb16ic512ih14oc32oh14kh1ph0n
-
---reset --cfg=u8s8u8,u8s8s8
 --mb=2,16
---dir=FWD_B --batch=set_gpu --batch=shapes_dilated
+mb2ic256ih14oc1024oh14kh1ph0n
+mb2ic32ih14oc32oh14kh1ph0n
+mb2ic32ih7oc512oh7kh1ph0n
+mb2ic512ih14oc32oh14kh1ph0n
+--batch=shapes_regression_dw
 
---reset --cfg=u8s8u8
---mb=2
---dir=BWD_D --batch=set_gpu --batch=shapes_dilated --batch=harness_conv_dilated_3d
---mb=16
---dir=BWD_D --batch=set_gpu --batch=shapes_dilated --batch=harness_conv_dilated_3d
+--reset --cfg=u8s8u8,u8s8s8
+--stag=any
+--mb=2,16
+--dir=FWD_B,BWD_D --batch=set_gpu
 
---reset --cfg=u8s8s8
---mb=2
---dir=BWD_D --batch=set_gpu --batch=shapes_dilated --batch=harness_conv_dilated_3d
---mb=16
---dir=BWD_D --batch=set_gpu --batch=shapes_dilated --batch=harness_conv_dilated_3d
+--reset --cfg=u8s8u8,u8s8s8
+--stag=axb
+--mb=2,16
+--dir=FWD_B --batch=set_gpu
+
+--reset --cfg=u8s8s32,u8s8f32
+--mb=2,16
+--stag=any,axb
+--dir=FWD_B --batch=set_gpu
+
 
 # test scale and post-ops
 --batch=harness_conv_attrs_gpu

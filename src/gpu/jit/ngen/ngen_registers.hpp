@@ -91,6 +91,7 @@ static constexpr_reg InstructionModifier NoSrcDepSet = AccWrEn;
 static constexpr_reg InstructionModifier Breakpoint = InstructionModifier::createDebugCtrl();
 static constexpr_reg InstructionModifier sat = InstructionModifier::createSaturate();
 static constexpr_reg InstructionModifier NoMask = InstructionModifier::createMaskCtrl(true);
+
 static constexpr_reg InstructionModifier Mask = InstructionModifier::createMaskCtrl(false);
 static constexpr_reg InstructionModifier ForceMask = InstructionModifier::createMaskCtrl(true);     // for use when setDefaultNoMask() active
 static constexpr_reg InstructionModifier AutoSWSB = InstructionModifier::createAutoSWSB();
@@ -101,6 +102,7 @@ static constexpr_reg InstructionModifier Align16 = InstructionModifier::createAc
 
 static constexpr_reg InstructionModifier Switch{ThreadCtrl::Switch};
 static constexpr_reg InstructionModifier Atomic{ThreadCtrl::Atomic};
+static constexpr_reg InstructionModifier NoPreempt{ThreadCtrl::NoPreempt};
 
 #ifdef NGEN_SHORT_NAMES
 static constexpr_reg_const InstructionModifier &W = NoMask;

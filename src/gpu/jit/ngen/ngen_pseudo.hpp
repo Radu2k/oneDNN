@@ -157,6 +157,8 @@ void sqt(const InstructionModifier &mod, const RegData &dst, const RegData &src0
     math<DT>(mod, MathFunction::sqt, dst, src0);
 }
 
+#define TMP(n) tmp[n].retype(dst.getType())
+
 // IEEE 754-compliant divide math macro sequence.
 //   Requires GRFs initialized with 0.0 and 1.0, as well as temporary GRFs (4 for single precision, 5 for double precision).
 //   dst, num, denom must be distinct GRFs.
@@ -178,13 +180,13 @@ void fdiv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, R
             invm<DT>(mod | eo | flag,         dst | mme0,      num | nomme,   denom | nomme);
             if_(mod | ~flag, labelSkip);
 
-            madm<DT>(mod, tmp[0] | mme1,     zero | nomme,     num | nomme,     dst | mme0);
-            madm<DT>(mod, tmp[1] | mme2,      one | nomme,  -denom | nomme,     dst | mme0);
-            madm<DT>(mod, tmp[2] | mme3,      dst | mme0,   tmp[1] | mme2,      dst | mme0);
-            madm<DT>(mod, tmp[3] | mme4,      num | nomme,  -denom | nomme,  tmp[0] | mme1);
-            madm<DT>(mod, tmp[0] | mme5,   tmp[0] | mme1,   tmp[3] | mme4,   tmp[2] | mme3);
-            madm<DT>(mod, tmp[1] | mme6,      num | nomme,  -denom | nomme,  tmp[0] | mme5);
-            madm<DT>(mod,    dst | nomme,  tmp[0] | mme5,   tmp[1] | mme6,   tmp[2] | mme3);
+            madm<DT>(mod, TMP(0) | mme1,     zero | nomme,     num | nomme,     dst | mme0);
+            madm<DT>(mod, TMP(1) | mme2,      one | nomme,  -denom | nomme,     dst | mme0);
+            madm<DT>(mod, TMP(2) | mme3,      dst | mme0,   TMP(1) | mme2,      dst | mme0);
+            madm<DT>(mod, TMP(3) | mme4,      num | nomme,  -denom | nomme,  TMP(0) | mme1);
+            madm<DT>(mod, TMP(0) | mme5,   TMP(0) | mme1,   TMP(3) | mme4,   TMP(2) | mme3);
+            madm<DT>(mod, TMP(1) | mme6,      num | nomme,  -denom | nomme,  TMP(0) | mme5);
+            madm<DT>(mod,    dst | nomme,  TMP(0) | mme5,   TMP(1) | mme6,   TMP(2) | mme3);
 
             mark(labelSkip);
             endif(mod);
@@ -193,16 +195,16 @@ void fdiv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, R
             invm<DT>(mod | eo | flag,         dst | mme0,      num | nomme,   denom | nomme);
             if_(mod | ~flag, labelSkip);
 
-            madm<DT>(mod, tmp[0] | mme1,     zero | nomme,     num | nomme,     dst | mme0);
-            madm<DT>(mod, tmp[1] | mme2,      one | nomme,  -denom | nomme,     dst | mme0);
-            madm<DT>(mod, tmp[2] | mme3,      num | nomme,  -denom | nomme,  tmp[0] | mme1);
-            madm<DT>(mod, tmp[3] | mme4,      dst | mme0,   tmp[1] | mme2,      dst | mme0);
-            madm<DT>(mod, tmp[4] | mme5,      one | nomme,  -denom | nomme,  tmp[3] | mme4);
-            madm<DT>(mod,    dst | mme6,      dst | mme0,   tmp[1] | mme2,   tmp[3] | mme4);
-            madm<DT>(mod, tmp[0] | mme7,   tmp[0] | mme1,   tmp[2] | mme3,   tmp[3] | mme4);
-            madm<DT>(mod, tmp[3] | mme0,   tmp[3] | mme4,      dst | mme6,   tmp[4] | mme5);
-            madm<DT>(mod, tmp[2] | mme1,      num | nomme,  -denom | nomme,  tmp[0] | mme7);
-            madm<DT>(mod,    dst | nomme,  tmp[0] | mme7,   tmp[2] | mme1,   tmp[3] | mme0);
+            madm<DT>(mod, TMP(0) | mme1,     zero | nomme,     num | nomme,     dst | mme0);
+            madm<DT>(mod, TMP(1) | mme2,      one | nomme,  -denom | nomme,     dst | mme0);
+            madm<DT>(mod, TMP(2) | mme3,      num | nomme,  -denom | nomme,  TMP(0) | mme1);
+            madm<DT>(mod, TMP(3) | mme4,      dst | mme0,   TMP(1) | mme2,      dst | mme0);
+            madm<DT>(mod, TMP(4) | mme5,      one | nomme,  -denom | nomme,  TMP(3) | mme4);
+            madm<DT>(mod,    dst | mme6,      dst | mme0,   TMP(1) | mme2,   TMP(3) | mme4);
+            madm<DT>(mod, TMP(0) | mme7,   TMP(0) | mme1,   TMP(2) | mme3,   TMP(3) | mme4);
+            madm<DT>(mod, TMP(3) | mme0,   TMP(3) | mme4,      dst | mme6,   TMP(4) | mme5);
+            madm<DT>(mod, TMP(2) | mme1,      num | nomme,  -denom | nomme,  TMP(0) | mme7);
+            madm<DT>(mod,    dst | nomme,  TMP(0) | mme7,   TMP(2) | mme1,   TMP(3) | mme0);
 
             mark(labelSkip);
             endif(mod);
@@ -235,11 +237,11 @@ void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             invm<DT>(mod | eo | flag,         dst | mme0,      one | nomme,     src | nomme);
             if_(mod | ~flag, labelSkip);
 
-            madm<DT>(mod, tmp[1] | mme2,      one | nomme,    -src | nomme,     dst | mme0);
-            madm<DT>(mod, tmp[2] | mme3,      dst | mme0,   tmp[1] | mme2,      dst | mme0);
-            madm<DT>(mod, tmp[0] | mme5,      dst | mme0,   tmp[1] | mme2,   tmp[2] | mme3);
-            madm<DT>(mod, tmp[1] | mme6,      one | nomme,    -src | nomme,  tmp[0] | mme5);
-            madm<DT>(mod,    dst | nomme,  tmp[0] | mme5,   tmp[1] | mme6,   tmp[2] | mme3);
+            madm<DT>(mod, TMP(1) | mme2,      one | nomme,    -src | nomme,     dst | mme0);
+            madm<DT>(mod, TMP(2) | mme3,      dst | mme0,   TMP(1) | mme2,      dst | mme0);
+            madm<DT>(mod, TMP(0) | mme5,      dst | mme0,   TMP(1) | mme2,   TMP(2) | mme3);
+            madm<DT>(mod, TMP(1) | mme6,      one | nomme,    -src | nomme,  TMP(0) | mme5);
+            madm<DT>(mod,    dst | nomme,  TMP(0) | mme5,   TMP(1) | mme6,   TMP(2) | mme3);
 
             mark(labelSkip);
             endif(mod);
@@ -248,13 +250,13 @@ void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             invm<DT>(mod | eo | flag,        dst | mme0,      one | nomme,     src | nomme);
             if_(mod | ~flag, labelSkip);
 
-            madm<DT>(mod, tmp[0] | mme2,     one | nomme,    -src | nomme,     dst | mme0);
-            madm<DT>(mod, tmp[1] | mme4,     dst | mme0,   tmp[0] | mme2,      dst | mme0);
-            madm<DT>(mod, tmp[2] | mme5,     one | nomme,    -src | nomme,  tmp[1] | mme4);
-            madm<DT>(mod,    dst | mme6,     dst | mme0,   tmp[0] | mme2,   tmp[1] | mme4);
-            madm<DT>(mod, tmp[1] | mme0,  tmp[1] | mme4,      dst | mme6,   tmp[2] | mme5);
-            madm<DT>(mod, tmp[0] | mme1,     one | nomme,    -src | nomme,     dst | mme6);
-            madm<DT>(mod,    dst | nomme,    dst | mme6,   tmp[0] | mme1,   tmp[1] | mme0);
+            madm<DT>(mod, TMP(0) | mme2,     one | nomme,    -src | nomme,     dst | mme0);
+            madm<DT>(mod, TMP(1) | mme4,     dst | mme0,   TMP(0) | mme2,      dst | mme0);
+            madm<DT>(mod, TMP(2) | mme5,     one | nomme,    -src | nomme,  TMP(1) | mme4);
+            madm<DT>(mod,    dst | mme6,     dst | mme0,   TMP(0) | mme2,   TMP(1) | mme4);
+            madm<DT>(mod, TMP(1) | mme0,  TMP(1) | mme4,      dst | mme6,   TMP(2) | mme5);
+            madm<DT>(mod, TMP(0) | mme1,     one | nomme,    -src | nomme,     dst | mme6);
+            madm<DT>(mod,    dst | nomme,    dst | mme6,   TMP(0) | mme1,   TMP(1) | mme0);
 
             mark(labelSkip);
             endif(mod);
@@ -289,13 +291,13 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             rsqtm<DT>(mod | eo | flag,        dst | mme0,       src | nomme);
             if_(mod | ~flag, labelSkip);
 
-            madm<DT>(mod, tmp[0] | mme1,     zero | nomme,  oneHalf | nomme,     dst | mme0);
-            madm<DT>(mod, tmp[1] | mme2,     zero | nomme,      src | nomme,     dst | mme0);
-            madm<DT>(mod, tmp[2] | mme3,  oneHalf | nomme,  -tmp[1] | mme2,   tmp[0] | mme1);
-            madm<DT>(mod, tmp[0] | mme4,   tmp[0] | mme1,    tmp[2] | mme3,   tmp[0] | mme1);
-            madm<DT>(mod,    dst | mme5,   tmp[1] | mme2,    tmp[2] | mme3,   tmp[1] | mme2);
-            madm<DT>(mod, tmp[2] | mme6,      src | nomme,     -dst | mme5,      dst | mme5);
-            madm<DT>(mod,    dst | nomme,     dst | mme5,    tmp[0] | mme4,   tmp[2] | mme6);
+            madm<DT>(mod, TMP(0) | mme1,     zero | nomme,  oneHalf | nomme,     dst | mme0);
+            madm<DT>(mod, TMP(1) | mme2,     zero | nomme,      src | nomme,     dst | mme0);
+            madm<DT>(mod, TMP(2) | mme3,  oneHalf | nomme,  -TMP(1) | mme2,   TMP(0) | mme1);
+            madm<DT>(mod, TMP(0) | mme4,   TMP(0) | mme1,    TMP(2) | mme3,   TMP(0) | mme1);
+            madm<DT>(mod,    dst | mme5,   TMP(1) | mme2,    TMP(2) | mme3,   TMP(1) | mme2);
+            madm<DT>(mod, TMP(2) | mme6,      src | nomme,     -dst | mme5,      dst | mme5);
+            madm<DT>(mod,    dst | nomme,     dst | mme5,    TMP(0) | mme4,   TMP(2) | mme6);
 
             mark(labelSkip);
             endif(mod);
@@ -304,17 +306,17 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             rsqtm<DT>(mod | eo | flag,        dst | mme0,       src | nomme);
             if_(mod | ~flag, labelSkip);
 
-            madm<DT>(mod, tmp[0] | mme1,     zero | mme0,   oneHalf | nomme,     dst | mme0);
-            madm<DT>(mod, tmp[1] | mme2,     zero | mme0,       src | nomme,     dst | mme0);
-            madm<DT>(mod, tmp[2] | mme3,  oneHalf | nomme,  -tmp[1] | mme2,   tmp[0] | mme1);
-            madm<DT>(mod, tmp[3] | mme4,      one | nomme,  oneHalf | nomme,     dst | nomme);
-            madm<DT>(mod, tmp[3] | mme5,      one | nomme,   tmp[3] | mme4,   tmp[2] | mme3);
-            madm<DT>(mod,    dst | mme6,     zero | mme0,    tmp[2] | mme3,   tmp[1] | mme2);
-            madm<DT>(mod, tmp[2] | mme7,     zero | mme0,    tmp[2] | mme3,   tmp[0] | mme1);
-            madm<DT>(mod,    dst | mme6,   tmp[1] | mme2,    tmp[3] | mme5,      dst | mme6);
-            madm<DT>(mod, tmp[3] | mme5,   tmp[0] | mme1,    tmp[3] | mme5,   tmp[2] | mme7);
-            madm<DT>(mod, tmp[0] | mme1,      src | nomme,     -dst | mme6,      dst | mme6);
-            madm<DT>(mod,    dst | nomme,     dst | mme6,    tmp[0] | mme1,   tmp[3] | mme5);
+            madm<DT>(mod, TMP(0) | mme1,     zero | mme0,   oneHalf | nomme,     dst | mme0);
+            madm<DT>(mod, TMP(1) | mme2,     zero | mme0,       src | nomme,     dst | mme0);
+            madm<DT>(mod, TMP(2) | mme3,  oneHalf | nomme,  -TMP(1) | mme2,   TMP(0) | mme1);
+            madm<DT>(mod, TMP(3) | mme4,      one | nomme,  oneHalf | nomme,     dst | nomme);
+            madm<DT>(mod, TMP(3) | mme5,      one | nomme,   TMP(3) | mme4,   TMP(2) | mme3);
+            madm<DT>(mod,    dst | mme6,     zero | mme0,    TMP(2) | mme3,   TMP(1) | mme2);
+            madm<DT>(mod, TMP(2) | mme7,     zero | mme0,    TMP(2) | mme3,   TMP(0) | mme1);
+            madm<DT>(mod,    dst | mme6,   TMP(1) | mme2,    TMP(3) | mme5,      dst | mme6);
+            madm<DT>(mod, TMP(3) | mme5,   TMP(0) | mme1,    TMP(3) | mme5,   TMP(2) | mme7);
+            madm<DT>(mod, TMP(0) | mme1,      src | nomme,     -dst | mme6,      dst | mme6);
+            madm<DT>(mod,    dst | nomme,     dst | mme6,    TMP(0) | mme1,   TMP(3) | mme5);
 
             mark(labelSkip);
             endif(mod);
@@ -327,14 +329,11 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
     }
 }
 
+#undef TMP
+
 // Thread spawner messages.
 void threadend(const InstructionModifier &mod, const RegData &r0_info) {
-    auto dmSave = defaultModifier;
-    defaultModifier |= NoMask;
-
-    send(8 | EOT | mod, null, r0_info, 0x27, 0x2000010);
-
-    defaultModifier = dmSave;
+    send(8 | EOT | mod | NoMask, null, r0_info, 0x27, 0x2000010);
 }
 
 void threadend(const RegData &r0_info) { threadend(InstructionModifier(), r0_info); }
@@ -342,41 +341,25 @@ void threadend(const RegData &r0_info) { threadend(InstructionModifier(), r0_inf
 // Gateway messages.
 void barriermsg(const InstructionModifier &mod, const GRF &header)
 {
-    auto dmSave = defaultModifier;
-    defaultModifier |= NoMask;
-
-    send(1 | mod, null, header, 0x3, 0x2000004);
-
-    defaultModifier = dmSave;
+    send(1 | mod | NoMask, null, header, 0x3, 0x2000004);
 }
 
 void barriermsg(const GRF &header) { barriermsg(InstructionModifier(), header); }
 
-
 void barriersignal(const InstructionModifier &mod, const GRF &temp, const GRF &r0_info = r0)
 {
-    auto dmSave = defaultModifier;
-    defaultModifier |= NoMask;
-
-    and_(8, temp.ud(), r0_info.ud(2), uint32_t((hardware >= HW::Gen11) ? 0x7F000000 : 0x8F000000));
+    and_(8 | NoMask, temp.ud(), r0_info.ud(2), uint32_t((hardware >= HW::Gen11) ? 0x7F000000 : 0x8F000000));
     barriermsg(mod, temp);
-
-    defaultModifier = dmSave;
 }
 
 void barriersignal(const GRF &temp, const GRF &r0_info = r0) { barriersignal(InstructionModifier(), temp, r0_info); }
 
 void barrierwait()
 {
-    auto dmSave = defaultModifier;
-    defaultModifier |= NoMask;
-
     if (isGen12)
-        sync.bar();
+        sync.bar(NoMask);
     else
-        wait(InstructionModifier(), n0[0]);
-
-    defaultModifier = dmSave;
+        wait(NoMask, n0[0]);
 }
 
 void barrier(const GRF &temp, const GRF &r0_info = r0)
@@ -420,15 +403,16 @@ void atomic(AtomicOp op, const InstructionModifier &mod, const RegData &dst, con
         sends(mod, dst, addr, data, exdesc.all, desc.all);
 }
 
+template <typename DataSpec>
+void atomic(AtomicOp op, const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const RegData &addr, const RegData &data = NullRegister())
+{
+    atomic(op, mod, NullRegister(), spec, base, addr, data);
+}
+
 // Global memory fence.
 void memfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
-    auto dmSave = defaultModifier;
-    defaultModifier |= NoMask;
-
-    send(8 | mod, dst, header, 0xA, 0x219E000);
-
-    defaultModifier = dmSave;
+    send(8 | mod | NoMask, dst, header, 0xA, 0x219E000);
 }
 
 void memfence(const RegData &dst, const RegData &header = GRF(0)) { memfence(InstructionModifier(), dst, header); }
@@ -436,12 +420,7 @@ void memfence(const RegData &dst, const RegData &header = GRF(0)) { memfence(Ins
 // SLM-only memory fence.
 void slmfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
-    auto dmSave = defaultModifier;
-    defaultModifier |= NoMask;
-
-    send(8 | mod, dst, header, 0xA, 0x219E0FE);
-
-    defaultModifier = dmSave;
+    send(8 | mod | NoMask, dst, header, 0xA, 0x219E0FE);
 }
 
 void slmfence(const RegData &dst, const RegData &header = GRF(0)) { slmfence(InstructionModifier(), dst, header); }
@@ -506,3 +485,5 @@ void loadargs(const GRF &base, int argGRFs, const GRF &temp = GRF(127))
         defaultModifier = dmSave;
     }
 }
+
+

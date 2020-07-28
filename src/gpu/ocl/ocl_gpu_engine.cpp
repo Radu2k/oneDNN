@@ -20,7 +20,9 @@
 
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
+
 #include "gpu/compute/kernel_list.hpp"
+
 #include "gpu/jit/binary_format.hpp"
 #include "gpu/ocl/kernel_utils.hpp"
 #include "gpu/ocl/ocl_gpu_engine.hpp"
@@ -194,6 +196,19 @@ status_t ocl_gpu_engine_t::create_kernels_from_ocl_source(
 
     OCL_CHECK(clReleaseProgram(program));
     return status::success;
+}
+
+void ocl_gpu_engine_t::check_mayiuse_ngen_kernels() {
+    if (!checked_ngen_kernels_) {
+        auto status
+                = jit::gpu_supports_binary_format(&enable_ngen_kernels_, this);
+        if (status != status::success) enable_ngen_kernels_ = false;
+        checked_ngen_kernels_ = true;
+
+        if (get_verbose())
+            printf("dnnl_verbose,info,gpu,binary_kernels:%s\n",
+                    enable_ngen_kernels_ ? "enabled" : "disabled");
+    }
 }
 
 } // namespace ocl

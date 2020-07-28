@@ -77,8 +77,7 @@ const char *data_kind2str(data_kind_t kind);
 struct attr_t {
     struct scale_t {
         enum policy_t {
-            NONE = 0,
-            COMMON,
+            COMMON = 0,
             PER_OC,
             // reorder section
             // XXX: order is important, from longer name to a shorter one
@@ -95,9 +94,9 @@ struct attr_t {
         static policy_t str2policy(const char *str);
         static const char *policy2str(policy_t policy);
 
-        int str2scale(const char *str, const char **end_s);
+        int from_str(const char *str, const char **end_s);
 
-        bool is_def() const { return this->policy == NONE; }
+        bool is_def() const { return policy == COMMON && scale == 1.; }
 
         static int get_default_mask(policy_t policy) {
             switch (policy) {
@@ -105,13 +104,12 @@ struct attr_t {
                 case PER_OC:
                 case PER_DIM_1: return (1 << 1);
                 case PER_DIM_01: return (1 << 0) + (1 << 1);
-                case COMMON:
-                case NONE: return 0;
+                case COMMON: return 0;
                 default: SAFE_V(FAIL); return 0;
             }
         }
 
-        policy_t policy = NONE;
+        policy_t policy = COMMON;
         float scale = 1.;
         bool runtime = false;
     };
@@ -150,8 +148,8 @@ struct attr_t {
     };
 
     struct arg_scales_t {
-        void set(int arg, scale_t::policy_t p, float scale) {
-            scales.insert(std::make_pair(arg, attr_t::scale_t(p, scale)));
+        void set(int arg, scale_t scale) {
+            scales.insert(std::make_pair(arg, scale));
         }
 
         scale_t get(int arg) const {
@@ -284,6 +282,18 @@ struct attr_t {
         std::vector<entry_t> entry;
     };
 
+    attr_t() = default;
+
+    attr_t(const post_ops_t &po) : post_ops(po) {}
+
+    attr_t(const scale_t &s, const post_ops_t &po) : oscale(s), post_ops(po) {}
+
+    attr_t(const arg_scales_t &as, const post_ops_t &po)
+        : scales(as), post_ops(po) {}
+
+    attr_t(const scale_t &s, const zero_points_t &zp, const post_ops_t &po)
+        : oscale(s), zero_points(zp), post_ops(po) {}
+
     scale_t oscale;
     arg_scales_t scales;
     zero_points_t zero_points;
@@ -293,11 +303,14 @@ struct attr_t {
 };
 using policy_t = attr_t::scale_t::policy_t;
 
+void handle_legacy_attr(attr_t &attr, const attr_t &legacy_attr);
+
 int str2attr(attr_t *attr, const char *str);
 std::ostream &operator<<(std::ostream &s, const policy_t &policy);
 std::ostream &operator<<(std::ostream &s, const attr_t::scale_t &scale);
 std::ostream &operator<<(
         std::ostream &s, const attr_t::zero_points_t &zero_points);
+std::ostream &operator<<(std::ostream &s, const attr_t::arg_scales_t &scales);
 std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t::kind_t &k);
 std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t &post_ops);
 std::ostream &operator<<(std::ostream &s, const attr_t &attr);
@@ -425,12 +438,13 @@ inline dnnl_primitive_attr_t create_dnnl_attr(const attr_t &attr) {
 dnnl_engine_kind_t str2engine_kind(const char *str);
 dnnl_scratchpad_mode_t str2scratchpad_mode(const char *str);
 
-void maybe_scale(float &d, float *scales, int64_t oc, const attr_t &attr);
+void maybe_oscale(const attr_t &attr, float &d, float *scales, int64_t oc);
 float compute_eltwise_fwd(attr_t::post_ops_t::kind_t kind, float src,
         float scale, float alpha, float beta);
 float compute_eltwise_bwd(attr_t::post_ops_t::kind_t kind, float d_dst,
         float src, float alpha, float beta);
 float compute_binary(attr_t::post_ops_t::kind_t kind, float src0, float src1);
+
 void maybe_post_ops(const attr_t &attr, float &val, float sum_val,
         const std::vector<float> &v_binary_vals);
 inline void maybe_post_ops(const attr_t &attr, float &val) {

@@ -223,7 +223,7 @@ int doit(const prb_t *p, res_t *r) {
     args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
     args.set(binary_po_args, binary_po_dt);
 
-    DNN_SAFE(execute_and_wait(b, args), WARN);
+    SAFE(execute_and_wait(b, args), WARN);
 
     if (bench_mode & CORR) {
         compute_ref(p, src0_fp, src1_fp, binary_po_fp, dst_fp);

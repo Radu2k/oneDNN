@@ -9,20 +9,22 @@
 where *conv-knobs* are:
 
  - `--dir={FWD_B [default], FWD_D, FWD_I, BWD_D, BWD_W, BWD_WB}`
-            -- dnnl_prop_kind_t. Refer to the common glossary in README.md for
-            details.
+            -- dnnl_prop_kind_t. Refer to [direction](knobs_dir.md) for details.
  - `--cfg={f32 [default], ...}` -- Refer to ``Configurations`` below.
  - `--stag={any [default], ...}` -- physical src memory layout.
-            Refer to the common glossary in README.md for details.
+            Refer to [tags](knobs_tag.md) for details.
  - `--wtag={any [default], ...}` -- physical wei memory layout.
-            Refer to the common glossary in README.md for details.
+            Refer to [tags](knobs_tag.md) for details.
  - `--dtag={any [default], ...}` -- physical dst memory layout.
-            Refer to the common glossary in README.md for details.
+            Refer to [tags](knobs_tag.md) for details.
  - `--alg={DIRECT [default], WINO, AUTO}` -- convolution algorithm. `WINO` is
             Winograd-based convolution. `AUTO` will pick one of `DIRECT` or
             `WINO` automatically, library-based decision.
- - `--attr="attr_str"` -- primitive attributes. The default is `""` (no
-            attributes). Refer to [attributes](knobs_attr.md) for details.
+ - `--attr-oscale="STRING"` -- output scale primitive attribute. No oscale is
+            set by default. Refer to [attributes](knobs_attr.md) for details.
+ - `--attr-post-ops="STRING"` -- post operation primitive attribute. No post
+            operations are set by default. Refer to [attributes](knobs_attr.md)
+            for details.
  - `--mb=INT` -- override minibatch size specified in the problem description.
              When set to `0`, use minibatch size as defined by the individual
              problem descriptor. The default is `0`.
@@ -35,25 +37,16 @@ and *conv-desc* is a problem descriptor. The canonical form is:
 ```
     gXmbX_icXidXihXiwX_ocXodXohXowX_kdXkhXkwX_sdXshXswX_pdXphXpwX_ddXdhXdwX_nS
 ```
-Here `X` is an integer number and `S` is a string literal without spaces (`n`
-stands for name). The special symbol `_` is ignored, so it may be used as a
-delimiter for better readability. Refer to the common glossary in README.md for
-the entity name and description.
-
-There are default values for some entities in case they were not specified:
- - g = 1;
- - mb = 2;
- - sd/sh/sw = 1;
- - dd/dh/dw = 0;
-There are also implicit rules:
- - Output shape may be deduced from the input and kernel size.
- - Values for smaller dimensions may be copied from the biggest.
+Refer to [descriptor](knobs_desc.md) for details. Input shape and kernel size
+are mandatory inputs. Output shape and padding may be deduced based on the
+values provided.
 
 ## Precision Configurations
 
-`--cfg` option specifies what data type will be used for a problem. It also
-defines the data filling strategy. It is implicit for the integer type
-saturation. This option also defines the threshold for computation errors.
+`--cfg` option specifies what [data types](knobs_dt.md) will be used for a
+problem. It also defines the data filling strategy. It is implicit for the
+integer type saturation. This option also defines the threshold for computation
+errors.
 
 The table below shows supported name configurations for this driver:
 
@@ -120,13 +113,13 @@ default minibatch:
 Run the same but with post_ops ReLU:
 ``` sh
     ./benchdnn --conv --cfg=f32 --dir=FWD_B \
-               --attr="post_ops='relu'" --batch=inputs/conv/conv_all
+               --attr-post-ops="'relu'" --batch=inputs/conv/conv_all
 ```
 
 Run the same as previous but measures performance, not correctness check:
 ``` sh
     ./benchdnn --conv --mode=p --cfg=f32 --dir=FWD_B \
-               --attr="post_ops='relu'" --batch=inputs/conv/conv_all
+               --attr-post-ops="'relu'" --batch=inputs/conv/conv_all
 ```
 
 Run a set of f32 backward convolutions wrt weights with kh=3 and
@@ -163,7 +156,7 @@ Run a set of u8s8u8 forward convolutions without bias, skipping
 reference implementations with one common output scale set to 0.5:
 ``` sh
     ./benchdnn --conv --cfg=u8s8u8 --dir=FWD_D --skip-impl="ref" \
-               --attr="oscale=common:.5" --batch=inputs/conv/conv_all
+               --attr-oscale=common:0.5 --batch=inputs/conv/conv_all
 ```
 
 More examples with different driver options can be found at
@@ -191,3 +184,4 @@ batch files and configurations (e.g `--mb`, `--dir`, `--skip-impl`,
 
 * **test_conv_\<label\>**: These files are used for deploying testing
 via command-line `make <test>`.
+

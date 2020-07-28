@@ -17,7 +17,6 @@
 #include "ngen_register_allocator.hpp"
 #include "ngen_utils.hpp"
 #include <iomanip>
-#include <immintrin.h>
 #include <iostream>
 
 namespace ngen {
@@ -45,7 +44,7 @@ int Bundle::first_reg(HW hw) const
 int Bundle::group_size(HW hw) const
 {
     if (bundle_id == any && bank_id == any)
-        return register_count(hw);
+        return 128;
     else switch (hw) {
     case HW::Gen11:
     case HW::Gen12HP:
@@ -58,7 +57,7 @@ int Bundle::group_size(HW hw) const
 int Bundle::stride(HW hw) const
 {
     if (bundle_id == any && bank_id == any)
-        return register_count(hw);
+        return 128;
     else switch (hw) {
     case HW::Gen9:
     case HW::Gen10:
@@ -70,7 +69,7 @@ int Bundle::stride(HW hw) const
     case HW::Gen12HP:
         return 64;
     default:
-        return register_count(hw);
+        return 128;
     }
 }
 
@@ -79,9 +78,6 @@ int64_t Bundle::reg_mask(HW hw, int offset) const
     int64_t bundle_mask = -1, bank_mask = -1, base_mask = -1;
     int bundle0 = (bundle_id == any) ? 0 : bundle_id;
     int bank0   = (bank_id == any)   ? 0 : bank_id;
-
-    if ((offset * 64) >= register_count(hw))
-        return 0;
 
     switch (hw) {
     case HW::Gen9:
@@ -129,24 +125,19 @@ Bundle Bundle::locate(HW hw, RegData reg)
 //  Low-level register allocator functions.
 // -----------------------------------------
 
-
-void RegisterAllocator::init()
+template <int register_count>
+void RegisterAllocator<register_count>::init()
 {
-    for (int r = 0; r < register_count(hw); r++)
+    for (int r = 0; r < register_count; r++)
         free_sub[r] = 0xFF;
-    for (int r_whole = 0; r_whole < (register_count(hw) >> 3); r_whole++)
+    for (int r_whole = 0; r_whole < (register_count >> 3); r_whole++)
         free_whole[r_whole] = 0xFF;
-
-    // Remove registers past the maximum from the free list.
-    for (int r = register_count(hw); r < 256; r++)
-        free_sub[r] = 0;
-    for (int r_whole = (register_count(hw) >> 3); r_whole < (256 >> 3); r_whole++)
-        free_whole[r_whole] = 0;
 
     free_flag = 0xF;
 }
 
-void RegisterAllocator::claim(GRF reg)
+template <int register_count>
+void RegisterAllocator<register_count>::claim(GRF reg)
 {
     int r = reg.getBase();
 
@@ -154,13 +145,15 @@ void RegisterAllocator::claim(GRF reg)
     free_whole[r >> 3] &= ~(1 << (r & 7));
 }
 
-void RegisterAllocator::claim(GRFRange range)
+template <int register_count>
+void RegisterAllocator<register_count>::claim(GRFRange range)
 {
     for (int i = 0; i < range.getLen(); i++)
         claim(range[i]);
 }
 
-void RegisterAllocator::claim(Subregister subreg)
+template <int register_count>
+void RegisterAllocator<register_count>::claim(Subregister subreg)
 {
     int r = subreg.getBase();
     int dw = subreg.getDwords();
@@ -169,18 +162,21 @@ void RegisterAllocator::claim(Subregister subreg)
     claim_sub(r, o, dw);
 }
 
-void RegisterAllocator::claim_sub(int r, int o, int dw)
+template <int register_count>
+void RegisterAllocator<register_count>::claim_sub(int r, int o, int dw)
 {
     free_sub[r]        &= ~((1 << (o + dw)) - (1 << o));
     free_whole[r >> 3] &= ~(1 << (r & 7));
 }
 
-void RegisterAllocator::claim(FlagRegister flag)
+template <int register_count>
+void RegisterAllocator<register_count>::claim(FlagRegister flag)
 {
     free_flag &= ~(1 << flag.index());
 }
 
-void RegisterAllocator::release(GRF reg)
+template <int register_count>
+void RegisterAllocator<register_count>::release(GRF reg)
 {
     int r = reg.getBase();
 
@@ -188,13 +184,15 @@ void RegisterAllocator::release(GRF reg)
     free_whole[r >> 3] |= (1 << (r & 7));
 }
 
-void RegisterAllocator::release(GRFRange range)
+template <int register_count>
+void RegisterAllocator<register_count>::release(GRFRange range)
 {
     for (int i = 0; i < range.getLen(); i++)
         release(range[i]);
 }
 
-void RegisterAllocator::release(Subregister subreg)
+template <int register_count>
+void RegisterAllocator<register_count>::release(Subregister subreg)
 {
     int r = subreg.getBase();
     int dw = subreg.getDwords();
@@ -205,7 +203,8 @@ void RegisterAllocator::release(Subregister subreg)
         free_whole[r >> 3] |= (1 << (r & 7));
 }
 
-void RegisterAllocator::release(FlagRegister flag)
+template <int register_count>
+void RegisterAllocator<register_count>::release(FlagRegister flag)
 {
     free_flag |= (1 << flag.index());
 }
@@ -214,13 +213,41 @@ void RegisterAllocator::release(FlagRegister flag)
 //  High-level register allocation functions.
 // -------------------------------------------
 
-GRFRange RegisterAllocator::alloc_range(int nregs, Bundle base_bundle)
+template <int register_count>
+GRFRange RegisterAllocator<register_count>::alloc_range(int nregs, Bundle base_bundle)
+{
+    auto result = try_alloc_range(nregs, base_bundle);
+    if (result.isInvalid())
+        throw out_of_registers_exception();
+    return result;
+}
+
+template <int register_count>
+Subregister RegisterAllocator<register_count>::alloc_sub(DataType type, Bundle bundle)
+{
+    auto result = try_alloc_sub(type, bundle);
+    if (result.isInvalid())
+        throw out_of_registers_exception();
+    return result;
+}
+
+template <int register_count>
+FlagRegister RegisterAllocator<register_count>::alloc_flag()
+{
+    auto result = try_alloc_flag();
+    if (result.isInvalid())
+        throw out_of_registers_exception();
+    return result;
+}
+
+template <int register_count>
+GRFRange RegisterAllocator<register_count>::try_alloc_range(int nregs, Bundle base_bundle)
 {
     int64_t *free_whole64 = (int64_t *) free_whole;
     bool ok = false;
     int r_base = -1;
 
-    for (int rchunk = 0; rchunk < (register_count(hw) >> 6); rchunk++) {
+    for (int rchunk = 0; rchunk < (register_count >> 6); rchunk++) {
         int64_t free = free_whole64[rchunk];
         int64_t free_base = free & base_bundle.reg_mask(hw, rchunk);
 
@@ -264,10 +291,11 @@ GRFRange RegisterAllocator::alloc_range(int nregs, Bundle base_bundle)
         }
     }
 
-    throw out_of_registers_exception();
+    return GRFRange();
 }
 
-Subregister RegisterAllocator::alloc_sub(DataType type, Bundle bundle)
+template <int register_count>
+Subregister RegisterAllocator<register_count>::try_alloc_sub(DataType type, Bundle bundle)
 {
     int dwords = getDwords(type);
     int r_alloc, o_alloc;
@@ -277,7 +305,7 @@ Subregister RegisterAllocator::alloc_sub(DataType type, Bundle bundle)
         uint8_t alloc_pattern = alloc_patterns[dwords - 1];
         int64_t *free_whole64 = (int64_t *) free_whole;
 
-        for (int rchunk = 0; rchunk < (register_count(hw) >> 6); rchunk++) {
+        for (int rchunk = 0; rchunk < (register_count >> 6); rchunk++) {
             int64_t free = search_full_grf ? free_whole64[rchunk] : -1;
             free &= bundle.reg_mask(hw, rchunk);
 
@@ -310,20 +338,32 @@ Subregister RegisterAllocator::alloc_sub(DataType type, Bundle bundle)
                 || find_alloc_sub(true);
 
     if (!success)
-        throw out_of_registers_exception();
+        return Subregister();
 
     claim_sub(r_alloc, o_alloc, dwords);
 
     return Subregister(GRF(r_alloc), (o_alloc << 2) / getBytes(type), type);
 }
 
-void RegisterAllocator::dump(std::ostream &str)
+template <int register_count>
+FlagRegister RegisterAllocator<register_count>::try_alloc_flag()
+{
+    if (!free_flag) return FlagRegister();
+
+    int idx = utils::bsf(free_flag);
+    free_flag &= (free_flag - 1);               // clear lowest bit.
+
+    return FlagRegister::createFromIndex(idx);
+}
+
+template <int register_count>
+void RegisterAllocator<register_count>::dump(std::ostream &str)
 {
     str << "\n// Flag registers: ";
     for (int r = 0; r < 4; r++)
         str << char((free_flag & (1 << r)) ? '.' : 'x');
 
-    for (int r = 0; r < register_count(hw); r++) {
+    for (int r = 0; r < register_count; r++) {
         if (!(r & 0x1F)) {
             str << "\n//\n// " << std::left;
             str << 'r' << std::setw(3) << r;
@@ -342,7 +382,7 @@ void RegisterAllocator::dump(std::ostream &str)
 
     str << "\n//\n";
 
-    for (int r = 0; r < register_count(hw); r++) {
+    for (int r = 0; r < register_count; r++) {
         int rr = r >> 3, rb = 1 << (r & 7);
         if ((free_sub[r] == 0xFF) != bool(free_whole[rr] & rb))
             str << "// Inconsistent bitmaps at r" << r << std::endl;
@@ -357,16 +397,7 @@ void RegisterAllocator::dump(std::ostream &str)
     str << std::endl;
 }
 
-FlagRegister RegisterAllocator::alloc_flag()
-{
-    if (!free_flag) throw out_of_registers_exception();
-
-    int idx = utils::bsf(free_flag);
-    free_flag &= (free_flag - 1);               // clear lowest bit.
-
-    return FlagRegister::createFromIndex(idx);
-}
-
-
+template class RegisterAllocator<128>;
 
 } /* namespace ngen */
+

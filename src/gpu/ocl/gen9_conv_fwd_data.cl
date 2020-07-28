@@ -322,7 +322,9 @@ int dst_idx(int mb_block, int oc_outer, int ow_block) {
                     && ((iw) + iw_off < 0 || (iw) + iw_off >= IW)) \
                 continue; \
             for (int ic_outer = 0; ic_outer < IC_OUTER; ic_outer++) \
-                for (int mb_block = 0; mb_block < MB_BLOCK; mb_block += 8) { \
+                __attribute__((opencl_unroll_hint)) /*  attr:no-format */ \
+                        for (int mb_block = 0; mb_block < MB_BLOCK; \
+                                mb_block += 8) { \
                     int mb_bound = min(8, MB_BLOCK - mb_block); \
                     DATA_T A[8]; \
                     int off = src_off( \
@@ -608,7 +610,8 @@ DATA_T shuffle_a_value(int mb_block, int ic_block, int ow_outer, int ow_inner,
                             + src_off(0, 0, kd * (1 + DD), kh * (1 + DH), 0); \
                     const __global DATA_T *wei1 \
                             = (wei) + wei_off(0, 0, 0, kd, kh, kw); \
-                    for (int ic = 0; ic < IC; ic += IC_BLOCK) { \
+                    __attribute__((opencl_unroll_hint)) /*  attr:no-format */ \
+                            for (int ic = 0; ic < IC; ic += IC_BLOCK) { \
                         DATA_T B[IC_OUTER * OC_OUTER * IC_INNER]; \
                         read_wei_block(B, wei1); \
                         read_src_and_multiply(src1, (iw), kw, 0, (C), B); \
@@ -649,14 +652,21 @@ gen9_conv_fwd(const __global DATA_T *src, const __global DATA_T *wei,
     int id = od * SD - PD;
 
     DATA_T C[MB_BLOCK * OC_OUTER * OW_BLOCK] = {0};
-    for (int mb_block = 0; mb_block < MB_BLOCK; mb_block++)
-        for (int oc_outer = 0; oc_outer < OC_OUTER; oc_outer++)
-            for (int ow_block = 0; ow_block < OW_BLOCK; ow_block++) {
-                int c_off = dst_idx(mb_block, oc_outer, ow_block);
-                C[c_off] = WITH_BIAS
-                        ? bia[g * OC + oc + oc_outer * 16 + local_id]
-                        : 0;
+    if (WITH_BIAS) {
+        for (int mb_block = 0; mb_block < MB_BLOCK; mb_block++) {
+            for (int oc_outer = 0; oc_outer < OC_OUTER; oc_outer++) {
+                for (int ow_block = 0; ow_block < OW_BLOCK; ow_block++) {
+                    const int c_off = dst_idx(mb_block, oc_outer, ow_block);
+                    const int bg_off = g * OC;
+                    const int bc_off = oc + oc_outer * 16 + local_id;
+                    C[c_off] = (OC_WO_PADDING % OC_BLOCK == 0
+                                       || bc_off < OC_WO_PADDING)
+                            ? bia[bg_off + bc_off]
+                            : DATA_ZERO;
+                }
             }
+        }
+    }
 
     src += src_off(mb, g * IC, id, ih, iw);
     wei += wei_off(g, oc, 0, 0, 0, 0);

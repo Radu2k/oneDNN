@@ -219,8 +219,8 @@ struct settings_t {
     std::vector<bool> with_peephole {false};
     std::vector<bool> with_projection {false};
     std::vector<int64_t> mb {0};
-    std::vector<policy_t> scale_policy {policy_t::NONE};
-    attr_t attr = {};
+    std::vector<policy_t> scale_policy {policy_t::COMMON};
+
     unsigned int flags = 0x0;
     float alpha = 0.9f, beta = 0.0f;
 
@@ -239,10 +239,9 @@ struct settings_t {
 struct prb_t : public desc_t {
     prb_t(const desc_t &desc, const dt_conf_t &cfg, dir_t prop, alg_t alg,
             bool with_peephole, bool with_projection,
-            dnnl_rnn_direction_t direction, const attr_t &attr,
-            policy_t scale_policy, unsigned int flags, activation_t activation,
-            float alpha, float beta, bool skip_nonlinear, bool trivial_strides,
-            int mb = 0)
+            dnnl_rnn_direction_t direction, policy_t scale_policy,
+            unsigned int flags, activation_t activation, float alpha,
+            float beta, bool skip_nonlinear, bool trivial_strides, int mb = 0)
         : desc_t(desc)
         , cfg(cfg)
         , prop(prop2prop_kind(prop))
@@ -254,7 +253,6 @@ struct prb_t : public desc_t {
         , activation(activation)
         , alpha(alpha)
         , beta(beta)
-        , attr(attr)
         , ops(0.0)
         , wei_scales_policy(scale_policy)
         , skip_nonlinear(skip_nonlinear)
@@ -275,14 +273,13 @@ struct prb_t : public desc_t {
         set_tparams(cfg[SRC_LAYER].f_min, cfg[SRC_LAYER].f_max);
 
         switch (wei_scales_policy) {
+            case policy_t::COMMON:
+                wei_scales_mask = 0x0;
+                wei_nscales = 1;
+                break;
             case policy_t::PER_OC:
                 wei_scales_mask = 0x18;
                 wei_nscales = dhc * n_gates();
-                break;
-            case policy_t::COMMON:
-            case policy_t::NONE:
-                wei_scales_mask = 0x0;
-                wei_nscales = 1;
                 break;
             default: assert(!"unsupported scaling policy");
         }
@@ -358,7 +355,6 @@ struct prb_t : public desc_t {
     activation_t activation;
     float alpha;
     float beta;
-    attr_t attr;
     double ops;
 
     float data_scale, data_shift;
@@ -450,8 +446,6 @@ void compute_ref_bwd(const prb_t &p, dnn_mem_t &src_layer_m,
         dnn_mem_t &diff_src_iter_c_m, dnn_mem_t &diff_weights_layer_m,
         dnn_mem_t &diff_weights_iter_m, dnn_mem_t &diff_weights_peephole_m,
         dnn_mem_t &diff_weights_projection_m, dnn_mem_t &diff_bias_m);
-
-void check_case_validity(const dt_conf_t &cfg, policy_t policy);
 
 int doit(const prb_t &p, res_t *res);
 int bench(int argc, char **argv);

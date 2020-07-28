@@ -28,7 +28,7 @@ namespace dnnl {
 namespace impl {
 namespace cpu {
 
-enum conv_gemm_loop_order_t { gemm_loop_rlb, gemm_loop_lrb };
+enum conv_gemm_loop_order_t { gemm_loop_rlb, gemm_loop_lrb, gemm_loop_lbr };
 struct conv_gemm_conf_t {
     prop_kind_t prop_kind;
 
@@ -82,10 +82,10 @@ void im2col_dt(const conv_gemm_conf_t &jcp, const im_dt *__restrict im,
 template <typename T>
 void col2im_dt(
         const conv_gemm_conf_t &jcp, const T *__restrict col, T *__restrict im);
-
-void col2im_3d(
-        const conv_gemm_conf_t &jcp, const float *col, float *im, int od);
-void col2im(const conv_gemm_conf_t &jcp, const float *col, float *im);
+void col2im_3d(const conv_gemm_conf_t &jcp, const float *col, float *im, int od,
+        int spatial_step, int spatial_block);
+void col2im(const conv_gemm_conf_t &jcp, const float *col, float *im,
+        int spatial_step, int spatial_block);
 
 status_t init_conf(conv_gemm_conf_t &jcp,
         memory_tracking::registrar_t &scratchpad, const convolution_desc_t &cd,

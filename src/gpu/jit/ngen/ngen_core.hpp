@@ -195,7 +195,12 @@ public:
 
 // Gen hardware generations.
 enum class HW {
-    Unknown, Gen9, Gen10, Gen11, Gen12LP, Gen12HP
+    Unknown,
+    Gen9,
+    Gen10,
+    Gen11,
+    Gen12LP,
+    Gen12HP,
 };
 
 // Data types. Bits[0:3] are the ID, bits[4:7] hold the width, in bytes.
@@ -410,7 +415,7 @@ public:
 class Label {
 protected:
     unsigned id : 31;
-    bool uninit : 1;
+    unsigned uninit : 1;
 
 public:
     Label() : id(0), uninit(true) {}
@@ -424,10 +429,11 @@ public:
     }
 
     /* for compatibility with RegData */
-    void fixup(int execSize, DataType defaultType, bool isDest) {}
+    void fixup(int execSize, DataType defaultType, bool isDest, int arity) {}
     constexpr14 bool isScalar() const { return false; }
 
 #ifdef NGEN_ASM
+    static const bool emptyOp = false;
     inline void outputText(std::ostream &str, PrintDetail detail, LabelManager &man);
 #endif
 };
@@ -496,7 +502,7 @@ public:
     void invalidate()                     { invalid = true; }
     RegData &operator=(const Invalid &i)  { this->invalidate(); return *this; }
 
-    inline void fixup(int execSize, DataType defaultType, bool isDest);                    // Adjust automatically-computed strides given ESize.
+    inline void fixup(int execSize, DataType defaultType, bool isDest, int arity);                    // Adjust automatically-computed strides given ESize.
 
     constexpr RegData operator+() const { return *this; }
     constexpr14 RegData operator-() const {
@@ -533,7 +539,7 @@ inline RegData abs(const RegData &r)
     return result.setMods(1);
 }
 
-inline void RegData::fixup(int execSize, DataType defaultType, bool isDest)
+inline void RegData::fixup(int execSize, DataType defaultType, bool isDest, int arity)
 {
 #ifdef NGEN_SAFE
     if (isInvalid()) throw invalid_object_exception();
@@ -601,7 +607,9 @@ public:
     bool isValid()                        const { return !rd.isInvalid(); }
     constexpr bool isScalar()             const { return rd.isScalar(); }
 
-    void fixup(int execSize, DataType defaultType, bool isDest) { rd.fixup(execSize, defaultType, isDest); }
+    void fixup(int execSize, DataType defaultType, bool isDest, int arity) {
+        rd.fixup(execSize, defaultType, isDest, arity);
+    }
 
 #ifdef NGEN_ASM
     inline void outputText(std::ostream &str, PrintDetail detail, LabelManager &man) const;
@@ -880,7 +888,9 @@ public:
     constexpr ExtendedReg(RegData base_, uint8_t mmeNum_) : base(base_), mmeNum(mmeNum_) {}
     constexpr ExtendedReg(RegData base_, SpecialAccumulatorRegister acc) : base(base_), mmeNum(acc.getMME()) {}
 
-    void fixup(int execSize, DataType defaultType, bool isDest) { base.fixup(execSize, defaultType, isDest); }
+    void fixup(int execSize, DataType defaultType, bool isDest, int arity) {
+        base.fixup(execSize, defaultType, isDest, arity);
+    }
 
     constexpr int getMods()         const { return base.getMods(); }
     constexpr DataType getType()    const { return base.getType(); }
@@ -1180,6 +1190,7 @@ enum class ThreadCtrl {
     Normal = 0,
     Atomic = 1,
     Switch = 2,
+    NoPreempt = 3
 };
 
 enum class Opcode {
@@ -1443,7 +1454,9 @@ public:
             return SBInfo(scoreboard.sbid, scoreboard.mode == 3, scoreboard.mode == 2);
     }
     constexpr14 Pipe pipe() const {
-        if (isPipeline())
+        if (combined.combined)
+            return Pipe::A;
+        else if (isPipeline())
             return static_cast<Pipe>(pipeline.pipe);
         else
             return Pipe::Default;
@@ -1650,6 +1663,36 @@ protected:
 
     Immediate(uint64_t payload_, DataType type_) : payload(payload_), type(type_) {}
 
+    template <typename T> typename std::enable_if<sizeof(T) == 2>::type setPayload(T imm) {
+        uint32_t ximm = utils::bitcast<T, uint16_t>(imm);
+        payload = ximm | (ximm << 16);
+    }
+    template <typename T> typename std::enable_if<sizeof(T) == 4>::type setPayload(T imm) {
+        payload = utils::bitcast<T, uint32_t>(imm);
+    }
+    template <typename T> typename std::enable_if<sizeof(T) == 8>::type setPayload(T imm) {
+        payload = utils::bitcast<T, uint64_t>(imm);
+    }
+
+    template <typename T> void set(T imm) {
+        setPayload<T>(imm);
+        type = getDataType<T>();
+    }
+
+    template <typename T> void shrinkSigned(T imm) {
+        if (imm == T(int16_t(imm)))       set<int16_t>(imm);
+        else if (imm == T(uint16_t(imm))) set<uint16_t>(imm);
+        else if (imm == T(int32_t(imm)))  set<int32_t>(imm);
+        else if (imm == T(uint32_t(imm))) set<uint32_t>(imm);
+        else                              set(imm);
+    }
+
+    template <typename T> void shrinkUnsigned(T imm) {
+        if (imm == T(uint16_t(imm)))      set<uint16_t>(imm);
+        else if (imm == T(uint32_t(imm))) set<uint32_t>(imm);
+        else                              set(imm);
+    }
+
 public:
     Immediate() : payload(0), type(DataType::invalid) {}
 
@@ -1662,29 +1705,23 @@ public:
     constexpr14 int getMods()                const { return 0; }
     constexpr14 bool isARF()                 const { return false; }
 
-    Immediate &setType(DataType type_)           { type = type_; return *this; }
+    Immediate &setType(DataType type_)             { type = type_; return *this; }
 
-    Immediate(uint16_t imm) : type(DataType::uw) {
-        uint32_t ximm = imm;
-        payload = ximm | (ximm << 16);
-    }
-    Immediate(int16_t  imm) : type(DataType::w) {
-        uint32_t ximm = uint16_t(imm);
-        payload = ximm | (ximm << 16);
-    }
-    Immediate(uint32_t imm) : payload(imm), type(DataType::ud) {}
-    Immediate(int32_t  imm) : payload(imm), type(DataType::d)  {}
-    Immediate(uint64_t imm) : payload(imm), type(DataType::uq) {}
-    Immediate(int64_t  imm) : payload(imm), type(DataType::q)  {}
-    Immediate(float    imm) : payload(utils::bitcast<float, uint32_t>(imm)), type(DataType::f) {}
-    Immediate(double   imm) : payload(utils::bitcast<double, uint64_t>(imm)), type(DataType::df) {}
+    Immediate(uint16_t imm) { set(imm); }
+    Immediate(int16_t  imm) { set(imm); }
+    Immediate(uint32_t imm) { shrinkUnsigned(imm); }
+    Immediate(int32_t imm)  { shrinkSigned(imm); }
+    Immediate(uint64_t imm) { shrinkUnsigned(imm); }
+    Immediate(int64_t imm)  { shrinkSigned(imm); }
+
+    Immediate(float    imm) { set(imm); }
+    Immediate(double   imm) { set(imm); }
 #ifdef NGEN_HALF_TYPE
-    Immediate(half     imm) : payload(utils::bitcast<half, uint16_t>(imm)), type(DataType::hf) {}
+    Immediate(half     imm) { set(imm); }
 #endif
 #ifdef NGEN_BFLOAT16_TYPE
-    Immediate(bfloat16 imm) : payload(utils::bitcast<bfloat16, uint16_t>(imm)), type(DataType::bf) {}
+    Immediate(bfloat16 imm) { set(imm); }
 #endif
-
 
     Immediate hideType() const {
         Immediate result = *this;
@@ -1692,12 +1729,28 @@ public:
         return result;
     }
 
+    static inline Immediate uw(uint16_t imm) { return Immediate(imm); }
+    static inline Immediate  w(int16_t  imm) { return Immediate(imm); }
+    static inline Immediate ud(uint32_t imm) { Immediate i; i.set(imm); return i; }
+    static inline Immediate  d(int32_t  imm) { Immediate i; i.set(imm); return i; }
+    static inline Immediate uq(uint64_t imm) { Immediate i; i.set(imm); return i; }
+    static inline Immediate  q(int64_t  imm) { Immediate i; i.set(imm); return i; }
+    static inline Immediate  f(float    imm) { return Immediate(imm); }
+    static inline Immediate df(double   imm) { return Immediate(imm); }
+
     static inline Immediate hf(uint16_t f) {
         uint32_t fimm = f;
         fimm |= (fimm << 16);
         return Immediate(fimm, DataType::hf);
     }
 
+    static inline Immediate bf(uint16_t f) {
+        uint32_t fimm = f;
+        fimm |= (fimm << 16);
+        return Immediate(fimm, DataType::bf);
+    }
+
+protected:
     static inline uint32_t toUV(int8_t i) {
 #ifdef NGEN_SAFE
         if (i & 0xF0) throw invalid_immediate_exception();
@@ -1705,6 +1758,7 @@ public:
         return i;
     }
 
+public:
     static inline Immediate uv(uint32_t i) {
         return Immediate(i, DataType::uv);
     }
@@ -1721,6 +1775,7 @@ public:
         return uv(payload);
     }
 
+protected:
     static inline uint32_t toV(int8_t i) {
 #ifdef NGEN_SAFE
         if (i & 0x78) throw invalid_immediate_exception();
@@ -1728,6 +1783,7 @@ public:
         return (i & 0x7) | ((i >> 4) & 0x8);
     }
 
+public:
     static inline Immediate v(uint32_t i) {
         return Immediate(i, DataType::v);
     }
@@ -1770,7 +1826,12 @@ public:
         return Immediate(payload, DataType::vf);
     }
 
-    void fixup(int execSize, DataType defaultType, bool isDest) const {}                   /* for compatibility with RegData */
+    void fixup(int execSize, DataType defaultType, bool isDest, int arity) const {
+#ifdef NGEN_SAFE
+        if (getBytes(type) > (16 >> arity))
+            throw invalid_immediate_exception();
+#endif
+    }
 
     constexpr14 bool isScalar() const {
         switch (type) {
@@ -1781,6 +1842,15 @@ public:
             default:
                 return true;
         }
+    }
+
+    Immediate forceInt32() const {
+        auto result = *this;
+        if (result.type == DataType::uw)
+            result.set<uint32_t>(uint16_t(payload));
+        else if (result.type == DataType::w)
+            result.set<int32_t>(int16_t(payload));
+        return result;
     }
 
 #ifdef NGEN_ASM
@@ -1826,7 +1896,7 @@ union MessageDescriptor {
         unsigned legacySIMD : 1;
         unsigned elements : 2;
         unsigned : 1;
-        unsigned : 1;                /* Status return (DG2/ATS/PVC), invalidate L3 (old?) */
+        unsigned : 1;
         unsigned messageType : 5;
         unsigned header : 1;
         unsigned responseLen : 5;
@@ -1908,8 +1978,6 @@ enum class AtomicOp : uint8_t {
     fcmpwr = 0x13,
     fadd = 0x14,
     fsub = 0x15,
-    fadd_64b = 0x16,
-    fsub_64b = 0x17
 };
 
 static inline int operandCount(AtomicOp op) {
@@ -2138,7 +2206,7 @@ public:
     }
 };
 
-class scattered_word_class {
+class scattered_word {
 public:
     template <Access access> void getDescriptors(const InstructionModifier &mod, AddressBase base, MessageDescriptor &desc, ExtendedMessageDescriptor &exdesc) const
     {
@@ -2166,8 +2234,6 @@ public:
         desc.atomic.simd8 = a64 ? 0 : !simd16;
     }
 };
-
-static constexpr scattered_word_class scattered_word{};
 
 class scattered_dword {
 protected:
@@ -2308,8 +2374,8 @@ public:
         exdesc = SharedFunction::dc1;
         desc.all = 0;
         desc.block.messageType = (base.getModel() == ModelSC) ? 0x05 :
-                                  (access == Access::Write) ? 0x0A :
-                                                              0x04;
+                                    (access == Access::Write) ? 0x0A :
+                                                                0x04;
         desc.block.elements = (vls_override << 2) | (vls_offset & 1);
         desc.block.header = true;
 
@@ -2377,3 +2443,4 @@ void encodeAtomicDescriptors(MessageDescriptor &desc, ExtendedMessageDescriptor 
 
 
 #endif /* header guard */
+

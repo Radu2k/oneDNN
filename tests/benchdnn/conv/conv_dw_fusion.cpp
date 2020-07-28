@@ -177,14 +177,7 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
     dnnl_dim_t strides_nd[] = {p->sd, p->sh, p->sw};
     dnnl_dim_t dilates_nd[] = {p->dd, p->dh, p->dw};
     dnnl_dim_t padding_nd[] = {p->pd, p->ph, p->pw};
-
-    auto bph = [](int64_t ih, int64_t oh, int64_t kh, int64_t sh, int64_t ph,
-                       int64_t dh) {
-        return (oh - 1) * sh - ih + ((kh - 1) * (dh + 1) + 1) - ph;
-    };
-    dnnl_dim_t padding_r_nd[] = {bph(p->id, p->od, p->kd, p->sd, p->pd, p->dd),
-            bph(p->ih, p->oh, p->kh, p->sh, p->ph, p->dh),
-            bph(p->iw, p->ow, p->kw, p->sw, p->pw, p->dw)};
+    dnnl_dim_t padding_r_nd[] = {p->pd_r, p->ph_r, p->pw_r};
 
     dnnl_dim_t *strides = strides_nd + (5 - p->ndims);
     dnnl_dim_t *dilates = dilates_nd + (5 - p->ndims);
@@ -319,6 +312,7 @@ std::unique_ptr<prb_t> get_fused_conv_prb(const prb_t *p) {
     cd.pw = 1;
     cd.has_groups = true;
     cd.ndims = p->ndims;
+    cd.init_pad_r(false); // is_deconv = false for conv descriptor
 
     return std::unique_ptr<prb_t>(new prb_t(cd, p->dir, p_dw_cfg, tag::any,
             tag::any, p->dtag, alg_t::DIRECT, fusion_attr, p->mb));
@@ -540,7 +534,8 @@ int doit(const prb_t *p, res_t *r) {
         args0.set(DNNL_ARG_DST, dst_dt0);
         args0.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt0);
 
-        DNN_SAFE(execute_and_wait(c0, args0), WARN);
+        SAFE(execute_and_wait(c0, args0), WARN);
+
         SAFE(src_dt1.reorder(dst_dt0), WARN);
 
         args1.set(DNNL_ARG_SRC, src_dt1);
@@ -549,7 +544,7 @@ int doit(const prb_t *p, res_t *r) {
         args1.set(DNNL_ARG_DST, dst_dt1);
         args1.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt1);
 
-        DNN_SAFE(execute_and_wait(c1, args1), WARN);
+        SAFE(execute_and_wait(c1, args1), WARN);
 
         args.set(DNNL_ARG_SRC, src_dt);
         args.set(DNNL_ARG_WEIGHTS, wei_dt);
@@ -561,7 +556,7 @@ int doit(const prb_t *p, res_t *r) {
             args.set(DNNL_ARG_ATTR_POST_OP_DW | DNNL_ARG_BIAS, fused_bia_dt);
         args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
 
-        DNN_SAFE(execute_and_wait(c, args), WARN);
+        SAFE(execute_and_wait(c, args), WARN);
 
         if (bench_mode & CORR) {
             dnn_mem_t dst_fused(dst_dt, fp, src_tag, test_engine);

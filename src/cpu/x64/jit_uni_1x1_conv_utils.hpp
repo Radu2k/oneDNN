@@ -156,7 +156,7 @@ struct rtus_driver_t : public jit_generator {
     int src_step_h_, src_step_icb_, ws_step_icb_, vlen_, vlen_shift_;
     bool src_to_ws_;
     size_t typesize_;
-    int ic_;
+    int ic_, ic_tail_;
     bool is_nspc_;
 
     Xbyak::Xmm reg_zero;
@@ -232,6 +232,10 @@ struct rtus_driver_t : public jit_generator {
             tvlen /= 2;
             vlen_shift_++;
         }
+
+        const int simd_w = vlen_ / sizeof(float);
+        ic_tail_ = ic_ % simd_w;
+
         generate();
     }
 
@@ -351,9 +355,11 @@ struct rtus_driver_t : public jit_generator {
         shl(reg_icb, vlen_shift_);
 
         const size_t w_step_factor = ic_ * typesize_;
-        const size_t max_load_store_bytes = 16;
+        const size_t max_load_store_bytes = 32;
         const size_t load_store_size
                 = isa == avx512_common ? vlen_ : max_load_store_bytes;
+        size_t load_store_tail_size = (typesize_ == 1 ? max_load_store_bytes
+                                                      : ic_tail_ * typesize_);
 
         Label is_loop, ic_loop, ic_loop_tail, ic_loop_finish;
         L(is_loop);
@@ -390,16 +396,18 @@ struct rtus_driver_t : public jit_generator {
                 je(ic_loop_finish);
 
                 if (src_to_ws_) {
-                    load_reg(
-                            reg_v | tail_mask, reg_cur_src, 0, load_store_size);
-                    store_reg(reg_ws, reg_v | tail_mask, 0, load_store_size);
-                } else {
-                    load_reg(reg_v | tail_mask, reg_ws, 0, load_store_size);
+                    load_reg(reg_v | tail_mask, reg_cur_src, 0,
+                            load_store_tail_size);
                     store_reg(
-                            reg_cur_src, reg_v | tail_mask, 0, load_store_size);
+                            reg_ws, reg_v | tail_mask, 0, load_store_tail_size);
+                } else {
+                    load_reg(
+                            reg_v | tail_mask, reg_ws, 0, load_store_tail_size);
+                    store_reg(reg_cur_src, reg_v | tail_mask, 0,
+                            load_store_tail_size);
                     for (int w = 1; w < stride_w_; ++w)
                         store_reg(reg_cur_src, reg_zero | tail_mask,
-                                w * w_step_factor, load_store_size);
+                                w * w_step_factor, load_store_tail_size);
                 }
             }
             L(ic_loop_finish);
@@ -444,7 +452,7 @@ struct rtus_driver_t : public jit_generator {
 
                     for (int w = 0; w < stride_w_; ++w)
                         store_reg(reg_cur_src, reg_zero | tail_mask,
-                                w * w_step_factor, load_store_size);
+                                w * w_step_factor, load_store_tail_size);
 
                     L(ic_finish_ih_loop_nhwc);
 
@@ -569,6 +577,110 @@ inline int best_divider(int value, int min_divider, int max_divider,
         }
     }
     return x_divider;
+}
+
+typedef jit_1x1_conv_conf_t jcp_t;
+
+inline bool is_bcast_layout_nxc(const jcp_t &jcp) {
+    switch (jcp.prop_kind) {
+        case prop_kind::forward_training:
+        case prop_kind::forward_inference:
+        case prop_kind::backward_weights:
+            return utils::one_of(jcp.src_tag, format_tag::ndhwc,
+                    format_tag::nhwc, format_tag::nwc);
+        case prop_kind::backward_data:
+            return utils::one_of(jcp.dst_tag, format_tag::ndhwc,
+                    format_tag::nhwc, format_tag::nwc);
+        default: assert(!"invalid prop_kind"); return false;
+    }
+}
+
+inline bool is_load_layout_nxc(const jcp_t &jcp) {
+    return jcp.prop_kind == prop_kind::backward_weights
+            && utils::one_of(jcp.dst_tag, format_tag::ndhwc, format_tag::nhwc,
+                    format_tag::nwc);
+}
+
+inline bool is_out_layout_nxc(const jcp_t &jcp) {
+    switch (jcp.prop_kind) {
+        case prop_kind::forward_training:
+        case prop_kind::forward_inference:
+            return utils::one_of(jcp.dst_tag, format_tag::ndhwc,
+                    format_tag::nhwc, format_tag::nwc);
+        case prop_kind::backward_data:
+            return utils::one_of(jcp.src_tag, format_tag::ndhwc,
+                    format_tag::nhwc, format_tag::nwc);
+        case prop_kind::backward_weights: return false;
+        default: assert(!"invalid prop_kind"); return false;
+    }
+}
+
+inline size_t get_bcast_u_offset(const jcp_t &jcp) {
+    return is_bcast_layout_nxc(jcp) ? jcp.ic : jcp.ic_block;
+}
+
+inline size_t get_bcast_j_offset(const jcp_t &jcp) {
+    return is_bcast_layout_nxc(jcp) ? jcp.reduce_dim : jcp.reduce_loop_unroll;
+}
+
+inline size_t get_bcast_offset(const jcp_t &jcp, int u, int j) {
+    size_t offset;
+    if (utils::one_of(jcp.prop_kind, prop_kind::forward_training,
+                prop_kind::forward_inference, prop_kind::backward_data)) {
+        assert(jcp.reduce_loop_unroll == jcp.reduce_block);
+        if (is_bcast_layout_nxc(jcp) || u != jcp.reduce_loop_unroll) {
+            offset = j * get_bcast_j_offset(jcp) + u;
+        } else {
+            offset = (jcp.bcast_dim + j) * get_bcast_j_offset(jcp);
+        }
+    } else {
+        offset = u * get_bcast_u_offset(jcp) + j;
+    }
+    return sizeof(float) * offset;
+}
+
+inline size_t get_load_u_offset(const jcp_t &jcp) {
+    return is_load_layout_nxc(jcp) ? jcp.oc : jcp.oc_block;
+}
+
+inline size_t get_load_i_offset(const jcp_t &jcp) {
+    return is_load_layout_nxc(jcp) ? jcp.oc_block : jcp.os;
+}
+
+inline size_t get_load_bwd_w_offset(const jcp_t &jcp, int i, int u0) {
+    if (is_load_layout_nxc(jcp)) {
+        return i * get_load_i_offset(jcp) + u0 * get_load_u_offset(jcp);
+    } else {
+        return (i * get_load_i_offset(jcp) + u0) * get_load_u_offset(jcp);
+    }
+}
+
+inline size_t get_output_i_offset(const jcp_t &jcp) {
+    if (is_out_layout_nxc(jcp)) {
+        return jcp.load_block;
+    } else {
+        return (jcp.with_dw_conv ? jcp.ow : jcp.bcast_dim) * jcp.load_block;
+    }
+}
+
+inline size_t get_output_j_offset(const jcp_t &jcp) {
+    return is_out_layout_nxc(jcp) ? jcp.load_dim : jcp.load_block;
+}
+
+inline size_t get_load_loop_output_fwd_offset(
+        const jcp_t &jcp, int load_loop_blk) {
+    size_t offset = load_loop_blk * jcp.oc_block * sizeof(float);
+    if (!is_out_layout_nxc(jcp)) {
+        offset *= jcp.with_dw_conv ? jcp.ow : jcp.os;
+    }
+    return offset;
+}
+
+inline size_t get_load_loop_output_bwd_d_offset(
+        const jcp_t &jcp, int load_loop_blk) {
+    size_t offset = load_loop_blk * jcp.ic_block * sizeof(float);
+    if (!is_out_layout_nxc(jcp)) { offset *= jcp.os; }
+    return offset;
 }
 
 } // namespace x64

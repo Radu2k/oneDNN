@@ -330,15 +330,19 @@ PREFIX constexpr ngen::InstructionModifier CG::NoSrcDepSet; \
 PREFIX constexpr ngen::InstructionModifier CG::Breakpoint; \
 PREFIX constexpr ngen::InstructionModifier CG::sat; \
 PREFIX constexpr ngen::InstructionModifier CG::NoMask; \
+\
 PREFIX constexpr ngen::InstructionModifier CG::Mask; \
 PREFIX constexpr ngen::InstructionModifier CG::ForceMask; \
+\
 PREFIX constexpr ngen::InstructionModifier CG::AutoSWSB; \
 PREFIX constexpr ngen::InstructionModifier CG::Serialize; \
 PREFIX constexpr ngen::InstructionModifier CG::EOT; \
 PREFIX constexpr ngen::InstructionModifier CG::Align1; \
 PREFIX constexpr ngen::InstructionModifier CG::Align16; \
-PREFIX constexpr ngen::InstructionModifier CG::Switch; \
+\
 PREFIX constexpr ngen::InstructionModifier CG::Atomic; \
+PREFIX constexpr ngen::InstructionModifier CG::Switch; \
+PREFIX constexpr ngen::InstructionModifier CG::NoPreempt; \
 \
 PREFIX constexpr ngen::PredCtrl CG::anyv; \
 PREFIX constexpr ngen::PredCtrl CG::allv; \
@@ -424,6 +428,7 @@ template class ngen::BinaryCodeGenerator<ngen::HW::Gen9>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen10>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen11>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen12LP>;
+
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen12HP>;
 
 #endif /* (defined(NGEN_CPP11) || defined(NGEN_CPP14)) && !defined(NGEN_GLOBAL_REGS) */

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2019 Intel Corporation
+* Copyright 2016-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -54,13 +54,8 @@
 	@note modified new BSD license
 	http://opensource.org/licenses/BSD-3-Clause
 */
-#if !defined(XBYAK_USE_OP_NAMES) && !defined(XBYAK_NO_OP_NAMES)
+#if (not +0) && !defined(XBYAK_NO_OP_NAMES) // trick to detect whether 'not' is operator or not
 	#define XBYAK_NO_OP_NAMES
-#endif
-#ifndef XBYAK_NO_OP_NAMES
-	#if not +0 // trick to detect whether 'not' is operator or not
-		#error "use -fno-operator-names option if you want to use and(), or(), xor(), not() as function names, Or define XBYAK_NO_OP_NAMES and use and_(), or_(), xor_(), not_()."
-	#endif
 #endif
 
 #include <stdio.h> // for debug print
@@ -74,7 +69,9 @@
 
 // #define XBYAK_DISABLE_AVX512
 
-//#define XBYAK_USE_MMAP_ALLOCATOR
+#if !defined(XBYAK_USE_MMAP_ALLOCATOR) && !defined(XBYAK_DONT_USE_MMAP_ALLOCATOR)
+	#define XBYAK_USE_MMAP_ALLOCATOR
+#endif
 #if !defined(__GNUC__) || defined(__MINGW32__)
 	#undef XBYAK_USE_MMAP_ALLOCATOR
 #endif
@@ -128,9 +125,12 @@
 	#include <sys/mman.h>
 	#include <stdlib.h>
 #endif
-#if defined(__APPLE__) && defined(MAP_JIT)
+#if defined(__APPLE__) && !defined(XBYAK_DONT_USE_MAP_JIT)
 	#define XBYAK_USE_MAP_JIT
 	#include <sys/sysctl.h>
+	#ifndef MAP_JIT
+		#define MAP_JIT 0x800
+	#endif
 #endif
 #if !defined(_MSC_VER) || (_MSC_VER >= 1600)
 	#include <stdint.h>
@@ -165,7 +165,7 @@ namespace Xbyak {
 
 enum {
 	DEFAULT_MAX_CODE_SIZE = 4096,
-	VERSION = 0x5850 /* 0xABCD = A.BC(D) */
+	VERSION = 0x5912 /* 0xABCD = A.BC(D) */
 };
 
 #ifndef MIE_INTEGER_TYPE_DEFINED
@@ -442,7 +442,7 @@ class Reg;
 class Operand {
 	static const uint8 EXT8BIT = 0x20;
 	unsigned int idx_:6; // 0..31 + EXT8BIT = 1 if spl/bpl/sil/dil
-	unsigned int kind_:9;
+	unsigned int kind_:10;
 	unsigned int bit_:10;
 protected:
 	unsigned int zero_:1;
@@ -460,7 +460,8 @@ public:
 		YMM = 1 << 5,
 		ZMM = 1 << 6,
 		OPMASK = 1 << 7,
-		BNDREG = 1 << 8
+		BNDREG = 1 << 8,
+		TMM = 1 << 9
 	};
 	enum Code {
 #ifdef XBYAK64
@@ -490,6 +491,7 @@ public:
 	bool isXMM() const { return is(XMM); }
 	bool isYMM() const { return is(YMM); }
 	bool isZMM() const { return is(ZMM); }
+	bool isTMM() const { return is(TMM); }
 	bool isXMEM() const { return is(XMM | MEM); }
 	bool isYMEM() const { return is(YMM | MEM); }
 	bool isZMEM() const { return is(ZMM | MEM); }
@@ -508,15 +510,14 @@ public:
 	int getRounding() const { return rounding_; }
 	void setKind(Kind kind)
 	{
-		if ((kind & (XMM|YMM|ZMM)) == 0) return;
+		if ((kind & (XMM|YMM|ZMM|TMM)) == 0) return;
 		kind_ = kind;
-		bit_ = kind == XMM ? 128 : kind == YMM ? 256 : 512;
+		bit_ = kind == XMM ? 128 : kind == YMM ? 256 : kind == ZMM ? 512 : 8192;
 	}
 	// err if MMX/FPU/OPMASK/BNDREG
 	void setBit(int bit);
-	void setOpmaskIdx(int idx, bool ignore_idx0 = false)
+	void setOpmaskIdx(int idx, bool /*ignore_idx0*/ = true)
 	{
-		if (!ignore_idx0 && idx == 0) throw Error(ERR_K0_IS_INVALID);
 		if (mask_) throw Error(ERR_OPMASK_IS_ALREADY_SET);
 		mask_ = idx;
 	}
@@ -559,6 +560,11 @@ public:
 		} else if (isOPMASK()) {
 			static const char *tbl[8] = { "k0", "k1", "k2", "k3", "k4", "k5", "k6", "k7" };
 			return tbl[idx];
+		} else if (isTMM()) {
+			static const char *tbl[8] = {
+				"tmm0", "tmm1", "tmm2", "tmm3", "tmm4", "tmm5", "tmm6", "tmm7"
+			};
+			return tbl[idx];
 		} else if (isZMM()) {
 			static const char *tbl[32] = {
 				"zmm0", "zmm1", "zmm2", "zmm3", "zmm4", "zmm5", "zmm6", "zmm7", "zmm8", "zmm9", "zmm10", "zmm11", "zmm12", "zmm13", "zmm14", "zmm15",
@@ -598,13 +604,13 @@ public:
 
 inline void Operand::setBit(int bit)
 {
-	if (bit != 8 && bit != 16 && bit != 32 && bit != 64 && bit != 128 && bit != 256 && bit != 512) goto ERR;
+	if (bit != 8 && bit != 16 && bit != 32 && bit != 64 && bit != 128 && bit != 256 && bit != 512 && bit != 8192) goto ERR;
 	if (isBit(bit)) return;
-	if (is(MEM)) {
+	if (is(MEM | OPMASK)) {
 		bit_ = bit;
 		return;
 	}
-	if (is(REG | XMM | YMM | ZMM)) {
+	if (is(REG | XMM | YMM | ZMM | TMM)) {
 		int idx = getIdx();
 		// err if converting ah, bh, ch, dh
 		if (isREG(8) && (4 <= idx && idx < 8) && !isExt8bit()) goto ERR;
@@ -626,6 +632,7 @@ inline void Operand::setBit(int bit)
 		case 128: kind = XMM; break;
 		case 256: kind = YMM; break;
 		case 512: kind = ZMM; break;
+		case 8192: kind = TMM; break;
 		}
 		idx_ = idx;
 		kind_ = kind;
@@ -718,6 +725,10 @@ struct Ymm : public Xmm {
 struct Zmm : public Ymm {
 	explicit Zmm(int idx = 0) : Ymm(idx, Operand::ZMM, 512) { }
 	Zmm operator|(const EvexModifierRounding& emr) const { Zmm r(*this); r.setRounding(emr.rounding); return r; }
+};
+
+struct Tmm : public Reg {
+	explicit Tmm(int idx = 0, Kind kind = Operand::TMM, int bit = 8192) : Reg(idx, kind, bit) { }
 };
 
 struct Opmask : public Reg {
@@ -828,7 +839,7 @@ public:
 		: scale_(scale)
 		, disp_(0)
 	{
-		if (!r.isREG(i32e) && !r.is(Reg::XMM|Reg::YMM|Reg::ZMM)) throw Error(ERR_BAD_SIZE_OF_REGISTER);
+		if (!r.isREG(i32e) && !r.is(Reg::XMM|Reg::YMM|Reg::ZMM|Reg::TMM)) throw Error(ERR_BAD_SIZE_OF_REGISTER);
 		if (scale == 0) return;
 		if (scale != 1 && scale != 2 && scale != 4 && scale != 8) throw Error(ERR_BAD_SCALE);
 		if (r.getBit() >= 128 || scale != 1) { // xmm/ymm is always index
@@ -1629,6 +1640,7 @@ private:
 		T_M_K = 1 << 28, // mem{k}
 		T_VSIB = 1 << 29,
 		T_MEM_EVEX = 1 << 30, // use evex if mem
+		T_TMM = 1 << 31,
 		T_XXX
 	};
 	void vex(const Reg& reg, const Reg& base, const Operand *v, int type, int code, bool x = false)
@@ -1712,6 +1724,7 @@ private:
 		bool Vp = !((v ? v->isExtIdx2() : 0) | Hi16Vidx);
 		bool z = reg.hasZero() || base.hasZero() || (v ? v->hasZero() : false);
 		if (aaa == 0) aaa = verifyDuplicate(base.getOpmaskIdx(), reg.getOpmaskIdx(), (v ? v->getOpmaskIdx() : 0), ERR_OPMASK_IS_ALREADY_SET);
+		if (aaa == 0) z = 0; // clear T_z if mask is not set
 		db(0x62);
 		db((R ? 0x80 : 0) | (X ? 0x40 : 0) | (B ? 0x20 : 0) | (Rp ? 0x10 : 0) | (mm & 3));
 		db((w == 1 ? 0x80 : 0) | ((vvvv & 15) << 3) | 4 | (pp & 3));
@@ -1825,6 +1838,7 @@ private:
 			db(longCode); dd(disp - longJmpSize);
 		}
 	}
+	bool isNEAR(LabelType type) const { return type == T_NEAR || (type == T_AUTO && isDefaultJmpNEAR_); }
 	template<class T>
 	void opJmp(T& label, LabelType type, uint8 shortCode, uint8 longCode, uint8 longPref)
 	{
@@ -1834,7 +1848,7 @@ private:
 			makeJmp(inner::VerifyInInt32(offset - size_), type, shortCode, longCode, longPref);
 		} else {
 			int jmpSize = 0;
-			if (type == T_NEAR) {
+			if (isNEAR(type)) {
 				jmpSize = 4;
 				if (longPref) db(longPref);
 				db(longCode); dd(0);
@@ -1849,7 +1863,7 @@ private:
 	void opJmpAbs(const void *addr, LabelType type, uint8 shortCode, uint8 longCode, uint8 longPref = 0)
 	{
 		if (isAutoGrow()) {
-			if (type != T_NEAR) throw Error(ERR_ONLY_T_NEAR_IS_SUPPORTED_IN_AUTO_GROW);
+			if (!isNEAR(type)) throw Error(ERR_ONLY_T_NEAR_IS_SUPPORTED_IN_AUTO_GROW);
 			if (size_ + 16 >= maxSize_) growMemory();
 			if (longPref) db(longPref);
 			db(longCode);
@@ -2294,6 +2308,19 @@ private:
 		}
 		throw Error(ERR_BAD_COMBINATION);
 	}
+	void opAMX(const Tmm& t1, const Operand& op1, const Operand& op2, int type, int code0, int imm8 = NONE)
+	{
+		const Reg *t2 = static_cast<const Reg*>(&op1);
+		const Operand *op = &op2;
+		if (op2.isNone()) { // <i>(t1, op1) -> <i>(t1, t1, op1)
+			t2 = &t1;
+			op = &op1;
+		}
+		// <i>(t1, t2, op)
+		if (!((type & T_TMM) && (t1.isTMM() && t2->isTMM()))) throw Error(ERR_BAD_COMBINATION);
+
+		opVex(t1, t2, *op, type, code0, imm8);
+	}
 public:
 	unsigned int getVersion() const { return VERSION; }
 	using CodeArray::db;
@@ -2303,7 +2330,7 @@ public:
 	const Zmm zmm0, zmm1, zmm2, zmm3, zmm4, zmm5, zmm6, zmm7;
 	const Xmm &xm0, &xm1, &xm2, &xm3, &xm4, &xm5, &xm6, &xm7;
 	const Ymm &ym0, &ym1, &ym2, &ym3, &ym4, &ym5, &ym6, &ym7;
-	const Ymm &zm0, &zm1, &zm2, &zm3, &zm4, &zm5, &zm6, &zm7;
+	const Zmm &zm0, &zm1, &zm2, &zm3, &zm4, &zm5, &zm6, &zm7;
 	const Reg32 eax, ecx, edx, ebx, esp, ebp, esi, edi;
 	const Reg16 ax, cx, dx, bx, sp, bp, si, di;
 	const Reg8 al, cl, dl, bl, ah, ch, dh, bh;
@@ -2329,6 +2356,7 @@ public:
 	const Zmm zmm8, zmm9, zmm10, zmm11, zmm12, zmm13, zmm14, zmm15;
 	const Zmm zmm16, zmm17, zmm18, zmm19, zmm20, zmm21, zmm22, zmm23;
 	const Zmm zmm24, zmm25, zmm26, zmm27, zmm28, zmm29, zmm30, zmm31;
+	const Tmm tmm0, tmm1, tmm2, tmm3, tmm4, tmm5, tmm6, tmm7;
 	const Xmm &xm8, &xm9, &xm10, &xm11, &xm12, &xm13, &xm14, &xm15; // for my convenience
 	const Xmm &xm16, &xm17, &xm18, &xm19, &xm20, &xm21, &xm22, &xm23;
 	const Xmm &xm24, &xm25, &xm26, &xm27, &xm28, &xm29, &xm30, &xm31;
@@ -2338,11 +2366,15 @@ public:
 	const Zmm &zm8, &zm9, &zm10, &zm11, &zm12, &zm13, &zm14, &zm15;
 	const Zmm &zm16, &zm17, &zm18, &zm19, &zm20, &zm21, &zm22, &zm23;
 	const Zmm &zm24, &zm25, &zm26, &zm27, &zm28, &zm29, &zm30, &zm31;
+	const Tmm &tm0, &tm1, &tm2, &tm3, &tm4, &tm5, &tm6, &tm7;
 	const RegRip rip;
 #endif
 #ifndef XBYAK_DISABLE_SEGMENT
 	const Segment es, cs, ss, ds, fs, gs;
 #endif
+private:
+	bool isDefaultJmpNEAR_;
+public:
 	void L(const std::string& label) { labelMgr_.defineSlabel(label); }
 	void L(Label& label) { labelMgr_.defineClabel(label); }
 	Label L() { Label label; L(label); return label; }
@@ -2362,6 +2394,8 @@ public:
 	void putL(std::string label) { putL_inner(label); }
 	void putL(const Label& label) { putL_inner(label); }
 
+	// set default type of `jmp` of undefined label to T_NEAR
+	void setDefaultJmpNEAR(bool isNear) { isDefaultJmpNEAR_ = isNear; }
 	void jmp(const Operand& op) { opR_ModM(op, BIT, 4, 0xFF, NONE, NONE, true); }
 	void jmp(std::string label, LabelType type = T_AUTO) { opJmp(label, type, 0xEB, 0xE9, 0); }
 	void jmp(const char *label, LabelType type = T_AUTO) { jmp(std::string(label), type); }
@@ -2605,6 +2639,7 @@ public:
 		, zmm8(8), zmm9(9), zmm10(10), zmm11(11), zmm12(12), zmm13(13), zmm14(14), zmm15(15)
 		, zmm16(16), zmm17(17), zmm18(18), zmm19(19), zmm20(20), zmm21(21), zmm22(22), zmm23(23)
 		, zmm24(24), zmm25(25), zmm26(26), zmm27(27), zmm28(28), zmm29(29), zmm30(30), zmm31(31)
+		, tmm0(0), tmm1(1), tmm2(2), tmm3(3), tmm4(4), tmm5(5), tmm6(6), tmm7(7)
 		// for my convenience
 		, xm8(xmm8), xm9(xmm9), xm10(xmm10), xm11(xmm11), xm12(xmm12), xm13(xmm13), xm14(xmm14), xm15(xmm15)
 		, xm16(xmm16), xm17(xmm17), xm18(xmm18), xm19(xmm19), xm20(xmm20), xm21(xmm21), xm22(xmm22), xm23(xmm23)
@@ -2615,11 +2650,13 @@ public:
 		, zm8(zmm8), zm9(zmm9), zm10(zmm10), zm11(zmm11), zm12(zmm12), zm13(zmm13), zm14(zmm14), zm15(zmm15)
 		, zm16(zmm16), zm17(zmm17), zm18(zmm18), zm19(zmm19), zm20(zmm20), zm21(zmm21), zm22(zmm22), zm23(zmm23)
 		, zm24(zmm24), zm25(zmm25), zm26(zmm26), zm27(zmm27), zm28(zmm28), zm29(zmm29), zm30(zmm30), zm31(zmm31)
+		, tm0(tmm0), tm1(tmm1), tm2(tmm2), tm3(tmm3), tm4(tmm4), tm5(tmm5), tm6(tmm6), tm7(tmm7)
 		, rip()
 #endif
 #ifndef XBYAK_DISABLE_SEGMENT
 		, es(Segment::es), cs(Segment::cs), ss(Segment::ss), ds(Segment::ds), fs(Segment::fs), gs(Segment::gs)
 #endif
+		, isDefaultJmpNEAR_(false)
 	{
 		labelMgr_.set(this);
 	}
@@ -2740,6 +2777,7 @@ static const Ymm ymm24(24), ymm25(25), ymm26(26), ymm27(27), ymm28(28), ymm29(29
 static const Zmm zmm8(8), zmm9(9), zmm10(10), zmm11(11), zmm12(12), zmm13(13), zmm14(14), zmm15(15);
 static const Zmm zmm16(16), zmm17(17), zmm18(18), zmm19(19), zmm20(20), zmm21(21), zmm22(22), zmm23(23);
 static const Zmm zmm24(24), zmm25(25), zmm26(26), zmm27(27), zmm28(28), zmm29(29), zmm30(30), zmm31(31);
+static const Tmm tmm0(0), tmm1(1), tmm2(2), tmm3(3), tmm4(4), tmm5(5), tmm6(6), tmm7(7);
 static const RegRip rip;
 #endif
 #ifndef XBYAK_DISABLE_SEGMENT

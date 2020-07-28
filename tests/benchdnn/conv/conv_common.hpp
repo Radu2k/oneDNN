@@ -43,11 +43,27 @@ struct desc_t {
     int64_t kd, kh, kw;
     int64_t sd, sh, sw;
     int64_t pd, ph, pw;
+    int64_t pd_r, ph_r, pw_r; // End side padding for each dimension
     int64_t dd, dh, dw;
     bool has_groups;
 
     const char *name;
     int ndims;
+
+    // Initialize dependent opposite-side paddings values
+    // from the shape parameters
+    void init_pad_r(bool is_deconv) {
+        pw_r = opp_pad(is_deconv, iw, ow, kw, sw, pw, dw);
+        ph_r = opp_pad(is_deconv, ih, oh, kh, sh, ph, dh);
+        pd_r = opp_pad(is_deconv, id, od, kd, sd, pd, dd);
+    }
+
+private:
+    int64_t opp_pad(bool is_deconv, int64_t i, int64_t o, int64_t k, int64_t s,
+            int64_t p, int64_t d) {
+        return is_deconv ? (i - 1) * s - o + ((k - 1) * (d + 1) + 1) - p
+                         : (o - 1) * s - i + ((k - 1) * (d + 1) + 1) - p;
+    }
 };
 
 int str2desc(desc_t *desc, const char *str, bool is_deconv);
@@ -99,6 +115,8 @@ struct settings_t {
     std::vector<std::string> stag {tag::any}, wtag {tag::any}, dtag {tag::any};
     std::vector<int64_t> mb {0};
     std::vector<alg_t> alg {DIRECT};
+    std::vector<attr_t::scale_t> oscale {attr_t::scale_t()};
+    std::vector<attr_t::post_ops_t> post_ops {attr_t::post_ops_t()};
     attr_t attr = {};
     const char *pattern = NULL;
 

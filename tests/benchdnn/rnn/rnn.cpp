@@ -52,9 +52,8 @@ void create_dnnl_rnn_attr(const prb_t &p, dnnl_primitive_attr_t *dnnl_attr) {
         DNN_SAFE_V(dnnl_primitive_attr_set_rnn_tparams(*dnnl_attr, true,
                 p.n_gates(), p.linear_scales, p.linear_cscale));
 
-    if (p.wei_scales_policy != policy_t::NONE)
-        DNN_SAFE_V(dnnl_primitive_attr_set_rnn_weights_qparams(
-                *dnnl_attr, p.wei_nscales, p.wei_scales_mask, p.wei_scales));
+    DNN_SAFE_V(dnnl_primitive_attr_set_rnn_weights_qparams(
+            *dnnl_attr, p.wei_nscales, p.wei_scales_mask, p.wei_scales));
 
     if (p.data_scale != 1.0 || p.data_shift != 0.0)
         DNN_SAFE_V(dnnl_primitive_attr_set_rnn_data_qparams(
@@ -741,7 +740,7 @@ int doit(const prb_t &p, res_t *r) {
     args.set(DNNL_ARG_WORKSPACE, workspace_dt);
     args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
 
-    DNN_SAFE_CLEAN(execute_and_wait(c, args), WARN, cleanup);
+    SAFE_CLEAN(execute_and_wait(c, args), WARN, cleanup);
 
     if ((p.prop == dnnl_forward) && (bench_mode & CORR)) {
         compute_ref_fwd(p, src_layer_fp, src_iter_fp, src_iter_c_fp,
@@ -900,7 +899,7 @@ int doit(const prb_t &p, res_t *r) {
         args.set(DNNL_ARG_DIFF_BIAS, diff_bias_dt);
         args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
 
-        DNN_SAFE_CLEAN(execute_and_wait(c, args), WARN, cleanup);
+        SAFE_CLEAN(execute_and_wait(c, args), WARN, cleanup);
 
         if (bench_mode & CORR) {
             compute_ref_bwd(p, src_layer_fp, src_iter_fp, src_iter_c_fp,

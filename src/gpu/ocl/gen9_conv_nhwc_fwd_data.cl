@@ -151,9 +151,14 @@ gen9_conv_nhwc_fwd(const __global DATA_T *src, const __global DATA_T *wei,
     const int oh = (ohw / OWB) * OH_BLOCK;
     const int ow = (ohw % OWB) * OW_BLOCK;
 
-    DATA_T blockC00[OW_BLOCK];
-    for (int i = 0; i < OW_BLOCK; i++)
-        blockC00[i] = WITH_BIAS ? bias[oc * OC_BLOCK + local_id] : 0;
+    DATA_T blockC00[OW_BLOCK] = {0};
+    if (WITH_BIAS) {
+        const int bc_off = oc * OC_BLOCK + local_id;
+        DATA_T b = (OC_WO_PADDING % OC_BLOCK == 0 || bc_off < OC_WO_PADDING)
+                ? bias[bc_off]
+                : DATA_ZERO;
+        unroll_for(int i = 0; i < OW_BLOCK; i++) { blockC00[i] = b; }
+    }
 
     int ih = oh * SH - PH;
     int iw = ow * SW - PW;
@@ -298,6 +303,7 @@ gen9_conv_nhwc_fwd(const __global DATA_T *src, const __global DATA_T *wei,
                 oh, 1, ow, 1, 0, 1);
         blockC00[didx] = accum;
     }
+
     // Save
     for (int i = 0; i < min(OW_BLOCK, OW - ow); i++) {
         write_oc_block(&dst_write0[i * G * OC_WO_PADDING], goc * OC_BLOCK,

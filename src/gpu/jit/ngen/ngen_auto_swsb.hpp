@@ -142,9 +142,9 @@ struct Dependency {
     uint8_t dist;                                       // (swsb consumer only) Pipe distance
     DependencyRegion region;                            // GRF region covered
 
-    Dependency() : label{0}, pipe{}, tokenTime{0}, counters{{0,0,0,0}},
+    Dependency() : label{0}, pipe{}, tokenTime{0},
         token{0}, tokenSrc{false}, tokenDst{false},
-        rw{false}, swsb{false}, depPipe{PipeMaskNone}, dist{0}, region{} {}
+        rw{false}, swsb{false}, depPipe{PipeMaskNone}, dist{0}, region{} { counters.fill(0); }
 
     bool operator==(const Dependency &other) {
         return !std::memcmp(this, &other, sizeof(Dependency));
@@ -273,7 +273,6 @@ GeneralizedPipe getPipe(HW hw, const Instruction &insn, bool checkOOO = true)
             mask |= PipeMaskI;
     } else
         mask = PipeMaskA;
-
     return mask;
 }
 
@@ -476,7 +475,7 @@ inline bool intersects(const Dependency<false> &dep1, const Dependency<true> &de
         //   * If producer is in-order, is it close enough to require tracking the dependency?
         //   * Do the producer+consumer regions overlap?
         if (dep1.read() && dep2.read())                                                             return false;
-        if (dep2.write() && (dep1.pipe == dep2.pipe))                                               return false;
+        if (dep2.write() && (dep1.pipe == dep2.pipe) && (dep1.pipe != GeneralizedPipe::Math()))     return false;
         if (dep1.pipe.inOrder() && (distance(dep1, dep2, dep1.pipe) >= timeout(dep1.pipe)))         return false;
         return intersects(dep1.region, dep2.region);
     } else {
@@ -1746,3 +1745,4 @@ inline BasicBlockList autoSWSB(HW hw, Program &program)
 // 	size_t size() const;
 
 #endif /* NGEN_AUTOSWSB_HPP */
+

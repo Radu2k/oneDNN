@@ -32,7 +32,7 @@ float round_to_nearest_representable(dnnl_data_type_t dt, float value) {
         case dnnl_f16: value = (float)dnnl::impl::float16_t(value); break;
         case dnnl_s32:
         case dnnl_s8:
-        case dnnl_u8: value = maybe_saturate(dt, mxcsr_cvt(value)); break;
+        case dnnl_u8: value = maybe_saturate(dt, value); break;
         default: SAFE_V(FAIL);
     }
 
@@ -119,7 +119,7 @@ static bool is_null_memory(dnnl_memory_t mem) {
 }
 #endif
 
-dnnl_status_t execute_and_wait(dnnl_primitive_t prim, const args_t &args) {
+int execute_and_wait(dnnl_primitive_t prim, const args_t &args) {
     const_dnnl_primitive_desc_t pd;
     dnnl_engine_t engine;
 
@@ -271,7 +271,14 @@ dnnl_status_t execute_and_wait(dnnl_primitive_t prim, const args_t &args) {
 #endif
 
     execute_map_args(args);
-    return dnnl_success;
+
+    if (bench_mode & CORR) {
+        for (int i = 0; i < args.size(); ++i) {
+            SAFE(check_zero_padding(args.dnn_mem(i), args.arg(i)), WARN);
+        }
+    }
+
+    return OK;
 }
 
 inline bool should_stop(const benchdnn_timer_t &t) {

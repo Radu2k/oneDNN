@@ -337,6 +337,7 @@
 #define MMAD_ACC_DATA8_T int8
 #elif DT_S32 == 1
 #define DATA_T int
+#define DATA4_T int4
 #define DATA_TO_REF convert_float
 #define CONVERT_DATA_T convert_int_sat_rte
 #define POST_OP_DATA_T float

@@ -31,7 +31,6 @@
 #include "gpu/ocl/ocl_gpu_engine.hpp"
 #include "gpu/ocl/ocl_gpu_kernel.hpp"
 
-
 namespace dnnl {
 namespace impl {
 namespace gpu {
@@ -73,8 +72,8 @@ struct gen_gemm_t : public gpu_gemm_t {
                     && compute_engine->mayiuse_ngen_kernels()
                     && attr()->has_default_values(attr_skip_mask)
                     && attr()->output_scales_.mask_ == 0
-                    && attr()->post_ops_.len_ <= 1
-                    && IMPLICATION(attr()->post_ops_.len_ == 1,
+                    && attr()->post_ops_.len() <= 1
+                    && IMPLICATION(attr()->post_ops_.len() == 1,
                             attr()->post_ops_.find(sum) != -1);
 
             if (!ok) return status::unimplemented;
@@ -138,8 +137,6 @@ struct gen_gemm_t : public gpu_gemm_t {
         auto b_type = pd()->desc()->b_type;
         auto c_type = pd()->desc()->c_type;
 
-
-
         kernel_t::choose_unrolls(pd()->arch_, pd()->hw_threads_, transa, transb,
                 a_type, b_type, c_type, pd()->desc()->m, pd()->desc()->n,
                 pd()->desc()->k, batch, unroll_m, unroll_n);
@@ -150,9 +147,7 @@ struct gen_gemm_t : public gpu_gemm_t {
                 b_type, c_type, unroll_m, unroll_n);
         if (status != status::success) return status;
 
-
         create_kernel(engine, &nocopy_kernel_, kernel);
-
 
         nocopy_info_ = kernel.driver_info();
 

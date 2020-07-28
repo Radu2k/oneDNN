@@ -14,6 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <atomic>
+
 #include "dnnl_types.h"
 
 #include "common/bfloat16.hpp"
@@ -288,28 +290,20 @@ template <data_type_t dst_data_type>
 void gemm_bf16_convolution_fwd_t<dst_data_type>::pp_ker_t::operator()(
         dst_data_t *dst, const acc_data_t *acc, const acc_data_t *bias,
         float sum_scale, size_t dst_stride_in_elements,
-        size_t acc_stride_in_elements, size_t len, bool do_parallel) {
+        size_t acc_stride_in_elements, size_t sp_len, size_t oc_len) {
     assert(ker_);
-    if (len == 0) return;
+    if (sp_len == 0) return;
 
-    parallel(do_parallel ? 0 : 1, [&](const int ithr, const int nthr) {
-        size_t start_oc = 0, end_oc = 0;
-        balance211(OC_, nthr, ithr, start_oc, end_oc);
-        if (end_oc > start_oc) {
-            ker_args args;
-            args.acc = acc + start_oc * acc_stride_in_elements;
-            args.dst = dst + start_oc * dst_stride_in_elements;
-            args.bias = bias + start_oc;
-            args.sum_scale = sum_scale;
-            args.dst_stride_in_bytes
-                    = dst_stride_in_elements * sizeof(dst_data_t);
-            args.acc_stride_in_bytes
-                    = acc_stride_in_elements * sizeof(acc_data_t);
-            args.spatial_length = len;
-            args.oc_work = end_oc - start_oc;
-            ker_(&args);
-        }
-    });
+    ker_args args;
+    args.acc = acc;
+    args.dst = dst;
+    args.bias = bias;
+    args.sum_scale = sum_scale;
+    args.dst_stride_in_bytes = dst_stride_in_elements * sizeof(dst_data_t);
+    args.acc_stride_in_bytes = acc_stride_in_elements * sizeof(acc_data_t);
+    args.spatial_length = sp_len;
+    args.oc_work = oc_len;
+    ker_(&args);
 }
 
 template <data_type_t dst_data_type>
@@ -336,7 +330,7 @@ status_t gemm_bf16_convolution_fwd_t<dst_data_type>::execute_forward_nspc(
     }
     assert(IMPLICATION(jcp.ow_block != jcp.ow, jcp.oh_block == 1));
 
-    status_t st = status::success;
+    std::atomic<status_t> st(status::success);
     parallel(jcp.nthr, [&](const int ithr, const int nthr) {
         status_t st_thr = execute_forward_thr_nspc(
                 ithr, nthr, src_base, wei_base, bia_base, dst_base, scratchpad);
@@ -508,20 +502,62 @@ status_t gemm_bf16_convolution_fwd_t<dst_data_type>::execute_forward_ncsp(
     const size_t src_step = (size_t)jcp.ic * jcp.ih * jcp.iw * jcp.id;
     const size_t dst_step = (size_t)jcp.oc * M;
     const size_t weights_g_size = (size_t)jcp.ic * jcp.oc * jcp.ks;
-    const bool is_problem_3d = pd()->ndims() == 5;
+    const size_t weights_oc_size = jcp.ic * jcp.ks;
 
-    assert(IMPLICATION(
-            is_problem_3d, jcp.oh_block == jcp.oh && jcp.ow_block == jcp.ow));
-    assert(IMPLICATION(jcp.ow_block != jcp.ow, jcp.oh_block == 1));
-
-    const dim_t K = jcp.ic * jcp.ks;
-    const dim_t N = jcp.oc;
-
-    const int nb_oh = div_up(jcp.oh, jcp.oh_block);
-    const int nb_ow = div_up(jcp.ow, jcp.ow_block);
+    const dim_t LDB = weights_oc_size;
     const size_t work_amount
-            = (size_t)jcp.ngroups * jcp.mb * jcp.od * nb_oh * nb_ow;
-    status_t st = status::success;
+            = (size_t)jcp.ngroups * jcp.mb * jcp.od * jcp.os_nb_block;
+    const bool is_problem_3d = pd()->ndims() == 5;
+    std::atomic<status_t> st(status::success);
+
+    auto inner_ker = [&](const int ic, const int oc, const int groups,
+                             const int od, const int spatial,
+                             const src_data_t *src, const wei_data_t *weights,
+                             src_data_t *col, dst_data_t *dst,
+                             acc_data_t *acc) {
+        const dim_t os_block = nstl::min(
+                (dim_t)jcp.os_block, (dim_t)jcp.os - spatial * jcp.os_block);
+        const int ic_block = nstl::min(jcp.ic_block, jcp.ic - ic);
+        const int oc_block = nstl::min(jcp.oc_block, jcp.oc - oc);
+
+        if (jcp.im2col_sz) {
+            if (!is_problem_3d) {
+                jit_gemm_convolution_utils::im2col<src_data_t>(jcp, src, col,
+                        spatial * jcp.os_block, os_block, ic, ic_block);
+            } else {
+                assert(jcp.ic_block == jcp.ic);
+                jit_gemm_convolution_utils::im2col_3d<src_data_t>(
+                        jcp, src, col, od, spatial * jcp.os_block, os_block);
+            }
+        }
+
+        const acc_data_t one = 1.0;
+        const dim_t N = oc_block;
+        const dim_t K = ic_block * jcp.ks;
+        const dim_t m = os_block;
+        const dim_t LDA = jcp.im2col_sz ? m : M;
+        const dim_t LDC = is_bf16_dst ? m : M;
+        const float beta = (ic == 0) ? this->beta_ : one;
+        auto out_off = spatial * jcp.os_block + od * jcp.os;
+        dst_data_t *dst_local = dst + out_off;
+
+        status_t st_thr = gemm_bf16bf16f32("N", "N", &m, &N, &K, &one,
+                jcp.im2col_sz ? col : src + ic * M + out_off, &LDA, weights,
+                &LDB, &beta, acc, &LDC);
+
+        if (st_thr != status::success) {
+            st = st_thr;
+            return;
+        }
+
+        if (this->pd()->is_postprocess_required()) {
+            size_t acc_str = LDC;
+            size_t dst_str = M;
+            (*pp_ker_)(dst_local, acc, bias + groups * jcp.oc + oc, sum_scale,
+                    dst_str, acc_str, m, oc_block);
+        }
+    };
+
     parallel(jcp.nthr, [&](const int ithr, const int nthr) {
         src_data_t *_col = col + (ptrdiff_t)ithr * jcp.im2col_sz;
         if (is_problem_3d) {
@@ -530,61 +566,38 @@ status_t gemm_bf16_convolution_fwd_t<dst_data_type>::execute_forward_ncsp(
             for (ptrdiff_t i = 0; i < jcp.im2col_sz; i++)
                 _col[i] = (src_data_t)0;
         }
-
-        int g {0}, n {0}, od {0}, ohb {0}, owb {0};
+        int g {0}, n {0}, od {0}, nb_os {0};
         size_t start = 0, end = 0;
+        size_t oc_start = 0, oc_end = 0;
 
-        balance211(work_amount, nthr, ithr, start, end);
-        nd_iterator_init(start, g, jcp.ngroups, n, jcp.mb, od, jcp.od, ohb,
-                nb_oh, owb, nb_ow);
+        assert(jcp.loop_order == gemm_loop_lbr);
+        balance2D(nthr, ithr, work_amount, start, end, (size_t)jcp.oc, oc_start,
+                oc_end, (size_t)jcp.nthr_oc);
+
+        nd_iterator_init(start, g, jcp.ngroups, n, jcp.mb, od, jcp.od, nb_os,
+                jcp.os_nb_block);
         for (size_t iwork = start; iwork < end; ++iwork) {
-            int oh = ohb * jcp.oh_block;
-            int ow = owb * jcp.ow_block;
-            const src_data_t *_src = src + (n * jcp.ngroups + g) * src_step;
-            const wei_data_t *_weights = weights + g * weights_g_size;
-            dst_data_t *_dst_im = dst + (n * jcp.ngroups + g) * dst_step;
-            const int h_step = nstl::min(jcp.oh_block, jcp.oh - oh);
-            const int w_step = nstl::min(jcp.ow_block, jcp.ow - ow);
-            if (jcp.im2col_sz) {
-                if (!is_problem_3d)
-                    jit_gemm_convolution_utils::im2col<src_data_t>(
-                            jcp, _src, _col, 0, jcp.os, 0, jcp.ic);
-                else
-                    jit_gemm_convolution_utils::im2col_3d<src_data_t>(
-                            jcp, _src, _col, od, 0, jcp.os);
+            for_(int oc = (int)oc_start; oc < (int)oc_end; oc += jcp.oc_block)
+            for (int ic = 0; ic < jcp.ic; ic += jcp.ic_block) {
+                const src_data_t *_src = src + (n * jcp.ngroups + g) * src_step;
+                const wei_data_t *_weights = weights + g * weights_g_size
+                        + oc * weights_oc_size + ic * jcp.ks;
+                dst_data_t *_dst_im
+                        = dst + (n * jcp.ngroups + g) * dst_step + oc * M;
+                auto out_off = nb_os * jcp.os_block + od * jcp.os;
+                dst_data_t *dst_local = _dst_im + out_off;
+                const int sizeof_cacheline_float = 16;
+                acc_data_t *_acc = is_bf16_dst ? acc_base
+                                + ithr
+                                        * rnd_up(jcp.oc_block * jcp.os_block,
+                                                sizeof_cacheline_float)
+                                               : (acc_data_t *)dst_local;
+
+                inner_ker(ic, oc, g, od, nb_os, _src, _weights, _col, _dst_im,
+                        _acc);
             }
-
-            const acc_data_t one = 1.0;
-
-            const dim_t m = h_step * w_step;
-            const dim_t LDA = jcp.im2col_sz ? m : M;
-            const dim_t LDC = is_bf16_dst ? m : M;
-            dst_data_t *dst_local = _dst_im + od * jcp.os + oh * jcp.ow + ow;
-            acc_data_t *_acc = is_bf16_dst ? acc_base
-                            + ithr
-                                    * rnd_up(jcp.oc * jcp.oh_block
-                                                    * jcp.ow_block,
-                                            16)
-                                           : (acc_data_t *)dst_local;
-
-            status_t st_thr = gemm_bf16bf16f32("N", "N", &m, &N, &K, &one,
-                    jcp.im2col_sz ? _col : _src + od * m, &LDA, _weights, &K,
-                    &this->beta_, _acc, &LDC);
-
-            if (st_thr != status::success) {
-                st = st_thr;
-                return;
-            }
-
-            if (this->pd()->is_postprocess_required()) {
-                size_t acc_str = LDC;
-                size_t dst_str = M;
-                (*pp_ker_)(dst_local, _acc, bias + g * jcp.oc, sum_scale,
-                        dst_str, acc_str, m, jcp.nthr == 1);
-            }
-
-            nd_iterator_step(g, jcp.ngroups, n, jcp.mb, od, jcp.od, ohb, nb_oh,
-                    owb, nb_ow);
+            nd_iterator_step(g, jcp.ngroups, n, jcp.mb, od, jcp.od, nb_os,
+                    jcp.os_nb_block);
         }
     });
 
@@ -602,7 +615,7 @@ status_t gemm_bf16_convolution_bwd_data_t<diff_src_data_type>::
     auto scratchpad = ctx.get_scratchpad_grantor();
     const conv_gemm_conf_t &jcp = pd()->jcp_;
 
-    status_t st = status::success;
+    std::atomic<status_t> st(status::success);
     parallel(jcp.nthr, [&](const int ithr, const int nthr) {
         status_t st_thr = execute_backward_data_thr_nspc(
                 ithr, nthr, diff_src_base, wei_base, diff_dst_base, scratchpad);
@@ -726,15 +739,14 @@ status_t gemm_bf16_convolution_bwd_data_t<diff_src_data_type>::
     const size_t dst_step = (size_t)jcp.oc * M;
     const size_t weights_g_size = (size_t)jcp.ic * jcp.oc * jcp.ks;
 
-    const dim_t m = jcp.os;
+    const dim_t m = jcp.os_block;
     const dim_t K = jcp.oc;
     const dim_t N = jcp.ic * jcp.ks;
-    const dim_t LDC = jcp.im2col_sz ? m : M;
 
     const size_t work_amount = (size_t)jcp.ngroups * jcp.mb;
     const bool is_problem_3d = pd()->ndims() == 5;
 
-    status_t st = status::success;
+    std::atomic<status_t> st(status::success);
 
     parallel(jcp.nthr, [&](const int ithr, const int nthr) {
         acc_data_t *_col = col + (ptrdiff_t)ithr * jcp.im2col_sz;
@@ -759,14 +771,19 @@ status_t gemm_bf16_convolution_bwd_data_t<diff_src_data_type>::
             }
 
             const wei_data_t *_weights = weights + g * weights_g_size;
-            for (int od = 0; od < jcp.od; ++od) {
+            for_(int od = 0; od < jcp.od; ++od)
+            for (int os_nb = 0; os_nb < jcp.os_nb_block; ++os_nb) {
+                auto out_off = os_nb * m + od * jcp.os;
                 const diff_dst_data_t *_diff_dst
-                        = diff_dst + (n * jcp.ngroups + g) * dst_step + od * m;
+                        = diff_dst + (n * jcp.ngroups + g) * dst_step + out_off;
+                const dim_t os_block
+                        = nstl::min((dim_t)jcp.os_block, jcp.os - os_nb * m);
+                const dim_t LDC = jcp.im2col_sz ? os_block : M;
 
                 const acc_data_t zero = 0.0, one = 1.0;
-                status_t st_thr = gemm_bf16bf16f32("N", "T", &m, &N, &K, &one,
-                        _diff_dst, &M, _weights, &N, &zero,
-                        jcp.im2col_sz ? _col : acc + od * m, &LDC);
+                status_t st_thr = gemm_bf16bf16f32("N", "T", &os_block, &N, &K,
+                        &one, _diff_dst, &M, _weights, &N, &zero,
+                        jcp.im2col_sz ? _col : acc + out_off, &LDC);
 
                 if (st_thr != status::success) {
                     st = st_thr;
@@ -775,10 +792,11 @@ status_t gemm_bf16_convolution_bwd_data_t<diff_src_data_type>::
 
                 if (jcp.im2col_sz) {
                     if (!is_problem_3d)
-                        jit_gemm_convolution_utils::col2im(jcp, _col, acc);
+                        jit_gemm_convolution_utils::col2im(
+                                jcp, _col, acc, os_nb * jcp.os_block, os_block);
                     else
-                        jit_gemm_convolution_utils::col2im_3d(
-                                jcp, _col, acc, od);
+                        jit_gemm_convolution_utils::col2im_3d(jcp, _col, acc,
+                                od, os_nb * jcp.os_block, os_block);
                 }
             }
             if (diff_src_data_type == data_type::bf16) {
@@ -912,7 +930,7 @@ status_t gemm_bf16_convolution_bwd_weights_t<diff_wei_data_type>::
     const dim_t LDA = jcp.im2col_sz ? jcp.oh * jcp.ow : jcp.ngroups * jcp.ic;
     const bool is_problem_3d = pd()->ndims() == 5;
 
-    status_t st = status::success;
+    std::atomic<status_t> st(status::success);
 
     parallel(jcp.nthr, [&](const int ithr, const int nthr) {
         int ithr_g, nthr_g, ithr_mb, nthr_mb;
@@ -997,13 +1015,17 @@ status_t gemm_bf16_convolution_bwd_weights_t<diff_wei_data_type>::
                                 _diff_weights, &LDC);
                         if (st_thr != status::success) {
                             st = st_thr;
-                            return;
+                            // Finish the loops early if failure occured.
+                            g = g_end;
+                            mb = mb_end;
+                            od = jcp.od;
                         }
                     }
                 }
             }
             if (need_reduction && dnnl_thr_syncable()) {
                 dnnl_thr_barrier();
+                if (st != status::success) return;
                 bf16_bwd_weights_reduction_par_nspc(ithr_mb, nthr_mb, g_start,
                         g_end, jcp, weights_reduce_base, diff_weights);
             } else if (diff_wei_data_type == data_type::bf16
@@ -1112,7 +1134,7 @@ status_t gemm_bf16_convolution_bwd_weights_t<diff_wei_data_type>::
     const dim_t M = jcp.ic * jcp.ks;
     const bool is_problem_3d = pd()->ndims() == 5;
 
-    status_t st = status::success;
+    std::atomic<status_t> st(status::success);
     parallel(jcp.nthr, [&](const int ithr, const int nthr) {
         int ithr_g, nthr_g, ithr_mb, nthr_mb;
         size_t g_start {0}, g_end {0}, mb_start {0}, mb_end {0};
@@ -1182,13 +1204,18 @@ status_t gemm_bf16_convolution_bwd_weights_t<diff_wei_data_type>::
 
                         if (st_thr != status::success) {
                             st = st_thr;
-                            return;
-                        };
+                            // Finish the loops early if failure occured.
+                            g = g_end;
+                            mb = mb_end;
+                            od = jcp.od;
+                            os_nb = jcp.os_nb_block;
+                        }
                     }
                 }
             }
             if (need_reduction && dnnl_thr_syncable()) {
                 dnnl_thr_barrier();
+                if (st != status::success) return;
                 diff_wei_data_t *weights_base
                         = diff_weights + g_start * weights_g_size;
                 bf16_bwd_weights_reduction_par_ncsp(ithr_mb, nthr_mb, jcp,

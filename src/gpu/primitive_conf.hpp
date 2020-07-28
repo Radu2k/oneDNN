@@ -22,6 +22,7 @@
 #include "common/c_types_map.hpp"
 #include "common/memory_desc_wrapper.hpp"
 #include "common/primitive_attr.hpp"
+#include "common/primitive_exec_types.hpp"
 #include "common/utils.hpp"
 #include "gpu/compute/compute.hpp"
 
@@ -91,7 +92,7 @@ struct attr_info_t {
 
         attr_info_t attr_info;
 
-        attr_info.all_post_ops = po;
+        attr_info.all_post_ops.copy_from(po);
 
         // Eltwise
         attr_info.eltwise_idx = po.find(primitive_kind::eltwise);
@@ -384,7 +385,7 @@ struct rnn_conf_t {
     size_t ws_states_offset;
     size_t ws_diff_states_offset;
     size_t ws_grid_comp_offset;
-    size_t ws_cell_comp_offset;
+    size_t scratch_cell_offset;
     size_t ws_h_state_offset;
     size_t ws_c_state_offset;
     size_t ws_bias_offset;
@@ -525,6 +526,8 @@ struct eltwise_conf_t {
     alg_kind_t alg;
     bool is_forward;
     compute::dispatch_t dispatch;
+    memory_desc_info_t data_md_info;
+    memory_desc_info_t data_diff_md_info;
 };
 
 // Shuffle
@@ -702,6 +705,42 @@ inline void def_offsets(const int offs[4][MAX_NDIMS],
     }
 }
 
+inline void def_binary_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
+    kernel_ctx.define_int("BINARY_ADD", alg_kind::binary_add);
+    kernel_ctx.define_int("BINARY_MUL", alg_kind::binary_mul);
+    kernel_ctx.define_int("BINARY_MIN", alg_kind::binary_min);
+    kernel_ctx.define_int("BINARY_MAX", alg_kind::binary_max);
+}
+
+inline void def_eltwise_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
+    kernel_ctx.define_int("RELU", alg_kind::eltwise_relu);
+    kernel_ctx.define_int("LINEAR", alg_kind::eltwise_linear);
+    kernel_ctx.define_int("BOUNDED_RELU", alg_kind::eltwise_bounded_relu);
+    kernel_ctx.define_int("SOFT_RELU", alg_kind::eltwise_soft_relu);
+    kernel_ctx.define_int("LOGISTIC", alg_kind::eltwise_logistic);
+    kernel_ctx.define_int("TANH", alg_kind::eltwise_tanh);
+    kernel_ctx.define_int("ELU", alg_kind::eltwise_elu);
+    kernel_ctx.define_int("SQUARE", alg_kind::eltwise_square);
+    kernel_ctx.define_int("SQRT", alg_kind::eltwise_sqrt);
+    kernel_ctx.define_int("ABS", alg_kind::eltwise_abs);
+    kernel_ctx.define_int("EXP", alg_kind::eltwise_exp);
+    kernel_ctx.define_int("GELU_TANH", alg_kind::eltwise_gelu_tanh);
+    kernel_ctx.define_int("SWISH", alg_kind::eltwise_swish);
+    kernel_ctx.define_int("LOG", alg_kind::eltwise_log);
+    kernel_ctx.define_int("CLIP", alg_kind::eltwise_clip);
+    kernel_ctx.define_int("POW", alg_kind::eltwise_pow);
+    kernel_ctx.define_int("GELU_ERF", alg_kind::eltwise_gelu_erf);
+    kernel_ctx.define_int("ROUND", alg_kind::eltwise_round);
+
+    kernel_ctx.define_int("RELU_DST", alg_kind::eltwise_relu_use_dst_for_bwd);
+    kernel_ctx.define_int(
+            "LOGISTIC_DST", alg_kind::eltwise_logistic_use_dst_for_bwd);
+    kernel_ctx.define_int("TANH_DST", alg_kind::eltwise_tanh_use_dst_for_bwd);
+    kernel_ctx.define_int("ELU_DST", alg_kind::eltwise_elu_use_dst_for_bwd);
+    kernel_ctx.define_int("SQRT_DST", alg_kind::eltwise_sqrt_use_dst_for_bwd);
+    kernel_ctx.define_int("EXP_DST", alg_kind::eltwise_exp_use_dst_for_bwd);
+}
+
 inline void def_data_type(
         compute::kernel_ctx_t &kernel_ctx, data_type_t dt, const char *str) {
     switch (dt) {
@@ -757,42 +796,6 @@ inline void def_memory_desc_info(compute::kernel_ctx_t &kernel_ctx,
                     utils::format("%s_S%d_%d", prefix, d, l), stride);
         }
     }
-}
-
-inline void def_binary_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
-    kernel_ctx.define_int("BINARY_ADD", alg_kind::binary_add);
-    kernel_ctx.define_int("BINARY_MUL", alg_kind::binary_mul);
-    kernel_ctx.define_int("BINARY_MIN", alg_kind::binary_min);
-    kernel_ctx.define_int("BINARY_MAX", alg_kind::binary_max);
-}
-
-inline void def_eltwise_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
-    kernel_ctx.define_int("RELU", alg_kind::eltwise_relu);
-    kernel_ctx.define_int("LINEAR", alg_kind::eltwise_linear);
-    kernel_ctx.define_int("BOUNDED_RELU", alg_kind::eltwise_bounded_relu);
-    kernel_ctx.define_int("SOFT_RELU", alg_kind::eltwise_soft_relu);
-    kernel_ctx.define_int("LOGISTIC", alg_kind::eltwise_logistic);
-    kernel_ctx.define_int("TANH", alg_kind::eltwise_tanh);
-    kernel_ctx.define_int("ELU", alg_kind::eltwise_elu);
-    kernel_ctx.define_int("SQUARE", alg_kind::eltwise_square);
-    kernel_ctx.define_int("SQRT", alg_kind::eltwise_sqrt);
-    kernel_ctx.define_int("ABS", alg_kind::eltwise_abs);
-    kernel_ctx.define_int("EXP", alg_kind::eltwise_exp);
-    kernel_ctx.define_int("GELU_TANH", alg_kind::eltwise_gelu_tanh);
-    kernel_ctx.define_int("SWISH", alg_kind::eltwise_swish);
-    kernel_ctx.define_int("LOG", alg_kind::eltwise_log);
-    kernel_ctx.define_int("CLIP", alg_kind::eltwise_clip);
-    kernel_ctx.define_int("POW", alg_kind::eltwise_pow);
-    kernel_ctx.define_int("GELU_ERF", alg_kind::eltwise_gelu_erf);
-    kernel_ctx.define_int("ROUND", alg_kind::eltwise_round);
-
-    kernel_ctx.define_int("RELU_DST", alg_kind::eltwise_relu_use_dst_for_bwd);
-    kernel_ctx.define_int(
-            "LOGISTIC_DST", alg_kind::eltwise_logistic_use_dst_for_bwd);
-    kernel_ctx.define_int("TANH_DST", alg_kind::eltwise_tanh_use_dst_for_bwd);
-    kernel_ctx.define_int("ELU_DST", alg_kind::eltwise_elu_use_dst_for_bwd);
-    kernel_ctx.define_int("SQRT_DST", alg_kind::eltwise_sqrt_use_dst_for_bwd);
-    kernel_ctx.define_int("EXP_DST", alg_kind::eltwise_exp_use_dst_for_bwd);
 }
 
 inline void def_post_ops_cfg(

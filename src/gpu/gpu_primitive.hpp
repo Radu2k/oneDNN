@@ -46,7 +46,7 @@ struct gpu_primitive_t : public primitive_t {
             CHECK(rk.realize(&realized_kernel, engine));
             r->add_kernel(rk.id(), realized_kernel);
         }
-        init_res_storage(engine, r.get());
+        CHECK(init_res_storage(engine, r.get()));
         mapper.add(this, std::move(r));
 
         for (auto const &np : nested_primitives()) {
@@ -116,12 +116,6 @@ protected:
             const compute::kernel_arg_list_t &arg_list) const {
         return parallel_for(ctx.get_resource_mapper(), ctx.stream(), range,
                 kernel, arg_list);
-    }
-
-    void register_kernels(const std::vector<compute::kernel_t> &kernels) {
-        for (const auto &k : kernels) {
-            registered_kernels_.push_back(k);
-        }
     }
 
 private:

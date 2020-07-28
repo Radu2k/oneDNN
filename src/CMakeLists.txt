@@ -65,8 +65,16 @@ if(WIN32)
     add_definitions(-D_WIN)
     add_definitions(-DNOMINMAX)
     # Correct 'jnl' macro/jit issue
-    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel")
+    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel" AND ${CMAKE_CXX_COMPILER_VERSION} LESS 19.1)
         append(CMAKE_CXX_FLAGS "/Qlong-double")
+    endif()
+endif()
+
+# Windows does not support weak/strong symbols and no guarrantees by the linker
+# for out_of_memory testing to work. Not tested on macOS
+if(UNIX)
+    if(DNNL_ENABLE_MEM_DEBUG)
+        add_definitions(-DDNNL_ENABLE_MEM_DEBUG)
     endif()
 endif()
 
@@ -170,15 +178,19 @@ else()
     endif()
     foreach(ver "" ${vers})
         set_ternary(ext_and_ver APPLE "${ver}${ext}" "${ext}${ver}")
-        add_custom_command(OUTPUT libmkldnn${ext_and_ver}
+        get_property(lib_location TARGET ${LIB_NAME} PROPERTY LIBRARY_OUTPUT_DIRECTORY)
+        if(lib_location)
+            set(compat_link "${lib_location}/libmkldnn${ext_and_ver}")
+        else()
+            set(compat_link "${CMAKE_CURRENT_BINARY_DIR}/libmkldnn${ext_and_ver}")
+        endif()
+        add_custom_command(OUTPUT ${compat_link}
             # to make the next command work fine
-            COMMAND ${CMAKE_COMMAND} -E remove -f libmkldnn${ext_and_ver}
-            COMMAND ${CMAKE_COMMAND} -E create_symlink libdnnl${ext_and_ver} libmkldnn${ext_and_ver}
+            COMMAND ${CMAKE_COMMAND} -E remove -f ${compat_link}
+            COMMAND ${CMAKE_COMMAND} -E create_symlink libdnnl${ext_and_ver} ${compat_link}
             DEPENDS ${LIB_NAME})
-        add_custom_target(compat_libs${ver} ALL
-                DEPENDS libmkldnn${ext_and_ver})
-        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libmkldnn${ext_and_ver}
-            DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
+        add_custom_target(compat_libs${ver} ALL DEPENDS ${compat_link})
+        install(FILES ${compat_link} DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
     endforeach()
 endif()
 

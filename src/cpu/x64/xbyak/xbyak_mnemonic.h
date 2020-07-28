@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2019 Intel Corporation
+* Copyright 2016-2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@
 * THE POSSIBILITY OF SUCH DAMAGE.
 *******************************************************************************/
 
-const char *getVersionString() const { return "5.85"; }
+const char *getVersionString() const { return "5.912"; }
 void adc(const Operand& op, uint32 imm) { opRM_I(op, imm, 0x10, 2); }
 void adc(const Operand& op1, const Operand& op2) { opRM_RM(op1, op2, 0x10); }
 void adcx(const Reg32e& reg, const Operand& op) { opGen(reg, op, 0xF6, 0x66, isREG32_REG32orMEM, NONE, 0x38); }
@@ -1716,17 +1716,17 @@ void kandnw(const Opmask& r1, const Opmask& r2, const Opmask& r3) { opVex(r1, &r
 void kandq(const Opmask& r1, const Opmask& r2, const Opmask& r3) { opVex(r1, &r2, r3, T_L1 | T_0F | T_W1, 0x41); }
 void kandw(const Opmask& r1, const Opmask& r2, const Opmask& r3) { opVex(r1, &r2, r3, T_L1 | T_0F | T_W0, 0x41); }
 void kmovb(const Address& addr, const Opmask& k) { opVex(k, 0, addr, T_L0 | T_0F | T_66 | T_W0, 0x91); }
-void kmovb(const Opmask& k, const Operand& op) { opVex(k, 0, op, T_L0 | T_0F | T_66 | T_W0, 0x90); }
+void kmovb(const Opmask& k, const Operand& op) { if (!op.isMEM() && !op.isOPMASK()) throw Error(ERR_BAD_COMBINATION); opVex(k, 0, op, T_L0 | T_0F | T_66 | T_W0, 0x90); }
 void kmovb(const Opmask& k, const Reg32& r) { opVex(k, 0, r, T_L0 | T_0F | T_66 | T_W0, 0x92); }
 void kmovb(const Reg32& r, const Opmask& k) { opVex(r, 0, k, T_L0 | T_0F | T_66 | T_W0, 0x93); }
 void kmovd(const Address& addr, const Opmask& k) { opVex(k, 0, addr, T_L0 | T_0F | T_66 | T_W1, 0x91); }
-void kmovd(const Opmask& k, const Operand& op) { opVex(k, 0, op, T_L0 | T_0F | T_66 | T_W1, 0x90); }
+void kmovd(const Opmask& k, const Operand& op) { if (!op.isMEM() && !op.isOPMASK()) throw Error(ERR_BAD_COMBINATION); opVex(k, 0, op, T_L0 | T_0F | T_66 | T_W1, 0x90); }
 void kmovd(const Opmask& k, const Reg32& r) { opVex(k, 0, r, T_L0 | T_0F | T_F2 | T_W0, 0x92); }
 void kmovd(const Reg32& r, const Opmask& k) { opVex(r, 0, k, T_L0 | T_0F | T_F2 | T_W0, 0x93); }
 void kmovq(const Address& addr, const Opmask& k) { opVex(k, 0, addr, T_L0 | T_0F | T_W1, 0x91); }
-void kmovq(const Opmask& k, const Operand& op) { opVex(k, 0, op, T_L0 | T_0F | T_W1, 0x90); }
+void kmovq(const Opmask& k, const Operand& op) { if (!op.isMEM() && !op.isOPMASK()) throw Error(ERR_BAD_COMBINATION); opVex(k, 0, op, T_L0 | T_0F | T_W1, 0x90); }
 void kmovw(const Address& addr, const Opmask& k) { opVex(k, 0, addr, T_L0 | T_0F | T_W0, 0x91); }
-void kmovw(const Opmask& k, const Operand& op) { opVex(k, 0, op, T_L0 | T_0F | T_W0, 0x90); }
+void kmovw(const Opmask& k, const Operand& op) { if (!op.isMEM() && !op.isOPMASK()) throw Error(ERR_BAD_COMBINATION); opVex(k, 0, op, T_L0 | T_0F | T_W0, 0x90); }
 void kmovw(const Opmask& k, const Reg32& r) { opVex(k, 0, r, T_L0 | T_0F | T_W0, 0x92); }
 void kmovw(const Reg32& r, const Opmask& k) { opVex(r, 0, k, T_L0 | T_0F | T_W0, 0x93); }
 void knotb(const Opmask& r1, const Opmask& r2) { opVex(r1, 0, r2, T_0F | T_66 | T_W0, 0x44); }
@@ -2079,5 +2079,17 @@ void vshufi64x2(const Ymm& y1, const Ymm& y2, const Operand& op, uint8 imm) { op
 void kmovq(const Opmask& k, const Reg64& r) { opVex(k, 0, r, T_L0 | T_0F | T_F2 | T_W1, 0x92); }
 void kmovq(const Reg64& r, const Opmask& k) { opVex(r, 0, k, T_L0 | T_0F | T_F2 | T_W1, 0x93); }
 void vpbroadcastq(const Xmm& x, const Reg64& r) { opVex(x, 0, r, T_66 | T_0F38 | T_EW1 | T_YMM | T_MUST_EVEX, 0x7C); }
+void ldtilecfg(const Address& addr) { opAMX(tm0, tm0, addr, T_0F38 | T_W0 | T_TMM, 0x49); }
+void sttilecfg(const Address& addr) { opAMX(tm0, tm0, addr, T_66 | T_0F38 | T_W0 | T_TMM, 0x49); }
+void tdpbf16ps(const Tmm& x1, const Tmm& x2, const Tmm& x3) { opAMX(x1, x3, x2, T_F3 | T_0F38 | T_W0 | T_TMM, 0x5c); }
+void tdpbssd(const Tmm& x1, const Tmm& x2, const Tmm& x3) { opAMX(x1, x3, x2, T_F2 | T_0F38 | T_W0 | T_TMM, 0x5e); }
+void tdpbsud(const Tmm& x1, const Tmm& x2, const Tmm& x3) { opAMX(x1, x3, x2, T_F3 | T_0F38 | T_W0 | T_TMM, 0x5e); }
+void tdpbusd(const Tmm& x1, const Tmm& x2, const Tmm& x3) { opAMX(x1, x3, x2, T_66 | T_0F38 | T_W0 | T_TMM, 0x5e); }
+void tdpbuud(const Tmm& x1, const Tmm& x2, const Tmm& x3) { opAMX(x1, x3, x2,        T_0F38 | T_W0 | T_TMM, 0x5e); }
+void tileloadd(const Tmm& tm, const Operand& op) { opAMX(tm, tm0, op, T_F2 | T_0F38 | T_W0 | T_TMM, 0x4b); }
+void tileloaddt1(const Tmm& tm, const Operand& op) { opAMX(tm, tm0, op, T_66 | T_0F38 | T_W0 | T_TMM, 0x4b); }
+void tilerelease() { db(0xc4); db(0xe2); db(0x78); db(0x49); db(0xc0); }
+void tilestored(const Operand& op, const Tmm& tm) { opAMX(tm, tm0, op, T_F3 | T_0F38 | T_W0 | T_TMM, 0x4b); }
+void tilezero(const Tmm& Tmm) { opAMX(Tmm, tm0, tm0, T_F2 | T_0F38 | T_W0 | T_TMM, 0x49); }
 #endif
 #endif

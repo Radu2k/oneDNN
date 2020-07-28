@@ -43,7 +43,8 @@ void exec_conv(get_args_func get_args, const prb_t *p, dnnl_primitive_t c_ref,
             dst_m.md_, engine_ref, (void *)dst_m);
 
     args_t args = get_args(p, src_ref, wei_ref, bia_ref, dst_ref);
-    execute_and_wait(c_ref, args);
+
+    SAFE_V(execute_and_wait(c_ref, args));
 }
 
 args_t get_args_conv_fwd(const prb_t *p, dnn_mem_t &src_ref, dnn_mem_t &wei_ref,
@@ -177,8 +178,7 @@ void compute_ref_direct_fwd(const prb_t *p, dnn_mem_t &src_m, dnn_mem_t &wei_m,
                     conv_res += ((float *)bia_m)[bia_off];
                 }
 
-                maybe_scale(conv_res, p->scales, g * OCG + oc, p->attr);
-
+                maybe_oscale(p->attr, conv_res, p->scales, g * OCG + oc);
                 std::vector<float> v_binary_vals;
                 for (size_t d = 0; d < v_bin_po_mask.size(); ++d) {
                     auto bin_po_offset
@@ -300,7 +300,8 @@ void compute_ref_direct_bwd_d(const prb_t *p, dnn_mem_t &diff_src_m,
                     const size_t bia_off = (size_t)g * ICG + ic;
                     conv_res += ((float *)bia_m)[bia_off];
                 }
-                maybe_scale(conv_res, p->scales, g * ICG + ic, p->attr);
+
+                maybe_oscale(p->attr, conv_res, p->scales, g * ICG + ic);
                 maybe_post_ops(p->attr, conv_res, ds);
 
                 ds = conv_res;

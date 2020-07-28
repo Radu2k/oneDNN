@@ -122,6 +122,7 @@ private:
 
     static constexpr size_t vlen = cpu_isa_traits<isa>::vlen;
     static constexpr size_t preserved_vecs_max = 5;
+    static constexpr size_t preserved_gprs_max = 4;
     static constexpr size_t vecs_count = has_avx512() ? 32 : 16;
     static constexpr int n_mantissa_bits = 23;
     static constexpr int k_mask_size = 8;
@@ -129,11 +130,13 @@ private:
     size_t vecs_to_preserve = 0;
     size_t preserved_vecs_count = 0;
     size_t preserved_vec_idxs[preserved_vecs_max] = {0};
+    size_t preserved_gpr_idxs[preserved_gprs_max] = {0};
     size_t start_idx_tail = 0;
 
     Vmm vmm_mask, vmm_aux0, vmm_aux1, vmm_aux2, vmm_aux3, vmm_aux4;
 
     size_t aux_vecs_count();
+    size_t aux_gprs_count();
 
     void compute_body(size_t start_idx, size_t end_idx);
     void injector_preamble(size_t start_idx, size_t end_idx);
@@ -201,10 +204,11 @@ private:
         exp_ln_flt_max_f, // logf(FLT_MAX) - max normal value
         exp_ln_flt_min_f, // logf(FLT_MIN) - min normal value
         exp_pol, // see correspondent table for float values
-        tanh_bound_x, // arg below which tanh(x) = x
-        tanh_bound_pol, // arg below which polynomial approx is valid
-        tanh_bound_one, // arg after which tanh(x) = 1.f
-        tanh_pol, // see correspondent table for float values
+        tanh_idx_bias, // bias applied during index computation
+        tanh_idx_mask, // mask applied to extract index
+        tanh_linear_ubound, // arg below which tanh(x) = x
+        tanh_saturation_lbound, // arg after which tanh(x) = 1.f
+        tanh_pol_table, // table of polynomial coefficients
         soft_relu_one_twenty_six, // 126.f
         soft_relu_mantissa_sign_mask, // mask for mantissa bits and sign
         soft_relu_pol, // see correspondent table for float values
@@ -223,21 +227,44 @@ private:
         log_five_bit_offset, // 5 bits off (31 = 2^5 - 1)
         log_pol, // see correspondent table for float values
         log_predefined_vals, // see correspondent table for float values
+        undef_key,
     };
 
-    Xbyak::Address table_val(key_t key, size_t key_off_val_shift = 0) {
+    size_t table_off(key_t key, size_t key_off_val_shift = 0) {
+        // assumption: all table entries sharing the same key also
+        // share their broadcast property
+        // TODO: enforce through data structure
         const auto it = entry_map_.find(key); // search an entry for a key
         assert(it != entry_map_.end());
-        const auto &t_e = (*it).second;
-        const auto t_e_offset = t_e.first;
-        const auto index = t_e_offset + key_off_val_shift;
-        return h->ptr[p_table + index * vlen];
+        const auto &te = (*it).second;
+        const auto scale = te.bcast ? vlen : sizeof(table_entry_val_t);
+        return te.off + key_off_val_shift * scale;
+    }
+    Xbyak::Address table_val(key_t key, size_t key_off_val_shift = 0) {
+        auto off = table_off(key, key_off_val_shift);
+        return h->ptr[p_table + off];
     }
 
-    using table_entry_t = std::pair<size_t, size_t>; // {offset, hex_value}
-    using table_t = std::multimap<key_t, table_entry_t>; // {key, table_entry}
+    // we accept only 32bit hexadecimal table values to avoid any rounding
+    using table_entry_val_t = uint32_t;
+    using table_entry_offset_t = size_t; // offsets are in bytes wrt p_table
+    using table_entry_bcast_t = bool; // true => bcast value
+
+    struct table_entry_t {
+        table_entry_val_t val;
+        table_entry_bcast_t bcast;
+    };
+    struct mapped_table_entry_t {
+        table_entry_offset_t off;
+        table_entry_val_t val;
+        table_entry_bcast_t bcast;
+    };
+
+    using table_t = std::multimap<key_t, table_entry_t>;
+    using mapped_table_t = std::multimap<key_t, mapped_table_entry_t>;
+
     void register_table_entries();
-    table_t entry_map_;
+    mapped_table_t entry_map_;
 };
 
 } // namespace x64

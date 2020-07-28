@@ -19,7 +19,11 @@
 # f32_wino
 --reset --alg=wino --cfg=f32_wino
 --mb=2
+<<<<<<< HEAD
 --dir=FWD_B --attr=post_ops='sum;relu' --batch=shapes_resnet_50
+=======
+--dir=FWD_B --attr-post-ops='sum;relu' --batch=shapes_resnet_50
+>>>>>>> dyoussif/mdev2
 
 # Depthwise fusion
 --batch=harness_conv_fused_depthwise

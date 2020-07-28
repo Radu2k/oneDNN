@@ -183,6 +183,7 @@ int str2desc(desc_t *desc, const char *str, bool is_deconv) {
             != OK)
         return FAIL;
 
+    d.init_pad_r(is_deconv);
     *desc = d;
 
     return OK;
@@ -300,8 +301,8 @@ std::ostream &operator<<(std::ostream &s, const prb_t &p) {
     if (canonical || p.dtag != def.dtag[0]) s << "--dtag=" << p.dtag << " ";
     if (canonical || p.alg != def.alg[0])
         s << "--alg=" << alg2str(p.alg) << " ";
-    if (canonical || !p.attr.is_def()) s << "--attr=\"" << p.attr << "\" ";
 
+    s << p.attr;
     s << static_cast<const desc_t &>(p);
 
     return s;

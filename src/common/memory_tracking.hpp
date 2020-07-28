@@ -165,9 +165,12 @@ enum {
     key_concat_optrs,
     key_concat_tent_dst,
     key_conv_adjusted_scales,
+    key_conv_amx_inp_buffer,
+    key_conv_amx_tilecfg,
+    key_conv_amx_tile_buffer,
+    key_conv_amx_wsp_buffer,
     key_conv_bia_reduction,
     key_conv_bias_bf16_convert_wsp,
-    key_conv_dst_bf16_convert_wsp,
     key_conv_gemm_acc,
     key_conv_gemm_col,
     key_conv_gemm_imtr,
@@ -289,6 +292,9 @@ inline size_t buffer_protect_size() {
 struct registry_t {
     struct entry_t {
         size_t offset, size, capacity, alignment;
+
+        // apply offset and alignment + check memory_debug (host/cpu only)
+        const void *compute_ptr(const void *base_ptr) const;
     };
 
     // perf_align is the desired alignment for performance.
@@ -311,32 +317,6 @@ struct registry_t {
         offset_map_[key] = entry_t {size_, size, capacity, alignment};
 
         size_ += capacity;
-    }
-
-    void *get(const key_t &key, void *base_ptr) const {
-        if (!base_ptr) {
-            assert(size() == 0);
-            return nullptr;
-        }
-        if (offset_map_.count(key) != 1) return nullptr;
-
-        return get(offset_map_.at(key), base_ptr);
-    }
-
-    std::unique_ptr<memory_storage_t> get_memory_storage(
-            const key_t &key, const memory_storage_t *base_mem_storage) const {
-        if (!base_mem_storage) {
-            assert(size() == 0);
-            return nullptr;
-        }
-        if (offset_map_.count(key) != 1) return nullptr;
-
-        const auto &e = offset_map_.at(key);
-        const size_t aligned_offset
-                = reinterpret_cast<size_t>(utils::align_ptr<char>(
-                        reinterpret_cast<char *>(e.offset), e.alignment));
-        assert(aligned_offset + e.size <= size());
-        return base_mem_storage->get_sub_storage(aligned_offset, e.size);
     }
 
     entry_t get(const key_t &key) const {
@@ -379,11 +359,10 @@ struct registry_t {
             return iter != rhs.iter;
         }
         std::pair<return_type, size_t> operator*() const {
-            const void *ptr_start = nullptr;
-            const entry_t &e = iter->second;
-            ptr_start = get(e, base_ptr);
+            const entry_t &entry = iter->second;
+            const void *ptr_start = entry.compute_ptr(base_ptr);
             return std::pair<return_type, size_t> {
-                    (return_type)ptr_start, e.size};
+                    (return_type)ptr_start, entry.size};
         }
     };
     typedef common_iterator_t<void *> iterator;
@@ -404,27 +383,6 @@ struct registry_t {
 protected:
     std::unordered_map<key_t, entry_t> offset_map_;
     size_t size_ = 0;
-
-    static const void *get(const entry_t &e, const void *base_ptr) {
-        const char *ptr = reinterpret_cast<const char *>(base_ptr) + e.offset;
-        const char *aligned_ptr
-                = utils::align_ptr<const char>(ptr, get_alignment(e.alignment));
-        if (memory_debug::is_mem_debug_overflow()
-                && e.size % getpagesize() != 0) {
-            // Align to end of page
-            size_t page_end_offset
-                    = utils::rnd_up(e.size, e.alignment) % getpagesize();
-            aligned_ptr += getpagesize() - page_end_offset;
-            if (aligned_ptr - getpagesize() > ptr) aligned_ptr -= getpagesize();
-            assert((size_t)aligned_ptr % e.alignment == 0);
-        }
-        assert(aligned_ptr + e.size
-                <= ptr + e.capacity - buffer_protect_size());
-        return aligned_ptr;
-    }
-    static void *get(const entry_t &e, void *base_ptr) {
-        return const_cast<void *>(get(e, (const void *)base_ptr));
-    }
 };
 
 struct registrar_t {
@@ -479,15 +437,11 @@ struct grantor_t {
             return nullptr;
         }
         auto e = registry_.get(make_key(prefix_, key));
+        if (e.size == 0) return nullptr;
 
-        char *host_ptr
-                = reinterpret_cast<char *>(get_host_ptr(base_mem_storage_));
-        char *base_ptr = host_ptr + base_mem_storage_->base_offset();
-
-        char *ptr = reinterpret_cast<char *>(base_ptr) + e.offset;
-        char *aligned_ptr = utils::align_ptr<char>(ptr, e.alignment);
-        assert(aligned_ptr + e.size <= ptr + e.capacity);
-        return (T *)aligned_ptr;
+        char *host_storage_ptr = get_host_storage_ptr(base_mem_storage_);
+        char *base_ptr = host_storage_ptr + base_mem_storage_->base_offset();
+        return (T *)e.compute_ptr(base_ptr);
     }
 
     std::unique_ptr<memory_storage_t> get_memory_storage(
@@ -497,17 +451,14 @@ struct grantor_t {
             return nullptr;
         }
         auto e = registry_.get(make_key(prefix_, key));
+        if (e.size == 0) return nullptr;
 
         if (is_cpu_engine(base_mem_storage_)) {
-            char *host_ptr
-                    = reinterpret_cast<char *>(get_host_ptr(base_mem_storage_));
-            char *base_ptr = host_ptr + base_mem_storage_->base_offset();
-
-            char *ptr = reinterpret_cast<char *>(base_ptr) + e.offset;
-            char *aligned_ptr = utils::align_ptr<char>(ptr, e.alignment);
-            assert(aligned_ptr + e.size <= ptr + e.capacity);
-
-            size_t aligned_offset = size_t(aligned_ptr - host_ptr);
+            char *host_storage_ptr = get_host_storage_ptr(base_mem_storage_);
+            char *base_ptr
+                    = host_storage_ptr + base_mem_storage_->base_offset();
+            char *aligned_ptr = (char *)e.compute_ptr(base_ptr);
+            size_t aligned_offset = size_t(aligned_ptr - host_storage_ptr);
             return base_mem_storage_->get_sub_storage(aligned_offset, e.size);
         }
 
@@ -524,13 +475,14 @@ struct grantor_t {
     const registry_t &get_registry() const { return registry_; }
 
 protected:
-    void *get_host_ptr(const memory_storage_t *mem_storage) const;
-    bool is_cpu_engine(const memory_storage_t *mem_storage) const;
-
     const registry_t &registry_;
     const key_t prefix_;
     const memory_storage_t *base_mem_storage_;
     const exec_ctx_t *exec_ctx_;
+
+private:
+    char *get_host_storage_ptr(const memory_storage_t *storage) const;
+    bool is_cpu_engine(const memory_storage_t *mem_storage) const;
 };
 
 inline registrar_t registry_t::registrar() {

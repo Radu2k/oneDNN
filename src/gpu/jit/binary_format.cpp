@@ -29,9 +29,10 @@
 #define MAGIC4 0x0123456789ABCDEFull
 #define MAGIC5 0xFEDCBA9876543210ull
 #define MAGICPTR 0xABADFEEDu
-#define MAGICSIZEX 8
-#define MAGICSIZEY 3
-#define MAGICSIZEZ 2
+
+#define MAGICSIZEX 4
+#define MAGICSIZEY 2
+#define MAGICSIZEZ 1
 
 namespace dnnl {
 namespace impl {
@@ -147,12 +148,17 @@ public:
         threadend(SWSB(sb2, 1), r127);
     }
 
-    static cl_kernel make_kernel(cl_context context, cl_device_id device) {
-        cl_kernel kernel = nullptr;
+    static compute::kernel_t make_kernel(
+            cl_context context, cl_device_id device) {
+        compute::kernel_t kernel;
 
         if (hw != HW::Unknown) {
             binary_format_kernel_t<hw> binary_format_kernel;
-            kernel = binary_format_kernel.getKernel(context, device);
+            auto binary = binary_format_kernel.getBinary(context, device);
+            const char *binary_name
+                    = binary_format_kernel.getExternalName().c_str();
+            kernel = compute::kernel_t(
+                    new ocl::ocl_gpu_kernel_t(binary, binary_name));
         } else {
             auto hw_detect = OpenCLCodeGenerator<HW::Unknown>::detectHW(
                     context, device);
@@ -189,10 +195,8 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     // - All nGEN primitives must call mayiuse_ngen_kernels().
     //
     // DO_NOT_PROMOTE : Return true unless flag is set to zero value
-    *ok = dnnl::impl::getenv_int("DNNL_ENABLE_NGEN", 1) != 0;
-    return status::success;
+    *ok = false;
 
-#if 0
     auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine);
     if (!gpu_engine) return status::runtime_error;
 
@@ -200,7 +204,8 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
             gpu_engine->context(), gpu_engine->device());
     if (!kernel) return status::success;
 
-    auto compute_kernel = compute::kernel_t(new ocl::ocl_gpu_kernel_t(kernel));
+    compute::kernel_t realized_kernel;
+    CHECK(kernel.realize(&realized_kernel, engine));
 
     status_t status = status::success;
 
@@ -213,7 +218,7 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     uint64_t magic5 = MAGIC5;
     uint32_t magic_ptr = MAGICPTR;
 
-    size_t gws[3] = {1, 1, 1};
+    size_t gws[3] = {MAGICSIZEX, MAGICSIZEY, MAGICSIZEZ};
     size_t lws[3] = {MAGICSIZEX, MAGICSIZEY, MAGICSIZEZ};
 
     memory_storage_t *storage = nullptr;
@@ -249,7 +254,9 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     arg_list.set(7, *result_buf.get());
 
     auto nd_range = compute::nd_range_t(gws, lws);
-    status = stream->parallel_for(nd_range, compute_kernel, arg_list);
+
+    status = stream->parallel_for(nd_range, realized_kernel, arg_list);
+
     if (status != status::success) return status::runtime_error;
 
     status = stream->wait();
@@ -260,7 +267,6 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     *ok = (result != 0);
 
     return status::success;
-#endif
 }
 
 } // namespace jit
