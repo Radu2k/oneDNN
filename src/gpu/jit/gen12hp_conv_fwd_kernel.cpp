@@ -240,15 +240,16 @@ public:
         init_wei_off_tg();
 
         // Initialize thread read offsets for source.
-        mul(1, src_off_rd, ithr0, uint16_t(conf.stride_w * 32 * 32));
-        mad(1, src_off_rd, src_off_rd, ithr1, uint16_t(256));
+        mul(1, src_off_rd, ithr0, conf.stride_w * 32 * 32);
+        mul(1, tmp0.d(0), ithr1, uint16_t(256));
+        add(1, src_off_rd, src_off_rd, tmp0.d(0));
         add(1, src_off_rd, src_off_rd, src_off_tg);
 
         // Initialize thread read address for weights.
         mul(1, wei_addr.uq(0), ithr0,
                 ic_bytes_padded * conf.kd * conf.kh * conf.kw * 32);
         mad(1, wei_addr.d(0), wei_addr.d(0), ithr1, uint16_t(256));
-        add(1, wei_addr.d(0), wei_addr.d(0), wei_off_tg);
+        add(1, wei_addr.uq(0), wei_addr.uq(0), wei_off_tg);
         add(1, wei_addr.uq(0), wei_addr.uq(0), wei_ptr);
 
         if (slm_nbuf == 3) {
@@ -345,11 +346,11 @@ public:
         add(1, kw, kw, 1);
         add(1, iw, iw, 1 + conf.dilate_w);
         add(1, src_off_rd, src_off_rd, (1 + conf.dilate_w) * 32 * 32);
-        cmp(8 | lt | f0[0] | SWSB(3), kw, conf.kw);
+        cmp(8 | lt | f0[0] | SWSB(2), kw, conf.kw);
         while_(8 | f0[0], kw_loop);
 
         // Restore src offset after kw loop.
-        add(1 | SWSB(3), src_off_rd, src_off_rd,
+        add(1 | SWSB(1), src_off_rd, src_off_rd,
                 -conf.kw * (1 + conf.dilate_w) * 32 * 32);
 
         if (has_h) {
@@ -358,13 +359,13 @@ public:
             // Advance kh = kh + 1.
             add(1, kh, kh, 1);
             add(1, ih, ih, 1 + conf.dilate_h);
-            add(1 | SWSB(3), src_off_rd, src_off_rd,
+            add(1 | SWSB(1), src_off_rd, src_off_rd,
                     (1 + conf.dilate_h) * conf.iw * 32 * 32);
-            cmp(8 | lt | f0[0] | SWSB(3), kh, conf.kh);
+            cmp(8 | lt | f0[0] | SWSB(2), kh, conf.kh);
             while_(8 | f0[0], kh_loop);
 
             // Restore src offset after kh loop.
-            add(1 | SWSB(3), src_off_rd, src_off_rd,
+            add(1 | SWSB(1), src_off_rd, src_off_rd,
                     -conf.kh * (1 + conf.dilate_h) * conf.iw * 32 * 32);
         }
 
@@ -374,22 +375,22 @@ public:
             // Advance kd = kd + 1.
             add(1, kd, kd, 1);
             add(1, id, id, 1 + conf.dilate_d);
-            add(1 | SWSB(3), src_off_rd, src_off_rd,
+            add(1 | SWSB(1), src_off_rd, src_off_rd,
                     (1 + conf.dilate_d) * conf.ih * conf.iw * 32 * 32);
-            cmp(8 | lt | f0[0] | SWSB(3), kd, conf.kd);
+            cmp(8 | lt | f0[0] | SWSB(2), kd, conf.kd);
             while_(8 | f0[0], kd_loop);
 
             // Restore src offset after kd loop.
-            add(1 | SWSB(3), src_off_rd, src_off_rd,
+            add(1 | SWSB(1), src_off_rd, src_off_rd,
                     -conf.kd * (1 + conf.dilate_d) * conf.ih * conf.iw * 32
                             * 32);
         }
 
         // Advance ic_bytes = ic_bytes + 32.
         add(1, ic_bytes, ic_bytes, 32);
-        add(1 | SWSB(2), src_off_rd, src_off_rd,
+        add(1 | SWSB(1), src_off_rd, src_off_rd,
                 conf.id * conf.ih * conf.iw * 32 * 32);
-        cmp(8 | lt | f0[0] | SWSB(2), ic_bytes, ic_bytes_padded);
+        cmp(8 | lt | f0[0] | SWSB(1), ic_bytes, ic_bytes_padded);
         while_(8 | f0[0], ic_loop);
 
         if (slm_nbuf == 2) {
@@ -465,8 +466,8 @@ public:
 
         off_tmp = ra.alloc_sub<int32_t>();
 
-        src_off_tg = ra.alloc_sub<int32_t>();
-        wei_off_tg = ra.alloc_sub<int32_t>();
+        src_off_tg = ra.alloc_sub<int64_t>();
+        wei_off_tg = ra.alloc_sub<int64_t>();
 
         mb = ra.alloc_sub<int32_t>();
 
@@ -506,7 +507,7 @@ public:
         src_addr = ra.alloc();
         wei_addr = ra.alloc();
 
-        src_off_rd = ra.alloc_sub<int32_t>();
+        src_off_rd = ra.alloc_sub<int64_t>();
 
         A_tmp = ra.alloc_range(conf.oc_group == 4 ? 8 : 16);
         B_tmp = ra.alloc_range(conf.ow_group == 4 ? 8 : 16);
@@ -554,30 +555,29 @@ public:
 
     void init_src_off_tg() {
         // (mb / 32) * (IC / 32) * ID * IH * IW * 32 * 32
-        mul(1, tmp0.uq(0), mb, conf.id * conf.ih * conf.iw * ic_bytes_padded);
-        mov(1, src_off_tg, tmp0.d(0));
+        mul(1, src_off_tg, mb, conf.id * conf.ih * conf.iw * ic_bytes_padded);
 
         if (has_d) {
             // id * IH * IW * 32 * 32
             mul(1, tmp0.uq(0), id_init, conf.ih * conf.iw * 32 * 32);
-            add(1, src_off_tg, src_off_tg, tmp0.d(0));
+            add(1, src_off_tg, src_off_tg, tmp0.uq(0));
         }
 
         if (has_h) {
             // ih * IW * 32 * 32
             mul(1, tmp0.uq(0), ih_init, conf.iw * 32 * 32);
-            add(1, src_off_tg, src_off_tg, tmp0.d(0));
+            add(1, src_off_tg, src_off_tg, tmp0.uq(0));
         }
 
         // iw * 32 * 32
-        mad(1, src_off_tg, src_off_tg, iw_tg, uint16_t(32 * 32));
+        mul(1, tmp0.uq(0), iw_tg, 32 * 32);
+        add(1, src_off_tg, src_off_tg, tmp0.uq(0));
     }
 
     void init_wei_off_tg() {
         // (oc / 32) * (IC / 32) * KH * KW * 32 * 32
-        mul(1, tmp0.uq(0), oc_tg,
+        mul(1, wei_off_tg, oc_tg,
                 ic_bytes_padded * conf.kd * conf.kh * conf.kw);
-        mov(1, wei_off_tg, tmp0.d(0));
     }
 
     void slm_buffer_advance() {
