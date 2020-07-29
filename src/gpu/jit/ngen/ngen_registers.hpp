@@ -91,9 +91,6 @@ static constexpr_reg InstructionModifier NoSrcDepSet = AccWrEn;
 static constexpr_reg InstructionModifier Breakpoint = InstructionModifier::createDebugCtrl();
 static constexpr_reg InstructionModifier sat = InstructionModifier::createSaturate();
 static constexpr_reg InstructionModifier NoMask = InstructionModifier::createMaskCtrl(true);
-
-static constexpr_reg InstructionModifier Mask = InstructionModifier::createMaskCtrl(false);
-static constexpr_reg InstructionModifier ForceMask = InstructionModifier::createMaskCtrl(true);     // for use when setDefaultNoMask() active
 static constexpr_reg InstructionModifier AutoSWSB = InstructionModifier::createAutoSWSB();
 static constexpr_reg InstructionModifier Serialize = InstructionModifier::createSerialized();
 static constexpr_reg InstructionModifier EOT = InstructionModifier::createEOT();

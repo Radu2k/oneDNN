@@ -14,13 +14,13 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "gpu/jit/gen12hp_systolic_gemm.hpp"
+#include "gpu/jit/gemm/gen12hp_systolic_gemm.hpp"
 
 #include "common/c_types_map.hpp"
 #include "common/dnnl_traits.hpp"
 #include "common/float16.hpp"
 #include "common/type_helpers.hpp"
-#include "gpu/jit/gen12hp_systolic_gemm_kernel.hpp"
+#include "gpu/jit/gemm/gen12hp_systolic_gemm_kernel.hpp"
 #include "gpu/jit/ngen_type_bridge.hpp"
 #include "gpu/ocl/gemm/gen12hp_systolic_gemm_copy_kernel.hpp"
 

@@ -224,7 +224,6 @@ public:
     }
 
 private:
-
     static constexpr int max_args = 64;
     static constexpr int storage_size = 512;
     static constexpr int storage_alginment = 8;

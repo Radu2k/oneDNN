@@ -403,7 +403,6 @@ status_t gen12lp_x8s8s32x_convolution_fwd_t::pd_t::init_kernel_ctx(
 
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
     kernel_ctx.add_option("-Dcl_intel_subgroups_long");
-    if (is_gen12hp) kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
 
     return status::success;
 }

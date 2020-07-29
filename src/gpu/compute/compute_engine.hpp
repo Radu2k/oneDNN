@@ -54,7 +54,6 @@ public:
         return status;
     }
 
-
     virtual status_t create_kernel(compute::kernel_t *kernel,
             jit::jit_generator_base &jitter) const = 0;
 
@@ -102,8 +101,7 @@ public:
         return dispatch_t(this, md);
     }
 
-
-    virtual bool mayiuse_ngen_kernels()  { return false; }
+    virtual bool mayiuse_ngen_kernels() { return false; }
 
 private:
     std::unique_ptr<device_info_t> device_info_;

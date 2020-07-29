@@ -247,7 +247,12 @@ int execute_and_wait(dnnl_primitive_t prim, const args_t &args) {
                     fname << aub_file << std::setfill('0') << std::setw(3)
                           << kv.second << ".bin";
                     std::ifstream in(fname.str(), std::ios::binary);
-                    assert(in.good());
+                    if (!in.good()) {
+                        fprintf(stderr,
+                                "Error: cannot load binary file for "
+                                "simulation.\n");
+                        abort();
+                    }
                     {
                         const dnnl_memory_desc_t *md;
                         DNN_SAFE_V(dnnl_memory_get_memory_desc(mem, &md));

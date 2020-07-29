@@ -63,7 +63,6 @@ inline const char *gpu_arch2str(gpu_arch_t arch) {
 #undef CASE
 }
 
-
 enum class device_ext_t : int64_t {
     intel_subgroups = 1 << 0,
     intel_subgroups_short = 1 << 1,
@@ -77,7 +76,6 @@ enum class device_ext_t : int64_t {
     future_bf16_cvt = 1 << 9,
     last
 };
-
 
 static bool has(uint64_t extensions, device_ext_t ext) {
     return extensions & (uint64_t)ext;
@@ -231,7 +229,6 @@ public:
             gpu_arch_ = real_gpu_arch_;
             return status::success;
         }
-
 
         // Environment GPU architecture is different from the detected one, use
         // emulation.

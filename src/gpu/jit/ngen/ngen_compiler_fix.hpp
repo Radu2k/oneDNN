@@ -126,10 +126,7 @@ void _workaround_() {
     (void) NoSrcDepSet.getAll();
     (void) Breakpoint.getAll();
     (void) sat.getAll();
-    (void) NoMask.getAll();
-    (void) Mask.getAll();
-    (void) ForceMask.getAll();
-
+    (void) NoMask.getAll(); 
     (void) Serialize.getAll();
     (void) EOT.getAll();
     (void) Align1.getAll();

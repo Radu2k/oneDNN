@@ -16,7 +16,7 @@
 
 #include <assert.h>
 
-#include "gpu/jit/gen12hp_systolic_gemm_kernel.hpp"
+#include "gpu/jit/gemm/gen12hp_systolic_gemm_kernel.hpp"
 
 using namespace ngen;
 

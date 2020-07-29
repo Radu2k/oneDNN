@@ -330,16 +330,11 @@ PREFIX constexpr ngen::InstructionModifier CG::NoSrcDepSet; \
 PREFIX constexpr ngen::InstructionModifier CG::Breakpoint; \
 PREFIX constexpr ngen::InstructionModifier CG::sat; \
 PREFIX constexpr ngen::InstructionModifier CG::NoMask; \
-\
-PREFIX constexpr ngen::InstructionModifier CG::Mask; \
-PREFIX constexpr ngen::InstructionModifier CG::ForceMask; \
-\
 PREFIX constexpr ngen::InstructionModifier CG::AutoSWSB; \
 PREFIX constexpr ngen::InstructionModifier CG::Serialize; \
 PREFIX constexpr ngen::InstructionModifier CG::EOT; \
 PREFIX constexpr ngen::InstructionModifier CG::Align1; \
 PREFIX constexpr ngen::InstructionModifier CG::Align16; \
-\
 PREFIX constexpr ngen::InstructionModifier CG::Atomic; \
 PREFIX constexpr ngen::InstructionModifier CG::Switch; \
 PREFIX constexpr ngen::InstructionModifier CG::NoPreempt; \

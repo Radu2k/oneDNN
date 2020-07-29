@@ -623,11 +623,13 @@ conv_dw_fwd_ow_block_x8s8s32x(const __global uchar *src,
         block_read_dst(OW_BLOCK - 8, &D1, dst + 8 * OC_BLOCK);
     }
 #endif // WITH_SUM
+    SUM_DATA16_T SUM0 = AS_SUM_DATA16_T(D0);
+    SUM_DATA16_T SUM1 = AS_SUM_DATA16_T(D1);
 
-    APPLY_POST_OPS(ACC0, ACC_DATA_TYPE, AS_SUM_DATA16_T(D0), SUM_DATA_T, 0, 1,
-            0, 1, 0, 1, 0, 1, 0, 1, 0, 1);
-    APPLY_POST_OPS(ACC1, ACC_DATA_TYPE, AS_SUM_DATA16_T(D1), SUM_DATA_T, 0, 1,
-            0, 1, 0, 1, 0, 1, 0, 1, 0, 1);
+    APPLY_POST_OPS(ACC0, ACC_DATA_TYPE, SUM0, SUM_DATA_T, 0, 1, 0, 1, 0, 1, 0,
+            1, 0, 1, 0, 1);
+    APPLY_POST_OPS(ACC1, ACC_DATA_TYPE, SUM1, SUM_DATA_T, 0, 1, 0, 1, 0, 1, 0,
+            1, 0, 1, 0, 1);
 
     DST_DATA16_T R0 = CONVERT_DST_DATA16_T(ACC0);
     DST_DATA16_T R1 = CONVERT_DST_DATA16_T(ACC1);

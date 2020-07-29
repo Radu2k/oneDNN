@@ -32,7 +32,7 @@ struct gpu_convolution_fwd_pd_t : public convolution_fwd_pd_t {
     using convolution_fwd_pd_t::convolution_fwd_pd_t;
 
 protected:
-    bool post_ops_ok(const primitive_attr_t *attr) const {
+    virtual bool post_ops_ok(const primitive_attr_t *attr) const {
         const auto &p = attr->post_ops_;
 
         auto is_eltwise

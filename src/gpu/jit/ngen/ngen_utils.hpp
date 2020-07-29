@@ -20,7 +20,6 @@
 #include <cstdint>
 
 #include <immintrin.h>
-#include <nmmintrin.h>
 
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -45,7 +44,6 @@ struct bitcast {
     explicit constexpr bitcast(T t) : from{t} {}
     constexpr operator U() const { return to; }
 };
-
 
 template <typename T> static inline constexpr14 int bsf(T x)
 {

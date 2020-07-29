@@ -332,6 +332,12 @@ std::vector<unsigned char> gen_gemm_kernel_t::get_binary(
             program_binary = generator.getBinary(ctx, dev);
             break;
         }
+        case HW::Gen12HP: {
+            gemm_kernel_generator_t<HW::Gen12HP> generator;
+            generator.gemm(problem_, strategy_, interface_);
+            program_binary = generator.getBinary(ctx, dev);
+            break;
+        }
         default: assert(!"Unsupported architecture"); break;
     }
 
@@ -453,6 +459,32 @@ const kernel_table_t *gen12lp_f16_nocopy_tables[2][2] = {
     {gen12lp_f16_nocopy_nn_table, gen12lp_f16_nocopy_nt_table},
     {gen12lp_f16_nocopy_tn_table, gen12lp_f16_nocopy_tt_table}
 };
+
+const kernel_table_t gen12hp_f16_nocopy_nn_table[] = {
+    {{32, 32}, {-1, -1}, {0, 0}}
+};
+
+const kernel_table_t gen12hp_f16_nocopy_nt_table[] = {
+    {{32, 32}, {-1, -1}, {0, 0}}
+};
+
+const kernel_table_t gen12hp_f16_nocopy_tn_table[] = {
+    {{16, 16}, {-1, -1}, {0, 0}}
+};
+
+const kernel_table_t gen12hp_f16_nocopy_tt_table[] = {
+    {{32, 32}, {-1, -1}, {0, 0}}
+};
+
+const kernel_table_t *gen12hp_f16_nocopy_tables[2][2] = {
+    {gen12hp_f16_nocopy_nn_table, gen12hp_f16_nocopy_nt_table},
+    {gen12hp_f16_nocopy_tn_table, gen12hp_f16_nocopy_tt_table}
+};
+
+const kernel_table_t *gen12hp_f32_nocopy_tables[2][2] = {
+    {nullptr, nullptr},
+    {nullptr, nullptr}
+};
 // clang-format on
 
 } // anonymous namespace
@@ -465,11 +497,15 @@ void gen_gemm_nocopy_kernel_t::choose_unrolls(compute::gpu_arch_t arch,
     unroll_m = unroll_n = 1;
 
     using tables_t = decltype(gen9_f32_nocopy_tables);
-    const tables_t *all_tables[2][2]
-            = {{&gen9_f32_nocopy_tables, &gen12lp_f32_nocopy_tables},
-                    {&gen9_f16_nocopy_tables, &gen12lp_f16_nocopy_tables}};
+    const tables_t *all_tables[2][3]
+            = {{&gen9_f32_nocopy_tables, &gen12lp_f32_nocopy_tables,
+                       &gen12hp_f32_nocopy_tables},
+                    {&gen9_f16_nocopy_tables, &gen12lp_f16_nocopy_tables,
+                            &gen12hp_f16_nocopy_tables}};
 
-    int arch_idx = (arch == compute::gpu_arch_t::gen12lp) ? 1 : 0;
+    int arch_idx = (arch == compute::gpu_arch_t::gen12lp)
+            ? 1
+            : (arch == compute::gpu_arch_t::gen12hp) ? 2 : 0;
     int type_idx = (c_type == data_type::f16) ? 1 : 0;
 
     const kernel_table_t *table

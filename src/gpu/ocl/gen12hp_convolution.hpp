@@ -66,8 +66,10 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
                             attr_skip_mask, desc()->dst_desc.data_type)
                     && post_ops_ok(attr())
                     && IMPLICATION(!attr()->output_scales_.has_default_values(),
-                            utils::one_of(
-                                    attr()->output_scales_.mask_, 0, 1 << 1));
+                            utils::one_of(src_md_.data_type, s8, u8)
+                                    && utils::one_of(
+                                            attr()->output_scales_.mask_, 0,
+                                            1 << 1));
             if (!ok) return status::unimplemented;
 
             status_t status = init_conf();
