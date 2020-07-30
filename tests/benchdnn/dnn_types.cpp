@@ -417,7 +417,6 @@ int attr_t::post_ops_t::from_str(const char *str, const char **end_s) {
                                 = str2dt(std::string(end, s - end).c_str());
                         if (*s == ':') {
                             ++s;
-                            attr_t::scale_t oscale;
                             auto rc = e.convolution.oscale.from_str(s, &s);
                             if (rc != OK) return rc;
                         }

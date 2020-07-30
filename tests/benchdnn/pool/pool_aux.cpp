@@ -209,7 +209,6 @@ std::ostream &operator<<(std::ostream &s, const prb_t &p) {
     if (canonical || p.tag != def.tag[0]) s << "--tag=" << p.tag << " ";
     if (canonical || p.alg != def.alg[0])
         s << "--alg=" << alg2str(p.alg) << " ";
-    if (canonical || !p.attr.is_def()) s << "--attr=\"" << p.attr << "\" ";
 
     s << static_cast<const desc_t &>(p);
 

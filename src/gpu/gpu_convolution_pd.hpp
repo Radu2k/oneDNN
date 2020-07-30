@@ -40,9 +40,6 @@ protected:
         auto is_sum = [&](int idx) { return p.entry_[idx].is_sum(false); };
         auto is_binary = [&](int idx) { return p.entry_[idx].is_binary(); };
 
-        bool is_int8 = utils::one_of(
-                invariant_src_md()->data_type, data_type::s8, data_type::u8);
-
         bool is_po_ok = true;
         for (int po_idx = 0; po_idx < p.len(); ++po_idx) {
             is_po_ok &= is_eltwise(po_idx) | is_sum(po_idx) | is_binary(po_idx);

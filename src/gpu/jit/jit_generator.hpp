@@ -85,8 +85,13 @@ constexpr gpu_gen_t gpu_gen12hp = ngen::HW::Gen12HP;
 //
 
 template <gpu_gen_t hw>
+struct jit_eltwise_injector_f32;
+
+template <gpu_gen_t hw>
 class jit_generator : public ngen::OpenCLCodeGenerator<hw>,
                       public jit_generator_base {
+    friend struct jit_eltwise_injector_f32<hw>;
+
 private:
 #ifdef CL_VERSION_2_0
     struct svm_deleter {
@@ -113,7 +118,6 @@ public:
 
     void dbg_alloc(cl_context context);
     void *dbg_memory() const { return dbg_memory_.get(); }
-#endif
 };
 
 #ifdef CL_VERSION_2_0

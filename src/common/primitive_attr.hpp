@@ -355,7 +355,8 @@ struct dnnl_post_ops : public dnnl::impl::c_compatible {
             dnnl::impl::memory_desc_t src1_desc;
         };
 
-        dnnl::impl::primitive_kind_t kind;
+        dnnl::impl::primitive_kind_t kind
+                = dnnl::impl::primitive_kind::undefined;
         union {
             struct {
                 float scale;

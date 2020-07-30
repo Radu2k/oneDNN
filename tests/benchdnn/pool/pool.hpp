@@ -93,6 +93,7 @@ struct settings_t {
     std::vector<std::string> tag {tag::abx};
     std::vector<alg_t> alg {MAX};
     std::vector<int64_t> mb {0};
+    std::vector<attr_t::post_ops_t> post_ops {attr_t::post_ops_t()};
 
     const char *perf_template_csv
             = "perf,%engine%,%name%,%dir%,%cfg%,%tag%,%alg%,%DESC%,%-time%,%"
