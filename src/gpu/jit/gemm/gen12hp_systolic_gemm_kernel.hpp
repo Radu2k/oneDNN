@@ -43,8 +43,8 @@ public:
         bias_t c_bias = bias_t::none;
         bool early_c_bias = false;
 
-        bool alt_barriers = true;
-        bool use_slm_fence = false;
+        bool alt_barriers = false;
+        bool use_slm_fence = true;
         bool c_remainder = true;
         bool c_align16_check = true;
         bool pad_a = true;
