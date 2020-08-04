@@ -622,7 +622,7 @@ conv_nhwc_fwd_first_x8s8s32x(const __global uchar *src,
 #define DO_POST_OP(i) \
     { \
         DST_DATA4_T d; \
-        if (WITH_SUM) d = BLOCK_READ_DST4(dst); \
+        if (WITH_SUM) d = read_oc_block4(dst, (group_oc + oc) * OC_BLOCK); \
         for (int didx = 0; didx < 4; ++didx) { \
             float tmp_i = tmp[didx]; \
             SUM_DATA_T d_i = AS_SUM_DATA_T(d[didx]); \
@@ -640,7 +640,14 @@ conv_nhwc_fwd_first_x8s8s32x(const __global uchar *src,
 #define DO_POST_OP_4(i) \
     { \
         DST_DATA16_T d; \
-        if (WITH_SUM) d = BLOCK_READ_DST16(dst); \
+        if (WITH_SUM) { \
+            d.s0123 = read_oc_block4(dst, (group_oc + oc) * OC_BLOCK); \
+            d.s4567 = read_oc_block4(dst + OC, (group_oc + oc) * OC_BLOCK); \
+            d.s89ab = read_oc_block4( \
+                    dst + OC * 2, (group_oc + oc) * OC_BLOCK); \
+            d.scdef = read_oc_block4( \
+                    dst + OC * 3, (group_oc + oc) * OC_BLOCK); \
+        } \
         float16 tmp_x16 = (float16)(tmp0, tmp1); \
         for (int didx = 0; didx < 16; ++didx) { \
             float tmp_i = tmp_x16[didx]; \

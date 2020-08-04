@@ -48,11 +48,11 @@ inline status_t get_depthwise_conv_desc(convolution_desc_t &cd_dw,
         CHECK(attr_dw.output_scales_.set(
                 dw_po.count, dw_po.mask, dw_po.scales));
     }
-
-    auto len = attr_dw.post_ops_.len();
-    for (int i = dw_po_index + 1; i < attr_1x1.post_ops_.len(); ++i) {
-        CHECK(attr_dw.post_ops_.entry_[len++].copy_from(
-                attr_1x1.post_ops_.entry_[i]));
+    auto dw_po_len = attr_1x1.post_ops_.len() - (dw_po_index + 1);
+    attr_dw.post_ops_.entry_.resize(dw_po_len);
+    for (int i = 0; i < dw_po_len; ++i) {
+        CHECK(attr_dw.post_ops_.entry_[i].copy_from(
+                attr_1x1.post_ops_.entry_[i + dw_po_index + 1]));
     }
 
     attr_dw.scratchpad_mode_ = attr_1x1.scratchpad_mode_;

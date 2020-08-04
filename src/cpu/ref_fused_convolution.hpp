@@ -186,7 +186,7 @@ struct ref_fused_convolution_fwd_t : public primitive_t {
             if (po_op_iter == -1) return status::unimplemented;
 
             primitive_attr_t attr_1x1 = *attr();
-            // erase post-ops after fusion as they will be handled separately
+            //erase post-ops after fusion as they will be handled separately
             auto &e = attr_1x1.post_ops_.entry_;
             e.erase(e.begin() + po_op_iter, e.end());
 

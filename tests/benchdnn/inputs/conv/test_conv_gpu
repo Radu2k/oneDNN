@@ -18,9 +18,9 @@
 --mb=2,16
 --dir=BWD_D --batch=shapes_resnet_50
 
-#--mb=32
-#--cfg=bf16f32bf16,bf16bf16bf16
-#--dir=BWD_WB --batch=set_gpu
+--mb=32
+--cfg=bf16f32bf16,bf16bf16bf16
+--dir=BWD_WB --batch=set_gpu
 
 # i8
 # i8 - 1x1 tests

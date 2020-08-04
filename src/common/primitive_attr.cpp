@@ -159,11 +159,11 @@ bool primitive_attr_t::defined(dnnl_primitive_attr::skip_mask_t mask) const {
 
 status_t post_ops_t::append_sum(float scale, data_type_t dt) {
 
-    entry_t e;
+    entry_.emplace_back();
+    auto &e = entry_.back();
     e.kind = primitive_kind::sum;
     e.sum.scale = scale;
     e.sum.dt = dt;
-    entry_.push_back(e);
 
     return success;
 }
@@ -173,13 +173,13 @@ status_t post_ops_t::append_eltwise(
     if (!math::is_eltwise_ok(data_type::f32, alg, alpha, beta))
         return invalid_arguments;
 
-    entry_t e;
+    entry_.emplace_back();
+    auto &e = entry_.back();
     e.kind = primitive_kind::eltwise;
     e.eltwise.scale = scale;
     e.eltwise.alg = alg;
     e.eltwise.alpha = alpha;
     e.eltwise.beta = beta;
-    entry_.push_back(e);
     return success;
 }
 
@@ -215,7 +215,8 @@ status_t post_ops_t::append_dw_k3s1p1(data_type_t wei_dt, data_type_t bias_dt,
             && IMPLICATION(count > 0, scales) && mask >= 0;
     if (!ok) return invalid_arguments;
 
-    entry_t e;
+    entry_.emplace_back();
+    auto &e = entry_.back();
     e.kind = primitive_kind::convolution;
     auto &d = e.depthwise_conv;
     d.stride = 1;
@@ -229,7 +230,6 @@ status_t post_ops_t::append_dw_k3s1p1(data_type_t wei_dt, data_type_t bias_dt,
     auto status = e.set_depthwise_scales(scales);
     if (status != status::success) return status;
 
-    entry_.push_back(e);
     return success;
 }
 
@@ -239,7 +239,7 @@ status_t post_ops_t::append_dw_k3s2p1(data_type_t wei_dt, data_type_t bias_dt,
     auto status
             = append_dw_k3s1p1(wei_dt, bias_dt, dst_dt, count, mask, scales);
     if (status != success) return status;
-    entry_[len() - 1].depthwise_conv.stride = 2;
+    entry_.back().depthwise_conv.stride = 2;
 
     return success;
 }
@@ -251,11 +251,11 @@ status_t post_ops_t::append_binary(
     if (!alg_ok) return invalid_arguments;
     if (!memory_desc_sanity_check(src1_desc)) return invalid_arguments;
 
-    entry_t e;
+    entry_.emplace_back();
+    auto &e = entry_.back();
     e.kind = primitive_kind::binary;
     e.binary.alg = alg;
     e.binary.src1_desc = *src1_desc;
-    entry_.push_back(e);
     return success;
 }
 
