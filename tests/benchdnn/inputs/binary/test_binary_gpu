@@ -92,3 +92,22 @@
 --ddt=f32
 --sdt=f32:f32
 --batch=shapes_common
+
+# testing ddt different from sdt
+--reset
+
+--inplace=false
+--alg=ADD,MUL,MAX,MIN
+--ddt=s8,u8
+--sdt=f32:f32
+--batch=shapes_common
+
+--attr=post_ops='sum:0.5'
+--batch=shapes_common
+
+--attr=post_ops='linear:2:0.125:1.5'
+--batch=shapes_common
+
+--attr=post_ops='sum:0.25;relu:-0.01'
+--batch=shapes_common
+
