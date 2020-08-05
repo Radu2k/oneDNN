@@ -41,8 +41,98 @@ const bool enable_smem_write = true;
 
 const bool enable_barrier = true;
 
+class gen12hp_conv_fwd_kernel_t;
+
+// Convert registers between data types.
+// to_stride is always assumed to be 1.
+class convertor_t {
+public:
+    convertor_t(gen12hp_conv_fwd_kernel_t *host, int width, DataType to_type,
+            DataType from_type, int from_stride = 1)
+        : host_(host)
+        , width_(width)
+        , to_type_(to_type)
+        , from_type_(from_type)
+        , from_stride_(from_stride)
+        , from_bytes_(getBytes(from_type))
+        , to_bytes_(getBytes(to_type)) {
+        assert(width % 8 == 0);
+    }
+
+    int min_scratch_regs() const {
+        if (from_bytes_ == 4 && to_bytes_ == 1) return 1;
+        if (from_bytes_ == 1 && to_bytes_ == 4) return 1;
+        return 0;
+    }
+
+    int preferred_scratch_regs() const {
+        if (from_bytes_ == 4 && to_bytes_ == 1) return 8;
+        if (from_bytes_ == 1 && to_bytes_ == 4) return 8;
+        return 0;
+    }
+
+    int max_batch_size() const {
+        if (preferred_scratch_regs() == 0) return 128;
+        return scratch_.getLen() * 8;
+    }
+
+    int phase_count() const {
+        if (from_type_ == DataType::f
+                && utils::one_of(to_type_, DataType::bf, DataType::hf))
+            return 2;
+        if (from_bytes_ == 4 && to_bytes_ == 1) return 2;
+        if (from_bytes_ == 1 && to_bytes_ == 4) return 2;
+        return 1;
+    }
+
+    void convert(const Subregister &to, const Subregister &from,
+            RegisterAllocator<256> &ra) {
+        scratch_ = ra.alloc_range(preferred_scratch_regs());
+
+        int bmax = max_batch_size();
+        for (int width0 = 0; width0 < width_; width0 += bmax) {
+            for (int phase = 0; phase < phase_count(); phase++) {
+                int batch = std::min(width_ - width0, bmax);
+                int simd = std::min(batch, 16);
+                for (int off = width0; off < width0 + batch;) {
+                    convert_impl(simd, off - width0, fixup_sub(to, off),
+                            fixup_sub(from, off, from_stride_), phase);
+                    off += simd;
+                    if (off + simd > width0 + batch) simd = 8;
+                }
+            }
+        }
+        ra.safeRelease(scratch_);
+    }
+
+private:
+    void convert_impl(
+            int simd, int off, Subregister to, Subregister from, int phase);
+
+    // Fixes sub-register base/offset when offset is too big and crosses GRF
+    // boundary.
+    Subregister fixup_sub(const Subregister &sub, int off, int stride = 1) {
+        auto new_off = (sub.getOffset() + off) * sub.getBytes();
+        auto grf = GRF(sub.getBase() + new_off / 32).retype(sub.getType());
+        return grf[(new_off % 32) / sub.getBytes()];
+    }
+
+    gen12hp_conv_fwd_kernel_t *host_;
+
+    int width_;
+    DataType to_type_;
+    DataType from_type_;
+    int to_bytes_;
+    int from_bytes_;
+    int from_stride_;
+
+    GRFRange scratch_;
+};
+
 class gen12hp_conv_fwd_kernel_t : public jit_generator<HW::Gen12HP> {
 public:
+    friend class convertor_t;
+
     gen12hp_conv_fwd_kernel_t(const conv_conf_t &conf)
         : conf(conf), attr_info(conf.attr_info), ra(HW::Gen12HP) {
 
@@ -57,6 +147,12 @@ public:
         src_size = (int)types::data_type_size(conf.src_data_type);
         bia_size = (int)types::data_type_size(conf.bias_data_type);
         dst_size = (int)types::data_type_size(conf.dst_data_type);
+
+        int mb_padded = utils::rnd_up(conf.mb, conf.mb_block);
+        int ic_padded = utils::rnd_up(conf.ic, conf.ic_block);
+        int64_t src_bytes = (int64_t)mb_padded * ic_padded * conf.id * conf.ih
+                * conf.iw * src_size;
+        is_src_off_64_bit = (src_bytes > std::numeric_limits<int32_t>::max());
 
         // Destination layout:
         // - 32n16c for f16/bf16/f32
@@ -240,10 +336,11 @@ public:
         init_wei_off_tg();
 
         // Initialize thread read offsets for source.
-        mul(1, src_off_rd, ithr0, conf.stride_w * 32 * 32);
+        mul(1, src_off_rd_ic, ithr0, conf.stride_w * 32 * 32);
         mul(1, tmp0.d(0), ithr1, uint16_t(256));
-        add(1, src_off_rd, src_off_rd, tmp0.d(0));
-        add(1, src_off_rd, src_off_rd, src_off_tg);
+        add(1, src_off_rd_ic, src_off_rd_ic, tmp0.d(0));
+        add(1, src_off_rd_ic, src_off_rd_ic,
+                is_src_off_64_bit ? src_off_tg : src_off_tg.d(0));
 
         // Initialize thread read address for weights.
         mul(1, wei_addr.uq(0), ithr0,
@@ -287,6 +384,9 @@ public:
 
         mov(1, ic_bytes, 0);
 
+        auto src_off_dep
+                = is_src_off_64_bit ? SWSB<int64_t>(1) : SWSB<int32_t>(3);
+
         // Reduction loop.
         Label ic_loop;
         mark(ic_loop);
@@ -294,8 +394,10 @@ public:
         Label kd_loop;
         Label kd_skip;
         if (has_d) {
+            mov(1 | src_off_dep, src_off_rd_kd, src_off_rd_ic);
             mov(1, kd, 0);
             mov(1, id, id_init);
+
             mark(kd_loop);
 
             // Check padding for ID.
@@ -311,6 +413,8 @@ public:
         Label kh_loop;
         Label kh_skip;
         if (has_h) {
+            mov(1 | src_off_dep, src_off_rd_kh,
+                    has_d ? src_off_rd_kd : src_off_rd_ic);
             mov(1, kh, 0);
             mov(1, ih, ih_init);
 
@@ -326,6 +430,8 @@ public:
             }
         }
 
+        mov(1 | src_off_dep, src_off_rd_kw,
+                has_h ? src_off_rd_kh : has_d ? src_off_rd_kd : src_off_rd_ic);
         mov(1, kw, 0);
         mov(1, iw, iw_init);
 
@@ -343,15 +449,11 @@ public:
         slm_buffer_advance();
 
         // Advance kw = kw + 1.
+        add(1, src_off_rd_kw, src_off_rd_kw, (1 + conf.dilate_w) * 32 * 32);
         add(1, kw, kw, 1);
         add(1, iw, iw, 1 + conf.dilate_w);
-        add(1, src_off_rd, src_off_rd, (1 + conf.dilate_w) * 32 * 32);
         cmp(8 | lt | f0[0] | SWSB(2), kw, conf.kw);
         while_(8 | f0[0], kw_loop);
-
-        // Restore src offset after kw loop.
-        add(1 | SWSB(1), src_off_rd, src_off_rd,
-                -conf.kw * (1 + conf.dilate_w) * 32 * 32);
 
         if (has_h) {
             mark(kh_skip);
@@ -359,14 +461,10 @@ public:
             // Advance kh = kh + 1.
             add(1, kh, kh, 1);
             add(1, ih, ih, 1 + conf.dilate_h);
-            add(1 | SWSB(1), src_off_rd, src_off_rd,
+            add(1, src_off_rd_kh, src_off_rd_kh,
                     (1 + conf.dilate_h) * conf.iw * 32 * 32);
             cmp(8 | lt | f0[0] | SWSB(2), kh, conf.kh);
             while_(8 | f0[0], kh_loop);
-
-            // Restore src offset after kh loop.
-            add(1 | SWSB(1), src_off_rd, src_off_rd,
-                    -conf.kh * (1 + conf.dilate_h) * conf.iw * 32 * 32);
         }
 
         if (has_d) {
@@ -375,20 +473,15 @@ public:
             // Advance kd = kd + 1.
             add(1, kd, kd, 1);
             add(1, id, id, 1 + conf.dilate_d);
-            add(1 | SWSB(1), src_off_rd, src_off_rd,
+            add(1, src_off_rd_kd, src_off_rd_kd,
                     (1 + conf.dilate_d) * conf.ih * conf.iw * 32 * 32);
             cmp(8 | lt | f0[0] | SWSB(2), kd, conf.kd);
             while_(8 | f0[0], kd_loop);
-
-            // Restore src offset after kd loop.
-            add(1 | SWSB(1), src_off_rd, src_off_rd,
-                    -conf.kd * (1 + conf.dilate_d) * conf.ih * conf.iw * 32
-                            * 32);
         }
 
         // Advance ic_bytes = ic_bytes + 32.
         add(1, ic_bytes, ic_bytes, 32);
-        add(1 | SWSB(1), src_off_rd, src_off_rd,
+        add(1, src_off_rd_ic, src_off_rd_ic,
                 conf.id * conf.ih * conf.iw * 32 * 32);
         cmp(8 | lt | f0[0] | SWSB(1), ic_bytes, ic_bytes_padded);
         while_(8 | f0[0], ic_loop);
@@ -479,17 +572,23 @@ public:
             od = ra.alloc_sub<int32_t>();
             id = ra.alloc_sub<int32_t>();
             kd = ra.alloc_sub<int32_t>();
+            src_off_rd_kd = ra.alloc_sub(
+                    is_src_off_64_bit ? DataType::q : DataType::d);
         }
 
         if (has_h) {
             oh = ra.alloc_sub<int32_t>();
             ih = ra.alloc_sub<int32_t>();
             kh = ra.alloc_sub<int32_t>();
+            src_off_rd_kh = ra.alloc_sub(
+                    is_src_off_64_bit ? DataType::q : DataType::d);
         }
 
         ow = ra.alloc_sub<int32_t>();
         iw = ra.alloc_sub<int32_t>();
         kw = ra.alloc_sub<int32_t>();
+        src_off_rd_kw
+                = ra.alloc_sub(is_src_off_64_bit ? DataType::q : DataType::d);
 
         id_init = ra.alloc_sub<int32_t>();
         ih_init = ra.alloc_sub<int32_t>();
@@ -507,7 +606,8 @@ public:
         src_addr = ra.alloc();
         wei_addr = ra.alloc();
 
-        src_off_rd = ra.alloc_sub<int64_t>();
+        src_off_rd_ic
+                = ra.alloc_sub(is_src_off_64_bit ? DataType::q : DataType::d);
 
         A_tmp = ra.alloc_range(conf.oc_group == 4 ? 8 : 16);
         B_tmp = ra.alloc_range(conf.ow_group == 4 ? 8 : 16);
@@ -622,7 +722,7 @@ public:
                 cmp(8 | f1[0] | ge, iw, -ithr * conf.stride_w);
                 if_(8 | f1[0], src_skip, src_end);
             }
-            add(1 | sb0.src, src_addr.uq(0), src_ptr, src_off_rd);
+            add(1 | sb0.src, src_addr.uq(0), src_ptr, src_off_rd_kw);
             if (iter == 1) {
                 add(1 | SWSB(1), src_addr.uq(0), src_addr.uq(0),
                         2 * conf.stride_w * 32 * 32);
@@ -662,26 +762,6 @@ public:
         }
 
         store(16 | SWSB(sb2, 1), block_oword(16), SLM, b_slm_wr, B_tmp[0]);
-    }
-
-    void load_A(int i, const SBID &sb) {
-        if (!enable_smem_read) return;
-        assert(!is_auto_swsb);
-
-        auto off = a_slm_rd[i / 8];
-        mad(1, off.d(2), a_slm_off_rd_init[i / 8], slm_buf_compute,
-                uint16_t(ab_slm_size / 16));
-        load(16 | SWSB(sb, 1), A[i], block_oword(16), SLM, off);
-    }
-
-    void load_B(int i, const SBID &sb) {
-        if (!enable_smem_read) return;
-        assert(!is_auto_swsb);
-
-        auto off = b_slm_rd[i / 8];
-        mad(1, off.d(2), b_slm_off_rd_init[i / 8], slm_buf_compute,
-                uint16_t(ab_slm_size / 16));
-        load(16 | SWSB(sb, 1), B[i % 16], block_oword(16), SLM, off);
     }
 
     void fence_and_signal(bool skip_fence = false) {
@@ -725,10 +805,29 @@ public:
 
         if (slm_nbuf == 3) wait();
 
-        load_B(0, sb10);
-        load_B(8, sb11);
-        load_A(0, sb8);
-        load_A(8, sb9);
+        if (enable_smem_read) {
+            mad(1, a_slm_rd[0].d(2), a_slm_off_rd_init[0], slm_buf_compute,
+                    uint16_t(ab_slm_size / 16));
+            mad(1, a_slm_rd[1].d(2), a_slm_off_rd_init[1], slm_buf_compute,
+                    uint16_t(ab_slm_size / 16));
+            mad(1, b_slm_rd[0].d(2), b_slm_off_rd_init[0], slm_buf_compute,
+                    uint16_t(ab_slm_size / 16));
+            mad(1, b_slm_rd[1].d(2), b_slm_off_rd_init[1], slm_buf_compute,
+                    uint16_t(ab_slm_size / 16));
+            mad(1, b_slm_rd[2].d(2), b_slm_off_rd_init[2], slm_buf_compute,
+                    uint16_t(ab_slm_size / 16));
+            mad(1, b_slm_rd[3].d(2), b_slm_off_rd_init[3], slm_buf_compute,
+                    uint16_t(ab_slm_size / 16));
+
+            sync(SyncFunction::allrd,
+                    (1 << 10) | (1 << 11) | (1 << 12) | (1 << 13));
+            load(16 | SWSB(sb8, 6), A[0], block_oword(16), SLM, a_slm_rd[0]);
+            load(16 | SWSB(sb9, 5), A[8], block_oword(16), SLM, a_slm_rd[1]);
+            load(16 | SWSB(sb10, 4), B[0], block_oword(16), SLM, b_slm_rd[0]);
+            load(16 | SWSB(sb11, 3), B[8], block_oword(16), SLM, b_slm_rd[1]);
+            load(16 | SWSB(sb12, 2), B[16], block_oword(16), SLM, b_slm_rd[2]);
+            load(16 | SWSB(sb13, 1), B[24], block_oword(16), SLM, b_slm_rd[3]);
+        }
 
         // [0:8, 0:32]
         sync(SyncFunction::nop, sb10.dst);
@@ -737,28 +836,25 @@ public:
         dpasw_typed(8 | Atomic | sb9.dst, 8, 8, C[16], B[0], A[8]);
         dpasw_typed(8 | sb10, 8, 8, C[24], B[0], A[12]);
 
-        load_B(16, sb10);
-
         // [8:16, 0:32]
         dpasw_typed(8 | Atomic | sb11.dst, 8, 8, C[32], B[8], A[0]);
         dpasw_typed(8 | Atomic, 8, 8, C[40], B[8], A[4]);
         dpasw_typed(8 | Atomic, 8, 8, C[48], B[8], A[8]);
         dpasw_typed(8 | sb11, 8, 8, C[56], B[8], A[12]);
 
-        load_B(24, sb11);
-        if (slm_nbuf == 3 && !skip_signal) fence_and_signal();
-
         // [16:24, 0:32]
-        dpasw_typed(8 | Atomic | sb10.dst, 8, 8, C[64], B[0], A[0]);
-        dpasw_typed(8 | Atomic, 8, 8, C[72], B[0], A[4]);
-        dpasw_typed(8 | Atomic, 8, 8, C[80], B[0], A[8]);
-        dpasw_typed(8 | sb10, 8, 8, C[88], B[0], A[12]);
+        dpasw_typed(8 | Atomic | sb12.dst, 8, 8, C[64], B[16], A[0]);
+        dpasw_typed(8 | Atomic, 8, 8, C[72], B[16], A[4]);
+        dpasw_typed(8 | Atomic, 8, 8, C[80], B[16], A[8]);
+        dpasw_typed(8 | sb12, 8, 8, C[88], B[16], A[12]);
 
         // [24:32, 0:32]
-        dpasw_typed(8 | Atomic | sb11.dst, 8, 8, C[96], B[8], A[0]);
-        dpasw_typed(8 | Atomic, 8, 8, C[104], B[8], A[4]);
-        dpasw_typed(8 | Atomic, 8, 8, C[112], B[8], A[8]);
-        dpasw_typed(8 | sb11, 8, 8, C[120], B[8], A[12]);
+        dpasw_typed(8 | Atomic | sb13.dst, 8, 8, C[96], B[24], A[0]);
+        dpasw_typed(8 | Atomic, 8, 8, C[104], B[24], A[4]);
+        dpasw_typed(8 | Atomic, 8, 8, C[112], B[24], A[8]);
+        dpasw_typed(8 | sb13, 8, 8, C[120], B[24], A[12]);
+
+        if (slm_nbuf == 3 && !skip_signal) fence_and_signal();
 
         else_(8, end, end);
         mark(skip);
@@ -779,26 +875,93 @@ public:
         return y * 4 + (mb_idx % 4);
     }
 
-    void apply_post_ops(const GRF &C_reg, int idx) {
-        auto &all_po = attr_info.all_post_ops;
-        for (int i = 0; i < all_po.len(); i++) {
-            auto &e = all_po.entry_[i];
+    int c_off(int mb_idx, int mb_inner, int oc_idx, int oc_inner) {
+        return mb_off(mb_idx + mb_inner) + (oc_idx + oc_inner) / 8 * 32;
+    }
+
+    void reorder_C_to_dense(int mb_idx, int mb_step, int oc_idx, int oc_step) {
+        int ireg = 0;
+        for_(int mb_inner = 0; mb_inner < mb_step; mb_inner++)
+        for_(int oc_inner = 0; oc_inner < oc_step; oc_inner += 8)
+        {
+            auto C_dense_reg = C_dense[ireg++];
+            auto C_reg = C[c_off(mb_idx, mb_inner, oc_idx, oc_inner)];
+            mov(8, C_dense_reg.retype(post_op_type), C_reg.retype(acc_type));
+        }
+    }
+
+    void load_C_old() {
+        if (!attr_info.with_sum) return;
+
+        // Read 128 bytes of destination.
+        C_old = ra.alloc_range(4);
+        load(16, C_old[0], block_oword(8), A64, dst_addr);
+        C_old_cvt = (dst_size == 4)
+                ? C_old
+                : ra.alloc_range(4 * (sizeof(float) / dst_size));
+    }
+
+    void convert_C_old() {
+        if (!attr_info.with_sum) return;
+
+        convertor_t cvt(this, 128 / dst_size, DataType::f, sum_type);
+        cvt.convert(C_old_cvt[0].f(0), C_old[0].sub(0, sum_type), ra);
+
+        if (C_old_cvt != C_old) ra.safeRelease(C_old);
+    }
+
+    void apply_bias(int mb_idx, int mb_step, int oc_idx, int oc_step) {
+        if (!conf.with_bias) return;
+
+        int ireg = 0;
+        for_(int mb_inner = 0; mb_inner < mb_step; mb_inner++)
+        for_(int oc_inner = 0; oc_inner < oc_step; oc_inner += 16)
+        {
+            auto C_reg = C_dense[ireg];
+            add(16, C_reg.f(), C_reg.f(), bia[oc_inner / 8].f());
+            ireg += 2;
+        }
+    }
+
+    void apply_oscales(int mb_idx, int mb_step, int oc_idx, int oc_step) {
+        if (!attr_info.with_oscales) return;
+
+        int ireg = 0;
+        for_(int mb_inner = 0; mb_inner < mb_step; mb_inner++)
+        for_(int oc_inner = 0; oc_inner < oc_step; oc_inner += 16)
+        {
+            auto C_reg = C_dense[ireg];
+            if (attr_info.with_common_oscales) {
+                mul(16, C_reg.f(), C_reg.f(), common_oscales);
+            } else {
+                // Per-oc output scales.
+                mul(16, C_reg.f(), C_reg.f(), oscales[oc_inner / 8].f());
+            }
+            ireg += 2;
+        }
+    }
+
+    void apply_post_ops() {
+        for (int po_idx = 0; po_idx < attr_info.all_post_ops.len(); po_idx++) {
+            auto &e = attr_info.all_post_ops.entry_[po_idx];
             switch (e.kind) {
                 case primitive_kind::sum:
                     if (e.sum.scale != 0) {
-                        auto old = C_old[idx / 8];
-                        mad(8, C_reg.f(), C_reg.f(), old.f(), sum_scale);
+                        for (int ireg = 0; ireg < C_dense.getLen(); ireg += 2) {
+                            auto upd = C_dense[ireg].f();
+                            auto old = C_old_cvt[ireg];
+                            mad(16, upd, upd, old.f(), sum_scale);
+                        }
                     }
                     break;
                 case primitive_kind::eltwise: {
-                    // TODO: Move out of the loop and reuse to reduce overhead.
                     jit_eltwise_injector_f32<HW::Gen12HP> inj(this,
                             e.eltwise.alg, e.eltwise.alpha, e.eltwise.beta,
                             e.eltwise.scale);
                     auto scratch = ra.alloc_range(inj.preferred_scratch_regs());
                     inj.set_scratch(scratch);
                     inj.prepare();
-                    inj.compute(GRFRange(C_reg, 1));
+                    inj.compute(C_dense);
                     ra.safeRelease(scratch);
                     break;
                 }
@@ -807,85 +970,47 @@ public:
         }
     }
 
+    void convert_C_to_dst(const GRFRange &C_tmp, int mb_idx, int mb_step,
+            int oc_idx, int oc_step) {
+        convertor_t cvt(this, 128 / dst_size, dst_type, post_op_type);
+        cvt.convert(C_tmp[0].retype(dst_type)[0],
+                C_dense[0].retype(post_op_type)[0], ra);
+    }
+
     void read_update_write_dst_range(
             int mb_idx, int mb_step, int oc_idx, int oc_step) {
-
-        auto c_off = [&](int mb_inner, int oc_inner) {
-            return mb_off(mb_idx + mb_inner) + (oc_idx + oc_inner) / 8 * 32;
-        };
-
-        auto C_tmp = ra.alloc_range(4);
-
         bool do_f32_cvt = conf.with_bias || attr_info.with_oscales
                 || attr_info.all_post_ops.len() > 0;
+        post_op_type = do_f32_cvt ? DataType::f : acc_type;
 
-        // Convert s32 -> f32 in-place if needed.
-        DataType post_op_type = do_f32_cvt ? DataType::f : acc_type;
-        if (acc_type != post_op_type) {
-            for_(int mb_inner = 0; mb_inner < mb_step; mb_inner++)
-            for_(int oc_inner = 0; oc_inner < oc_step; oc_inner += 8)
-            {
-                auto C_reg = C[c_off(mb_inner, oc_inner)];
-                mov(8, C_reg.retype(post_op_type), C_reg.retype(acc_type));
-            }
-        }
+        // Load old values if needed for sum post-op.
+        load_C_old();
 
-        // Load old values for sum post-op.
-        if (attr_info.with_sum) {
-            // Read 128 bytes of destination and convert to f32.
-            GRFRange C_old_tmp = ra.alloc_range(4);
-            load(16, C_old_tmp[0], block_oword(8), A64, dst_addr);
+        // Reorder mb_step x oc_step block of C to a dense GRF region and
+        // convert for post-ops if needed.
+        C_dense = ra.alloc_range(4 * (4 / dst_size));
+        reorder_C_to_dense(mb_idx, mb_step, oc_idx, oc_step);
 
-            C_old = (dst_size == 4)
-                    ? C_old_tmp
-                    : ra.alloc_range(4 * (sizeof(float) / dst_size));
-            convert(128 / dst_size, C_old[0].f(0),
-                    C_old_tmp[0].sub(0, sum_type));
-            if (C_old != C_old_tmp) ra.safeRelease(C_old_tmp);
-        }
+        // Convert old values to f32 if needed for sum post-op.
+        convert_C_old();
 
-        for_(int mb_inner = 0; mb_inner < mb_step; mb_inner++)
-        for_(int oc_inner = 0; oc_inner < oc_step; oc_inner += 8)
-        {
-            auto C_reg = C[c_off(mb_inner, oc_inner)];
-
-            // Apply bias.
-            if (conf.with_bias)
-                add(8, C_reg.f(), C_reg.f(), bia[oc_inner / 8].f());
-
-            // Apply output scales.
-            if (attr_info.with_oscales) {
-                if (attr_info.with_common_oscales) {
-                    mul(8, C_reg.f(), C_reg.f(), common_oscales);
-                } else {
-                    // Per-oc output scales.
-                    mul(8, C_reg.f(), C_reg.f(), oscales[oc_inner / 8].f());
-                }
-            }
-
-            apply_post_ops(C_reg, mb_inner * oc_step + oc_inner);
-        }
+        apply_bias(mb_idx, mb_step, oc_idx, oc_step);
+        apply_oscales(mb_idx, mb_step, oc_idx, oc_step);
+        apply_post_ops();
 
         // Convert to the destination type and write.
-        int c_bytes = 0;
-        for_(int mb_inner = 0; mb_inner < mb_step; mb_inner++)
-        for_(int oc_inner = 0; oc_inner < oc_step; oc_inner += 8)
-        {
-            auto C_reg = C[c_off(mb_inner, oc_inner)];
-            auto packed = C_tmp[c_bytes / 32]
-                                  .b(c_bytes % 32)
-                                  .reinterpret(0, dst_type);
-            convert(8, packed, C_reg.retype(post_op_type)[0]);
-            c_bytes += 8 * dst_size;
-        }
-        assert(c_bytes == 128);
+        auto C_tmp = ra.alloc_range(4);
+        convert_C_to_dst(C_tmp, mb_idx, mb_step, oc_idx, oc_step);
         store(16, block_oword(8), A64, dst_addr, C_tmp[0]);
-
         ra.safeRelease(C_tmp);
-        if (attr_info.with_sum) ra.safeRelease(C_old);
+
+        ra.safeRelease(C_dense);
+        if (attr_info.with_sum) ra.safeRelease(C_old_cvt);
     }
 
     void load_bias(int oc_idx, int oc_step) {
+        if (!conf.with_bias) return;
+
         // TODO: Add bounds check.
         switch (bia_size) {
             case 2: {
@@ -911,91 +1036,22 @@ public:
         }
     }
 
+    void convert_bias(int oc_idx, int oc_step) {
+        UNUSED(oc_idx);
+        if (!conf.with_bias) return;
+
+        convertor_t cvt(this, oc_step, DataType::f, bia_type, 4 / bia_size);
+        cvt.convert(bia[0].f(0), bia[0].retype(bia_type)[0], ra);
+    }
+
     void load_per_oc_oscales(int oc_idx, int oc_step) {
+        if (!attr_info.with_per_oc_oscales) return;
+
         // TODO: Add bounds check.
         add(1, oc_off[0].d(2), oscales_off_init,
                 int32_t(oc_idx * sizeof(float)));
         load(16, oscales[0], aligned_block_oword(oc_step * sizeof(float) / 16),
                 Surface(oscales_surf), oc_off[0]);
-    }
-
-    // Fixes sub-register base/offset when offset is too big and crosses GRF
-    // boundary.
-    Subregister fixup_sub(const Subregister &sub, int off, int stride = 1) {
-        auto new_off = (sub.getOffset() + off) * sub.getBytes();
-        auto grf = GRF(sub.getBase() + new_off / 32).retype(sub.getType());
-        return grf[(new_off % 32) / sub.getBytes()];
-    }
-
-    // to_stride is always assumed to be 1.
-    void convert_impl(
-            int simd, Subregister to, Subregister from, int from_stride) {
-        auto from_type = from.getType();
-        auto to_type = to.getType();
-        auto from_bytes = getBytes(from_type);
-        auto to_bytes = getBytes(to_type);
-
-        assert(utils::one_of(simd, 8, 16));
-
-        if (to.getType() == from.getType() && from_stride == 1) {
-            mov(simd, to(1), from(from_stride));
-            return;
-        }
-
-        // bf16 -> f32:
-        // - bf16 must be packed: use left shift instead.
-        if (from_type == DataType::bf && to_type == DataType::f) {
-            to.setType(DataType::ud);
-            from.setType(DataType::uw);
-            shl(simd, to(1), from(from_stride), uint16_t(16));
-            return;
-        }
-
-        // f32 -> bf16 or f32 -> f16:
-        // - SIMD16 does not support mixed mode move.
-        if (simd == 16 && from_type == DataType::f
-                && utils::one_of(to_type, DataType::bf, DataType::hf)) {
-            mov(8, to(1), from(from_stride));
-            mov(8, fixup_sub(to, 8)(1), fixup_sub(from, 8, from_stride));
-            return;
-        }
-
-        // f32/s32 -> s8/u8:
-        // - Use saturation
-        // - s8/u8 must be DW-strided: use temporary
-        if (from_bytes == 4
-                && utils::one_of(to_type, DataType::b, DataType::ub)) {
-            auto strided = tmp0.retype(to_type)[0](4);
-            mov(simd | sat, strided, from(from_stride));
-            mov(simd, to(1), strided);
-            return;
-        }
-
-        // s8/u8 -> f32/s32:
-        // - s8/u8 must be DW-strided: use temporary
-        if (utils::one_of(from_type, DataType::b, DataType::ub)
-                && to_bytes == 4) {
-            auto strided = tmp0.retype(from_type)[0](4);
-            mov(simd, strided, from(from_stride));
-            mov(simd, to(1), strided);
-            return;
-        }
-
-        mov(simd, to(1), from(from_stride));
-    }
-
-    // to_stride is always assumed to be 1.
-    void convert(int width, const Subregister &to, const Subregister &from,
-            int from_stride = 1) {
-        assert(width % 8 == 0);
-
-        int simd = std::min(width, 16);
-        for (int off = 0; off < width;) {
-            convert_impl(simd, fixup_sub(to, off),
-                    fixup_sub(from, off, from_stride), from_stride);
-            off += simd;
-            if (off + simd >= width) simd = 8;
-        }
     }
 
     void read_update_write_dst() {
@@ -1075,19 +1131,13 @@ public:
         }
 
         for (int oc_idx = 0; oc_idx < 32; oc_idx += oc_step) {
-            // Load and convert bias to float.
-            if (conf.with_bias) {
-                load_bias(oc_idx, oc_step);
-                convert(oc_step, bia[0].f(0), bia[0].retype(bia_type)[0],
-                        4 / bia_size);
-            }
-
-            // Load per-oc output scales.
-            if (attr_info.with_per_oc_oscales)
-                load_per_oc_oscales(oc_idx, oc_step);
+            load_bias(oc_idx, oc_step);
+            load_per_oc_oscales(oc_idx, oc_step);
 
             add(1, dst_addr.uq(0), dst_addr_init,
                     oc_idx * conf.od * conf.oh * conf.ow * 32 * dst_size);
+
+            convert_bias(oc_idx, oc_step);
 
             for (int mb_idx = 0; mb_idx < 32; mb_idx += mb_step) {
                 // Update and write 128 bytes.
@@ -1123,6 +1173,7 @@ public:
     DataType bia_type;
     DataType dst_type;
     DataType acc_type;
+    DataType post_op_type;
 
     int src_size;
     int bia_size;
@@ -1199,7 +1250,12 @@ public:
     Subregister slm_counter;
 
     GRF src_addr;
-    Subregister src_off_rd;
+
+    bool is_src_off_64_bit;
+    Subregister src_off_rd_ic;
+    Subregister src_off_rd_kd;
+    Subregister src_off_rd_kh;
+    Subregister src_off_rd_kw;
 
     GRF wei_addr;
 
@@ -1214,8 +1270,11 @@ public:
 
     GRFRange bia;
 
+    GRFRange C_dense;
+
     // Post-ops support.
     GRFRange C_old;
+    GRFRange C_old_cvt;
     DataType sum_type;
     Subregister sum_scale;
 
@@ -1224,8 +1283,8 @@ public:
     Subregister oscales_off_init;
     GRFRange oscales;
 
-    GRFRange A = r90 - r105;
-    GRFRange B = r106 - r121;
+    GRFRange A = r70 - r85;
+    GRFRange B = r86 - r117;
     GRFRange C = r128 - r255;
 
     bool is_auto_swsb = false;
@@ -1233,6 +1292,67 @@ public:
     // 256 registers.
     RegisterAllocator<256> ra;
 };
+
+void convertor_t::convert_impl(
+        int simd, int off, Subregister to, Subregister from, int phase) {
+    assert(utils::one_of(simd, 8, 16));
+
+    if (to_type_ == from_type_ && from_stride_ == 1) {
+        if (phase == 0) host_->mov(simd, to(1), from(from_stride_));
+        return;
+    }
+
+    // bf16 -> f32:
+    // - bf16 must be packed: use left shift instead.
+    if (from_type_ == DataType::bf && to_type_ == DataType::f) {
+        to.setType(DataType::ud);
+        from.setType(DataType::uw);
+        if (phase == 0)
+            host_->shl(simd, to(1), from(from_stride_), uint16_t(16));
+        return;
+    }
+
+    // f32 -> bf16 or f32 -> f16:
+    // - SIMD16 does not support mixed mode move.
+    if (simd == 16 && from_type_ == DataType::f
+            && utils::one_of(to_type_, DataType::bf, DataType::hf)) {
+        switch (phase) {
+            case 0: host_->mov(8, to(1), from(from_stride_)); return;
+            case 1:
+                host_->mov(8, fixup_sub(to, 8)(1),
+                        fixup_sub(from, 8, from_stride_)(from_stride_));
+                return;
+            default: assert(!"not expected"); return;
+        }
+    }
+
+    // f32/s32 -> s8/u8:
+    // - Use saturation
+    // - s8/u8 must be DW-strided: use temporary
+    if (from_bytes_ == 4 && to_bytes_ == 1) {
+        auto strided = scratch_[off / 8].retype(to_type_)[0](4);
+        switch (phase) {
+            case 0:
+                host_->mov(simd | host_->sat, strided, from(from_stride_));
+                return;
+            case 1: host_->mov(simd, to(1), strided); return;
+            default: assert(!"not expected"); return;
+        }
+    }
+
+    // s8/u8 -> f32/s32:
+    // - s8/u8 must be DW-strided: use temporary
+    if (from_bytes_ == 1 && to_bytes_ == 4) {
+        auto strided = scratch_[off / 8].retype(from_type_)[0](4);
+        switch (phase) {
+            case 0: host_->mov(simd, strided, from(from_stride_)); return;
+            case 1: host_->mov(simd, to(1), strided); return;
+            default: assert(!"not expected"); return;
+        }
+    }
+
+    if (phase == 0) host_->mov(simd, to(1), from(from_stride_));
+}
 
 status_t gen12hp_conv_fwd_create_kernel(const conv_conf_t &conf,
         compute::kernel_t *kernel, gpu_primitive_t *primitive,
