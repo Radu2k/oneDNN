@@ -83,7 +83,7 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
             bool is_int8 = (acc_dt == s32);
             is_int8 &= utils::one_of(src_dt, u8, s8);
             is_int8 &= utils::one_of(wei_dt, u8, s8);
-            is_int8 &= utils::one_of(dst_dt, u8, s8, s32);
+            is_int8 &= utils::one_of(dst_dt, u8, s8, s32, f32);
             if (is_int8) return true;
 
             // Ignore accumulator type set to f16 and use f32.
