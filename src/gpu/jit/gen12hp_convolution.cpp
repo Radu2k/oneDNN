@@ -57,6 +57,9 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     conf.oc_block = 32;
     conf.ic_block = 32;
 
+    bool enable_40n = (getenv_int("DNNL_ENABLE_CONV_40N", 0) != 0);
+    conf.mb_block = (enable_40n ? 40 : 32);
+
     conf.oc_group = (conf.oc <= 64 ? 2 : 4);
     conf.ow_group = 4;
 
@@ -77,16 +80,26 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     format_tag_t dst_tag;
 
     if (is_int8) {
-        src_tag = utils::pick(
-                conf.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+        if (conf.mb_block == 40) {
+            src_tag = utils::pick(
+                    conf.ndims - 3, NCw40n32c, NChw40n32c, NCdhw40n32c);
+        } else {
+            src_tag = utils::pick(
+                    conf.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+        }
         wei_tag = conf.with_groups ? utils::pick(conf.ndims - 3, gOIw4o8i8o4i,
                           gOIhw4o8i8o4i, gOIdhw4o8i8o4i)
                                    : utils::pick(conf.ndims - 3, OIw4o8i8o4i,
                                            OIhw4o8i8o4i, OIdhw4o8i8o4i);
         dst_tag = src_tag;
     } else { // f16 or bf16.
-        src_tag = utils::pick(
-                conf.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
+        if (conf.mb_block == 40) {
+            src_tag = utils::pick(
+                    conf.ndims - 3, NCw40n16c, NChw40n16c, NCdhw40n16c);
+        } else {
+            src_tag = utils::pick(
+                    conf.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
+        }
         wei_tag = conf.with_groups ? utils::pick(conf.ndims - 3, gOIw4o8i8o2i,
                           gOIhw4o8i8o2i, gOIdhw4o8i8o2i)
                                    : utils::pick(conf.ndims - 3, OIw4o8i8o2i,
