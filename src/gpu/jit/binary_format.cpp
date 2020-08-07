@@ -184,8 +184,10 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     // - All nGEN primitives must call mayiuse_ngen_kernels().
     //
     // DO_NOT_PROMOTE : Return true unless flag is set to zero value
-    *ok = false;
+    *ok = dnnl::impl::getenv_int("DNNL_ENABLE_NGEN", 1) != 0;
+    return status::success;
 
+#if 0
     auto gpu_engine = utils::downcast<compute::compute_engine_t *>(engine);
     auto stream = utils::downcast<compute::compute_stream_t *>(
             engine->service_stream());
@@ -267,6 +269,7 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
 
     *ok = (result != 0);
     return status::success;
+#endif
 }
 
 } // namespace jit
