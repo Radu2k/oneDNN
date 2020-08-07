@@ -45,16 +45,16 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     // LIMITATIONS:
     // - batch is not supported
     // - runtime dims are not supported
-    bool limits_ok = d->batch == 1
-            && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m, d->n, d->k, d->lda,
-                    d->ldb, d->ldc);
+    bool limits_ok = d->batch() == 1
+            && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m(), d->n(), d->k(),
+                    d->lda(), d->ldb(), d->ldc());
 
-    bool dt_float_ok
-            = (d->a_type == d->b_type && utils::one_of(d->a_type, bf16, f16)
-                    && utils::one_of(d->c_type, f32, d->a_type));
+    bool dt_float_ok = (d->a_type() == d->b_type()
+            && utils::one_of(d->a_type(), bf16, f16)
+            && utils::one_of(d->c_type(), f32, d->a_type()));
 
-    bool dt_int_ok = (utils::one_of(d->a_type, u8, s8)
-            && utils::one_of(d->b_type, u8, s8) && (d->c_type == s32));
+    bool dt_int_ok = (utils::one_of(d->a_type(), u8, s8)
+            && utils::one_of(d->b_type(), u8, s8) && (d->c_type() == s32));
 
     auto attr_skip_mask = smask_t::oscale | smask_t::post_ops;
 
@@ -72,7 +72,8 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
                     attr()->post_ops_.find(sum) == 0
                             && attr()->post_ops_.find(eltwise) == 1)
             && IMPLICATION(with_bias(),
-                    dt_float_ok && utils::one_of(d->bias_type, d->a_type, f32)
+                    dt_float_ok
+                            && utils::one_of(d->bias_type(), d->a_type(), f32)
                             && utils::one_of(bias_cmask(), 0, 1 << 0, 1 << 1));
 
     if (dt_int_ok) {
@@ -100,27 +101,27 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
 dim_t gen12hp_systolic_gemm_t::pd_t::m_aligned() const {
     using kernel_t = gen12hp_systolic_gemm_kernel_t;
     return utils::rnd_up(
-            desc()->m, kernel_t::unroll_m * kernel_t::thread_group_m);
+            desc()->m(), kernel_t::unroll_m * kernel_t::thread_group_m);
 }
 
 dim_t gen12hp_systolic_gemm_t::pd_t::n_aligned() const {
     using kernel_t = gen12hp_systolic_gemm_kernel_t;
     return utils::rnd_up(
-            desc()->n, kernel_t::unroll_n * kernel_t::thread_group_n);
+            desc()->n(), kernel_t::unroll_n * kernel_t::thread_group_n);
 }
 
 dim_t gen12hp_systolic_gemm_t::pd_t::k_aligned() const {
-    return utils::rnd_up(desc()->k,
-            gen12hp_systolic_gemm_kernel_t::unroll_k(desc()->a_type));
+    return utils::rnd_up(desc()->k(),
+            gen12hp_systolic_gemm_kernel_t::unroll_k(desc()->a_type()));
 }
 
 status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     using namespace data_type;
     using kernel_t = gen12hp_systolic_gemm_kernel_t;
 
-    auto a_type = pd()->desc()->a_type;
-    auto b_type = pd()->desc()->b_type;
-    auto c_type = pd()->desc()->c_type;
+    auto a_type = pd()->desc()->a_type();
+    auto b_type = pd()->desc()->b_type();
+    auto c_type = pd()->desc()->c_type();
     auto acc_type = pd()->desc()->acc_type;
 
     if (utils::one_of(acc_type, f16, bf16)) acc_type = f32;
@@ -153,7 +154,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
         pd()->attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
     } else if (pd()->with_bias()) {
         cfg.early_c_bias = true;
-        cfg.co_type = convert_dnnl_type_to_ngen(pd()->desc()->bias_type);
+        cfg.co_type = convert_dnnl_type_to_ngen(pd()->desc()->bias_type());
         cmask = pd()->bias_cmask();
     }
 
@@ -177,7 +178,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
             break;
     }
 
-    bool may_k_block = (pd()->desc()->k > default_block_k(a_type));
+    bool may_k_block = (pd()->desc()->k() > default_block_k(a_type));
 
     for (bool first_k_block : {false, true}) {
         for (bool last_k_block : {false, true}) {
@@ -215,7 +216,8 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
 
             compute::kernel_ctx_t kernel_ctx;
 
-            auto trans = !copy_b ? pd()->desc()->transa : pd()->desc()->transb;
+            auto trans
+                    = !copy_b ? pd()->desc()->transa() : pd()->desc()->transb();
             auto status
                     = ocl::gen12hp_systolic_gemm_copy_kernel_t::init_kernel_ctx(
                             kernel_ctx, !copy_b ? a_type : b_type, copy_b,
@@ -235,8 +237,8 @@ status_t gen12hp_systolic_gemm_t::init_res_storage(
         engine_t *engine, gpu_resource_t *r) const {
     using kernel_t = gen12hp_systolic_gemm_kernel_t;
 
-    auto a_type = pd()->desc()->a_type;
-    auto b_type = pd()->desc()->b_type;
+    auto a_type = pd()->desc()->a_type();
+    auto b_type = pd()->desc()->b_type();
 
     int64_t block_m = 0, block_n = 0, block_k = 0;
     std::tie(block_m, block_n, block_k) = get_blocking();
@@ -266,10 +268,10 @@ int64_t gen12hp_systolic_gemm_t::default_block_k(data_type_t dt) const {
 
 std::tuple<int64_t, int64_t, int64_t>
 gen12hp_systolic_gemm_t::get_blocking() const {
-    int64_t m = pd()->desc()->m;
-    int64_t n = pd()->desc()->n;
-    int64_t k = pd()->desc()->k;
-    auto dt = pd()->desc()->a_type;
+    int64_t m = pd()->desc()->m();
+    int64_t n = pd()->desc()->n();
+    int64_t k = pd()->desc()->k();
+    auto dt = pd()->desc()->a_type();
 
     int64_t unroll_m = gen12hp_systolic_gemm_kernel_t::unroll_m;
     int64_t unroll_n = gen12hp_systolic_gemm_kernel_t::unroll_n;
@@ -307,7 +309,7 @@ gen12hp_systolic_gemm_t::get_blocking() const {
     int64_t nblock_k = utils::div_up(k, block_k);
     block_k = utils::div_up(k, nblock_k);
     block_k = utils::rnd_up(
-            (pd()->desc()->acc_type != pd()->desc()->c_type) ? k : block_k,
+            (pd()->desc()->acc_type != pd()->desc()->c_type()) ? k : block_k,
             unroll_k);
 
     return std::make_tuple(block_m, block_n, block_k);
@@ -327,7 +329,7 @@ status_t gen12hp_systolic_gemm_t::launch_copy(const gemm_exec_ctx_t &ctx,
     int64_t unroll_m = gen12hp_systolic_gemm_kernel_t::unroll_m;
     int64_t unroll_n = gen12hp_systolic_gemm_kernel_t::unroll_n;
     int64_t unroll_k
-            = gen12hp_systolic_gemm_kernel_t::unroll_k(pd()->desc()->a_type);
+            = gen12hp_systolic_gemm_kernel_t::unroll_k(pd()->desc()->a_type());
 
     int64_t align_r = 0, align_c = 0;
 
@@ -339,8 +341,8 @@ status_t gen12hp_systolic_gemm_t::launch_copy(const gemm_exec_ctx_t &ctx,
         align_c = unroll_n * gen12hp_systolic_gemm_kernel_t::thread_group_n;
     }
 
-    bool transa = (pd()->desc()->transa == dnnl_trans);
-    bool transb = (pd()->desc()->transb == dnnl_trans);
+    bool transa = (pd()->desc()->transa() == dnnl_trans);
+    bool transb = (pd()->desc()->transb() == dnnl_trans);
     bool trans = !copyb ? transa : transb;
 
     auto &kernel = copy_kernel_[copyb][false];
@@ -356,7 +358,7 @@ status_t gen12hp_systolic_gemm_t::launch_copy(const gemm_exec_ctx_t &ctx,
     arg_list.set(6, offset_dst);
     arg_list.set(7, ld_dst);
 
-    auto elt_size = types::data_type_size(pd()->desc()->a_type);
+    auto elt_size = types::data_type_size(pd()->desc()->a_type());
     size_t r_threads = utils::div_up(utils::rnd_up(r, align_r),
             ocl::gen12hp_systolic_gemm_copy_kernel_t::unroll_r(
                     elt_size, copyb, trans));
@@ -388,7 +390,7 @@ status_t gen12hp_systolic_gemm_t::launch_clear_sum(const gemm_exec_ctx_t &ctx,
     arg_list.set(3, offset_dst);
     arg_list.set(4, ld_dst);
 
-    auto elt_size = types::data_type_size(pd()->desc()->a_type);
+    auto elt_size = types::data_type_size(pd()->desc()->a_type());
     size_t threads = !copyb
             ? utils::div_up(r, gen12hp_systolic_gemm_kernel_t::unroll_m)
             : utils::div_up(c, gen12hp_systolic_gemm_kernel_t::unroll_n);
@@ -451,7 +453,8 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
         arg_list.set(argn++, abo);
     }
     if (last_k_block
-            && (pd()->with_bias() || pd()->desc()->c_type == data_type::s32)) {
+            && (pd()->with_bias()
+                    || pd()->desc()->c_type() == data_type::s32)) {
         arg_list.set(argn++, co);
         arg_list.set(argn++, offset_co);
     }
@@ -469,28 +472,28 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
 
 status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
 
-    auto a_type = pd()->desc()->a_type;
-    auto b_type = pd()->desc()->b_type;
-    auto c_type = pd()->desc()->c_type;
-    auto bias_type = pd()->desc()->bias_type;
+    auto a_type = pd()->desc()->a_type();
+    auto b_type = pd()->desc()->b_type();
+    auto c_type = pd()->desc()->c_type();
+    auto bias_type = pd()->desc()->bias_type();
     auto co_type = c_type;
 
-    auto m = pd()->desc()->m;
-    auto n = pd()->desc()->n;
-    auto k = pd()->desc()->k;
+    auto m = pd()->desc()->m();
+    auto n = pd()->desc()->n();
+    auto k = pd()->desc()->k();
 
-    bool transa = (pd()->desc()->transa == dnnl_trans);
-    bool transb = (pd()->desc()->transb == dnnl_trans);
+    bool transa = (pd()->desc()->transa() == dnnl_trans);
+    bool transb = (pd()->desc()->transb() == dnnl_trans);
 
-    auto lda = pd()->desc()->lda;
-    auto ldb = pd()->desc()->ldb;
-    auto ldc = pd()->desc()->ldc;
+    auto lda = pd()->desc()->lda();
+    auto ldb = pd()->desc()->ldb();
+    auto ldc = pd()->desc()->ldc();
 
     auto alpha = pd()->alpha();
     auto beta = pd()->beta();
 
-    auto &a = GEMM_CTX_ARG_STORAGE(a);
-    auto &b = GEMM_CTX_ARG_STORAGE(b);
+    auto &a = GEMM_CTX_ARG_STORAGE(b);
+    auto &b = GEMM_CTX_ARG_STORAGE(a);
     auto &c = GEMM_CTX_ARG_STORAGE(c);
     auto &c_zp = GEMM_CTX_ARG_STORAGE(c_zero_point);
     auto &bias = GEMM_CTX_ARG_STORAGE(bias);
