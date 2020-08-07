@@ -42,6 +42,8 @@ struct gen12hp_systolic_gemm_copy_kernel_t {
         kernel_ctx.define_int("COPY_CLEAR_SUM", int(clear_sum));
         kernel_ctx.define_int("COPY_SIGNED", int(dt == data_type::s8));
         kernel_ctx.add_option("-cl-strict-aliasing");
+        kernel_ctx.add_option(
+                "-cl-intel-256-GRF-per-thread"); // avoid GRF mode switch
 
         return status::success;
     }

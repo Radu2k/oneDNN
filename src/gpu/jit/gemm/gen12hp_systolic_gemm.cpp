@@ -282,8 +282,8 @@ gen12hp_systolic_gemm_t::get_blocking() const {
     n = utils::rnd_up(n, align_n);
 
     // Decide on m/n blocking. Assume 512 EU config for now.
-    int64_t block_m = 2048; // Default blocking: 32 * 64
-    int64_t block_n = 1536; // Default blocking: 48 * 32
+    int64_t block_m = 1024; // Default blocking: 16 * 64
+    int64_t block_n = 3072; // Default blocking: 96 * 32
     int64_t max_block_m = nstl::min(m, block_m * 4);
     int64_t max_block_n = nstl::min(n, block_n * 4);
 
