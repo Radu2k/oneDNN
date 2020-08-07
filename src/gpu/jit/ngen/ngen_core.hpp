@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -557,7 +557,7 @@ inline void RegData::fixup(int execSize, DataType defaultType, bool isDest, int 
         width = 1;
     } else if (width == 0) {
         int maxWidth = 32 / getBytes();
-        width = (hs == 0) ? 1 : std::min<int>(maxWidth / hs, execSize);
+        width = (hs == 0) ? 1 : std::min<int>({int(maxWidth / hs), execSize, 16});
         vs = width * hs;
     }
     if (isDest && hs == 0)
@@ -1453,9 +1453,9 @@ public:
         else
             return SBInfo(scoreboard.sbid, scoreboard.mode == 3, scoreboard.mode == 2);
     }
-    constexpr14 Pipe pipe() const {
+    constexpr14 Pipe pipe(Opcode op) const {
         if (combined.combined)
-            return Pipe::A;
+            return (op == Opcode::send || op == Opcode::sendc) ? Pipe::A : Pipe::Default;
         else if (isPipeline())
             return static_cast<Pipe>(pipeline.pipe);
         else
@@ -2249,13 +2249,13 @@ public:
         int addrGRFCount = (1 + simd16) << int(a64);
         int dataGRFCount = count * (1 + simd16);
 
-        base.checkModel(ModelA32 | ModelA64 | ModelBTS | ModelCC);
         desc.all = 0;
         desc.parts.header = false;
         desc.parts.messageLen = addrGRFCount;
         desc.parts.responseLen = dataGRFCount;
 
         if (access == Access::AtomicInteger || access == Access::AtomicFloat) {
+            base.checkModel(ModelA32 | ModelA64 | ModelBTS | ModelSLM);
             exdesc = SharedFunction::dc1;
             if (access == Access::AtomicFloat)
                 desc.atomic.messageType = a64 ? 0x1D : 0x1B;
@@ -2269,6 +2269,7 @@ public:
             desc.a64_scattered.subtype = 0x1;
             desc.a64_scattered.messageType = (access == Access::Write) ? 0x1A : 0x10;
         } else {
+            base.checkModel(ModelA32 | ModelBTS | ModelCC);
             exdesc = (base.getModel() == ModelCC) ? SharedFunction::dcro : SharedFunction::dc0;
             desc.scattered.elements = utils::log2(count);
             desc.scattered.legacySIMD = 1;
@@ -2443,4 +2444,3 @@ void encodeAtomicDescriptors(MessageDescriptor &desc, ExtendedMessageDescriptor 
 
 
 #endif /* header guard */
-

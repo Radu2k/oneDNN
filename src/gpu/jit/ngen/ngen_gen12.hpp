@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -46,7 +46,6 @@ union BinaryOperand12 {
 union TernaryOperand12 {
     uint16_t bits;
     struct {
-
         unsigned hs : 2;
         unsigned regFile : 1;
         unsigned subRegNum : 5;         // mme# for math
@@ -238,10 +237,8 @@ static_assert(sizeof(Instruction12) == 16, "Internal error: Instruction12 has be
 
 static inline unsigned getTypecode12(DataType type)
 {
-
     // :bf = 0b1101 (not in BSpec)
     static const uint8_t conversionTable[16] = {2,6,1,5,0,4,11,10,3,7,9,13,2,0,4,8};
-
     return conversionTable[static_cast<unsigned>(type) & 0xF];
 }
 
@@ -541,7 +538,6 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                 region = DependencyRegion(GRFRange(base, len));
             return true;
         }
-
         case Opcode::dp4a:
         case Opcode::add3:
         case Opcode::bfn:

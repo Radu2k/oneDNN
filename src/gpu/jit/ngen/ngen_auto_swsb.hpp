@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2019 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -1554,7 +1554,9 @@ inline void propagate(std::vector<BasicBlock> &BBs)
         }
     }
 
+#ifdef NGEN_SAFE
     if (!done) throw std::runtime_error("nGEN internal error: propagation failed.");
+#endif
 
     // Perform final half-propagation step (tail-to-head) to accumulate incoming producers
     //  for each BB.
@@ -1745,4 +1747,3 @@ inline BasicBlockList autoSWSB(HW hw, Program &program)
 // 	size_t size() const;
 
 #endif /* NGEN_AUTOSWSB_HPP */
-

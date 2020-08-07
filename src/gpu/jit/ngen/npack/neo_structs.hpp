@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ enum class OpenCLProgramDeviceType : uint32_t {
     Gen11 = 15,
     Gen11LP = 16,
     Gen12 = 17,
-    Gen12LP = 18
+    Gen12LP = 18,
 };
 
 typedef struct

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ public:
     inline std::vector<uint8_t> getBinary(cl_context context, cl_device_id device, const std::string &options = "-cl-std=CL2.0", const std::vector<uint8_t> &patches = std::vector<uint8_t>{});
     inline cl_kernel getKernel(cl_context context, cl_device_id device, const std::string &options = "-cl-std=CL2.0", const std::vector<uint8_t> &patches = std::vector<uint8_t>{});
     static inline HW detectHW(cl_context context, cl_device_id device);
-    const std::string &getExternalName() const         { return interface_.getExternalName(); }
+    const std::string &getExternalName() const { return interface_.getExternalName(); }
 
 protected:
     NEOInterfaceHandler interface_{hw};
@@ -207,4 +207,3 @@ HW OpenCLCodeGenerator<hw>::detectHW(cl_context context, cl_device_id device)
 } /* namespace ngen */
 
 #endif
-

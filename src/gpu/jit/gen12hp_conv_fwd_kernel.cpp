@@ -88,7 +88,7 @@ public:
     }
 
     void convert(const Subregister &to, const Subregister &from,
-            RegisterAllocator<256> &ra) {
+            RegisterAllocator &ra) {
         scratch_ = ra.alloc_range(preferred_scratch_regs());
 
         int bmax = max_batch_size();
@@ -1433,7 +1433,7 @@ public:
     bool is_auto_swsb = false;
 
     // 256 registers.
-    RegisterAllocator<256> ra;
+    RegisterAllocator ra;
 };
 
 void convertor_t::convert_impl(

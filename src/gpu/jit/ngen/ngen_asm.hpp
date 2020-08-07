@@ -1,5 +1,5 @@
-*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+/*******************************************************************************
+* Copyright 2019 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -1484,7 +1484,7 @@ void AsmCodeGenerator::outMods(std::ostream &out,const InstructionModifier &mod,
             if (swsb.dist() > 0) {
                 startPostMod();
                 if (hardware > HW::Gen12LP || !swsb.hasSB())
-                    out << swsb.pipe();
+                    out << swsb.pipe(op);
                 out << '@' << swsb.dist();
             }
 
@@ -1509,4 +1509,3 @@ void AsmCodeGenerator::outMods(std::ostream &out,const InstructionModifier &mod,
 } /* namespace ngen */
 
 #endif
-
