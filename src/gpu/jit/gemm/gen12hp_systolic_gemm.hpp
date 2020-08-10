@@ -77,6 +77,8 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
     };
 
     status_t init(engine_t *engine);
+    status_t init_res_storage(
+            engine_t *engine, gpu_resource_t *r) const override;
 
 public:
     gen12hp_systolic_gemm_t(const pd_t *apd) : gpu_gemm_t(apd) {}
@@ -102,11 +104,11 @@ private:
             const memory_storage_t &co, int32_t offset_co, bool first_k_block,
             bool last_k_block) const;
 
+    static const int A_PACKED_ = 0;
+    static const int B_PACKED_ = 1;
+
     compute::kernel_t kernel_[2][2]; // [first_k_block][last_k_block]
     compute::kernel_t copy_kernel_[2][2]; // [trans][clear_sum]
-
-    std::unique_ptr<memory_storage_t> a_packed_;
-    std::unique_ptr<memory_storage_t> b_packed_;
 
     char co_kind_;
     bool ab_zero_points_;

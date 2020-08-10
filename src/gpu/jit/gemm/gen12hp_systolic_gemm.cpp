@@ -127,21 +127,6 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
 
     ab_zero_points_ = (c_type == s32);
 
-    int64_t block_m = 0, block_n = 0, block_k = 0;
-    std::tie(block_m, block_n, block_k) = get_blocking();
-
-    auto max_ldab_packed
-            = kernel_t::max_ld_packed(block_k, a_type, ab_zero_points_);
-
-    memory_storage_t *a_packed_ptr, *b_packed_ptr;
-    engine->create_memory_storage(&a_packed_ptr,
-            block_m * max_ldab_packed * types::data_type_size(a_type));
-    engine->create_memory_storage(&b_packed_ptr,
-            block_n * max_ldab_packed * types::data_type_size(b_type));
-    if (!a_packed_ptr || !b_packed_ptr) return status::runtime_error;
-    a_packed_.reset(a_packed_ptr);
-    b_packed_.reset(b_packed_ptr);
-
     // Initialize compute kernels (assembly)
     kernel_t::config_t cfg;
     auto attr_info = pd()->attr_info();
@@ -242,6 +227,35 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
             if (!copy_kernel_[copy_b][clear_sum]) return status::runtime_error;
         }
     }
+
+    return status::success;
+}
+
+status_t gen12hp_systolic_gemm_t::init_res_storage(
+        engine_t *engine, gpu_resource_t *r) const {
+    using kernel_t = gen12hp_systolic_gemm_kernel_t;
+
+    auto a_type = pd()->desc()->a_type;
+    auto b_type = pd()->desc()->b_type;
+
+    int64_t block_m = 0, block_n = 0, block_k = 0;
+    std::tie(block_m, block_n, block_k) = get_blocking();
+
+    auto max_ldab_packed
+            = kernel_t::max_ld_packed(block_k, a_type, ab_zero_points_);
+
+    memory_storage_t *a_packed_ptr, *b_packed_ptr;
+    engine->create_memory_storage(&a_packed_ptr,
+            block_m * max_ldab_packed * types::data_type_size(a_type));
+    engine->create_memory_storage(&b_packed_ptr,
+            block_n * max_ldab_packed * types::data_type_size(b_type));
+    if (!a_packed_ptr || !b_packed_ptr) return status::runtime_error;
+
+    std::unique_ptr<memory_storage_t> a_packed(a_packed_ptr);
+    std::unique_ptr<memory_storage_t> b_packed(b_packed_ptr);
+
+    r->add_memory_storage(A_PACKED_, std::move(a_packed));
+    r->add_memory_storage(B_PACKED_, std::move(b_packed));
 
     return status::success;
 }
@@ -480,6 +494,9 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     auto &bias = GEMM_CTX_ARG_STORAGE(bias);
     auto *co = &c_zp;
 
+    auto &a_packed = CTX_GPU_RES_STORAGE(A_PACKED_);
+    auto &b_packed = CTX_GPU_RES_STORAGE(B_PACKED_);
+
     int32_t ao = 0, bo = 0;
 
     size_t off_a0
@@ -526,7 +543,7 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
             auto off_a = off_a0 + (!transa ? (Bm + Bk * lda) : (Bk + Bm * lda));
             auto off_a_packed = 0;
 
-            status = launch_copy(ctx, size_m, size_k, a, off_a, lda, *a_packed_,
+            status = launch_copy(ctx, size_m, size_k, a, off_a, lda, a_packed,
                     off_a_packed, lda_packed, false);
             if (status) return status;
 
@@ -540,7 +557,7 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
 
                 if ((Bm == 0) || (n > block_n)) {
                     status = launch_copy(ctx, size_k, size_n, b, off_b, ldb,
-                            *b_packed_, off_b_packed, ldb_packed, true);
+                            b_packed, off_b_packed, ldb_packed, true);
                     if (status) return status;
                 }
 
@@ -553,8 +570,8 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
                 }
 
                 float this_beta = first_k_block ? beta : 1.0f;
-                status = launch_compute(ctx, size_m, size_n, size_k, *a_packed_,
-                        off_a_packed, lda_packed, *b_packed_, off_b_packed,
+                status = launch_compute(ctx, size_m, size_n, size_k, a_packed,
+                        off_a_packed, lda_packed, b_packed, off_b_packed,
                         ldb_packed, c, off_c, ldc, alpha, this_beta, ao, bo,
                         *co, off_co, first_k_block, last_k_block);
                 if (status) return status;
