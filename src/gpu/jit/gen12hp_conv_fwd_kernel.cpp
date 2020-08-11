@@ -774,9 +774,6 @@ public:
         if (!enable_barrier) return;
         assert(!is_auto_swsb);
 
-        // TODO: Replace by waiting on the first SLM read. This should
-        // guarantee that the previous SLM writes are flushed - no need to use
-        // fence.
         if (!skip_fence) {
             slmfence(sb15, tmp0, r0);
             mov<int32_t>(8 | sb15.dst, null, tmp0);
@@ -860,7 +857,9 @@ public:
         dpasw_typed(8 | Atomic, 8, 8, C[112], B[24], A[8]);
         dpasw_typed(8 | sb13, 8, 8, C[120], B[24], A[12]);
 
-        if (slm_nbuf == 3 && !skip_signal) fence_and_signal();
+        // SLM writes are flushed at this point (after SLM reads) so skip fence.
+        if (slm_nbuf == 3 && !skip_signal)
+            fence_and_signal(/*skip_fence=*/true);
 
         else_(8, end, end);
         mark(skip);
