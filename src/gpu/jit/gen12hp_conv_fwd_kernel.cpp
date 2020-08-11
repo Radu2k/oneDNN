@@ -181,6 +181,8 @@ public:
                 conf.stride_h, conf.dilate_h);
         has_pad_w = has_padding(conf.ow, conf.iw, conf.kw, conf.l_pad,
                 conf.stride_w, conf.dilate_w);
+        check_src_load_w = (has_pad_w || conf.ow != ow_padded);
+        do_kw_loop = (conf.kw > 1 || check_src_load_w);
 
         has_h = (conf.ih > 1 || conf.oh > 1 || conf.kh > 1);
         has_d = (conf.id > 1 || conf.od > 1 || conf.kd > 1);
@@ -432,11 +434,14 @@ public:
 
         mov(1 | src_off_dep, src_off_rd_kw,
                 has_h ? src_off_rd_kh : has_d ? src_off_rd_kd : src_off_rd_ic);
-        mov(1, kw, 0);
-        mov(1, iw, iw_init);
 
         Label kw_loop;
-        mark(kw_loop);
+        if (do_kw_loop) {
+            mov(1, kw, 0);
+            mov(1, iw, iw_init);
+
+            mark(kw_loop);
+        }
 
         if (slm_nbuf == 2) {
             fence_and_signal();
@@ -448,12 +453,14 @@ public:
 
         slm_buffer_advance();
 
-        // Advance kw = kw + 1.
-        add(1, src_off_rd_kw, src_off_rd_kw, (1 + conf.dilate_w) * 32 * 32);
-        add(1, kw, kw, 1);
-        add(1, iw, iw, 1 + conf.dilate_w);
-        cmp(8 | lt | f0[0] | SWSB(2), kw, conf.kw);
-        while_(8 | f0[0], kw_loop);
+        if (do_kw_loop) {
+            // Advance kw = kw + 1.
+            add(1, src_off_rd_kw, src_off_rd_kw, (1 + conf.dilate_w) * 32 * 32);
+            add(1, kw, kw, 1);
+            add(1, iw, iw, 1 + conf.dilate_w);
+            cmp(8 | lt | f0[0] | SWSB(2), kw, conf.kw);
+            while_(8 | f0[0], kw_loop);
+        }
 
         if (has_h) {
             mark(kh_skip);
@@ -714,8 +721,7 @@ public:
             Label src_skip, src_end;
             // TODO: No padding and non-multiple OW case does not require >= 0
             // check.
-            bool check_w = (has_pad_w || conf.ow != ow_padded);
-            if (check_w) {
+            if (check_src_load_w) {
                 // iw + ithr * SW < IW
                 cmp(8 | lt | f1[0], iw, conf.iw - ithr * conf.stride_w);
                 // iw + ithr * SW >= 0
@@ -730,7 +736,7 @@ public:
 
             load(16 | SWSB(SBID(iter), 1), A_tmp[iter * 8], block_hword(8), A64,
                     src_addr);
-            if (check_w) {
+            if (check_src_load_w) {
                 else_(8, src_end, src_end);
                 mark(src_skip);
                 for (int i = 0; i < 8; i += 2) {
@@ -1167,6 +1173,9 @@ public:
 
     bool has_h;
     bool has_d;
+
+    bool check_src_load_w;
+    bool do_kw_loop;
 
     DataType src_type;
     DataType wei_type;
