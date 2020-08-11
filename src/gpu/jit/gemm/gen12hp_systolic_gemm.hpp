@@ -47,6 +47,9 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
 
         status_t init(engine_t *engine);
 
+        bool set_default_formats() {
+            return gpu_gemm_pd_t::set_default_formats();
+        }
         dim_t m_aligned() const;
         dim_t n_aligned() const;
         dim_t k_aligned() const;

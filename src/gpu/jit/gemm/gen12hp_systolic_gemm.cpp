@@ -40,6 +40,9 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
 
     if (!compute_engine->mayiuse_ngen_kernels()) return status::unimplemented;
 
+    bool ok = set_default_formats();
+    if (!ok) return status::unimplemented;
+
     const auto d = desc();
 
     // LIMITATIONS:
@@ -60,7 +63,7 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
 
     if (dt_int_ok) attr_skip_mask |= smask_t::zero_points_runtime;
 
-    bool ok = true && limits_ok && (dt_float_ok || dt_int_ok)
+    ok = true && limits_ok && (dt_float_ok || dt_int_ok)
             && compute_engine->mayiuse(compute::device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate)
             && attr()->has_default_values(attr_skip_mask)
