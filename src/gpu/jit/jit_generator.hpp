@@ -123,7 +123,6 @@ public:
 };
 
 #ifdef CL_VERSION_2_0
-
 template <gpu_gen_t hw>
 void jit_generator<hw>::dbg_alloc(cl_context context) {
     constexpr size_t size = 1048576;

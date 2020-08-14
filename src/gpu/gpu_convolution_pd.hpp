@@ -56,6 +56,21 @@ protected:
 
         return is_po_ok;
     }
+
+    bool zero_points_ok(const primitive_attr_t *attr) const {
+        using namespace data_type;
+        const auto src_type = invariant_src_md()->data_type;
+        int mask_src = 0, mask_dst = 0;
+        attr->zero_points_.get(DNNL_ARG_SRC, nullptr, &mask_src, nullptr);
+        attr->zero_points_.get(DNNL_ARG_DST, nullptr, &mask_dst, nullptr);
+
+        return IMPLICATION(!utils::one_of(src_type, s8, u8),
+                       attr->zero_points_.has_default_values())
+                && attr->zero_points_.has_default_values(DNNL_ARG_WEIGHTS)
+                && (mask_src == 0 || mask_src == 1 << 1)
+                && (mask_dst == 0 || mask_dst == 1 << 1);
+    }
+
 };
 
 struct gpu_convolution_bwd_data_pd_t : public convolution_bwd_data_pd_t {
@@ -65,18 +80,18 @@ protected:
     bool post_ops_ok(const primitive_attr_t *attr) const {
         const auto &p = attr->post_ops_;
 
-        auto is_eltwise
-                = [&](int idx) { return p.entry_[idx].is_eltwise(false); };
-        auto is_sum = [&](int idx) { return p.entry_[idx].is_sum(false); };
+                auto is_eltwise
+                    = [&](int idx) { return p.entry_[idx].is_eltwise(false); };
+                auto is_sum = [&](int idx) { return p.entry_[idx].is_sum(false); };
 
-        switch (p.len()) {
-            case 0: return true; // no post_ops
-            case 1: return is_eltwise(0) || is_sum(0); // sum OR eltwise
-            case 2: return is_sum(0) && is_eltwise(1); // sum -> eltwise
-            default: return false;
-        }
+                switch (p.len()) {
+                case 0: return true; // no post_ops
+                case 1: return is_eltwise(0) || is_sum(0); // sum OR eltwise
+                case 2: return is_sum(0) && is_eltwise(1); // sum -> eltwise
+                default: return false;
+                }
 
-        return false;
+                return false;
     }
 };
 

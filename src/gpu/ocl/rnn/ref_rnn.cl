@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -254,7 +254,8 @@ __kernel void ref_rnn_copy_res_layer(
     __global DST_DATA_T *dst = (__global DST_DATA_T *)(dst_base);
     int dir = 0;
     if (lr) {
-        dst[DST_L_OFF(it, b, dir * DHC + s)] = dequantize
+        bool dequantize_at_copy = dequantize && DIRECTION_KIND != SUM;
+        dst[DST_L_OFF(it, b, dir * DHC + s)] = dequantize_at_copy
                 ? TO_DST(((float)src[OFF_WS_STATE(N_LAYER, dir, it + 1, b, s)]
                                  - shift)
                         / scale)
@@ -606,10 +607,19 @@ __kernel void ref_rnn_elemwise_fwd(int dir, int lay, int iter,
 
 #else
 
-__kernel void ref_rnn_elemwise_fwd(int dir, int lay, int iter,
-        __global char *ws, __global char *scr_gates, __global char *scr_cell,
+__kernel void ref_rnn_elemwise_fwd(
+        int dir, int lay, int iter, __global char *ws, __global char *scr_gates,
         __global AUX_DATA_T *bias_base, float alpha, __global float *tm_scales,
-        float tm_cscale) {
+        float tm_cscale
+#if CELL_KIND == LBR_GRU
+        ,
+        __global char *scr_cell
+#endif
+#if CELL_KIND == VANILLA_GRU
+        ,
+        int n_part
+#endif
+) {
 
     const int i = get_global_id(1); // batch
     const int j = get_global_id(0); // dhc
@@ -628,11 +638,11 @@ __kernel void ref_rnn_elemwise_fwd(int dir, int lay, int iter,
     __global WS_STATE_DATA_T *h_states_t_l
             = (__global WS_STATE_DATA_T *)(ws + WS_STATES_OFFSET)
             + OFF_WS_STATE(lay + 1, dir, iter + 1, 0, 0);
+
+#if CELL_KIND == VANILLA_LSTM
     __global AUX_DATA_T *c_states_t_l
             = (__global AUX_DATA_T *)(ws + WS_C_STATE_OFFSET)
             + OFF_WS_STATE(lay + 1, dir, iter + 1, 0, 0);
-
-#if CELL_KIND == VANILLA_LSTM
 
     float g_i = logistic_fwd_tm((float)scratch_gates[CELL_SCRATCH_MEM(i, 0, j)]
                     + bias[OFF_KER_BIAS(0, j)],
@@ -710,19 +720,58 @@ __kernel void ref_rnn_elemwise_fwd(int dir, int lay, int iter,
     ws_gates[CELL_WS_GATES(i, 2, j)] = G2;
     ws_grid[CELL_WS_GRID_COMP(i, j)] = Wh_b;
 #endif
+#elif CELL_KIND == VANILLA_GRU
+    __global WS_STATE_DATA_T *src_iter
+            = (__global WS_STATE_DATA_T *)(ws + WS_STATES_OFFSET)
+            + OFF_WS_STATE(lay + 1, dir, iter, 0, 0);
+    if (n_part == 1) {
+        float G0 = logistic_fwd_tm(scratch_gates[CELL_SCRATCH_MEM(i, 0, j)]
+                        + bias[OFF_KER_BIAS(0, j)],
+                tm_scales[0]);
+        float G1 = logistic_fwd_tm(scratch_gates[CELL_SCRATCH_MEM(i, 1, j)]
+                        + bias[OFF_KER_BIAS(1, j)],
+                tm_scales[1]);
+
+        /* TODO from CPU: Can be optimized for fwd_training by using
+        ws_gates instead of scratch_gates in p2 */
+        scratch_gates[CELL_SCRATCH_MEM(i, 0, j)] = TO_INPUT(G0);
+        scratch_gates[CELL_SCRATCH_MEM(i, 1, j)] = TO_INPUT(G1);
+        float tmp = TO_REF(src_iter[CELL_WS_STATE(i, j)]);
+        h_states_t_l[CELL_WS_STATE(i, j)] = TO_INPUT(tmp * G1);
+#if IS_TRAINING
+        ws_gates[CELL_WS_GATES(i, 0, j)] = G0;
+        ws_gates[CELL_WS_GATES(i, 1, j)] = G1;
+#endif
+    } else if (n_part == 2) {
+        float G0 = TO_REF(scratch_gates[CELL_SCRATCH_MEM(i, 0, j)]);
+        float G2 = tanh_fwd_tm(scratch_gates[CELL_SCRATCH_MEM(i, 2, j)]
+                        + bias[OFF_KER_BIAS(2, j)],
+                tm_scales[2]);
+        float tmp = TO_REF(src_iter[CELL_WS_STATE(i, j)]);
+        h_states_t_l[CELL_WS_STATE(i, j)]
+                = TO_INPUT(tmp * G0 + (1.0f - G0) * G2);
+#if IS_TRAINING
+        ws_gates[CELL_WS_GATES(i, 2, j)] = G2;
+#endif
+    }
 #else
 #error "Wrong Cell Kind"
 #endif
 }
 #endif
-__kernel void ref_rnn_elemwise_bwd(int dir, int lay, int iter,
-        __global char *ws, __global char *scr_gates, __global char *scr_gate_r,
+__kernel void ref_rnn_elemwise_bwd(
+        int dir, int lay, int iter, __global char *ws, __global char *scr_gates,
         __global AUX_DATA_T *bias_base, float alpha, __global float *tm_scales,
-        float tm_cscale) {
+        float tm_cscale
+#if CELL_KIND == LBR_GRU
+        ,
+        __global char *scr_gate_r
+#endif
+) {
 
     const int i = get_global_id(1); // batch
     const int j = get_global_id(0); // dhc
-
+#if !IS_FWD
 #if CELL_KIND == VANILLA_LSTM
 
     __global AUX_DATA_T *ws_gates
@@ -847,6 +896,7 @@ __kernel void ref_rnn_elemwise_bwd(int dir, int lay, int iter,
 
 #else
 #error "Wrong Cell Kind"
+#endif
 #endif
 }
 

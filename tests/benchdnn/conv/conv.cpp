@@ -72,6 +72,7 @@ inline bool post_ops_require_integral_check(const prb_t *p) {
     for (int idx = 0; idx < po.len(); ++idx) {
         const auto &e = po.entry[idx];
         using pk_t = attr_t::post_ops_t::kind_t;
+
         if (e.kind == pk_t::SUM || e.kind == pk_t::ABS) continue;
         if (e.kind == pk_t::RELU && e.eltwise.alpha == 0.f) continue;
         return true;
@@ -116,10 +117,13 @@ inline void get_result(const prb_t *p, const data_kind_t kind, res_t *r,
 
 inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
         dnn_mem_t &mem_fp, res_t *r, bool final_compare = false) {
+
     const bool dont_complain
             = false || (p->alg & WINO) || post_ops_require_integral_check(p);
 
     const auto nelems = mem_dt.nelems();
+    if (nelems == 0) return r->state = PASSED, OK;
+    r->total = nelems;
 
     const char *skind = data_kind2str(kind);
 
@@ -141,9 +145,6 @@ inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
     float f_max = diff_sum_dt ? max_dt(f_dt) : p->cfg[kind].max;
 
     diff_norm_t diff_norm;
-
-    r->errors = 0;
-    r->total = nelems;
 
     for (int64_t i = 0; i < nelems; ++i) {
         const float dt = mem_dt.get_elem(i);
@@ -304,8 +305,11 @@ int fill_src(const prb_t *p, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *r) {
                 const int gen
                         = 101 * id + 103 * ih + 107 * iw + 109 * mb + 113 * ic;
                 const bool non_base = flip_coin(gen, c.f_sparsity);
-                const float value = non_base ? c.f_min + gen * c.f_step % range
-                                             : c.f_base;
+                float value = non_base ? c.f_min + gen * c.f_step % range
+                                       : c.f_base;
+
+                maybe_zero_point(
+                        p->attr, value, p->src_zp, ic, DNNL_ARG_SRC, true);
 
                 ((float *)mem_00)[src_off_f(p, mb, 0, ic, id, ih, iw)] = value;
             });
@@ -584,7 +588,7 @@ inline int init_pd_custom(dnnl_engine_t engine, const prb_t *p,
 
 void check_known_skipped_case(const prb_t *p, res_t *r) {
     check_known_skipped_case_common(
-            {p->cfg[SRC].dt, p->cfg[WEI].dt, p->cfg[DST].dt}, r);
+            {p->cfg[SRC].dt, p->cfg[WEI].dt, p->cfg[DST].dt}, p->dir, r);
     if (r->state == SKIPPED) return;
 
     // Winograd implementation limitations.
@@ -619,8 +623,14 @@ void check_known_skipped_case(const prb_t *p, res_t *r) {
         const bool plain_ok = is_int8 && !stag_is_abx && !dtag_is_abx
                 && (stag_is_axb || dtag_is_axb);
 
+        const auto &po = p->attr.post_ops;
+        const auto sum_idx = po.find(attr_t::post_ops_t::kind_t::SUM);
+        const bool sum_post_op_ok
+                = sum_idx == -1 || po.entry[sum_idx].sum.scale == 1.f;
+
         if (!has_avx512_common || !shape_ok || (!has_avx512_bw && is_int8)
-                || !bwd_is_syncable || (is_plain && !plain_ok)) {
+                || !bwd_is_syncable || (is_plain && !plain_ok)
+                || !sum_post_op_ok) {
             r->state = SKIPPED, r->reason = CASE_NOT_SUPPORTED;
             return;
         }
@@ -692,7 +702,7 @@ int doit(const prb_t *p, res_t *r) {
 
     // Do not use CPU primitive for reference if any of these is true.
     bool with_binary_post_op = (p->attr.post_ops.binary_index() != -1);
-    bool with_user_scratchpad = (scratchpad_mode = dnnl_scratchpad_mode_user);
+    bool with_user_scratchpad = (p->attr.scratchpad_mode == dnnl_scratchpad_mode_user);
     bool with_runtime_oscale = p->attr.oscale.runtime;
 
     if ((bench_mode & CORR) && engine_tgt_kind == dnnl_gpu && fast_ref_gpu
@@ -718,6 +728,8 @@ int doit(const prb_t *p, res_t *r) {
     dnn_mem_t bia_dt(bia_md, test_engine);
     dnn_mem_t scratchpad_dt(scratchpad_md, test_engine);
     dnn_mem_t scales;
+    dnn_mem_t src_zero_points_m;
+    dnn_mem_t dst_zero_points_m;
     std::vector<dnn_mem_t> binary_po_fp, binary_po_dt;
     std::vector<int> binary_po_args;
     SAFE(setup_binary(const_pd, binary_po_args, binary_po_dt, binary_po_fp),
@@ -733,6 +745,10 @@ int doit(const prb_t *p, res_t *r) {
     SAFE(fill_dst(p, dst_dt, dst_fp, r), WARN);
     SAFE(fill_bia(p, bia_dt, bia_fp, r), WARN);
     maybe_prepare_runtime_scales(scales, p->attr, p->oc, p->scales);
+    maybe_prepare_runtime_zero_points(
+            src_zero_points_m, p->attr, DNNL_ARG_SRC, p->ic, p->src_zp);
+    maybe_prepare_runtime_zero_points(
+            dst_zero_points_m, p->attr, DNNL_ARG_DST, p->oc, p->dst_zp);
 
     args_t args;
 
@@ -744,6 +760,8 @@ int doit(const prb_t *p, res_t *r) {
         args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
         args.set(DNNL_ARG_ATTR_OUTPUT_SCALES, scales);
         args.set(binary_po_args, binary_po_dt);
+        args.set(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zero_points_m);
+        args.set(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zero_points_m);
 
         SAFE(execute_and_wait(c, args), WARN);
 

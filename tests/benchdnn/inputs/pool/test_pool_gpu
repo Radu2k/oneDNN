@@ -1,78 +1,53 @@
 --reset
---mb=2
-
 # f32, bf16
+--mb=2
 --cfg=f32,bf16
 --dir=FWD_D,FWD_I,BWD_D
 --alg=MAX,AVG_NP,AVG_P
 --tag=abx,aBx16b
---batch=pool_1d
---batch=pool_2d_small
-
---dir=FWD_D,BWD_D
---alg=MAX,AVG_P
---tag=abx,aBx16b
---batch=pool_ker_in_pad_2d_small
---batch=pool_3d_small
---batch=pool_ker_in_pad_3d_small
-
---reset
---mb=16
+--batch=set_all_small
 
 # f32
+--mb=16
 --cfg=f32
 --dir=FWD_D,FWD_I,BWD_D
 --alg=MAX,AVG_NP,AVG_P
 --tag=ABx16a16b
---batch=pool_2d_small
+--batch=set_all_small
 
---dir=FWD_D,BWD_D
---alg=MAX,AVG_P
---batch=pool_ker_in_pad_2d_small
---batch=pool_3d_small
---batch=pool_ker_in_pad_3d_small
-
-# s8, f16, bf16
---cfg=u8,s8,f16,bf16
-
---dir=FWD_I
+# u8, s8, s32, f16, bf16
 --mb=2
+--cfg=u8,s8,s32,f16,bf16
+--dir=FWD_I
 --alg=MAX,AVG_NP,AVG_P
---tag=abx,aBx16b --batch=pool_2d_small
+--tag=abx,aBx16b
+--batch=shapes_2d_small
 
 --mb=16
 --tag=ABx16a16b
---batch=pool_2d_small
---alg=MAX,AVG_P
---batch=pool_ker_in_pad_2d_small
---batch=pool_3d_small
---batch=pool_ker_in_pad_3d_small
+--batch=set_all_small
+
 
 --reset
-
 # f32, nhwc
+--mb=1
 --cfg=f32
 --dir=FWD_D,BWD_D
 --alg=MAX,AVG_NP,AVG_P
---mb=1
 --tag=axb
---batch=pool_2d_small
+--batch=shapes_2d_small
 
---cfg=f32
---dir=FWD_D,BWD_D
---alg=MAX
 --mb=1,16
---batch=pool_1d
---batch=pool_3d_small
+--alg=MAX
+--batch=set_all_small
 
 # f16, nhwc
+--mb=1,16
 --cfg=f16
 --dir=FWD_I
 --alg=MAX
 --mb=1,16
---batch=pool_1d
---batch=pool_2d_small
---batch=pool_3d_small
+--batch=set_all_small
 
 # post op tests
 --reset
@@ -82,8 +57,8 @@
 --attr-post-ops='sum;add:f32;min:u8:per_dim_01;linear:0.5:1.5;mul:f32:per_dim_0;add:f32:per_dim_01;max:f16;mul:s8;add:f32:per_oc;sum'
 --mb=1,2
 --tag=abx,aBx16b
---batch=pool_3d_small
+--batch=shapes_3d_small
 
 --mb=16
 --tag=ABx16a16b
---batch=pool_2d_small
+--batch=shapes_2d_small

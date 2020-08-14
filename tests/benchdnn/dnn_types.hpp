@@ -62,6 +62,7 @@ dims_t off2dims_idx(const dims_t &dims, int64_t off);
 std::ostream &operator<<(std::ostream &s, const dims_t &dims);
 std::ostream &operator<<(std::ostream &s, dir_t dir);
 std::ostream &operator<<(std::ostream &s, dnnl_data_type_t dt);
+std::ostream &operator<<(std::ostream &s, dnnl_engine_kind_t ek);
 template <typename T>
 std::ostream &operator<<(std::ostream &s, const std::vector<T> &v) {
     s << v[0];
@@ -75,38 +76,29 @@ enum { SRC = 0, WEI, BIA, DST, ACC, DATA, MEAN, VAR, SS, GWEI, DAT_TOTAL };
 const char *data_kind2str(data_kind_t kind);
 
 struct attr_t {
+    // policy_t defines the way entity values will be applied to a tensor
+    enum policy_t {
+        COMMON = 0, // single value for each point in a tensor
+        PER_OC, // apply a single value per each channel (dims[1]) point
+        PER_DIM_0, // apply a single value er dims[0] point
+        PER_DIM_1, // ... per dims[1] point
+        PER_DIM_01, // ... per unique combination of dims[0] and dims[1] points
+        POLICY_TOTAL // guard
+    };
+
+    static policy_t str2policy(const std::string &str);
+    static const char *policy2str(policy_t policy);
+    static int get_default_mask(policy_t policy);
+
     struct scale_t {
-        enum policy_t {
-            COMMON = 0,
-            PER_OC,
-            // reorder section
-            // XXX: order is important, from longer name to a shorter one
-            // TODO: generalize, use numbers instead of predefined enum
-            PER_DIM_01,
-            PER_DIM_0,
-            PER_DIM_1,
-            // reorder section ends
-            POLICY_TOTAL
-        };
-        scale_t() = default;
-        scale_t(policy_t policy, float scale) : policy(policy), scale(scale) {}
+        scale_t(policy_t apolicy = COMMON, float ascale = 1.,
+                bool aruntime = false)
+            : policy(apolicy), scale(ascale), runtime(aruntime) {}
 
-        static policy_t str2policy(const char *str);
-        static const char *policy2str(policy_t policy);
+        int from_str(const std::string &s);
 
-        int from_str(const char *str, const char **end_s);
-
-        bool is_def() const { return policy == COMMON && scale == 1.; }
-
-        static int get_default_mask(policy_t policy) {
-            switch (policy) {
-                case PER_DIM_0: return (1 << 0);
-                case PER_OC:
-                case PER_DIM_1: return (1 << 1);
-                case PER_DIM_01: return (1 << 0) + (1 << 1);
-                case COMMON: return 0;
-                default: SAFE_V(FAIL); return 0;
-            }
+        bool is_def() const {
+            return policy == COMMON && scale == 1. && runtime == false;
         }
 
         policy_t policy = COMMON;
@@ -116,19 +108,37 @@ struct attr_t {
 
     struct zero_points_t {
         struct entry_t {
-            int value;
-            bool runtime;
+            entry_t(policy_t apolicy = COMMON, int avalue = 0,
+                    bool aruntime = false)
+                : policy(apolicy), value(avalue), runtime(aruntime) {}
+
+            entry_t(const entry_t &other)
+                : policy(other.policy)
+                , value(other.value)
+                , runtime(other.runtime) {}
+
+            bool is_def() const {
+                return policy == COMMON && value == 0 && runtime == false;
+            }
+
+            policy_t policy = COMMON;
+            int value = 0;
+            bool runtime = false;
         };
 
-        int from_str(const char *str, const char **end_s);
+        int from_str(const std::string &s);
 
         int operator[](int arg) const { return get(arg).value; }
         bool runtime(int arg) const { return get(arg).runtime; }
 
+        bool is_def(int arg) const { return get(arg).is_def(); }
         bool is_def() const { return points.empty(); }
 
+        void set(int arg, policy_t policy, int value, bool runtime) {
+            set(arg, entry_t(policy, value, runtime));
+        }
         void set(int arg, const entry_t &entry) {
-            if (entry.value != 0 || entry.runtime) points[arg] = entry;
+            if (!entry.is_def()) points[arg] = entry;
         }
         entry_t get(int arg) const {
             const auto it = points.find(arg);
@@ -158,7 +168,7 @@ struct attr_t {
         }
 
         bool is_def() const { return scales.empty(); }
-        int from_str(const char *str, const char **end_s);
+        int from_str(const std::string &s);
 
         arg_scales_t() : scales() {} // needed for debug icc190 build;
 
@@ -209,7 +219,7 @@ struct attr_t {
             // guard entry
             KIND_TOTAL
         };
-        static kind_t str2kind(const char *str);
+        static kind_t str2kind(const std::string &str);
         static const char *kind2str(kind_t kind);
         static dnnl_alg_kind_t kind2dnnl_kind(kind_t kind);
 
@@ -230,7 +240,7 @@ struct attr_t {
                 } else if (is_binary_kind()) {
                     binary.alg = kind2dnnl_kind(kind);
                     binary.src1_dt = dnnl_data_type_undef;
-                    binary.policy = scale_t::policy_t::COMMON;
+                    binary.policy = policy_t::COMMON;
                 }
             }
 
@@ -252,7 +262,7 @@ struct attr_t {
                 struct {
                     dnnl_alg_kind_t alg;
                     dnnl_data_type_t src1_dt;
-                    scale_t::policy_t policy;
+                    policy_t policy;
                 } binary;
             };
 
@@ -264,16 +274,7 @@ struct attr_t {
 
         post_ops_t() : entry() {}
 
-        void append_sum(float ascale = 1.f,
-                dnnl_data_type_t adt = dnnl_data_type_undef);
-        void append_convolution(kind_t akind, dnnl_data_type_t adst_dt,
-                attr_t::scale_t aoscale);
-        void append_eltwise(kind_t akind, float aalpha = 0.f, float abeta = 0.f,
-                float ascale = 1.f);
-        void append_binary(kind_t akind, dnnl_data_type_t asrc1_dt,
-                scale_t::policy_t apolicy = scale_t::policy_t::COMMON);
-
-        int from_str(const char *str, const char **end_s);
+        int from_str(const std::string &s);
 
         int len() const { return (int)entry.size(); }
         bool is_def() const { return len() == 0; }
@@ -288,26 +289,23 @@ struct attr_t {
         std::vector<entry_t> entry;
     };
 
-    attr_t() = default;
+    attr_t() : scratchpad_mode(dnnl_scratchpad_mode_library) {}
 
-    attr_t(const post_ops_t &po) : post_ops(po) {}
-
-    attr_t(const scale_t &s, const post_ops_t &po) : oscale(s), post_ops(po) {}
-
-    attr_t(const arg_scales_t &as, const post_ops_t &po)
-        : scales(as), post_ops(po) {}
-
-    attr_t(const scale_t &s, const zero_points_t &zp, const post_ops_t &po)
-        : oscale(s), zero_points(zp), post_ops(po) {}
+    void insert(const scale_t &s) { this->oscale = s; }
+    void insert(const arg_scales_t &as) { this->scales = as; }
+    void insert(const zero_points_t &zp) { this->zero_points = zp; }
+    void insert(const post_ops_t &po) { this->post_ops = po; }
+    void insert(dnnl_scratchpad_mode_t sm) { this->scratchpad_mode = sm; }
 
     scale_t oscale;
     arg_scales_t scales;
     zero_points_t zero_points;
     post_ops_t post_ops;
+    dnnl_scratchpad_mode_t scratchpad_mode;
 
     bool is_def() const;
 };
-using policy_t = attr_t::scale_t::policy_t;
+using policy_t = attr_t::policy_t;
 
 void handle_legacy_attr(attr_t &attr, const attr_t &legacy_attr);
 
@@ -319,6 +317,7 @@ std::ostream &operator<<(
 std::ostream &operator<<(std::ostream &s, const attr_t::arg_scales_t &scales);
 std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t::kind_t &k);
 std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t &post_ops);
+std::ostream &operator<<(std::ostream &s, dnnl_scratchpad_mode_t sm);
 std::ostream &operator<<(std::ostream &s, const attr_t &attr);
 
 /* Container for becnhdnn description of attributes and oneDNN primitive
@@ -361,15 +360,16 @@ struct attr_args_t {
     struct entry_t {
         entry_t() = default;
 
-        entry_t(int64_t acount, const float *avals, bool aruntime = false)
-            : count(acount), vals(avals), runtime(aruntime) {}
+        entry_t(int64_t acount, int amask, const float *avals,
+                bool aruntime = false)
+            : count(acount), mask(amask), vals(avals), runtime(aruntime) {}
 
         int64_t get_count(policy_t policy) const {
             return (policy == policy_t::COMMON || runtime) ? 1 : count;
         }
 
         int get_mask(policy_t policy) const {
-            return mask == -1 ? attr_t::scale_t::get_default_mask(policy)
+            return mask == -1 ? attr_t::get_default_mask(policy)
                               : mask;
         }
 
@@ -387,7 +387,14 @@ struct attr_args_t {
 
     void insert(int aarg, int64_t acount, const float *avals,
             bool aruntime = false) {
-        entries.insert(std::make_pair(aarg, entry_t(acount, avals, aruntime)));
+        entries.insert(
+                std::make_pair(aarg, entry_t(acount, -1, avals, aruntime)));
+    }
+
+    void insert(int aarg, int64_t acount, int mask, const float *avals,
+            bool aruntime = false) {
+        entries.insert(
+                std::make_pair(aarg, entry_t(acount, mask, avals, aruntime)));
     }
 
     int prepare_binary_post_op_mds(
@@ -445,6 +452,8 @@ dnnl_engine_kind_t str2engine_kind(const char *str);
 dnnl_scratchpad_mode_t str2scratchpad_mode(const char *str);
 
 void maybe_oscale(const attr_t &attr, float &d, float *scales, int64_t oc);
+void maybe_zero_point(const attr_t &attr, float &d, const int32_t *zero_points,
+        int64_t c, int arg, bool opposite_zero_point = false);
 float compute_eltwise_fwd(attr_t::post_ops_t::kind_t kind, float src,
         float scale, float alpha, float beta);
 float compute_eltwise_bwd(attr_t::post_ops_t::kind_t kind, float d_dst,

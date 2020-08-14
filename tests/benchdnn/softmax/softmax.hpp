@@ -51,11 +51,14 @@ struct settings_t {
     std::vector<int> axis {1};
     std::vector<int64_t> mb {0};
     std::vector<bool> inplace {false};
+    std::vector<dnnl_scratchpad_mode_t> scratchpad_mode {
+            dnnl_scratchpad_mode_library};
 
     const char *perf_template_csv
-            = "perf,%engine%,%dir%,%dt%,%tag%,%alg%,%axis%,%DESC%,%-time%,%"
-              "0time%";
-    const char *perf_template_def = "perf,%engine%,%prb%,%-time%,%0time%";
+            = "perf,%engine%,%impl%,%dir%,%dt%,%tag%,%alg%,%axis%,%DESC%,%-"
+              "time%,%0time%";
+    const char *perf_template_def
+            = "perf,%engine%,%impl%,%prb%,%-time%,%0time%";
     const char *perf_template = perf_template_def;
 
     void reset() { *this = settings_t(perf_template); }
@@ -64,7 +67,7 @@ struct settings_t {
 struct prb_t {
     prb_t(const dims_t &dims, dir_t dir, dnnl_data_type_t dt,
             const std::string &tag, alg_t alg, int axis, bool inplace,
-            int64_t mb = 0)
+            const attr_t &attr, int64_t mb = 0)
         : dims(dims)
         , dir(dir)
         , dt(dt)
@@ -72,6 +75,7 @@ struct prb_t {
         , alg(alg)
         , axis(axis)
         , inplace(inplace)
+        , attr(attr)
         , ndims((int)dims.size()) {
         if (mb) this->dims[0] = mb;
     }
@@ -84,6 +88,7 @@ struct prb_t {
     alg_t alg;
     int axis;
     bool inplace;
+    attr_t attr;
     int ndims;
 };
 std::ostream &operator<<(std::ostream &s, const prb_t &p);
@@ -93,6 +98,7 @@ struct perf_report_t : public base_perf_report_t {
 
     void report(const prb_t *p, const res_t *r, const char *prb_str) {
         p_ = p;
+        tag_ = fmt_tag2str(convert_tag(p_->tag, p_->ndims));
         base_report(r, prb_str);
     }
 
@@ -105,10 +111,11 @@ struct perf_report_t : public base_perf_report_t {
     const int *axis() const override { return &p_->axis; }
     const dir_t *dir() const override { return &p_->dir; }
     const dnnl_data_type_t *dt() const override { return &p_->dt; }
-    const std::string *tag() const override { return &p_->tag; }
+    const std::string *tag() const override { return &tag_; }
 
 private:
     const prb_t *p_ = NULL;
+    std::string tag_;
 };
 
 inline void map_off_to_mb_ic(

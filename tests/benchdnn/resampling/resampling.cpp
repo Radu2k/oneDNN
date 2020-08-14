@@ -34,7 +34,8 @@ namespace resampling {
 inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
         dnn_mem_t &mem_fp, res_t *r) {
     const auto nelems = mem_dt.nelems();
-    r->errors = 0;
+    if (nelems == 0) return r->state = PASSED, OK;
+
     r->total = nelems;
 
     float trh = 0;
@@ -66,8 +67,9 @@ inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
 
         r->errors += !ok;
 
-        if ((!ok && (r->errors < 10 || verbose >= 10))
-                || (verbose >= 50 && i < 30)) {
+        const bool dump = (!ok && (r->errors < 10 || verbose >= 10))
+                || (verbose >= 50 && i < 30) || (verbose >= 99);
+        if (dump) {
             int64_t mb = 0, ic = 0, d = 0, h = 0, w = 0;
             switch (kind) {
                 case SRC: inv_src_off_f(p, i, mb, ic, d, h, w); break;
@@ -193,7 +195,7 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
         SAFE(init_fwd_status, WARN);
     }
 
-    auto dnnl_attr = create_dnnl_attr_v2(attr_t(), attr_args_t());
+    auto dnnl_attr = create_dnnl_attr_v2(p->attr, attr_args_t());
 
     dnnl_status_t init_status
             = dnnl_primitive_desc_create(&rpd, &pd, dnnl_attr, engine, _hint);
@@ -218,7 +220,7 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
 }
 
 void check_known_skipped_case(const prb_t *p, res_t *r) {
-    check_known_skipped_case_common({p->dt}, r);
+    check_known_skipped_case_common({p->dt}, p->dir, r);
 }
 
 int doit(const prb_t *p, res_t *r) {

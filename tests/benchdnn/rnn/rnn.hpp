@@ -218,19 +218,21 @@ struct settings_t {
     std::vector<bool> trivial_strides {false};
     std::vector<bool> with_peephole {false};
     std::vector<bool> with_projection {false};
-    std::vector<int64_t> mb {0};
+    std::vector<int64_t> n_layer {0}, n_iter {0}, mb {0};
     std::vector<policy_t> scale_policy {policy_t::COMMON};
-
+    std::vector<dnnl_scratchpad_mode_t> scratchpad_mode {
+            dnnl_scratchpad_mode_library};
     unsigned int flags = 0x0;
     float alpha = 0.9f, beta = 0.0f;
 
     const char *perf_template_csv
-            = "perf,%engine%,%name%,%prop%,%cfg%,%alg%,%activation%,%direction%"
+            = "perf,%engine%,%impl%,%name%,%prop%,%cfg%,%alg%,%activation%,%"
+              "direction%"
               ","
               "%DESC%,%Gops%,%Gfreq%,%-time%,%-Gflops%,%0time%,%0Gflops%";
     const char *perf_template_def
-            = "perf,%engine%,%name%,%prb%,%Gops%,%Gfreq%,%-time%,%-Gflops%,"
-              "%0time%,%0Gflops%";
+            = "perf,%engine%,%impl%,%name%,%prb%,%Gops%,%Gfreq%,%-time%,%-"
+              "Gflops%,%0time%,%0Gflops%";
     const char *perf_template = perf_template_def;
 
     void reset() { *this = settings_t(perf_template); }
@@ -240,8 +242,9 @@ struct prb_t : public desc_t {
     prb_t(const desc_t &desc, const dt_conf_t &cfg, dir_t prop, alg_t alg,
             bool with_peephole, bool with_projection,
             dnnl_rnn_direction_t direction, policy_t scale_policy,
-            unsigned int flags, activation_t activation, float alpha,
-            float beta, bool skip_nonlinear, bool trivial_strides, int mb = 0)
+            unsigned int flags, activation_t activation, const attr_t &attr,
+            float alpha, float beta, bool skip_nonlinear, bool trivial_strides,
+            int64_t n_layer, int64_t n_iter, int64_t mb = 0)
         : desc_t(desc)
         , cfg(cfg)
         , prop(prop2prop_kind(prop))
@@ -249,19 +252,21 @@ struct prb_t : public desc_t {
         , with_peephole(with_peephole)
         , with_projection(with_projection)
         , direction(direction)
+        , wei_scales_policy(scale_policy)
         , flags(flags)
         , activation(activation)
+        , attr(attr)
         , alpha(alpha)
         , beta(beta)
-        , ops(0.0)
-        , wei_scales_policy(scale_policy)
         , skip_nonlinear(skip_nonlinear)
         , trivial_strides(trivial_strides)
+        , ops(0.0)
         , linear_cscale(0.0f) {
 
+        if (n_layer) this->n_layer = n_layer;
+        if (n_iter) this->n_iter = n_iter;
         if (mb) this->mb = mb;
         count_ops();
-        wc = MAX2(MAX2(sic, slc), MAX2(dic, dhc));
 
         wei_scales = nullptr;
         linear_scales = nullptr;
@@ -294,18 +299,6 @@ struct prb_t : public desc_t {
 
     float get_wei_scale(int idx) const {
         return wei_scales[MIN2(idx, wei_nscales - 1)];
-    }
-
-    bool maybe_skip() const {
-        bool skip = false;
-        // TODO: remove early exit when int8 weights reorder supports non
-        // trivial strides
-        skip = skip || (is_int8() && !trivial_strides);
-
-        // TODO: remove early exit when other cells will support int8
-        skip = skip || (is_int8() && alg != VANILLA_LSTM);
-
-        return skip;
     }
 
     void count_ops() {
@@ -351,21 +344,22 @@ struct prb_t : public desc_t {
     alg_t alg;
     bool with_peephole, with_projection;
     dnnl_rnn_direction_t direction;
+    policy_t wei_scales_policy;
     unsigned int flags;
     activation_t activation;
+    attr_t attr;
     float alpha;
     float beta;
-    double ops;
 
     float data_scale, data_shift;
 
-    policy_t wei_scales_policy;
     float *wei_scales;
     int wei_nscales;
     int wei_scales_mask;
 
     bool skip_nonlinear;
     bool trivial_strides;
+    double ops;
     float *linear_scales;
     float linear_cscale;
 

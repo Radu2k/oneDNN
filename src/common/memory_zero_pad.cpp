@@ -195,7 +195,11 @@ status_t typed_zero_pad(const memory_t *memory, const exec_ctx_t &ctx) {
 
     if (mdw.nelems(false) == mdw.nelems(true)) return success;
 
-    void *mapped_ptr = ctx.map_memory_storage(memory_storage, ctx.stream());
+    const size_t map_size = mdw.size();
+    assert(map_size != DNNL_RUNTIME_SIZE_VAL);
+
+    void *mapped_ptr
+            = ctx.map_memory_storage(memory_storage, ctx.stream(), map_size);
 
     auto *data = static_cast<typename prec_traits<dt>::type *>(mapped_ptr);
     auto blk = mdw.blocking_desc();
@@ -290,7 +294,7 @@ status_t memory_t::zero_pad(stream_t *stream) const {
     if (stream == nullptr) {
         engine_t *engine;
         engine = memory_storage()->engine();
-        stream = engine->service_stream();
+        CHECK(engine->get_service_stream(stream));
     }
     return zero_pad(exec_ctx_t(stream));
 }
@@ -306,7 +310,7 @@ status_t memory_t::zero_pad(const exec_ctx_t &ctx) const {
     if (stream == nullptr) {
         engine_t *engine;
         engine = memory_storage()->engine();
-        stream = engine->service_stream();
+        CHECK(engine->get_service_stream(stream));
     }
 
     if (stream != nullptr)

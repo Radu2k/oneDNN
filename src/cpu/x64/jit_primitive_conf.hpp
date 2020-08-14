@@ -195,7 +195,8 @@ struct jit_conv_conf_t {
 
     // Needed for Intel(R) Advanced Matrix Extensions (Intel(R) AMX) kernels
     bool is_nspc; // activations in nwc, nhwc, or ndhwc layout
-    bool is_small_ic; // probably the same as is_1stconv, but maybe not
+    bool is_relo; // reduced lowering optimization
+    int nreduce; // used with is_relo
     bool is_pbuffer_strided; // does pbuffer have strided sectors?
     int n_stride_sets; // number of stride sectors (or sets) in pbuffer
     int kw_step; // usually stride_w, unless !is_pbuffer_strided
@@ -204,6 +205,8 @@ struct jit_conv_conf_t {
     int nb_ic_int;
     int nb_oh_blocking;
 
+    int full_tile_width;
+    int max_tiles;
     int tile_width;
     int tile_tail;
     int oh_per_tile;
@@ -212,6 +215,7 @@ struct jit_conv_conf_t {
     int per_one_pstore;
 
     int inp_buffer_size;
+    int wei_buffer_size;
     int wsp_buffer_size;
 
     int nb_os;
@@ -423,6 +427,7 @@ struct jit_conv_call_s {
     size_t is_osb;
     int flags;
     int flags_prf;
+    int oc_flag;
 };
 
 struct jit_deconv_call_s {
@@ -560,6 +565,7 @@ struct jit_pool_conf_t {
     bool pad_w_is_null;
     bool is_backward;
     bool simple_alg;
+    bool is_c_padded;
     data_type_t ind_dt;
 
     int c_block, c_tail, nb_c;
@@ -598,8 +604,8 @@ struct jit_pool_call_s {
     size_t kw_padding;
     const void *init_value;
     float ker_area_h;
-    size_t ur_bc;
-    size_t padded_mask;
+    size_t ur_bc; // contains number of channel blocks to processing
+    size_t b_c; // contains number of channel blocks already processed
 };
 
 } // namespace x64

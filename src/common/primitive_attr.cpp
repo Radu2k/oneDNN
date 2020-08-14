@@ -90,7 +90,7 @@ status_t zero_points_t::set(
             = utils::one_of(arg, DNNL_ARG_SRC, DNNL_ARG_WEIGHTS, DNNL_ARG_DST);
     const bool ok = count == 1
             && IMPLICATION(mask != 0,
-                    arg == DNNL_ARG_DST
+                    utils::one_of(arg, DNNL_ARG_SRC, DNNL_ARG_DST)
                             && zero_points[0] == DNNL_RUNTIME_S32_VAL)
             && IMPLICATION(!supported_arg, *zero_points == 0);
     if (!ok) return status::unimplemented;
@@ -158,13 +158,11 @@ bool primitive_attr_t::defined(dnnl_primitive_attr::skip_mask_t mask) const {
 }
 
 status_t post_ops_t::append_sum(float scale, data_type_t dt) {
-
     entry_.emplace_back();
     auto &e = entry_.back();
     e.kind = primitive_kind::sum;
     e.sum.scale = scale;
     e.sum.dt = dt;
-
     return success;
 }
 
@@ -227,10 +225,7 @@ status_t post_ops_t::append_dw_k3s1p1(data_type_t wei_dt, data_type_t bias_dt,
     d.mask = mask;
     d.scales = nullptr;
 
-    auto status = e.set_depthwise_scales(scales);
-    if (status != status::success) return status;
-
-    return success;
+    return e.set_depthwise_scales(scales);
 }
 
 status_t post_ops_t::append_dw_k3s2p1(data_type_t wei_dt, data_type_t bias_dt,

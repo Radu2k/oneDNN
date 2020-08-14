@@ -132,11 +132,12 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
 inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
         dnn_mem_t &mem_fp, res_t *r) {
     const auto nelems = mem_dt.nelems();
+    if (nelems == 0) return r->state = PASSED, OK;
+
+    r->total = nelems;
+
     int64_t non_zero = 0;
     const char *skind = data_kind2str(kind);
-
-    r->errors = 0;
-    r->total = nelems;
 
     for (int64_t i = 0; i < nelems; ++i) {
         const float dt = mem_dt.get_elem(i);
@@ -292,7 +293,7 @@ int fill_dst(const prb_t *p, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *r) {
 
 void check_known_skipped_case(const prb_t *p, res_t *r) {
     check_known_skipped_case_common(
-            {p->cfg[SRC].dt, p->cfg[WEI].dt, p->cfg[DST].dt}, r);
+            {p->cfg[SRC].dt, p->cfg[WEI].dt, p->cfg[DST].dt}, p->dir, r);
 }
 
 int doit(const prb_t *p, res_t *r) {

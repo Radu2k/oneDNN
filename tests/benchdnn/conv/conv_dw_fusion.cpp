@@ -115,7 +115,7 @@ dnnl_primitive_attr_t create_dnnl_fusion_attr(
     }
 
     DNN_SAFE_V(dnnl_primitive_attr_set_scratchpad_mode(
-            dnnl_attr, scratchpad_mode));
+            dnnl_attr, attr.scratchpad_mode));
 
     return dnnl_attr;
 }
@@ -320,7 +320,7 @@ std::unique_ptr<prb_t> get_fused_conv_prb(const prb_t *p) {
 
 void check_known_skipped_case(const prb_t *p, res_t *r) {
     check_known_skipped_case_common(
-            {p->cfg[SRC].dt, p->cfg[WEI].dt, p->cfg[DST].dt}, r);
+            {p->cfg[SRC].dt, p->cfg[WEI].dt, p->cfg[DST].dt}, p->dir, r);
 }
 
 int doit(const prb_t *p, res_t *r) {

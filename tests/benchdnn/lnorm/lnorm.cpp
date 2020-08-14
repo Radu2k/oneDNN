@@ -281,7 +281,10 @@ static int compare(const prb_t *p, data_kind_t kind, const dnn_mem_t &fp_mem,
                                  : (kind == DATA || kind == SS ? 2e-7 : 0));
     const int64_t N = kind == SS ? 1 : p->n;
     const int64_t C = kind == DATA ? p->c : (kind == SS ? 2 * p->c : 1);
+
     const auto nelems = N * C;
+    if (nelems == 0) return r->state = PASSED, OK;
+
     r->total += nelems;
 
     diff_norm_t diff_norm;
@@ -431,7 +434,7 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
             SAFE(init_fwd_status, WARN);
     }
 
-    auto dnnl_attr = create_dnnl_attr(attr_t());
+    auto dnnl_attr = create_dnnl_attr(p->attr);
 
     dnnl_status_t init_status = dnnl_primitive_desc_create(
             &lpd, &ld, dnnl_attr, engine, hint_fwd_pd);
@@ -467,7 +470,7 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
 }
 
 void check_known_skipped_case(const prb_t *p, res_t *r) {
-    check_known_skipped_case_common({p->dt}, r);
+    check_known_skipped_case_common({p->dt}, p->dir, r);
 }
 
 int doit(const prb_t *p, res_t *r) {

@@ -219,7 +219,6 @@ float round_to_nearest_representable(dnnl_data_type_t dt, float value);
 
 /* simplification */
 extern dnnl_engine_kind_t engine_tgt_kind;
-extern dnnl_scratchpad_mode_t scratchpad_mode;
 
 extern dnnl_engine_t engine_tgt;
 extern dnnl_stream_t stream_tgt;
@@ -385,6 +384,7 @@ int init_prim(dnnl_primitive_t *prim, const func_t &init_pd_func, prb_t *p,
     // the global test engine.
     status = init_pd_func(get_test_engine(), p, pd, r, dir, hint);
     if (status != OK) return status;
+    if (r->state == SKIPPED || r->state == UNIMPLEMENTED) return OK;
     // This primitive is expected to come from the cache.
     DNN_SAFE_CLEAN(dnnl_primitive_create(&return_prim, pd), WARN, cleanup_pd);
     DNN_SAFE_CLEAN(dnnl_primitive_desc_destroy(pd), WARN, cleanup_prim);
@@ -401,6 +401,8 @@ void maybe_prepare_runtime_scales(dnn_mem_t &scales_m, const attr_t &attr,
 void maybe_prepare_runtime_scales(
         dnn_mem_t &scales_m, const attr_bundle_t &attr_bundle);
 
+void maybe_prepare_runtime_zero_points(dnn_mem_t &zero_points_m,
+        const attr_t &attr, int arg, int64_t count, const int32_t *zero_points);
 void maybe_prepare_runtime_zero_points(
         dnn_mem_t &zero_points_m, const attr_t &attr, int arg);
 
@@ -408,7 +410,7 @@ bool check_md_consistency_with_tag(
         const dnnl_memory_desc_t &md, const std::string &tag);
 
 void check_known_skipped_case_common(
-        const std::vector<dnnl_data_type_t> &v_dt, res_t *r);
+        const std::vector<dnnl_data_type_t> &v_dt, dir_t dir, res_t *r);
 
 int setup_binary(const_dnnl_primitive_desc_t pd, std::vector<int> &args,
         std::vector<dnn_mem_t> &mem, std::vector<dnn_mem_t> &mem_ref);

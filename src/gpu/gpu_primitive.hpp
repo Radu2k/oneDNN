@@ -113,13 +113,14 @@ protected:
 
         assert(utils::one_of(oscales.mask_, 0, 1 << 1));
 
+        auto scales_sz = oscales.count_ * sizeof(float);
         memory_storage_t *tmp_mem_storage_ptr;
         CHECK(engine->create_memory_storage(
-                &tmp_mem_storage_ptr, oscales.count_ * sizeof(float)));
+                &tmp_mem_storage_ptr, scales_sz));
 
         std::unique_ptr<memory_storage_t> tmp_mem_storage(tmp_mem_storage_ptr);
         void *scales_ptr = nullptr;
-        CHECK(tmp_mem_storage->map_data(&scales_ptr, nullptr));
+        CHECK(tmp_mem_storage->map_data(&scales_ptr, nullptr, scales_sz));
         utils::array_copy((float *)scales_ptr, oscales.scales_, oscales.count_);
         CHECK(tmp_mem_storage->unmap_data(scales_ptr, nullptr));
         r->add_memory_storage(storage_key, std::move(tmp_mem_storage));

@@ -32,6 +32,7 @@ developers interested in improving application performance
 on Intel CPUs and GPUs. Deep learning practitioners should use one of the
 applications enabled with oneDNN:
 * [Apache\* MXNet](https://mxnet.apache.org)
+* [Apache\* SINGA](https://singa.apache.org)
 * [BigDL](https://github.com/intel-analytics/BigDL)
 * [Caffe\* Optimized for Intel Architecture](https://github.com/intel/caffe)
 * [Chainer\*](https://chainer.org)
@@ -328,10 +329,11 @@ terms.
 3-clause BSD license:
 * [Xbyak](https://github.com/herumi/xbyak)
 * [gtest](https://github.com/google/googletest)
-* [ittnotify](https://github.com/intel/IntelSEAPI)
+* [Instrumentation and Tracing Technology API (ITT API)](https://github.com/intel/IntelSEAPI/tree/master/ittnotify)
 * [CMake](https://github.com/Kitware/CMake)
 
 Apache License Version 2.0:
+* [Font Roboto](https://fonts.google.com/specimen/Roboto)
 * [MathJax](https://github.com/mathjax/MathJax)
 * [ComputeCPP SDK](https://github.com/codeplaysoftware/computecpp-sdk)
 
@@ -341,6 +343,10 @@ Boost Software License, Version 1.0:
 MIT License:
 * [Intel Graphics Compute Runtime for oneAPI Level Zero and OpenCL Driver](https://github.com/intel/compute-runtime)
 * [Intel Graphics Compiler](https://github.com/intel/intel-graphics-compiler)
+
+SIL Open Font License (OFL):
+* [Font Awesome](https://github.com/FortAwesome/Font-Awesome)
+* [Font Lato](https://fonts.google.com/specimen/Lato)
 
 This third party software, even if included with the distribution of
 the Intel software, may be governed by separate license terms, including

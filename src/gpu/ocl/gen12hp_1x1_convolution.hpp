@@ -148,13 +148,14 @@ protected:
             return status::success;
 
         memory_desc_wrapper scales_mdw(pd()->scales_md());
+        auto scales_sz = scales_mdw.nelems() * sizeof(float);
         memory_storage_t *tmp_mem_storage_ptr;
         CHECK(engine->create_memory_storage(
-                &tmp_mem_storage_ptr, scales_mdw.nelems() * sizeof(float)));
+                &tmp_mem_storage_ptr, scales_sz));
 
         std::unique_ptr<memory_storage_t> tmp_mem_storage(tmp_mem_storage_ptr);
         void *scales_ptr = nullptr;
-        CHECK(tmp_mem_storage->map_data(&scales_ptr, nullptr));
+        CHECK(tmp_mem_storage->map_data(&scales_ptr, nullptr, scales_sz));
         utils::array_copy((float *)scales_ptr,
                 pd()->attr()->output_scales_.scales_,
                 pd()->attr()->output_scales_.count_);

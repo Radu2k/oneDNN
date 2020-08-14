@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2020 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -105,7 +105,11 @@ struct gen12lp_x8s8s32x_1x1_convolution_fwd_t : public gpu_primitive_t {
     };
 
     status_t init(engine_t *engine) override {
-        const char *kernel_name = "gen12lp_1x1_conv_fwd_x8s8s32x";
+        const char *kernel_name = nullptr;
+        if (pd()->conf.is_nhwc)
+            kernel_name = "gen12lp_nhwc_1x1_conv_fwd_x8s8s32x";
+        else
+            kernel_name = "gen12lp_1x1_conv_fwd_x8s8s32x";
 
         compute::kernel_ctx_t kernel_ctx;
         auto status = pd()->init_kernel_ctx(kernel_ctx);
@@ -138,7 +142,8 @@ protected:
 
         std::unique_ptr<memory_storage_t> tmp_mem_storage(tmp_mem_storage_ptr);
         void *scales_ptr = nullptr;
-        CHECK(tmp_mem_storage->map_data(&scales_ptr, nullptr));
+        CHECK(tmp_mem_storage->map_data(&scales_ptr, nullptr,
+                sizeof(float) * pd()->attr()->output_scales_.count_));
         utils::array_copy((float *)scales_ptr,
                 pd()->attr()->output_scales_.scales_,
                 pd()->attr()->output_scales_.count_);

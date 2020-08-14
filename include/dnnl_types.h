@@ -395,6 +395,7 @@ typedef enum {
     dnnl_aBdefc8b,
     dnnl_Abcdef16a,
     dnnl_Abcdef32a,
+    dnnl_aBedc16b,
     dnnl_Acb16a,
     dnnl_AcB16a2b,
     dnnl_AcB16a4b,
@@ -414,6 +415,7 @@ typedef enum {
     dnnl_AcdeB16a2b,
     dnnl_Acdeb4a,
     dnnl_Acdeb8a,
+    dnnl_Adcb16a,
     dnnl_BAc16a16b,
     dnnl_BAc16b16a,
     dnnl_BAcd16a16b,
@@ -640,6 +642,7 @@ typedef enum {
     dnnl_IOhw8o16i2o = dnnl_BAcd8a16b2a,
     dnnl_OIhw8o8i = dnnl_ABcd8a8b,
     dnnl_OIhw8o4i = dnnl_ABcd8a4b,
+    dnnl_Owhi16o = dnnl_Adcb16a,
 
     // weights, 5D
     dnnl_Odhwi16o = dnnl_Acdeb16a,
@@ -724,6 +727,7 @@ typedef enum {
     dnnl_gOIhw8o8i = dnnl_aBCde8b8c,
     dnnl_gOIhw8o4i = dnnl_aBCde8b4c,
     dnnl_Goihw32g = dnnl_Abcde32a,
+    dnnl_gOwhi16o = dnnl_aBedc16b,
 
     dnnl_OIw4o8i8o4i = dnnl_ABc4a8b8a4b,
     dnnl_OIhw4o8i8o4i = dnnl_ABcd4a8b8a4b,
@@ -1231,7 +1235,12 @@ typedef struct dnnl_memory *dnnl_memory_t;
 /// A constant memory handle.
 typedef const struct dnnl_memory *const_dnnl_memory_t;
 
+/// Special pointer value that indicates that a memory object should not have
+/// an underlying buffer.
 #define DNNL_MEMORY_NONE (NULL)
+
+/// Special pointer value that indicates that the library needs to allocate an
+/// underlying buffer for a memory object.
 #define DNNL_MEMORY_ALLOCATE ((void *)(size_t)-1)
 
 /// @} dnnl_api_memory

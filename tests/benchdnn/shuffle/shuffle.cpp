@@ -59,7 +59,8 @@ static int compare(const prb_t *p, const dnn_mem_t &fp_mem,
         const dnn_mem_t &dt_mem, res_t *r) {
     const float trh = 0;
     const auto nelems = dt_mem.nelems();
-    r->errors = 0;
+    if (nelems == 0) return r->state = PASSED, OK;
+
     r->total = nelems;
 
     for (int64_t i = 0; i < nelems; i++) {
@@ -126,7 +127,7 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
                 WARN, cleanup_pd);
     }
 
-    auto dnnl_attr = create_dnnl_attr_v2(attr_t(), attr_args_t());
+    auto dnnl_attr = create_dnnl_attr_v2(p->attr, attr_args_t());
 
     dnnl_status_t init_status
             = dnnl_primitive_desc_create(&spd, &sd, dnnl_attr, engine, _hint);
@@ -144,7 +145,7 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
 }
 
 void check_known_skipped_case(const prb_t *p, res_t *r) {
-    check_known_skipped_case_common({p->dt}, r);
+    check_known_skipped_case_common({p->dt}, p->dir, r);
 }
 
 int doit(const prb_t *p, res_t *r) {

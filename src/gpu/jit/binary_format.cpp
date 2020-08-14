@@ -176,30 +176,21 @@ public:
 };
 
 status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
-    // TODO: This function needs to be fixed,currently there are serveral
-    // issues:
-    // - DPC++/OpenCL and DPC++/L0 runtimes are not supported
-    // - This function is called on every engine creation hence overhead on
-    //   memory allocation and kernel compilation. Result caching is needed.
-    // - All nGEN primitives must call mayiuse_ngen_kernels().
-    //
-    // DO_NOT_PROMOTE : Return true unless flag is set to zero value
-    *ok = dnnl::impl::getenv_int("DNNL_ENABLE_NGEN", 1) != 0;
-    return status::success;
-
-#if 0
     auto gpu_engine = utils::downcast<compute::compute_engine_t *>(engine);
-    auto stream = utils::downcast<compute::compute_stream_t *>(
-            engine->service_stream());
-    if (!gpu_engine || !stream) return status::invalid_arguments;
+    if (!gpu_engine) return status::invalid_arguments;
+
+    stream_t *stream_generic;
+    auto status = gpu_engine->get_service_stream(stream_generic);
+    if (status != status::success) return status::runtime_error;
+
+    auto stream = utils::downcast<compute::compute_stream_t *>(stream_generic);
+    if (!stream) return status::invalid_arguments;
 
     auto kernel = binary_format_kernel_t<HW::Unknown>::make_kernel(gpu_engine);
     if (!kernel) return status::success;
 
     compute::kernel_t realized_kernel;
     CHECK(kernel.realize(&realized_kernel, engine));
-
-    status_t status = status::success;
 
     // Binary kernel check.
     uint32_t magic0 = MAGIC0;
@@ -225,7 +216,7 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     result_buf.reset(storage);
 
     void *magic_host = nullptr;
-    magic_buf->map_data(&magic_host, nullptr);
+    magic_buf->map_data(&magic_host, nullptr, sizeof(int32_t));
     if (!magic_host) return status::runtime_error;
 
     *reinterpret_cast<uint32_t *>(magic_host) = magic_ptr;
@@ -233,7 +224,7 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     magic_buf->unmap_data(magic_host, nullptr);
 
     void *result_host = nullptr;
-    result_buf->map_data(&result_host, nullptr);
+    result_buf->map_data(&result_host, nullptr, sizeof(int32_t));
     if (!result_host) return status::runtime_error;
 
     *reinterpret_cast<uint32_t *>(result_host) = 0;
@@ -260,7 +251,7 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     if (status != status::success) return status::runtime_error;
 
     result_host = nullptr;
-    result_buf->map_data(&result_host, nullptr);
+    result_buf->map_data(&result_host, nullptr, sizeof(int32_t));
     if (!result_host) return status::runtime_error;
 
     auto result = *reinterpret_cast<uint32_t *>(result_host);
@@ -269,7 +260,6 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
 
     *ok = (result != 0);
     return status::success;
-#endif
 }
 
 } // namespace jit

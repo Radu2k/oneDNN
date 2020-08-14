@@ -17,6 +17,12 @@
 #include "gpu/ocl/ocl_post_ops.h"
 #include "gpu/ocl/ocl_types.h"
 
+#if DT_S8 || DT_U8
+#define RINT rint
+#else
+#define RINT
+#endif
+
 #if IS_FWD
 KERNEL_ATTR
 __kernel void ref_pooling_fwd(__global DATA_T *src, __global int *ws,
@@ -94,7 +100,6 @@ __kernel void ref_pooling_fwd(__global DATA_T *src, __global int *ws,
                         }
                     }
                 d /= num_summands;
-
 #endif
 
                     // post op service
@@ -104,7 +109,7 @@ __kernel void ref_pooling_fwd(__global DATA_T *src, __global int *ws,
                 POST_OP_DATA_T tmp = DATA_TO_REF(d);
 #endif
                 POST_OP_DATA_T sum_src;
-#if WITH_SUM
+#if WITH_SUM    
                 sum_src = DATA_TO_REF(dst[dst_off]);
 #endif
                 APPLY_POST_OPS(tmp, POST_OP_DATA_T, sum_src, POST_OP_DATA_T, mb,

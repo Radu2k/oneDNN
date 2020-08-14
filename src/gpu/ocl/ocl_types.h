@@ -37,6 +37,7 @@
 #define DATA2_T float2
 #define DATA4_T float4
 #define DATA8_T float8
+#define DATA16_T float16
 #define DATA_MAX FLT_MAX
 #define DATA_MIN -DATA_MAX
 #define DATA_ZERO 0.0f
@@ -336,6 +337,9 @@
 #define DATA_TO_REF convert_float
 #define CONVERT_DATA_T convert_int_sat_rte
 #define POST_OP_DATA_T float
+#define DATA_MIN INT_MIN
+#define DATA_MAX INT_MAX
+#define ROUND
 #elif !defined(DT_UNDEF)
 #error "Unexpected data type"
 #endif
