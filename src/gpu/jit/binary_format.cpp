@@ -176,6 +176,14 @@ public:
 };
 
 status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
+    // TODO: This function currently crashes on ATS
+    // this is tracked by MFDNN-3532.
+
+    // DO_NOT_PROMOTE : Return true unless flag is set to zero value
+    *ok = dnnl::impl::getenv_int("DNNL_ENABLE_NGEN", 1) != 0;
+    return status::success;
+
+#if 0
     auto gpu_engine = utils::downcast<compute::compute_engine_t *>(engine);
     if (!gpu_engine) return status::invalid_arguments;
 
@@ -260,6 +268,7 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
 
     *ok = (result != 0);
     return status::success;
+#endif
 }
 
 } // namespace jit

@@ -70,7 +70,6 @@ protected:
                 && (mask_src == 0 || mask_src == 1 << 1)
                 && (mask_dst == 0 || mask_dst == 1 << 1);
     }
-
 };
 
 struct gpu_convolution_bwd_data_pd_t : public convolution_bwd_data_pd_t {
@@ -80,18 +79,18 @@ protected:
     bool post_ops_ok(const primitive_attr_t *attr) const {
         const auto &p = attr->post_ops_;
 
-                auto is_eltwise
-                    = [&](int idx) { return p.entry_[idx].is_eltwise(false); };
-                auto is_sum = [&](int idx) { return p.entry_[idx].is_sum(false); };
+        auto is_eltwise
+                = [&](int idx) { return p.entry_[idx].is_eltwise(false); };
+        auto is_sum = [&](int idx) { return p.entry_[idx].is_sum(false); };
 
-                switch (p.len()) {
-                case 0: return true; // no post_ops
-                case 1: return is_eltwise(0) || is_sum(0); // sum OR eltwise
-                case 2: return is_sum(0) && is_eltwise(1); // sum -> eltwise
-                default: return false;
-                }
+        switch (p.len()) {
+            case 0: return true; // no post_ops
+            case 1: return is_eltwise(0) || is_sum(0); // sum OR eltwise
+            case 2: return is_sum(0) && is_eltwise(1); // sum -> eltwise
+            default: return false;
+        }
 
-                return false;
+        return false;
     }
 };
 

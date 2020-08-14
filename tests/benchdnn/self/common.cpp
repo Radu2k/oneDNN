@@ -207,8 +207,8 @@ static int check_post_ops2str() {
             "'sum;relu;sum:2:s8;linear:5:10:2;dw_k3s1p1;dw_k3s2p1:s32:per_oc:"
             "2'");
 
-    append_binary(po, attr_t::post_ops_t::ADD, dnnl_s8,
-            attr_t::policy_t::PER_OC);
+    append_binary(
+            po, attr_t::post_ops_t::ADD, dnnl_s8, attr_t::policy_t::PER_OC);
     CHECK_EQ(po.len(), 5);
     CHECK_PRINT_EQ(po, "'sum:2;relu;sum;relu:5;add:s8:per_oc'");
 

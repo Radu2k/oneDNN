@@ -369,8 +369,7 @@ struct attr_args_t {
         }
 
         int get_mask(policy_t policy) const {
-            return mask == -1 ? attr_t::get_default_mask(policy)
-                              : mask;
+            return mask == -1 ? attr_t::get_default_mask(policy) : mask;
         }
 
         const float *get_scales() const {

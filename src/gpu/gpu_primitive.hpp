@@ -115,8 +115,7 @@ protected:
 
         auto scales_sz = oscales.count_ * sizeof(float);
         memory_storage_t *tmp_mem_storage_ptr;
-        CHECK(engine->create_memory_storage(
-                &tmp_mem_storage_ptr, scales_sz));
+        CHECK(engine->create_memory_storage(&tmp_mem_storage_ptr, scales_sz));
 
         std::unique_ptr<memory_storage_t> tmp_mem_storage(tmp_mem_storage_ptr);
         void *scales_ptr = nullptr;

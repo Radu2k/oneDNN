@@ -702,7 +702,8 @@ int doit(const prb_t *p, res_t *r) {
 
     // Do not use CPU primitive for reference if any of these is true.
     bool with_binary_post_op = (p->attr.post_ops.binary_index() != -1);
-    bool with_user_scratchpad = (p->attr.scratchpad_mode == dnnl_scratchpad_mode_user);
+    bool with_user_scratchpad
+            = (p->attr.scratchpad_mode == dnnl_scratchpad_mode_user);
     bool with_runtime_oscale = p->attr.oscale.runtime;
 
     if ((bench_mode & CORR) && engine_tgt_kind == dnnl_gpu && fast_ref_gpu

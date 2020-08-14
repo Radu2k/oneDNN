@@ -138,8 +138,7 @@ protected:
         memory_desc_wrapper scales_mdw(pd()->scales_md());
         auto scales_sz = scales_mdw.nelems() * sizeof(float);
         memory_storage_t *tmp_mem_storage_ptr;
-        CHECK(engine->create_memory_storage(
-                &tmp_mem_storage_ptr, scales_sz));
+        CHECK(engine->create_memory_storage(&tmp_mem_storage_ptr, scales_sz));
 
         std::unique_ptr<memory_storage_t> tmp_mem_storage(tmp_mem_storage_ptr);
         void *scales_ptr = nullptr;
