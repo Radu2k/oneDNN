@@ -62,3 +62,6 @@
 --mb=16
 --tag=ABx16a16b
 --batch=shapes_2d_small
+
+# Test different src and dst datatypes
+--batch=harness_pooling_different_dt

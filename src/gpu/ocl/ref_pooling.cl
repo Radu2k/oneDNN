@@ -26,7 +26,7 @@
 #if IS_FWD
 KERNEL_ATTR
 __kernel void ref_pooling_fwd(__global DATA_T *src, __global int *ws,
-        __global DATA_T *dst POST_OP_ARGS) {
+        __global DST_DATA_T *dst POST_OP_ARGS) {
     const int mb = GWS_GET_MB();
     const int oc = GWS_GET_OC();
 
@@ -116,7 +116,7 @@ __kernel void ref_pooling_fwd(__global DATA_T *src, __global int *ws,
                         1, oc, 1, od, 1, oh, 1, ow, 1, 0, 1);
 
                 // store result
-                dst[dst_off] = TO_DATA_T(tmp);
+                dst[dst_off] = TO_DST(tmp);
             }
 }
 #endif
@@ -124,7 +124,7 @@ __kernel void ref_pooling_fwd(__global DATA_T *src, __global int *ws,
 #if IS_BWD
 KERNEL_ATTR
 __kernel void ref_pooling_bwd(__global DATA_T *diff_src, __global int *ws,
-        __global DATA_T *diff_dst) {
+        __global DST_DATA_T *diff_dst) {
 
     const int mb = GWS_GET_MB();
     const int oc = GWS_GET_OC();
