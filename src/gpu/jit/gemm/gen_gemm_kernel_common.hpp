@@ -18,6 +18,8 @@
 #define GPU_JIT_GEMM_GEN_GEMM_KERNEL_COMMON_HPP
 
 enum {
+    FlagConjA = 1,
+    FlagConjB = 2,
     FlagCOColumn = 4,
     FlagCORow = 8,
     FlagNonfinalKBlock = 16,

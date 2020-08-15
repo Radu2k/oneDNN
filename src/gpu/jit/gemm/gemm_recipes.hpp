@@ -106,6 +106,12 @@ const gemm_recipe_t gemm_recipes[] = {
     {ngen::HW::Gen12HP, "HHH", "NTN", {}, 32, 32, "ab4/1x2 ab2/1x2 ab l4 cs"},
     {ngen::HW::Gen12HP, "HHH", "TNN", {}, 16, 16, "as8 as32 ab l4 cab1 wg 4x4 cs"},
     {ngen::HW::Gen12HP, "HHH", "TTN", {}, 32, 32, "as4/1x2 ab4/1x2 ab l4 ca1 wg 2x8 cs nmk"},
+    {ngen::HW::Gen12HP, "SSS", "NNN", {}, 64, 8,  "sb1x2 su4/2x2 sb ca1 wg 2x8 cs di bm8192 bn8192 bk8192"},
+    {ngen::HW::Gen12HP, "SSS", "NNN", {}, 32, 8,  "sb4 sb8 sb cab1 wg 4x4 cs di bm4096 bn4096 bk8192"},
+    {ngen::HW::Gen12HP, "SSS", "NNN", {}, 16, 8,  "sb16 sb16 sb cab1 wg 4x4 cs di bm2048 bn2048 bk8192"},
+    {ngen::HW::Gen12HP, "SSS", "NTN", {}, 32, 16, "sb4/2x2 sb4x2 sb cs di bm8192 bn8192 bk8192"},
+    {ngen::HW::Gen12HP, "SSS", "TNN", {}, 16, 16, "sb8 sb8 su cab1 wg 4x4 cs di bm8192 bn8192 bk8192"},
+    {ngen::HW::Gen12HP, "SSS", "TTN", {}, 8,  64, "su4/2x2 sb1x2 su cb1 wg 8x2 cs di fn bm8192 bn8192 bk8192"},
 };
 // clang-format on
 

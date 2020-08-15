@@ -107,8 +107,9 @@ struct gen_gemm_t : public gpu_gemm_t {
             ok &= utils::one_of(
                     arch_, arch_t::gen9, arch_t::gen12lp, arch_t::gen12hp);
 
-            // Only f16 enabled on Gen12HP for now.
-            ok &= IMPLICATION(arch_ == arch_t::gen12hp, d->c_type == f16);
+            // Only f16 and f32 enabled on Gen12HP for now.
+            ok &= IMPLICATION(arch_ == arch_t::gen12hp,
+                    utils::one_of(d->c_type, f16, f32));
 
             if (!ok) return status::unimplemented;
 

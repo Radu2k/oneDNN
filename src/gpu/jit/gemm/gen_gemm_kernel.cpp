@@ -143,17 +143,22 @@ status_t gen_gemm_kernel_t::read_strategy(const char *str) {
     while (!s.eof()) {
         std::string mod;
         s >> mod;
-        if (mod == "cs")
+        if (mod == "cs") {
+            override_register_scheme = true;
             strategy_.registerScheme = GEMMStrategy::CSeparate;
-        else if (mod == "acb")
+        } else if (mod == "acb") {
+            override_register_scheme = true;
             strategy_.registerScheme = GEMMStrategy::ACB;
-        else if (mod == "bca")
+        } else if (mod == "bca") {
+            override_register_scheme = true;
             strategy_.registerScheme = GEMMStrategy::BCA;
-        else if (mod == "vnc")
+        } else if (mod == "vnc") {
+            override_register_scheme = true;
             strategy_.registerScheme = GEMMStrategy::VNC;
-        else if (mod == "int")
+        } else if (mod == "int") {
+            override_register_scheme = true;
             strategy_.registerScheme = GEMMStrategy::ABInterleave;
-        else if (mod == "ar") {
+        } else if (mod == "ar") {
             override_c_remainder = true;
             strategy_.altCRemainder = true;
         } else if (mod == "sr") {
@@ -305,7 +310,7 @@ status_t gen_gemm_kernel_t::init_interface() {
     interface_.newArgument("beta_real", s_type_ngen);
     if (problem_.abOffset != ABOffset::None)
         interface_.newArgument("abo", DataType::ud);
-    if (problem_.cOffset) {
+    if (problem_.cOffset != COffset::None) {
         interface_.newArgument("CO", ExternalArgumentType::GlobalPtr);
         interface_.newArgument("offset_CO", DataType::d);
     }
@@ -534,9 +539,27 @@ const kernel_table_t *gen12hp_f16_nocopy_tables[2][2] = {
     {gen12hp_f16_nocopy_tn_table, gen12hp_f16_nocopy_tt_table}
 };
 
+const kernel_table_t gen12hp_f32_nocopy_nn_table[] = {
+    {{16, 8}, { 0,  0}, {0, 0}},
+    {{32, 8}, { 0,  0}, {0, 0}},
+    {{64, 8}, {-1, -1}, {0, 0}}
+};
+
+const kernel_table_t gen12hp_f32_nocopy_nt_table[] = {
+    {{32, 16}, {-1, -1}, {0, 0}}
+};
+
+const kernel_table_t gen12hp_f32_nocopy_tn_table[] = {
+    {{16, 16}, {-1, -1}, {0, 0}}
+};
+
+const kernel_table_t gen12hp_f32_nocopy_tt_table[] = {
+    {{8, 64}, {-1, -1}, {0, 0}}
+};
+
 const kernel_table_t *gen12hp_f32_nocopy_tables[2][2] = {
-    {nullptr, nullptr},
-    {nullptr, nullptr}
+    {gen12hp_f32_nocopy_nn_table, gen12hp_f32_nocopy_nt_table},
+    {gen12hp_f32_nocopy_tn_table, gen12hp_f32_nocopy_tt_table}
 };
 
 const kernel_table_t *gen12hp_x8_nocopy_tables[2][2] = {
@@ -560,7 +583,8 @@ void gen_gemm_nocopy_kernel_t::choose_unrolls(compute::gpu_arch_t arch,
                        &gen12hp_f32_nocopy_tables},
                     {&gen9_f16_nocopy_tables, &gen12lp_f16_nocopy_tables,
                             &gen12hp_f16_nocopy_tables},
-                    {&gen9_x8_nocopy_tables, &gen12lp_x8_nocopy_tables, &gen12hp_x8_nocopy_tables}};
+                    {&gen9_x8_nocopy_tables, &gen12lp_x8_nocopy_tables,
+                            &gen12hp_x8_nocopy_tables}};
 
     int arch_idx = (arch == compute::gpu_arch_t::gen12lp)
             ? 1
