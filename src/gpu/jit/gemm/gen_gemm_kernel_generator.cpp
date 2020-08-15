@@ -5944,10 +5944,6 @@ bool gemm_kernel_generator_t<hw>::gemmApplyCOffset(bool row, bool column,
     allocAddrRegs(CO_addrs, CO_layout, CO, CO_strategy, state);
     setupAddr(Tc, CO_addrs, state.effCO, CO_layout, Subregister(), CO,
             CO_strategy, strategy, state);
-
-    if (!assignMasks(CO_layout, LoopM, LoopN, masks, state)) return false;
-
-    loadMasks(masks, state.remainders, state);
     loadMatrix(CO_regs, CO_layout, CO, CO_strategy, CO_addrs, state);
     releaseMaskAssignments(masks, state);
 
@@ -7873,15 +7869,15 @@ bool gemm_kernel_generator_t<hw>::gemmUpdateC(
         if (!problem.alpha1()) stub();
     }
 
+    // C early offset.
+    if (problem.cOffset == COffset::Pre)
+        gemmApplyCOffsetDispatch(problem, strategy, state);
+
     // Claim a flag register for complex swizzles for ATS+.
     if (hw >= HW::Gen12HP) {
         state.flagSwizzle = state.raVFlag.alloc();
         state.raVFlag.unlock(state.flagSwizzle);
     }
-
-    // C early offset.
-    if (problem.cOffset == COffset::Pre)
-        gemmApplyCOffsetDispatch(problem, strategy, state);
 
     // Scale by alpha now if alpha and beta are both nontrivial. Todo: move above beta = 0 check,
     //  handle double precision correctly (load alpha to register first).
