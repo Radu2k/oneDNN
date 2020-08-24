@@ -270,8 +270,8 @@ int dst_idx(int mb_block, int oc_outer, int ow_block) {
         if ((n) == 16 && (stride) == 1) { \
             (block)[0] = _BLOCK_READ((ptr)); \
         } else { \
-            int local_id = get_sub_group_local_id(); \
-            (block)[0] = (local_id < (n)) ? (ptr)[local_id * (stride)] : 0; \
+            int sglid = get_sub_group_local_id(); \
+            (block)[0] = (sglid < (n)) ? (ptr)[sglid * (stride)] : 0; \
         } \
     } while (0)
 
@@ -657,7 +657,7 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) __kernel void
 gen9_conv_fwd(const __global DATA_T *src, const __global DATA_T *wei,
         const __global DATA_T *bia, __global DATA_T *dst POST_OP_ARGS) {
 
-    int local_id = get_sub_group_local_id();
+    int sglid = get_sub_group_local_id();
     int g_ocb = get_group_id(0) * (LWS_0 / SUB_GROUP_SIZE) + get_sub_group_id();
     int g = g_ocb / (OCB / OC_BLOCK);
     int ocb = g_ocb % (OCB / OC_BLOCK) * OC_BLOCK;
@@ -696,7 +696,7 @@ gen9_conv_fwd(const __global DATA_T *src, const __global DATA_T *wei,
                 for (int ow_block = 0; ow_block < OW_BLOCK; ow_block++) {
                     const int c_off = dst_idx(mb_block, oc_outer, ow_block);
                     const int bg_off = g * OC;
-                    const int bc_off = oc + oc_outer * 16 + local_id;
+                    const int bc_off = oc + oc_outer * 16 + sglid;
                     C[c_off] = (OC_WO_PADDING % OC_BLOCK == 0
                                        || bc_off < OC_WO_PADDING)
                             ? bia[bg_off + bc_off]
@@ -724,8 +724,8 @@ gen9_conv_fwd(const __global DATA_T *src, const __global DATA_T *wei,
         DATA_T accum = C[didx];
         DATA_T sum = S[didx];
         const int po_mb = (mb + didx / (OC_OUTER * OW_BLOCK)) % MB;
-        const int po_oc = (g * OC + oc + local_id
-                                  + (((didx / OW_BLOCK) % OC_OUTER) * 16))
+        const int po_oc
+                = (g * OC + oc + sglid + (((didx / OW_BLOCK) % OC_OUTER) * 16))
                 % (OC * G);
         APPLY_POST_OPS(accum, DATA_T, sum, DATA_T, po_mb, 1, po_oc, 1, od, 1,
                 oh, 1, ow, 1, 0, 1);

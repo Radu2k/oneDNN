@@ -14,7 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
-#pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
+#include "gpu/ocl/ocl_math_utils.h"
 
 #if OD > 1
 #define CASE_3D 1
@@ -25,20 +25,6 @@
 #define HAS_PAD_D (PD != 0 || PD_R != 0)
 #define HAS_PAD_H (PH != 0 || PH_R != 0)
 #define HAS_PAD_W (PW != 0 || PW_R != 0)
-
-inline void atomic_add_global(
-        volatile __global atomic_float *source, float operand) {
-    float old_val = atomic_load_explicit(
-            source, memory_order_relaxed, memory_scope_device);
-    if (isnan(operand)) return;
-    bool success = false;
-    do {
-        float new_val = old_val + operand;
-        success = atomic_compare_exchange_strong_explicit(source, &old_val,
-                new_val, memory_order_acq_rel, memory_order_relaxed,
-                memory_scope_device);
-    } while (!success);
-}
 
 #if BWD_WEIGHTS == 1
 
@@ -63,7 +49,7 @@ gen9_conv_bwd_weights(__global float *src,
 #endif
     const uint kh = khw / KW;
     const uint kw = khw % KW;
-    const uint local_x = get_local_id(0);
+    const uint sglid = get_sub_group_local_id();
 
     const uint chunk = get_global_id(2) / ((IC / ICB) * (OC / OCB));
     const uint icb_ocb = get_global_id(2) % ((IC / ICB) * (OC / OCB));
@@ -72,7 +58,8 @@ gen9_conv_bwd_weights(__global float *src,
 
 #if IS_DW
     const uint g = 0;
-    const uint oc = get_group_id(0);
+    const uint oc
+            = get_group_id(0) * (LWS_0 / SUB_GROUP_SIZE) + get_sub_group_id();
     const uint ic = oc;
 #else
     const uint g_ic_oc = get_global_id(0);
@@ -104,7 +91,7 @@ gen9_conv_bwd_weights(__global float *src,
             + g * OC * OD * OH * OW * MB_BLOCK;
 
 #if WITH_BIAS == 1
-    diff_bias += g * OC + oc * OC_BLOCK + local_x;
+    diff_bias += g * OC + oc * OC_BLOCK + sglid;
     float bias_loc = 0.0f;
 #endif
 
@@ -251,7 +238,7 @@ gen9_conv_bwd_weights(__global float *src,
 
 #if WITH_BIAS == 1
     if (do_bias
-            && oc * OC_BLOCK + local_x < (IS_DW ? G_WO_PADDING : OC_WO_PADDING))
+            && oc * OC_BLOCK + sglid < (IS_DW ? G_WO_PADDING : OC_WO_PADDING))
         atomic_add_global(diff_bias, bias_loc);
 
 #endif
@@ -259,17 +246,17 @@ gen9_conv_bwd_weights(__global float *src,
 #if IS_DW
     diff_wei += oc * KD * KH * KW * OC_BLOCK + kd * KH * KW * OC_BLOCK
             + kh * KW * OC_BLOCK + kw * OC_BLOCK;
-    atomic_add_global(diff_wei + local_x, blockC00);
+    atomic_add_global(diff_wei + sglid, blockC00);
 #else
     diff_wei += ic * OC * KD * KH * KW * IC_BLOCK
             + oc * KD * KH * KW * IC_BLOCK * OC_BLOCK
             + kd * KH * KW * IC_BLOCK * OC_BLOCK + kh * KW * IC_BLOCK * OC_BLOCK
             + kw * IC_BLOCK * OC_BLOCK + g * OC * IC * KD * KH * KW;
     for (int i = 0; i < 8; i++)
-        atomic_add_global(diff_wei + i * OC_BLOCK + local_x, blockC00[i]);
+        atomic_add_global(diff_wei + i * OC_BLOCK + sglid, blockC00[i]);
 
     for (int i = 0; i < 8; i++)
-        atomic_add_global(diff_wei + (8 + i) * OC_BLOCK + local_x, blockC01[i]);
+        atomic_add_global(diff_wei + (8 + i) * OC_BLOCK + sglid, blockC01[i]);
 #endif
 
 #endif
@@ -284,7 +271,7 @@ gen9_conv_bwd_weights(__global float *src,
 #endif
     const int kh = khw / KW;
     const int kw = khw % KW;
-    const int local_x = get_local_id(0);
+    const int sglid = get_sub_group_local_id();
 
     const int chunk = get_global_id(2) % NCHUNK;
     const int icb_ocb = get_global_id(2) / NCHUNK;
@@ -293,7 +280,8 @@ gen9_conv_bwd_weights(__global float *src,
 
 #if IS_DW
     const int g = 0;
-    const int oc = get_group_id(0);
+    const int oc
+            = get_group_id(0) * (LWS_0 / SUB_GROUP_SIZE) + get_sub_group_id();
     const int ic = oc;
 #else
     const int g_ic_oc = get_global_id(0);
@@ -324,7 +312,7 @@ gen9_conv_bwd_weights(__global float *src,
             + g * OC * OD * OH * OW * MB_BLOCK;
 
 #if WITH_BIAS == 1
-    diff_bias += g * OC + oc * OC_BLOCK + local_x;
+    diff_bias += g * OC + oc * OC_BLOCK + sglid;
     float bias_loc = 0.0f;
 #endif
 
@@ -420,13 +408,12 @@ gen9_conv_bwd_weights(__global float *src,
 
                     float8 blockA, blockB;
 #if IC == 3
-                    if (local_x < IC) {
+                    if (sglid < IC) {
                         for (int i = 0; i < OW_BLOCK; i++) {
                             if (iw + i * SW < 0 || iw + i * SW >= IW)
                                 blockA[i] = 0;
                             else
-                                blockA[i]
-                                        = src1[local_x * ID * IH * IW + i * SW];
+                                blockA[i] = src1[sglid * ID * IH * IW + i * SW];
                         }
                     } else {
                         blockA = 0.0f;
@@ -478,7 +465,7 @@ gen9_conv_bwd_weights(__global float *src,
 
 #if WITH_BIAS == 1
     if (do_bias
-            && oc * OC_BLOCK + local_x < (IS_DW ? G_WO_PADDING : OC_WO_PADDING))
+            && oc * OC_BLOCK + sglid < (IS_DW ? G_WO_PADDING : OC_WO_PADDING))
         atomic_add_global(diff_bias, bias_loc);
 #endif
 
@@ -487,21 +474,21 @@ gen9_conv_bwd_weights(__global float *src,
             + kd * KH * KW * IC * OC_BLOCK + kh * KW * IC * OC_BLOCK
             + kw * IC * OC_BLOCK;
     for (int i = 0; i < 3; i++)
-        atomic_add_global(diff_wei + i * OC_BLOCK + local_x, blockC00[i]);
+        atomic_add_global(diff_wei + i * OC_BLOCK + sglid, blockC00[i]);
 #elif IS_DW
     diff_wei += oc * KD * KH * KW * OC_BLOCK + kd * KH * KW * OC_BLOCK
             + kh * KW * OC_BLOCK + kw * OC_BLOCK;
-    atomic_add_global(diff_wei + local_x, blockC00);
+    atomic_add_global(diff_wei + sglid, blockC00);
 #else
     diff_wei += ic * OC * KD * KH * KW * IC_BLOCK
             + oc * KD * KH * KW * IC_BLOCK * OC_BLOCK
             + kd * KH * KW * IC_BLOCK * OC_BLOCK + kh * KW * IC_BLOCK * OC_BLOCK
             + kw * IC_BLOCK * OC_BLOCK + g * OC * IC * KD * KH * KW;
     for (int i = 0; i < 8; i++)
-        atomic_add_global(diff_wei + i * OC_BLOCK + local_x, blockC00[i]);
+        atomic_add_global(diff_wei + i * OC_BLOCK + sglid, blockC00[i]);
 
     for (int i = 0; i < 8; i++)
-        atomic_add_global(diff_wei + (8 + i) * OC_BLOCK + local_x, blockC01[i]);
+        atomic_add_global(diff_wei + (8 + i) * OC_BLOCK + sglid, blockC01[i]);
 #endif
 #endif
 }

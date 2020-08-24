@@ -371,7 +371,7 @@ DECLARE_MMAD_EMU(mmad8x8_bf16, bf16_dot2, 8, 8, uint8, int8, float8)
 #ifdef cl_intel_global_float_atomics
 inline void atomic_add_global(
         volatile global atomic_float *source, float operand) {
-    atomic_fetch_add(source, operand);
+    atomic_fetch_add_explicit(source, operand, memory_order_relaxed);
 }
 
 #else // float atomics

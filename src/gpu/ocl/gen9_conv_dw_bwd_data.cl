@@ -27,9 +27,10 @@ gen9_conv_dw_bwd_data(__global DATA_T *diff_src, __global DATA_T *wei,
 #if VER_16MB16C == 1
     const int mb_unroll = 16;
 
-    const int ic = get_group_id(1);
+    const int ic
+            = get_group_id(1) * (LWS_1 / SUB_GROUP_SIZE) + get_sub_group_id();
     const int sp = get_group_id(0);
-    const int local_id = get_local_id(1);
+    const int sglid = get_sub_group_local_id();
     int mb = get_group_id(2) * mb_unroll;
 
     const int g = ic * IC_BLOCK;
@@ -46,7 +47,7 @@ gen9_conv_dw_bwd_data(__global DATA_T *diff_src, __global DATA_T *wei,
     DATA8_T blockC01 = (DATA8_T)DATA_ZERO;
 
     if (WITH_BIAS) {
-        const int bg_off = g * IC + gic * IC_BLOCK + local_id;
+        const int bg_off = g * IC + gic * IC_BLOCK + sglid;
         DATA_T b = (G_WO_PADDING % IC_BLOCK == 0 || bg_off < G_WO_PADDING)
                 ? bias[bg_off]
                 : DATA_ZERO;
@@ -137,9 +138,10 @@ gen9_conv_dw_bwd_data(__global DATA_T *diff_src, __global DATA_T *wei,
 
 #endif
 #if VER_8OW16C == 1
-    const int ic = get_group_id(1);
+    const int ic
+            = get_group_id(1) * (LWS_1 / SUB_GROUP_SIZE) + get_sub_group_id();
     const int sp = get_group_id(0);
-    const int local_id = get_local_id(1);
+    const int sglid = get_sub_group_local_id();
     const int mb = get_group_id(2);
 
     const int g = ic * IC_BLOCK;
@@ -155,7 +157,7 @@ gen9_conv_dw_bwd_data(__global DATA_T *diff_src, __global DATA_T *wei,
     DATA_T blockC00[IW_BLOCK] = {DATA_ZERO};
 
     if (WITH_BIAS) {
-        const int bg_off = g * IC + gic * IC_BLOCK + local_id;
+        const int bg_off = g * IC + gic * IC_BLOCK + sglid;
         DATA_T b = (G_WO_PADDING % IC_BLOCK == 0 || bg_off < G_WO_PADDING)
                 ? bias[bg_off]
                 : DATA_ZERO;

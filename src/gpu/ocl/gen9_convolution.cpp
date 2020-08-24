@@ -412,7 +412,7 @@ status_t gen9_convolution_fwd_t::pd_t::init_kernel_ctx(
     return status::success;
 }
 
-status_t gen9_convolution_bwd_data_t::pd_t::init_conf() {
+status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
     using namespace dnnl::impl::format_tag;
     using namespace data_type;
 
@@ -469,6 +469,9 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf() {
     else
         return status::unimplemented;
 
+    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+    const bool is_gen12hp = compute_engine->is_gen12hp();
+
     status_t status = status::success;
     switch (conf.ver) {
         case ver_16mb16c:
@@ -482,7 +485,7 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf() {
             if (conf.is_depthwise) {
                 conf.icb = conf.ngroups;
                 conf.lws_d[0] = 1;
-                conf.lws_d[1] = 16;
+                conf.lws_d[1] = is_gen12hp ? 32 : 16;
                 conf.lws_d[2] = 1;
                 conf.gws_d[0] = conf.ih * conf.iw * conf.id;
                 conf.gws_d[1] = conf.ic * conf.ngroups;
@@ -493,7 +496,7 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf() {
                     if (conf.ic % conf.icb == 0) break;
                     conf.icb /= 2;
                 }
-                conf.lws_d[0] = 16;
+                conf.lws_d[0] = is_gen12hp ? 32 : 16;
                 conf.lws_d[1] = 1;
                 conf.lws_d[2] = 1;
                 conf.gws_d[0] = conf.icb;
@@ -516,7 +519,7 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf() {
             if (conf.is_depthwise) {
                 conf.icb = conf.ngroups;
                 conf.lws_d[0] = 1;
-                conf.lws_d[1] = 16;
+                conf.lws_d[1] = is_gen12hp ? 32 : 16;
                 conf.lws_d[2] = 1;
                 conf.gws_d[0] = conf.ih * utils::div_up(conf.iw, conf.iw_block)
                         * conf.id;
@@ -529,7 +532,7 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf() {
                         break;
                     conf.icb /= 2;
                 }
-                conf.lws_d[0] = 16;
+                conf.lws_d[0] = is_gen12hp ? 32 : 16;
                 conf.lws_d[1] = 1;
                 conf.lws_d[2] = 1;
                 conf.gws_d[0] = conf.icb;
@@ -663,6 +666,8 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_kernel_ctx(
         case ver_8ow16c: kernel_ctx.define_int("VER_8OW16C", 1); break;
         default: break;
     }
+
+    kernel_ctx.add_option("-cl-std=CL2.0");
 
     return status::success;
 }
@@ -908,8 +913,11 @@ status_t gen9_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
 
     bwd_w_compute_block_sizes(conf, this, engine);
 
+    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+    const bool is_gen12hp = compute_engine->is_gen12hp();
+
     conf.sub_group_size = 16;
-    conf.lws_d[0] = 16;
+    conf.lws_d[0] = is_gen12hp ? 32 : 16;
     conf.lws_d[1] = 1;
     conf.lws_d[2] = 1;
 
