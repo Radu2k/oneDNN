@@ -17,6 +17,12 @@
 #include "gpu/ocl/ocl_post_ops.h"
 #include "gpu/ocl/ocl_types.h"
 
+#if DT_S8 || DT_U8
+#define RINT rint
+#else
+#define RINT
+#endif
+
 // Read functions.
 inline VECT_DATA_T read_vect_c_block(
         int idx, const __global DATA_T *ptr, int c, int stride);
@@ -53,6 +59,10 @@ __kernel void gen9_pooling_fwd(__global DATA_T *src, __global int *ws,
         const int ih = oh * SH - PH;
         const int iw = ow * SW - PW;
 
+#if ALG_AVG_P || ALG_AVG_NP
+        VECT_FLOAT_T A0 = DATA_ZERO;
+        VECT_FLOAT_T A1 = DATA_ZERO;
+#endif
         VECT_DATA_T D0 = ALG_MAX ? DATA_MIN : DATA_ZERO;
         VECT_DATA_T D1 = ALG_MAX ? DATA_MIN : DATA_ZERO;
         VECT_INT_T WS0 = 0, WS1 = 0;
@@ -86,15 +96,16 @@ __kernel void gen9_pooling_fwd(__global DATA_T *src, __global int *ws,
                     D1 = max(D1, S1);
 #endif // TRAINING
 #else // ALG_MAX
-                    D0 += S0;
-                    D1 += S1;
+                    A0 += CONVERT_VECT_FLOAT_T(S0);
+                    A1 += CONVERT_VECT_FLOAT_T(S1);
 #endif // ALG_MAX
                 }
             }
 
 #if ALG_AVG_P
-        D0 = D0 / (KD * KH * KW);
-        D1 = D1 / (KD * KH * KW);
+        D0 = CONVERT_VECTOR_DATA_T(RINT(A0 / (KD * KH * KW)));
+        D1 = CONVERT_VECTOR_DATA_T(RINT(A1 / (KD * KH * KW)));
+
 #endif // ALG_AVG_P
 
 #if ALG_AVG_NP
@@ -106,8 +117,8 @@ __kernel void gen9_pooling_fwd(__global DATA_T *src, __global int *ws,
         const int iw_end = min(ow * SW - PW + KW, IW);
         const DATA_T num_summands = (ih_end - ih_start) * (iw_end - iw_start)
                 * (id_end - id_start);
-        D0 = D0 / num_summands;
-        D1 = D1 / num_summands;
+        D0 = CONVERT_VECTOR_DATA_T(RINT(A0 / num_summands));
+        D1 = CONVERT_VECTOR_DATA_T(RINT(A1 / num_summands));
 #endif // ALG_AVG_NP
 
         int dst_off = DST_OFF(mb, c, od, oh, ow);
@@ -123,10 +134,18 @@ __kernel void gen9_pooling_fwd(__global DATA_T *src, __global int *ws,
 #if VECT_DT_N == 1
         const int po_mb = mb;
         const int po_oc = c + local_id;
-        APPLY_POST_OPS(D0, DATA_T, sum0, DATA_T, po_mb, 1, po_oc, 1, 0, 1, 0, 1,
-                0, 1, 0, 1);
-        APPLY_POST_OPS(D1, DATA_T, sum1, DATA_T, po_mb, 1, po_oc, 1, 0, 1, 0, 1,
-                0, 1, 0, 1);
+
+        POST_OP_DATA_T po_D0 = DATA_TO_REF(D0);
+        POST_OP_DATA_T po_sum0 = DATA_TO_REF(sum0);
+        APPLY_POST_OPS(po_D0, POST_OP_DATA_T, po_sum0, POST_OP_DATA_T, po_mb, 1,
+                po_oc, 1, 0, 1, 0, 1, 0, 1, 0, 1);
+        D0 = TO_DATA_T(po_D0);
+
+        POST_OP_DATA_T po_D1 = DATA_TO_REF(D1);
+        POST_OP_DATA_T po_sum1 = DATA_TO_REF(sum1);
+        APPLY_POST_OPS(po_D1, POST_OP_DATA_T, po_sum1, POST_OP_DATA_T, po_mb, 1,
+                po_oc, 1, 0, 1, 0, 1, 0, 1, 0, 1);
+        D1 = TO_DATA_T(po_D1);
 #else
         for (int idx = 0; idx < VECT_DT_N; ++idx) {
 #if USE_MB_BLOCK == 1
@@ -139,18 +158,18 @@ __kernel void gen9_pooling_fwd(__global DATA_T *src, __global int *ws,
 #else
             const int po_oc = c + local_id;
 #endif
-            DATA_T d0_i = D0[idx];
-            DATA_T sum0_i = sum0[idx];
-            APPLY_POST_OPS(d0_i, DATA_T, sum0_i, DATA_T, po_mb, 1, po_oc, 1, 0,
-                    1, 0, 1, 0, 1, 0, 1);
-            D0[idx] = d0_i;
+            POST_OP_DATA_T d0_i = DATA_TO_REF(D0[idx]);
+            POST_OP_DATA_T sum0_i = DATA_TO_REF(sum0[idx]);
+            APPLY_POST_OPS(d0_i, POST_OP_DATA_T, sum0_i, POST_OP_DATA_T, po_mb,
+                    1, po_oc, 1, 0, 1, 0, 1, 0, 1, 0, 1);
+            D0[idx] = TO_DATA_T(d0_i);
 
-            DATA_T d1_i = D1[idx];
-            DATA_T sum1_i = sum1[idx];
+            POST_OP_DATA_T d1_i = DATA_TO_REF(D1[idx]);
+            POST_OP_DATA_T sum1_i = DATA_TO_REF(sum1[idx]);
             po_mb += VECT_DT_N;
-            APPLY_POST_OPS(d1_i, DATA_T, sum1_i, DATA_T, po_mb, 1, po_oc, 1, 0,
-                    1, 0, 1, 0, 1, 0, 1);
-            D1[idx] = d1_i;
+            APPLY_POST_OPS(d1_i, POST_OP_DATA_T, sum1_i, POST_OP_DATA_T, po_mb,
+                    1, po_oc, 1, 0, 1, 0, 1, 0, 1, 0, 1);
+            D1[idx] = TO_DATA_T(d1_i);
         }
 #endif // #if VECT_DT_N == 1
         write_vect_c_block(0, &dst[dst_off], c, dst_stride, D0);
