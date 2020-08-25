@@ -63,5 +63,26 @@
 --tag=ABx16a16b
 --batch=shapes_2d_small
 
+--mb=32
+--tag=NChw32n32c
+--batch=shapes_2d_small
+
 # Test different src and dst datatypes
 --batch=harness_pooling_different_dt
+
+# Test optimized kernel with blocking by 32
+--reset
+--cfg=u8,s8,f32
+--alg=MAX,AVG_NP,AVG_P
+--dir=FWD_I
+--mb=32
+--tag=nChw32c,NChw32n32c
+--batch=shapes_2d_small
+
+--reset
+--cfg=f32
+--alg=MAX,AVG_NP,AVG_P
+--dir=FWD_D,BWD_D
+--mb=32
+--tag=nChw32c,NChw32n32c
+--batch=shapes_2d_small

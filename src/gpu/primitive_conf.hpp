@@ -317,6 +317,7 @@ struct pool_conf_t {
     alg_kind_t alg;
     bool is_training, is_backward;
     bool use_mb_block, use_c_block;
+    int mb_sub_blocks, c_sub_blocks;
     int vect_dt_n;
     int nvect;
     compute::dispatch_t dispatch;
