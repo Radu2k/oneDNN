@@ -16,6 +16,9 @@
 
 #include "gpu/jit/gen12hp_conv_fwd_kernel.hpp"
 
+#include <algorithm>
+#include <cstdint>
+#include <vector>
 #include <initializer_list>
 
 #include "common/utils.hpp"
@@ -131,9 +134,42 @@ private:
     GRFRange scratch_;
 };
 
+// Represents an (mb_len x w_len) region to read.
+class nw_read_region_t {
+public:
+    nw_read_region_t(gen12hp_conv_fwd_kernel_t *host, int mb_len, int w_val,
+            int w_shift, int w_len)
+        : host(host)
+        , mb_len(mb_len)
+        , w_val(w_val)
+        , w_shift(w_shift)
+        , w_len(w_len) {}
+
+    nw_read_region_t(gen12hp_conv_fwd_kernel_t *host, int mb_len, int w_len)
+        : host(host)
+        , mb_len(mb_len)
+        , w_val(INT_MAX)
+        , w_shift(0)
+        , w_len(w_len) {}
+
+    bool with_w_padding() const { return w_val != INT_MAX; }
+
+    void read_and_reorder();
+
+    gen12hp_conv_fwd_kernel_t *host;
+
+    int mb_len;
+    int w_val;
+    int w_shift;
+    int w_len;
+
+    Label label;
+};
+
 class gen12hp_conv_fwd_kernel_t : public jit_generator<HW::Gen12HP> {
 public:
     friend class convertor_t;
+    friend class nw_read_region_t;
 
     gen12hp_conv_fwd_kernel_t(const conv_conf_t &conf)
         : conf(conf), attr_info(conf.attr_info), ra(HW::Gen12HP) {
@@ -147,6 +183,7 @@ public:
                 : DataType::f;
 
         src_size = (int)types::data_type_size(conf.src_data_type);
+        wei_size = (int)types::data_type_size(conf.weights_data_type);
         bia_size = (int)types::data_type_size(conf.bias_data_type);
         dst_size = (int)types::data_type_size(conf.dst_data_type);
 
@@ -159,12 +196,20 @@ public:
         mb_block = conf.mb_block;
         assert(utils::one_of(mb_block, 32, 40));
 
+        is_1st = utils::one_of(conf.ic, 3, 4);
+        if (is_1st) {
+            // Only KW = 7 is supported.
+            assert(conf.kw == 7);
+            mb_read01 = utils::rnd_up(conf.mb_block / conf.oc_group, 4);
+            mb_read23 = (conf.mb_block - mb_read01 * (conf.oc_group - 2)) / 2;
+        }
+
         // Destination layout:
         // - <mb_block>n16c for f16/bf16/f32
         // - <mb_block>n32c for s8/u8/s32
         dst_oc_block = (acc_type == DataType::f) ? 16 : 32;
 
-        ic_bytes_padded = utils::rnd_up(conf.ic * src_size, 32);
+        ic_bytes_padded = ic_padded * src_size;
         oc_padded = utils::rnd_up(conf.oc, 32);
         oc_tg_padded = utils::rnd_up(conf.oc, conf.oc_group * 32);
         ow_padded = utils::rnd_up(conf.ow, conf.ow_group);
@@ -187,7 +232,8 @@ public:
         has_pad_w = has_padding(conf.ow, conf.iw, conf.kw, conf.l_pad,
                 conf.stride_w, conf.dilate_w);
         check_src_load_w = (has_pad_w || conf.ow != ow_padded);
-        do_kw_loop = (conf.kw > 1 || check_src_load_w);
+        do_kw_loop = (conf.kw > 1 || check_src_load_w) && !is_1st;
+        do_ic_loop = (conf.ic > conf.ic_block);
 
         has_h = (conf.ih > 1 || conf.oh > 1 || conf.kh > 1);
         has_d = (conf.id > 1 || conf.od > 1 || conf.kd > 1);
@@ -210,6 +256,10 @@ public:
 
         // Implement double/triple SLM buffering. Layout for int8 for 4x4
         // thread-group:
+        // - 1st convolution:
+        //     src - 4w x <mb_block>n8w4c
+        //     wei - 4o x 4o8w8o4i
+        // - other convolutions:
         //     src - 4w x <mb_block>n32c
         //     wei - 4o x 4o8i8o4i
         // Pad inner blocks to avoid SLM bank conflicts.
@@ -268,7 +318,7 @@ public:
         ra.claim(local_id_1);
 
         // Manually allocate and claim A, B, C.
-        reuse_b_regs = conf.oc_group != 4;
+        reuse_b_regs = (conf.oc_group != 4 || is_1st);
         A = GRFRange(r34, mb_block / 2);
         B = GRFRange(r54, reuse_b_regs ? 16 : 32);
         C = GRFRange(r96, mb_block * 4);
@@ -278,6 +328,37 @@ public:
         ra.claim(C);
 
         allocate_registers();
+
+        // Fill nw_read_regions for 1st convolution and zero-initialize
+        // buffer registers.
+        if (is_1st) {
+            int mb_cases = (mb_read01 != mb_read23 ? 2 : 1);
+            int mb_lens[2] = {mb_read01, mb_read23};
+
+            // No-padding region.
+            for (int i = 0; i < mb_cases; i++) {
+                nw_read_regions.emplace_back(this, mb_lens[i], conf.kw);
+            }
+
+            // Regions with padding.
+            for (int i_ow = 0; i_ow < ow_padded; i_ow++) {
+                int i_iw = -conf.l_pad + i_ow * conf.stride_w;
+                if (i_iw >= 0 && i_iw + conf.kw <= conf.iw) continue;
+
+                int w_beg = std::max(i_iw, 0);
+                int w_end = std::min(conf.iw, i_iw + conf.kw);
+                int w_len = std::max(0, w_end - w_beg);
+                for (int i = 0; i < mb_cases; i++) {
+                    nw_read_regions.emplace_back(
+                            this, mb_lens[i], i_iw, w_beg - i_iw, w_len);
+                }
+            }
+
+            // Set registers to zero to account for zero-padded area.
+            for (int i = 0; i < A_tmp.getLen(); i += 2) {
+                mov<float>(16, A_tmp[i], 0.0f);
+            }
+        }
 
         // ithr0 = get_local_id(0) / 8    [0, oc_group - 1]
         // ithr1 = get_local_id(1)        [0, ow_group - 1]
@@ -346,13 +427,31 @@ public:
         if (conf.l_pad > 0) add(1, iw_tg, iw_tg, -conf.l_pad);
 
         // iw to start reading from global memory.
-        mad(1, iw_init, iw_tg, ithr0, uint16_t(conf.stride_w));
+        if (is_1st) {
+            mad(1, iw_init, iw_tg, ithr1, uint16_t(conf.stride_w));
+        } else {
+            mad(1, iw_init, iw_tg, ithr0, uint16_t(conf.stride_w));
+        }
 
         // Initialize SLM write offsets for A and B in owords.
-        mul(1, a_slm_off_wr_init, ithr0, uint16_t(a_slm_block_size / 16));
+        if (is_1st) {
+            mul(1, a_slm_off_wr_init, ithr1, uint16_t(a_slm_block_size / 16));
+        } else {
+            mul(1, a_slm_off_wr_init, ithr0, uint16_t(a_slm_block_size / 16));
+        }
         mul(1, b_slm_off_wr_init, ithr0, uint16_t(b_slm_block_size / 16));
-        mad(1, a_slm_off_wr_init, a_slm_off_wr_init, ithr1,
-                uint16_t(mb_block * 32 / 4 / 16));
+        if (is_1st) {
+            mad(1, a_slm_off_wr_init, a_slm_off_wr_init, ithr0,
+                    uint16_t(mb_read01 * 32 / 16));
+            if (conf.oc_group == 4) {
+                cmp(1 | eq | f0[0], ithr0, 3);
+                add(1 | f0[0], a_slm_off_wr_init, a_slm_off_wr_init,
+                        -(mb_read01 - mb_read23) * 32 / 16);
+            }
+        } else {
+            mad(1, a_slm_off_wr_init, a_slm_off_wr_init, ithr1,
+                    uint16_t((conf.mb_block / 4) * 32 / 16));
+        }
         mad(1, b_slm_off_wr_init, b_slm_off_wr_init, ithr1,
                 uint16_t(32 * 32 / 4 / 16));
         add(1, b_slm_off_wr_init, b_slm_off_wr_init, a_slm_size / 16);
@@ -366,18 +465,46 @@ public:
         init_wei_off_tg();
 
         // Initialize thread read offsets for source.
-        mul(1, src_off_rd_ic, ithr0, conf.stride_w * mb_block * 32);
-        mul(1, tmp0.d(0), ithr1, uint16_t(mb_block * 32 / 4));
-        add(1, src_off_rd_ic, src_off_rd_ic, tmp0.d(0));
-        add(1, src_off_rd_ic, src_off_rd_ic,
-                is_src_off_64_bit ? src_off_tg : src_off_tg.d(0));
+        if (is_1st) {
+            assert(mb_block % conf.oc_group == 0);
+            mul(1, src_off_rd_ic, ithr1, conf.stride_w * 4 * 4);
+            mul(1, tmp0.uq(0), ithr0,
+                    mb_read01 * conf.id * conf.ih * conf.iw * 4 * src_size);
+            if (conf.oc_group == 4) {
+                cmp(1 | eq | f0[0], ithr0, 3);
+                add(1 | f0[0], tmp0.uq(0), tmp0.uq(0),
+                        -(mb_read01 - mb_read23) * conf.id * conf.ih * conf.iw
+                                * 4 * src_size);
+            }
+
+            add(1, src_off_rd_ic, src_off_rd_ic, tmp0.d(0));
+            add(1, src_off_rd_ic, src_off_rd_ic,
+                    is_src_off_64_bit ? src_off_tg : src_off_tg.d(0));
+        } else {
+            mul(1, src_off_rd_ic, ithr0, conf.stride_w * mb_block * 32);
+            mul(1, tmp0.d(0), ithr1, uint16_t(mb_block * 32 / 4));
+            add(1, src_off_rd_ic, src_off_rd_ic, tmp0.d(0));
+            add(1, src_off_rd_ic, src_off_rd_ic,
+                    is_src_off_64_bit ? src_off_tg : src_off_tg.d(0));
+        }
 
         // Initialize thread read address for weights.
-        mul(1, wei_addr.uq(0), ithr0,
-                ic_bytes_padded * conf.kd * conf.kh * conf.kw * 32);
-        mad(1, wei_addr.d(0), wei_addr.d(0), ithr1, uint16_t(256));
-        add(1, wei_addr.uq(0), wei_addr.uq(0), wei_off_tg);
-        add(1, wei_addr.uq(0), wei_addr.uq(0), wei_ptr);
+        if (is_1st) {
+            // OIx8o2i or OIx8o4i.
+            mul(1, wei_addr.uq(0), ithr0,
+                    conf.kd * conf.kh * conf.kw * 32 * 4 * wei_size);
+            mad(1, wei_addr.d(0), wei_addr.d(0), ithr1,
+                    uint16_t(conf.kd * conf.kh * conf.kw * 8 * 4 * wei_size));
+            add(1, wei_addr.uq(0), wei_addr.uq(0), wei_off_tg);
+            add(1, wei_addr.uq(0), wei_addr.uq(0), wei_ptr);
+        } else {
+            // OIx4o8i8o2i or OIx4o8i8o4i.
+            mul(1, wei_addr.uq(0), ithr0,
+                    ic_bytes_padded * conf.kd * conf.kh * conf.kw * 32);
+            mad(1, wei_addr.d(0), wei_addr.d(0), ithr1, uint16_t(256));
+            add(1, wei_addr.uq(0), wei_addr.uq(0), wei_off_tg);
+            add(1, wei_addr.uq(0), wei_addr.uq(0), wei_ptr);
+        }
 
         if (slm_nbuf == 3) {
             // Triple SLM buffering.
@@ -407,7 +534,7 @@ public:
 
         sync(SyncFunction::nop, SWSB<AllPipes>(1));
 
-        mov(1, ic_bytes, 0);
+        if (do_ic_loop) mov(1, ic_bytes, 0);
 
         // Dependency for src_off_rd* updates.
         auto src_off_dep
@@ -415,7 +542,7 @@ public:
 
         // Reduction loop.
         Label ic_loop;
-        mark(ic_loop);
+        if (do_ic_loop) mark(ic_loop);
 
         Label kd_loop;
         Label kd_skip;
@@ -430,8 +557,15 @@ public:
             if (has_pad_d) {
                 cmp(1 | lt | f1[0] | SWSB(1), id, conf.id);
                 cmp(1 | f1[0] | ge, id, 0);
-                add(1 | ~f1[0], wei_addr.uq(0), wei_addr.uq(0),
-                        conf.kh * conf.kw * 32 * 32);
+                if (is_1st) {
+                    // OIx8o2i or OIx8o4i.
+                    add(1 | ~f1[0], wei_addr.uq(0), wei_addr.uq(0),
+                            conf.kh * conf.kw * 32);
+                } else {
+                    // OIx4o8i8o2i or OIx4o8i8o4i.
+                    add(1 | ~f1[0], wei_addr.uq(0), wei_addr.uq(0),
+                            conf.kh * conf.kw * 32 * 32);
+                }
                 jmpi(1 | ~f1[0], kd_skip);
             }
         }
@@ -450,8 +584,15 @@ public:
             if (has_pad_h) {
                 cmp(1 | lt | f1[0] | SWSB(1), ih, conf.ih);
                 cmp(1 | f1[0] | ge, ih, 0);
-                add(1 | ~f1[0], wei_addr.uq(0), wei_addr.uq(0),
-                        conf.kw * 32 * 32);
+                if (is_1st) {
+                    // OIx8o2i or OIx8o4i.
+                    add(1 | ~f1[0], wei_addr.uq(0), wei_addr.uq(0),
+                            conf.kw * 32);
+                } else {
+                    // OIx4o8i8o2i or OIx4o8i8o4i.
+                    add(1 | ~f1[0], wei_addr.uq(0), wei_addr.uq(0),
+                            conf.kw * 32 * 32);
+                }
                 jmpi(1 | ~f1[0], kh_skip);
             }
         }
@@ -493,8 +634,15 @@ public:
             // Advance kh = kh + 1.
             add(1, kh, kh, 1);
             add(1, ih, ih, 1 + conf.dilate_h);
-            add(1, src_off_rd_kh, src_off_rd_kh,
-                    (1 + conf.dilate_h) * conf.iw * mb_block * 32);
+            if (is_1st) {
+                // NCx4n2c or NCx4n4c.
+                add(1, src_off_rd_kh, src_off_rd_kh,
+                        (1 + conf.dilate_h) * conf.iw * 4 * 4);
+            } else {
+                // NCx<mb_block>n16c or NCx<mb_block>n32c.
+                add(1, src_off_rd_kh, src_off_rd_kh,
+                        (1 + conf.dilate_h) * conf.iw * mb_block * 32);
+            }
             cmp(8 | lt | f0[0] | SWSB(2), kh, conf.kh);
             while_(8 | f0[0], kh_loop);
         }
@@ -505,18 +653,36 @@ public:
             // Advance kd = kd + 1.
             add(1, kd, kd, 1);
             add(1, id, id, 1 + conf.dilate_d);
-            add(1, src_off_rd_kd, src_off_rd_kd,
-                    (1 + conf.dilate_d) * conf.ih * conf.iw * mb_block * 32);
+            if (is_1st) {
+                // NCx4n2c or NCx4n4c.
+                add(1, src_off_rd_kd, src_off_rd_kd,
+                        (1 + conf.dilate_d) * conf.ih * conf.iw * 4 * 4);
+            } else {
+                // NCx<mb_block>n16c or NCx<mb_block>n32c.
+                add(1, src_off_rd_kd, src_off_rd_kd,
+                        (1 + conf.dilate_d) * conf.ih * conf.iw * mb_block
+                                * 32);
+            }
             cmp(8 | lt | f0[0] | SWSB(2), kd, conf.kd);
             while_(8 | f0[0], kd_loop);
         }
 
-        // Advance ic_bytes = ic_bytes + 32.
-        add(1, ic_bytes, ic_bytes, 32);
-        add(1, src_off_rd_ic, src_off_rd_ic,
-                conf.id * conf.ih * conf.iw * mb_block * 32);
-        cmp(8 | lt | f0[0] | SWSB(1), ic_bytes, ic_bytes_padded);
-        while_(8 | f0[0], ic_loop);
+        if (do_ic_loop) {
+            assert(!is_1st);
+            // Advance ic_bytes.
+            add(1, ic_bytes, ic_bytes, conf.ic_block * src_size);
+            if (is_1st) {
+                // NCx4n2c or NCx4n4c.
+                add(1, src_off_rd_ic, src_off_rd_ic,
+                        conf.id * conf.ih * conf.iw * 4 * 4);
+            } else {
+                // NCx<mb_block>n16c or NCx<mb_block>n32c.
+                add(1, src_off_rd_ic, src_off_rd_ic,
+                        conf.id * conf.ih * conf.iw * mb_block * 32);
+            }
+            cmp(8 | lt | f0[0] | SWSB(1), ic_bytes, ic_bytes_padded);
+            while_(8 | f0[0], ic_loop);
+        }
 
         if (slm_nbuf == 2) {
             fence_and_signal();
@@ -581,14 +747,15 @@ public:
         for (int i = 0; i < a_slm_blocks; i++)
             a_slm_off_rd_init[i] = ra.alloc_sub<int32_t>();
 
+        auto b_slm_off_rd_init_reg = ra.alloc();
+        assert(b_slm_blocks < 8);
         for (int i = 0; i < b_slm_blocks; i++)
-            b_slm_off_rd_init[i] = ra.alloc_sub<int32_t>();
+            b_slm_off_rd_init[i] = b_slm_off_rd_init_reg.d(i);
 
         a_slm_off_wr_init = ra.alloc_sub<int32_t>();
         b_slm_off_wr_init = ra.alloc_sub<int32_t>();
 
-        a_slm_wr0 = ra.alloc();
-        if (mb_block > 32) a_slm_wr1 = ra.alloc();
+        a_slm_wr = ra.alloc_range(2);
         b_slm_wr = ra.alloc();
 
         off_tmp = ra.alloc_sub<int32_t>();
@@ -598,7 +765,7 @@ public:
 
         mb = ra.alloc_sub<int32_t>();
 
-        ic_bytes = ra.alloc_sub<int32_t>();
+        if (do_ic_loop) ic_bytes = ra.alloc_sub<int32_t>();
         oc = ra.alloc_sub<int32_t>();
         oc_fused = ra.alloc_sub<int32_t>();
 
@@ -619,8 +786,10 @@ public:
         }
 
         ow = ra.alloc_sub<int32_t>();
+        // TODO: if (!is_1st)
         iw = ra.alloc_sub<int32_t>();
-        kw = ra.alloc_sub<int32_t>();
+        if (!is_1st) { kw = ra.alloc_sub<int32_t>(); }
+
         src_off_rd_kw
                 = ra.alloc_sub(is_src_off_64_bit ? DataType::q : DataType::d);
 
@@ -637,20 +806,30 @@ public:
         slm_buf_compute = slm_idx.w(1);
         slm_counter = slm_idx.d(1);
 
-        src_addr0 = ra.alloc();
-        if (mb_block > 32) src_addr1 = ra.alloc();
+        int src_addr_regs = 1;
+        if (is_1st) {
+            src_addr_regs = 3;
+        } else if (mb_block > 32) {
+            src_addr_regs = 2;
+        }
+        src_addr = ra.alloc_range(src_addr_regs);
         wei_addr = ra.alloc();
 
         src_off_rd_ic
                 = ra.alloc_sub(is_src_off_64_bit ? DataType::q : DataType::d);
 
-        int A_tmp_regs = mb_block / 4;
+        int A_tmp_regs = (is_1st ? mb_read01 : conf.mb_block / 4);
         int B_tmp_regs = 8;
 
-        if (conf.oc_group == 2) A_tmp_regs *= 2;
+        if (conf.oc_group == 2 && !is_1st) A_tmp_regs *= 2;
 
         A_tmp = ra.alloc_range(A_tmp_regs);
         B_tmp = ra.alloc_range(B_tmp_regs);
+
+        if (is_1st) {
+            assert(A.getLen() >= mb_read01);
+            A_tmp_reorder = A;
+        }
     }
 
     // SBID usage:
@@ -664,6 +843,8 @@ public:
         if (reg < 8) return SBID(iter);
         return SBID(2 + iter);
     }
+
+    SBID gmem_a_sbid(int iter) const { return SBID(iter % 4); }
 
     SBID gmem_b_sbid() const { return sb4; }
 
@@ -722,6 +903,37 @@ public:
     }
 
     void init_src_off_tg() {
+        if (is_1st) {
+            init_src_off_tg_4n4c();
+        } else {
+            init_src_off_tg_Xn32c();
+        }
+    }
+
+    // Initializes src offset in bytes for TG for 4n4c layout.
+    void init_src_off_tg_4n4c() {
+        // (mb / 4) * (IC / 4) * ID * IH * IW * 4 * 4
+        mul(1, src_off_tg, mb, conf.id * conf.ih * conf.iw * ic_bytes_padded);
+
+        if (has_d) {
+            // id * IH * IW * 4 * 4
+            mul(1, tmp0.uq(0), id_init, conf.ih * conf.iw * 4 * 4);
+            add(1, src_off_tg, src_off_tg, tmp0.uq(0));
+        }
+
+        if (has_h) {
+            // ih * IW * 4 * 4
+            mul(1, tmp0.uq(0), ih_init, conf.iw * 4 * 4);
+            add(1, src_off_tg, src_off_tg, tmp0.uq(0));
+        }
+
+        // iw * 4 * 4
+        mul(1, tmp0.uq(0), iw_tg, 4 * 4);
+        add(1, src_off_tg, src_off_tg, tmp0.uq(0));
+    }
+
+    // Initializes src offset in bytes for TG for Xn32c (Xn16c) layout.
+    void init_src_off_tg_Xn32c() {
         // (mb / MB_BLOCK) * (IC / 32) * ID * IH * IW * MB_BLOCK * 32
         mul(1, src_off_tg, mb, conf.id * conf.ih * conf.iw * ic_bytes_padded);
 
@@ -743,7 +955,8 @@ public:
     }
 
     void init_wei_off_tg() {
-        // (oc / 32) * (IC / 32) * KH * KW * 32 * 32
+        // OIx4o8i8o4i: (oc / 32) * (IC / 32) * KH * KW * 32 * 32
+        // OIx8o4i:     (oc / 8) * (IC / 4) * KH * KW * 8 * 4
         mul(1, wei_off_tg, oc_tg,
                 ic_bytes_padded * conf.kd * conf.kh * conf.kw);
     }
@@ -766,29 +979,26 @@ public:
         auto src_off_dep = is_src_off_64_bit
                 ? SWSB<int64_t>(1)
                 : SWSB<int32_t>(do_kw_loop ? 3 : 1);
-        add(1 | src_off_dep, src_addr0.uq(0), src_ptr, src_off_rd_kw);
-        if (A_block_regs > 8) add(1, src_addr1.uq(0), src_ptr, src_off_rd_kw);
 
-        // Load weights.
-        Label wei_skip;
-        // TODO: move condition out of the loop.
-        if (oc_padded != oc_tg_padded) {
-            cmp(8 | lt | f0[1], oc, oc_padded);
-            if_(8 | f0[1], wei_skip, wei_skip);
-        }
-        {
-            load(16 | SWSB(gmem_b_sbid(), 1), B_tmp[0], block_hword(8), A64,
-                    wei_addr);
-            add(1 | gmem_b_sbid().src, wei_addr.uq(0), wei_addr.uq(0), 32 * 32);
-        }
-        if (oc_padded != oc_tg_padded) {
-            mark(wei_skip);
-            endif(8);
+        for (int i = 0; i < src_addr.getLen(); i++) {
+            InstructionModifier mod
+                    = (i == 0) ? src_off_dep : InstructionModifier();
+            add(1 | mod, src_addr[i].uq(0), src_ptr, src_off_rd_kw);
         }
 
-        // Load source.
+        gmem2reg_weights();
+
+        if (is_1st) {
+            gmem2reg_source_1st();
+        } else {
+            gmem2reg_source(A_block_regs);
+        }
+    }
+
+    // Loads source from global memory.
+    void gmem2reg_source(int A_block_regs) {
         int src_load_iters = (conf.oc_group == 4 ? 1 : 2);
-        if (A_block_regs > 8) add(1, src_addr1.uq(0), src_addr1.uq(0), 256);
+        if (A_block_regs > 8) add(1, src_addr[1].uq(0), src_addr[1].uq(0), 256);
         for (int iter = 0; iter < src_load_iters; iter++) {
             int ithr = iter * conf.oc_group;
             Label src_skip, src_end;
@@ -802,11 +1012,11 @@ public:
                 if_(8 | f1[0], src_skip, src_end);
             }
             load(16 | SWSB(gmem_a_sbid(iter, 0), 1), A_tmp[iter * A_block_regs],
-                    block_hword(8), A64, src_addr0);
+                    block_hword(8), A64, src_addr[0]);
             if (A_block_regs > 8) {
                 load(16 | SWSB(gmem_a_sbid(iter, 8), 1),
                         A_tmp[iter * A_block_regs + 8],
-                        block_hword(A_block_regs - 8), A64, src_addr1);
+                        block_hword(A_block_regs - 8), A64, src_addr[1]);
             }
             if (check_src_load_w) {
                 else_(8, src_end, src_end);
@@ -820,51 +1030,192 @@ public:
             }
 
             if (iter + 1 < src_load_iters) {
-                add(1 | gmem_a_sbid(iter, 0).src, src_addr0.uq(0),
-                        src_addr0.uq(0), 2 * conf.stride_w * mb_block * 32);
+                add(1 | gmem_a_sbid(iter, 0).src, src_addr[0].uq(0),
+                        src_addr[0].uq(0), 2 * conf.stride_w * mb_block * 32);
                 if (A_block_regs > 8)
-                    add(1 | gmem_a_sbid(iter, 8).src, src_addr1.uq(0),
-                            src_addr1.uq(0), 2 * conf.stride_w * mb_block * 32);
+                    add(1 | gmem_a_sbid(iter, 8).src, src_addr[1].uq(0),
+                            src_addr[1].uq(0),
+                            2 * conf.stride_w * mb_block * 32);
             }
         }
+    }
+
+    // Loads source from global memory (for 1st convolution).
+    void gmem2reg_source_1st() {
+        assert(is_1st);
+
+        // Wait for DPASW reads to use A registers (for A_tmp_reorder).
+        auto sync_mask = to_sbid_mask(
+                {dpasw_sbid(0), dpasw_sbid(1), dpasw_sbid(2), dpasw_sbid(3)});
+        sync(SyncFunction::allrd, sync_mask);
+
+        Label end;
+        Label mb_tail_label;
+
+        // Handle different MB read lengths.
+        bool has_mb_tail = (mb_read23 != mb_read01);
+        if (has_mb_tail) {
+            cmp(8 | ge | f0[0], ithr0, 2);
+            jmpi(1 | f0[0], mb_tail_label);
+        }
+
+        // MB cases: first EU pair (mb_read01) and second EU pair (mb_read23).
+        for (int mb_case = 0; mb_case < (has_mb_tail ? 2 : 1); mb_case++) {
+            int mb_len = (mb_case == 0 ? mb_read01 : mb_read23);
+            if (mb_case == 1) mark(mb_tail_label);
+
+            // Handle cases for different W read lengths.
+            nw_read_region_t *no_w_pad = nullptr;
+            for (auto &r : nw_read_regions) {
+                if (r.mb_len != mb_len) continue;
+                if (!r.with_w_padding()) {
+                    no_w_pad = &r;
+                    continue;
+                }
+                cmp(1 | eq | f0[0], iw_init, r.w_val);
+                jmpi(1 | f0[0], r.label);
+            }
+
+            // No padding case.
+            no_w_pad->read_and_reorder();
+
+            jmpi(1, end);
+
+            // Cases with padding.
+            for (auto &r : nw_read_regions) {
+                if (r.mb_len != mb_len) continue;
+                if (!r.with_w_padding()) continue;
+                mark(r.label);
+                r.read_and_reorder();
+                jmpi(1, end);
+            }
+        }
+
+        mark(end);
+    }
+
+    // Loads weights from global memory.
+    void gmem2reg_weights() {
+        Label wei_skip;
+        // TODO: move condition out of the loop.
+        if (oc_padded != oc_tg_padded) {
+            cmp(8 | lt | f0[1], oc, oc_padded);
+            if_(8 | f0[1], wei_skip, wei_skip);
+        }
+        {
+            // TODO: Fix out-of-bounds access for the 1st convolution:
+            // - KW = 7 but always reading 8 hwords
+            // - When (conf.oc % 32) != 0: some threads read out-of-bounds
+            load(16 | SWSB(gmem_b_sbid(), 1), B_tmp[0], block_hword(8), A64,
+                    wei_addr);
+            if (is_1st) {
+                add(1 | gmem_b_sbid().src, wei_addr.uq(0), wei_addr.uq(0),
+                        conf.kw * 32);
+            } else {
+                add(1 | gmem_b_sbid().src, wei_addr.uq(0), wei_addr.uq(0),
+                        32 * 32);
+            }
+        }
+        if (oc_padded != oc_tg_padded) {
+            mark(wei_skip);
+            endif(8);
+        }
+    }
+
+    void reg2smem_A() {
+        int A_block_regs = mb_block / 4;
+        int src_load_iters = (conf.oc_group == 4 ? 1 : 2);
+
+        mad(1, a_slm_wr[0].d(2), a_slm_off_wr_init, slm_buf_load,
+                uint16_t(ab_slm_size / 16));
+        if (A_block_regs > 8) {
+            mad(1, a_slm_wr[1].d(2), a_slm_off_wr_init, slm_buf_load,
+                    uint16_t(ab_slm_size / 16));
+            // TODO: Add a_slm_off_wr_init1 to avoid dependency.
+            add(1 | SWSB(1), a_slm_wr[1].d(2), a_slm_wr[1].d(2), uint16_t(16));
+        }
+
+        for (int iter = 0; iter < src_load_iters; iter++) {
+            auto sb_store0 = gmem_a_sbid(iter, 0);
+            auto sb_store1 = gmem_a_sbid(iter, 8);
+            store(16 | SWSB(sb_store0, 1), block_oword(16), SLM, a_slm_wr[0],
+                    A_tmp[iter * A_block_regs]);
+            if (A_block_regs > 8) {
+                store(16 | SWSB(sb_store1, iter == 0 ? 2 : 1),
+                        block_oword((A_block_regs - 8) * 2), SLM, a_slm_wr[1],
+                        A_tmp[iter * A_block_regs + 8]);
+            }
+            if (iter + 1 < src_load_iters) {
+                add(1 | sb_store0.src, a_slm_wr[0].d(2), a_slm_wr[0].d(2),
+                        uint16_t(a_slm_block_size * 2 / 16));
+                if (A_block_regs > 8) {
+                    add(1 | sb_store1.src, a_slm_wr[1].d(2), a_slm_wr[1].d(2),
+                            uint16_t(a_slm_block_size * 2 / 16));
+                }
+            }
+        }
+    }
+
+    void reg2smem_A_1st() {
+        int A_block_regs = mb_read01;
+
+        assert(a_slm_wr.getLen() == 2);
+        mad(1, a_slm_wr[0].d(2), a_slm_off_wr_init, slm_buf_load,
+                uint16_t(ab_slm_size / 16));
+        if (A_block_regs > 8) {
+            mad(1, a_slm_wr[1].d(2), a_slm_off_wr_init, slm_buf_load,
+                    uint16_t(ab_slm_size / 16));
+            // TODO: Add a_slm_off_wr_init1 to avoid dependency.
+            add(1 | SWSB(1), a_slm_wr[1].d(2), a_slm_wr[1].d(2), uint16_t(16));
+        }
+
+        Label end;
+        Label mb_tail_label;
+
+        bool has_mb_tail = (mb_read23 != mb_read01);
+        if (has_mb_tail) {
+            cmp(8 | ge | f0[0], ithr0, 2);
+            jmpi(1 | f0[0], mb_tail_label);
+        }
+
+        for (int mb_case = 0; mb_case < (has_mb_tail ? 2 : 1); mb_case++) {
+            int mb_len = (mb_case == 0 ? mb_read01 : mb_read23);
+            if (mb_case == 1) mark(mb_tail_label);
+
+            for (int i = 0; i < mb_len; i += 8) {
+                int idx = i / 8;
+                int owords = std::min(mb_len - i, 8) * 2;
+                auto sbid = gmem_a_sbid(idx);
+                store(16 | SWSB(sbid, (i == 0 && A_block_regs > 8) ? 3 : 1),
+                        block_oword(owords), SLM, a_slm_wr[idx % 2], A_tmp[i]);
+                if (i + 16 < mb_len) {
+                    add(1 | sbid.src, a_slm_wr[idx % 2].d(2),
+                            a_slm_wr[idx % 2].d(2), uint16_t(32));
+                }
+            }
+
+            if (has_mb_tail) jmpi(1, end);
+        }
+
+        mark(end);
     }
 
     void reg2smem() {
         if (!enable_smem_write) return;
         assert(!is_auto_swsb);
 
-        int A_block_regs = mb_block / 4;
-        int src_load_iters = (conf.oc_group == 4 ? 1 : 2);
-
-        mad(1, a_slm_wr0.d(2), a_slm_off_wr_init, slm_buf_load,
-                uint16_t(ab_slm_size / 16));
-        if (A_block_regs > 8) {
-            mad(1, a_slm_wr1.d(2), a_slm_off_wr_init, slm_buf_load,
-                    uint16_t(ab_slm_size / 16));
-            // TODO: Add a_slm_off_wr_init1 to avoid dependency.
-            add(1 | SWSB(1), a_slm_wr1.d(2), a_slm_wr1.d(2), uint16_t(16));
-        }
         mad(1, b_slm_wr.d(2), b_slm_off_wr_init, slm_buf_load,
                 uint16_t(ab_slm_size / 16));
 
-        for (int iter = 0; iter < src_load_iters; iter++) {
-            auto sb_store0 = gmem_a_sbid(iter, 0);
-            auto sb_store1 = gmem_a_sbid(iter, 8);
-            store(16 | SWSB(sb_store0, iter == 0 ? 2 : 1), block_oword(16), SLM,
-                    a_slm_wr0, A_tmp[iter * A_block_regs]);
-            if (A_block_regs > 8) {
-                store(16 | SWSB(sb_store1, iter == 0 ? 2 : 1),
-                        block_oword((A_block_regs - 8) * 2), SLM, a_slm_wr1,
-                        A_tmp[iter * A_block_regs + 8]);
-            }
-            if (iter + 1 < src_load_iters) {
-                add(1 | sb_store0.src, a_slm_wr0.d(2), a_slm_wr0.d(2),
-                        uint16_t(a_slm_block_size * 2 / 16));
-                if (A_block_regs > 8) {
-                    add(1 | sb_store1.src, a_slm_wr1.d(2), a_slm_wr1.d(2),
-                            uint16_t(a_slm_block_size * 2 / 16));
-                }
-            }
+        if (is_1st) {
+            // Set 8o4i block to zero for kw = 7.
+            mov<float>(8 | gmem_b_sbid().dst, B_tmp[7], 0.0f);
+        }
+
+        if (is_1st) {
+            reg2smem_A_1st();
+        } else {
+            reg2smem_A();
         }
 
         store(16 | SWSB(gmem_b_sbid(), 1), block_oword(16), SLM, b_slm_wr,
@@ -1292,6 +1643,14 @@ public:
     int oc_tg_padded;
     int ow_padded;
 
+    int mb_read01 = 0;
+    int mb_read23 = 0;
+
+    bool is_1st;
+
+    // Used for 1st convolution only.
+    std::vector<nw_read_region_t> nw_read_regions;
+
     bool has_pad_d;
     bool has_pad_h;
     bool has_pad_w;
@@ -1301,6 +1660,7 @@ public:
 
     bool check_src_load_w;
     bool do_kw_loop;
+    bool do_ic_loop;
     bool reuse_b_regs;
 
     DataType src_type;
@@ -1311,6 +1671,7 @@ public:
     DataType post_op_type;
 
     int src_size;
+    int wei_size;
     int bia_size;
     int dst_size;
 
@@ -1344,6 +1705,7 @@ public:
 
     Subregister ithr0;
     Subregister ithr1;
+
     Subregister fused_idx;
 
     GRFRange a_slm_rd;
@@ -1360,8 +1722,7 @@ public:
     Subregister a_slm_off_wr_init;
     Subregister b_slm_off_wr_init;
 
-    GRF a_slm_wr0;
-    GRF a_slm_wr1;
+    GRFRange a_slm_wr;
     GRF b_slm_wr;
 
     Subregister off_tmp;
@@ -1391,8 +1752,7 @@ public:
     Subregister slm_buf_compute;
     Subregister slm_counter;
 
-    GRF src_addr0;
-    GRF src_addr1;
+    GRFRange src_addr;
 
     bool is_src_off_64_bit;
     Subregister src_off_rd_ic;
@@ -1409,6 +1769,7 @@ public:
     Subregister dst_addr_init;
 
     GRFRange A_tmp;
+    GRFRange A_tmp_reorder;
     GRFRange B_tmp;
 
     GRFRange bia;
@@ -1495,6 +1856,79 @@ void convertor_t::convert_impl(
     }
 
     if (phase == 0) host_->mov(simd, to(1), from(from_stride_));
+}
+
+void nw_read_region_t::read_and_reorder() {
+    if (w_len == 0) return;
+
+    auto &conf = host->conf;
+
+    // src_addr is set to the initial offset (maybe in the padded area).
+    auto &addr = host->src_addr;
+
+    auto &w_region = host->A_tmp;
+    auto &tmp = host->A_tmp_reorder;
+
+    auto get_sbid = [&](int idx) {
+        idx = (idx + 1) % 16;
+        if (idx >= host->gmem_b_sbid().set.getID()) return SBID((idx + 1) % 16);
+        return SBID(idx);
+    };
+
+    int off = w_shift * 16;
+    int reads = 0;
+
+    // 4 owords, 2 owords, 1 oword (up to 7 W elements to read).
+    for (int i = 2; i >= 0; i--) {
+        int len = (1 << i);
+        if ((w_len & len) == 0) continue;
+        host->add(1, addr[i].uq(0), addr[i].uq(0), off);
+        off += (1 << i) * 16;
+        reads++;
+    }
+
+    // Read data in 7w4n2c/7w4n4c format.
+    // TODO: Fix out-of-bounds access when (conf.mb % mb_block) != 0.
+    for (int idx = 0; idx < mb_len / 4; idx++) {
+        SBID sbids[] = {get_sbid(3 * idx + 0), get_sbid(3 * idx + 1),
+                get_sbid(3 * idx + 2)};
+
+        int read_off = 0;
+        int dist = reads;
+        for (int i = 2; i >= 0; i--) {
+            int len = (1 << i);
+            if ((w_len & len) == 0) continue;
+            host->load(16 | SWSB(sbids[i], dist--), tmp[4 * idx + read_off / 2],
+                    block_oword(len), host->A64, addr[i]);
+            read_off += len;
+        }
+
+        if (idx + 1 < mb_len / 4) {
+            for (int i = 2; i >= 0; i--) {
+                int len = (1 << i);
+                if ((w_len & len) == 0) continue;
+                host->add(1 | sbids[i].src, addr[i].uq(0), addr[i].uq(0),
+                        conf.id * conf.ih * conf.iw * 4 * 4 * host->src_size);
+            }
+        }
+    }
+
+    // Reorder data from 7w4n2c/7w4n4c to 4n8w2c/4n8w4c.
+    for (int idx = 0; idx < mb_len / 4; idx++) {
+        SBID sbids[] = {get_sbid(3 * idx + 0), get_sbid(3 * idx + 1),
+                get_sbid(3 * idx + 2)};
+
+        uint32_t sync_mask = host->to_sbid_mask({sbids[0], sbids[1], sbids[2]});
+        host->sync(SyncFunction::allwr, sync_mask);
+
+        for (int w = 0; w < w_len; w += 2) {
+            int w_simd = std::min(w_len - w, 2);
+            for (int n = 0; n < 4; n++) {
+                host->mov(w_simd, w_region[4 * idx + n].d(w_shift + w),
+                        tmp[4 * idx + w / 2].d(n)(4));
+            }
+        }
+    }
 }
 
 status_t gen12hp_conv_fwd_create_kernel(const conv_conf_t &conf,

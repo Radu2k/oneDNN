@@ -35,9 +35,14 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
             *weights_md(1), *attr());
 
+    bool is_1st = utils::one_of(conf.ic, 3, 4) && (conf.kw == 7);
+
     if (conf.with_groups && conf.ngroups > 1) return status::unimplemented;
-    if (conf.ic < 32) return status::unimplemented;
+    if (conf.ic < 32 && !is_1st) return status::unimplemented;
     if (conf.mb < 16) return status::unimplemented;
+
+    bool is_int8
+            = utils::one_of(conf.src_data_type, data_type::s8, data_type::u8);
 
     // Reduce dimensions for 1x1 kernel.
     bool is_1x1 = (conf.kd * conf.kh * conf.kw == 1);
@@ -55,7 +60,11 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
 
     conf.mb_block = 32;
     conf.oc_block = 32;
-    conf.ic_block = 32;
+    if (is_1st) {
+        conf.ic_block = is_int8 ? 4 : 2;
+    } else {
+        conf.ic_block = 32;
+    }
 
     bool enable_40n = (getenv_int("DNNL_ENABLE_CONV_40N", 0) != 0);
     conf.mb_block = (enable_40n ? 40 : 32);
@@ -72,51 +81,67 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     conf.lws_d[1] = conf.ow_group;
     conf.lws_d[2] = 1;
 
-    bool is_int8
-            = utils::one_of(conf.src_data_type, data_type::s8, data_type::u8);
-
     format_tag_t src_tag;
     format_tag_t wei_tag;
     format_tag_t dst_tag;
 
+    auto tag_4n2c = utils::pick(conf.ndims - 3, ABc4a2b, ABcd4a2b, ABcde4a2b);
+    auto tag_4n4c = utils::pick(conf.ndims - 3, ABc4a4b, ABcd4a4b, ABcde4a4b);
+    auto tag_32n16c
+            = utils::pick(conf.ndims - 3, ABc32a16b, ABcd32a16b, ABcde32a16b);
+    auto tag_32n32c
+            = utils::pick(conf.ndims - 3, ABc32a32b, ABcd32a32b, ABcde32a32b);
+    auto tag_40n16c
+            = utils::pick(conf.ndims - 3, ABc40a16b, ABcd40a16b, ABcde40a16b);
+    auto tag_40n32c
+            = utils::pick(conf.ndims - 3, ABc40a32b, ABcd40a32b, ABcde40a32b);
+
+    auto tag_g_4o8i8o2i = utils::pick(
+            conf.ndims - 3, aBCd4b8c8b2c, aBCde4b8c8b2c, aBCdef4b8c8b2c);
+    auto tag_g_4o8i8o4i = utils::pick(
+            conf.ndims - 3, aBCd4b8c8b4c, aBCde4b8c8b4c, aBCdef4b8c8b4c);
+    auto tag_g_8o2i
+            = utils::pick(conf.ndims - 3, aBCd8b2c, aBCde8b2c, aBCdef8b2c);
+    auto tag_g_8o4i
+            = utils::pick(conf.ndims - 3, aBCd8b4c, aBCde8b4c, aBCdef8b4c);
+
+    auto tag_4o8i8o2i = utils::pick(
+            conf.ndims - 3, ABc4a8b8a2b, ABcd4a8b8a2b, ABcde4a8b8a2b);
+    auto tag_4o8i8o4i = utils::pick(
+            conf.ndims - 3, ABc4a8b8a4b, ABcd4a8b8a4b, ABcde4a8b8a4b);
+    auto tag_8o2i = utils::pick(conf.ndims - 3, ABc8a2b, ABcd8a2b, ABcde8a2b);
+    auto tag_8o4i = utils::pick(conf.ndims - 3, ABc8a4b, ABcd8a4b, ABcde8a4b);
+
     if (is_int8) {
-        if (conf.mb_block == 40) {
-            src_tag = utils::pick(
-                    conf.ndims - 3, NCw40n32c, NChw40n32c, NCdhw40n32c);
+        src_tag = is_1st ? tag_4n4c
+                         : conf.mb_block == 32 ? tag_32n32c : tag_40n32c;
+        if (is_1st) {
+            wei_tag = conf.with_groups ? tag_g_8o4i : tag_8o4i;
         } else {
-            src_tag = utils::pick(
-                    conf.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+            wei_tag = conf.with_groups ? tag_g_4o8i8o4i : tag_4o8i8o4i;
         }
-        wei_tag = conf.with_groups ? utils::pick(conf.ndims - 3, gOIw4o8i8o4i,
-                          gOIhw4o8i8o4i, gOIdhw4o8i8o4i)
-                                   : utils::pick(conf.ndims - 3, OIw4o8i8o4i,
-                                           OIhw4o8i8o4i, OIdhw4o8i8o4i);
-        dst_tag = src_tag;
+        dst_tag = conf.mb_block == 32 ? tag_32n32c : tag_40n32c;
     } else { // f16 or bf16.
-        if (conf.mb_block == 40) {
-            src_tag = utils::pick(
-                    conf.ndims - 3, NCw40n16c, NChw40n16c, NCdhw40n16c);
+        src_tag = is_1st ? tag_4n2c
+                         : conf.mb_block == 32 ? tag_32n16c : tag_40n16c;
+        if (is_1st) {
+            wei_tag = conf.with_groups ? tag_g_8o2i : tag_8o2i;
         } else {
-            src_tag = utils::pick(
-                    conf.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
+            wei_tag = conf.with_groups ? tag_g_4o8i8o2i : tag_4o8i8o2i;
         }
-        wei_tag = conf.with_groups ? utils::pick(conf.ndims - 3, gOIw4o8i8o2i,
-                          gOIhw4o8i8o2i, gOIdhw4o8i8o2i)
-                                   : utils::pick(conf.ndims - 3, OIw4o8i8o2i,
-                                           OIhw4o8i8o2i, OIdhw4o8i8o2i);
-        dst_tag = src_tag;
+        dst_tag = conf.mb_block == 32 ? tag_32n16c : tag_40n16c;
     }
 
     if (src_mdw.format_kind() != format_kind::any
-            && src_mdw.format_kind() != src_tag)
+            && src_mdw.matches_one_of_tag(src_tag) == format_kind::undef)
         return status::unimplemented;
 
     if (wei_mdw.format_kind() != format_kind::any
-            && wei_mdw.format_kind() != wei_tag)
+            && wei_mdw.matches_one_of_tag(wei_tag) == format_kind::undef)
         return status::unimplemented;
 
     if (dst_mdw.format_kind() != format_kind::any
-            && dst_mdw.format_kind() != dst_tag)
+            && dst_mdw.matches_one_of_tag(dst_tag) == format_kind::undef)
         return status::unimplemented;
 
     conf.src_tag = src_tag;
