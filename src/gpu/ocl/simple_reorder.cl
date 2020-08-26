@@ -266,7 +266,6 @@ __kernel void simple_reorder(__global SRC_DATA_T *src, __global DST_DATA_T *dst,
     dst += DST_OFFSET0;
 
 #if REF_REORDER
-
     const int d0 = GWS_GET_D0();
     const int d1 = GWS_GET_D1();
     const int d2_blk_start = GWS_GET_D2();
@@ -307,8 +306,62 @@ __kernel void simple_reorder(__global SRC_DATA_T *src, __global DST_DATA_T *dst,
         }
     }
 
-#else // REF_REORDER == 0
-#if USE_DENSE_VECT
+#elif PLAIN_TO_ABCD4AXB
+    int sglid = get_sub_group_local_id();
+
+    const int d0 = GWS_GET_D0();
+    const int d1 = GWS_GET_D1();
+    const int d2 = GWS_GET_D2();
+    const int d3 = GWS_GET_D3();
+
+    const int d0_block = GWS_GET_D0_BLOCK();
+    const int d1_block = GWS_GET_D1_BLOCK();
+    const int d01_block = d0_block * d1_block;
+
+    SRC_DATA_T tmp_buf[d01_block] = {0};
+    const int d0_inner_block = min(d0_block, SRC_D0);
+    const int d1_inner_block = min(d1_block, SRC_D1);
+    for (int d0_inner = 0; d0_inner < d0_inner_block; d0_inner++) {
+        for (int d1_inner = 0; d1_inner < d1_inner_block; d1_inner++) {
+            if (SRC_D0 % d0_inner_block != 0 && d0 + d0_inner >= SRC_D0)
+                continue;
+            if (SRC_D1 % d1_inner_block != 0 && d1 + d1_inner >= SRC_D1)
+                continue;
+            if (SRC_S3_0 == 1) {
+                // abcd layout.
+                int src_off
+                        = SRC_OFF(d0 + d0_inner, d1 + d1_inner, d2, d3, 0, 0);
+                tmp_buf[d0_inner * d1_block + d1_inner]
+                        = SRC_BLOCK_READ(&src[src_off]);
+            } else {
+                // acdb layout.
+                int src_off = SRC_OFF(
+                        d0 + d0_inner, d1 + d1_inner, d2, d3 + sglid, 0, 0);
+                tmp_buf[d0_inner * d1_block + d1_inner] = src[src_off];
+            }
+        }
+    }
+
+    SRC_DATA_T src_all[d01_block][SUB_GROUP_SIZE];
+    for (int i = 0; i < d01_block; i++)
+        for (int j = 0; j < SUB_GROUP_SIZE; j++)
+            src_all[i][j] = intel_sub_group_shuffle(tmp_buf[i], j);
+
+    for (int d = 0; d < SUB_GROUP_SIZE; d += 8) {
+        SRC_DATA8_T src_tmp;
+        for (int i = 0; i < 8; i++)
+            src_tmp[i] = src_all[sglid][d + i];
+        int dst_off = DST_OFF(d0, d1, d2, d3 + d, 0, 0);
+
+        DST_DATA8_T dst_tmp;
+#if WITH_SUM_AB
+        dst_tmp = DST_BLOCK_READ8(&dst[dst_off]);
+#endif
+        REORDER8(dst_tmp, src_tmp, alpha, beta);
+        DST_BLOCK_WRITE8(&dst[dst_off], dst_tmp);
+    }
+
+#elif USE_DENSE_VECT
     const int d0_blk_start = GWS_GET_D0();
     const int d0_blk_end = d0_blk_start + (GWS_GET_D0_BLOCK() * 16);
     for (int d0 = d0_blk_start; d0 < d0_blk_end; d0 += 128) {
@@ -524,6 +577,5 @@ __kernel void simple_reorder(__global SRC_DATA_T *src, __global DST_DATA_T *dst,
 #endif // (SRC_16B16C || SRC_16C16B) && (DST_16B16C || DST_16C16B)
 #endif // SRC_16B16C || DST_16B16C || SRC_16C16B || DST_16C16B
 
-#endif // USE_DENSE_VECT
 #endif // REF_REORDER
 }
