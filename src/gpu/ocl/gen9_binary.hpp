@@ -45,12 +45,9 @@ struct gen9_binary_t : public gpu_primitive_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
 
-            const auto blocking = src_md(0)->format_desc.blocking;
             const auto attr_skip_mask = sm::post_ops | sm::scales;
-            bool ok = set_default_params() == status::success
-                    && blocking.inner_nblks == 1 && blocking.inner_idxs[0] == 1
-                    && blocking.inner_blks[0] == 16 && is_broadcast()
-                    && src_md(0)->dims[1] % 16 == 0
+
+            bool ok = set_default_params() == status::success && is_broadcast()
                     && (utils::everyone_is(f32, src_md(0)->data_type,
                                 src_md(1)->data_type, dst_md()->data_type)
                             || utils::everyone_is(bf16, src_md(0)->data_type,
@@ -58,7 +55,6 @@ struct gen9_binary_t : public gpu_primitive_t {
                             || utils::everyone_is(f16, src_md(0)->data_type,
                                     src_md(1)->data_type, dst_md()->data_type)
                             || utils::one_of(src_md(0)->data_type, s8, u8))
-                    && (src_md(0)->data_type == dst_md()->data_type)
                     && IMPLICATION(!attr()->scales_.has_default_values(),
                             utils::one_of(src_md(0)->data_type, s8, u8)
                                     && utils::one_of(
