@@ -31,7 +31,6 @@ void compute_ref(const prb_t *p, const dnn_mem_t &src0, const dnn_mem_t &src1,
 
     const auto nelems_A = src0.nelems();
     const auto broadcast_mask = p->get_broadcast_mask();
-
     std::vector<int> v_bin_po_mask = p->attr.post_ops.get_binary_po_masks();
 
     dnnl::impl::parallel_nd(nelems_A, [&](int64_t i) {
@@ -39,7 +38,6 @@ void compute_ref(const prb_t *p, const dnn_mem_t &src0, const dnn_mem_t &src1,
         float res = compute_binary(
                 p->alg, scales[0] * A[i], scales[1] * B[idx_B]);
         float &dst = dst_ptr[i];
-
         std::vector<float> v_binary_vals;
         for (size_t d = 0; d < v_bin_po_mask.size(); ++d) {
             auto bin_po_offset = src0.get_scale_idx(i, v_bin_po_mask[d]);

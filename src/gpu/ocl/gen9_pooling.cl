@@ -105,7 +105,6 @@ __kernel void gen9_pooling_fwd(__global DATA_T *src, __global int *ws,
 #if ALG_AVG_P
         D0 = CONVERT_VECTOR_DATA_T(RINT(A0 / (KD * KH * KW)));
         D1 = CONVERT_VECTOR_DATA_T(RINT(A1 / (KD * KH * KW)));
-
 #endif // ALG_AVG_P
 
 #if ALG_AVG_NP

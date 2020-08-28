@@ -59,6 +59,8 @@ public:
         s16 = 0x870201,
         u32 = 0x880402,
         s32 = 0x890402,
+        u64 = 0x8A0803,
+        s64 = 0x8B0803,
         bf16 = 0x0C0201,
     };
 
@@ -95,8 +97,8 @@ public:
         static const DataType table[16] = {DataType::hf, DataType::f,
                 DataType::df, DataType::invalid, DataType::ub, DataType::b,
                 DataType::uw, DataType::w, DataType::ud, DataType::d,
-                DataType::invalid, DataType::invalid, DataType::bf,
-                DataType::invalid, DataType::invalid, DataType::invalid};
+                DataType::uq, DataType::q, DataType::bf, DataType::invalid,
+                DataType::invalid, DataType::invalid};
         return table[(uint32_t(val) >> 16) & 0xF];
     }
 };
@@ -936,6 +938,7 @@ protected:
     }
 
     ngen::FlagRegister getPhysicalFlag(int vflag, CommonState &state);
+    void allocVFlagStorage(const CommonStrategy &strategy, CommonState &state);
 
     ngen::Bundle getHint(HintType type);
     ngen::Bundle getHint(HintType type, const CommonStrategy &strategy);
@@ -1077,6 +1080,12 @@ protected:
             const MatrixAddressing &atype,
             const MatrixAddressingStrategy &astrategy);
 
+    void adjustSubblockAddrs(const std::vector<RegisterBlock> &sublayout,
+            const std::vector<ngen::GRFRange> &subaddrs,
+            const std::vector<RegisterBlock> &layout,
+            const std::vector<ngen::GRFRange> &addrs,
+            const MatrixAddressing &atype, const CommonStrategy &strategy,
+            const CommonState &state);
     bool relevantAddrBlocks(std::vector<int> &relevant,
             const std::vector<RegisterBlock> &layout,
             const std::vector<RegisterBlock> &sublayout,

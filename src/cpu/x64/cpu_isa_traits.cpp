@@ -299,6 +299,7 @@ int get_max_rows(int palette) {
 }
 
 } // namespace amx
+
 } // namespace x64
 } // namespace cpu
 } // namespace impl

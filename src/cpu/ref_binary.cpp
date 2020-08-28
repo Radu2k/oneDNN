@@ -31,37 +31,6 @@ namespace dnnl {
 namespace impl {
 namespace cpu {
 
-using namespace alg_kind;
-
-float compute_binary_scalar(alg_kind_t alg, float x, float y) {
-    switch (alg) {
-        case binary_add: return x + y;
-        case binary_max: return nstl::max(x, y);
-        case binary_min: return nstl::min(x, y);
-        case binary_mul: return x * y;
-        default: assert(!"not supported operation!"); return NAN;
-    }
-}
-
-inline float cast_to_dt(data_type_t dt, const void *ptr, dim_t idx) {
-#define CASE(dt) \
-    case dt: return (float)(((typename prec_traits<dt>::type *)ptr)[idx]);
-
-    using namespace data_type;
-    switch (dt) {
-        CASE(bf16);
-        CASE(f16);
-        CASE(f32);
-        CASE(s32);
-        CASE(s8);
-        CASE(u8);
-        default: assert(!"bad data_type");
-    }
-
-#undef CASE
-    return 0;
-}
-
 template <data_type_t src0_type, data_type_t src1_type, data_type_t dst_type>
 status_t ref_binary_t<src0_type, src1_type, dst_type>::execute_ref(
         const exec_ctx_t &ctx) const {
@@ -90,25 +59,17 @@ status_t ref_binary_t<src0_type, src1_type, dst_type>::execute_ref(
     bool do_scale_src1 = !scales[1].has_default_values();
 
     const auto nelems_A = src0_d.nelems();
-
-    const auto &po = pd()->attr()->post_ops_;
-    const auto sum_idx = po.find(primitive_kind::sum);
-    const bool do_sum = sum_idx != -1 && po.entry_[sum_idx].sum.scale != 0.f;
-    const float sum_scale = do_sum ? po.entry_[sum_idx].sum.scale : 0.f;
-
-    auto get_mask = [&](const dims_t &src1_dims) {
-        const auto &src0_dims = src0_d.dims();
-
-        int broadcast_mask = 0;
-        for (int d = 0; d < src0_d.ndims(); ++d)
-            broadcast_mask += src0_dims[d] == src1_dims[d] ? (1 << d) : 0;
-        return broadcast_mask;
-    };
+    const auto ndims = pd()->ndims();
 
     parallel_nd(nelems_A, [&](dim_t i) {
-        auto off_A = src0_d.off_l(i);
-        auto off_B = src0_d.off_m(src1_d, i, get_mask(src1_d.dims()));
-        auto off_C = dst_d.off_l(i);
+        dims_t l_dims; // single decomposition for all physical offsets
+        utils::l_dims_by_l_offset(l_dims, i, src0_d.dims(), ndims);
+        auto off_A = src0_d.off_v(l_dims);
+        auto off_C = dst_d.off_v(l_dims);
+
+        int mask = utils::get_dims_mask(src0_d.dims(), src1_d.dims(), ndims);
+        utils::apply_mask_on_dims(l_dims, ndims, mask);
+        auto off_B = src1_d.off_v(l_dims);
 
         float x_f = (float)src0[off_A];
         float y_f = (float)src1[off_B];
@@ -118,34 +79,15 @@ status_t ref_binary_t<src0_type, src1_type, dst_type>::execute_ref(
         if (do_scale_src1) y_f *= scales[1].scales_[0];
 
         float acc = compute_binary_scalar(alg, x_f, y_f);
-        auto eltwise_it = eltwise_ker_.begin();
-        auto binary_it = binary_ker_.begin();
 
-        for (auto idx = 0; idx < po.len(); ++idx) {
-            using namespace primitive_kind;
-            const auto &e = po.entry_[idx];
-            switch (e.kind) {
-                case sum: acc += sum_scale * dst_f; break;
-                case eltwise:
-                    acc = (*eltwise_it)->compute_scalar(acc);
-                    ++eltwise_it;
-                    break;
-                case binary: {
-                    const auto &b = e.binary;
-                    const memory_desc_wrapper po_src1_d(b.src1_desc);
-                    auto off_po = src0_d.off_m(
-                            po_src1_d, i, get_mask(po_src1_d.dims()));
-                    const auto attr_po_b = CTX_IN_MEM(
-                            const void *, DNNL_ARG_ATTR_POST_OP_0 + idx);
-                    auto val_po = cast_to_dt(
-                            po_src1_d.data_type(), attr_po_b, off_po);
-                    acc = (*binary_it)->compute_scalar(acc, val_po);
-                    ++binary_it;
-                } break;
-                default: assert("unsupported post op primitive kind!"); break;
-            }
-        }
-        dst[off_C] = qz_a1b0<float, dst_data_t>()(acc);
+        ref_post_ops_t::args_t args;
+        args.dst_val = dst_f;
+        args.ctx = &ctx;
+        args.l_offset = i;
+        args.dst_md = pd()->dst_md();
+        ref_post_ops->execute(acc, args);
+
+        dst[off_C] = cpu::saturate_and_round<dst_data_t>(acc);
     });
 
     return status::success;

@@ -393,8 +393,7 @@ struct dnnl_post_ops : public dnnl::impl::c_compatible {
         }
 
         bool is_binary() const {
-            using namespace dnnl::impl;
-            return kind == primitive_kind::binary;
+            return kind == dnnl::impl::primitive_kind::binary;
         }
 
         dnnl::impl::status_t set_depthwise_scales(const float *scales);
@@ -529,6 +528,11 @@ struct dnnl_post_ops : public dnnl::impl::c_compatible {
     }
 
     std::vector<entry_t> entry_;
+
+private:
+    // Since binary post op accepts no more than 32 memory arguments by
+    // design, we limit the amount of post-ops to 32.
+    static constexpr int post_ops_limit = 32;
 };
 
 struct dnnl_primitive_attr : public dnnl::impl::c_compatible {

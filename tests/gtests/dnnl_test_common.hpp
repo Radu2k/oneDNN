@@ -895,6 +895,8 @@ void test_bwd_pd_constructors(const op_desc_t &op_desc, const pd_t &pd,
     test_bwd_pd_attr_po_sum<op_desc_t, pd_t>(op_desc, eng, hint_pd, aa.po_sum);
     test_bwd_pd_attr_po_eltwise<op_desc_t, pd_t>(
             op_desc, eng, hint_pd, aa.po_eltwise);
+    test_bwd_pd_attr_po_binary<op_desc_t, pd_t>(
+            op_desc, eng, hint_pd, aa.po_binary);
     test_bwd_pd_attr_zp<op_desc_t, pd_t>(op_desc, eng, hint_pd, aa.zp);
     test_bwd_pd_attr_scales<op_desc_t, pd_t>(op_desc, eng, hint_pd, aa.scales);
     // check allow empty, should not throw

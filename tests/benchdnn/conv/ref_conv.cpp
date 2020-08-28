@@ -186,6 +186,7 @@ void compute_ref_direct_fwd(const prb_t *p, dnn_mem_t &src_m, dnn_mem_t &wei_m,
                 }
 
                 maybe_oscale(p->attr, conv_res, p->scales, g * OCG + oc);
+
                 std::vector<float> v_binary_vals;
                 for (size_t d = 0; d < v_bin_po_mask.size(); ++d) {
                     auto bin_po_offset

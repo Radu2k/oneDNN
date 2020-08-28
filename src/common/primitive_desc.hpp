@@ -78,7 +78,9 @@ struct primitive_desc_t : public c_compatible {
             return arg_usage_t::output;
         for (int idx = 0; idx < attr()->post_ops_.len(); ++idx) {
             if (attr()->post_ops_.contain(primitive_kind::binary, idx)
-                    && arg == DNNL_ARG_ATTR_POST_OP_0 + idx) {
+                    && arg
+                            == (DNNL_ARG_ATTR_MULTIPLE_POST_OP(idx)
+                                    | DNNL_ARG_SRC_1)) {
                 return arg_usage_t::input;
             }
         }

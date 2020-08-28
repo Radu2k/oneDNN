@@ -268,6 +268,23 @@ HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test, TestPostOps) {
     ASSERT_EQ(src1_md, src1_md_out);
 }
 
+TEST_F(attr_test, TestPostOpsCheckLimit) {
+    dnnl::post_ops ops_sum, ops_eltwise, ops_binary;
+
+    for (int i = 0; i < 32; i++) {
+        EXPECT_NO_THROW(ops_sum.append_sum(i + 1.f));
+        EXPECT_NO_THROW(ops_eltwise.append_eltwise(
+                i, algorithm::eltwise_relu, 2 * i, 0.f));
+        EXPECT_NO_THROW(ops_binary.append_binary(algorithm::binary_add,
+                memory::desc({i}, data_type::s8, memory::format_tag::a)));
+    }
+    EXPECT_ANY_THROW(ops_sum.append_sum(1.f));
+    EXPECT_ANY_THROW(
+            ops_eltwise.append_eltwise(1.f, algorithm::eltwise_relu, 1.f, 0.f));
+    EXPECT_ANY_THROW(ops_binary.append_binary(algorithm::binary_add,
+            memory::desc({1}, data_type::s8, memory::format_tag::a)));
+}
+
 HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test, DepthwiseFusionPostop) {
     dnnl::primitive_attr attr;
     dnnl::post_ops ops;
