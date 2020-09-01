@@ -10,6 +10,7 @@
 
 # Inference
 --cfg=f32,bf16,f16,s32,s8,u8
+--attr-post-ops='add:s8:per_dim_01'
 --dir=FWD_I
 --tag=axb
 --batch=shapes_basic
