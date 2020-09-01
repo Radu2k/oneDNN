@@ -213,6 +213,7 @@ typedef enum {
     dnnl_ABc40a16b,
     dnnl_ABc32a32b,
     dnnl_ABc40a32b,
+    dnnl_ABc4a2b,
     dnnl_ABc4a4b,
     /// 3D tensor blocked by 2nd dimension with block size 16
     dnnl_aBc16b,
@@ -230,6 +231,7 @@ typedef enum {
     dnnl_ABc4b4a,
     dnnl_ABc8a16b2a,
     dnnl_ABc8a8b,
+    dnnl_ABc8a2b,
     dnnl_ABc8a4b,
     /// 3D tensor blocked by 2nd dimension with block size 8
     dnnl_aBc8b,
@@ -259,6 +261,7 @@ typedef enum {
     dnnl_ABcd16b16a4b,
     dnnl_ABcd16b16a2b,
     dnnl_ABcd4b4a,
+    dnnl_ABcd4a2b,
     dnnl_ABcd4a4b,
     dnnl_aBCd2c4b2c,
     dnnl_aBCd4b8c2b,
@@ -271,6 +274,7 @@ typedef enum {
     dnnl_ABcd8a16b2a,
     dnnl_ABcd2b8a4b,
     dnnl_ABcd8a8b,
+    dnnl_ABcd8a2b,
     dnnl_ABcd8a4b,
     /// 4D tensor blocked by 2nd dimension with block size 8
     dnnl_aBcd8b,
@@ -281,6 +285,7 @@ typedef enum {
     /// 4D tensor blocked by 1st and 2nd dimension with block size 8
     dnnl_ABcd8b8a,
     dnnl_aBCd8b8c,
+    dnnl_aBCd8b2c,
     dnnl_aBCd8b4c,
     dnnl_aBCd8c16b2c,
     dnnl_ABcde8a16b2a,
@@ -309,6 +314,7 @@ typedef enum {
     /// 5D tensor blocked by 2nd dimension with block size 4
     dnnl_aBcde4b,
     dnnl_ABcde4b4a,
+    dnnl_ABcde4a2b,
     dnnl_ABcde4a4b,
     dnnl_aBCde4b4c,
     dnnl_aBCde2c4b2c,
@@ -319,6 +325,7 @@ typedef enum {
     dnnl_aBCde4c4b,
     dnnl_Abcde8a,
     dnnl_ABcde8a8b,
+    dnnl_ABcde8a2b,
     dnnl_ABcde8a4b,
     dnnl_BAcde16b16a,
     /// 5D tensor blocked by 2nd dimension with block size 8
@@ -333,6 +340,7 @@ typedef enum {
     dnnl_ABcde32a32b,
     dnnl_ABcde40a32b,
     dnnl_aBCde8b8c,
+    dnnl_aBCde8b2c,
     dnnl_aBCde8b4c,
     dnnl_ABc4a8b8a4b,
     dnnl_ABcd4a8b8a4b,
@@ -377,6 +385,7 @@ typedef enum {
     dnnl_aBCdef2c4b2c,
     dnnl_aBCdef4b8c2b,
     dnnl_aBCdef8b8c,
+    dnnl_aBCdef8b2c,
     dnnl_aBCdef8b4c,
     dnnl_aBCdef8c16b2c,
     dnnl_aBCdef4b8c8b4c,
