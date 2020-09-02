@@ -43,7 +43,7 @@ inline status_t create_gemm_post_ops_pd(
         std::unique_ptr<primitive_desc_t> &gemm_pd, engine_t *engine,
         transpose_t transa, transpose_t transb, int m, int n, int k, int lda,
         int ldb, int ldc, data_type_t a_dt, data_type_t b_dt, data_type_t c_dt,
-        const primitive_attr_t &attr) {
+        data_type_t acc_dt, const primitive_attr_t &attr) {
     auto gemm_desc = gemm_desc_t();
     gemm_desc.primitive_kind = primitive_kind::gemm;
     gemm_desc.transa = transa;
@@ -61,7 +61,7 @@ inline status_t create_gemm_post_ops_pd(
     gemm_desc.a_type = a_dt;
     gemm_desc.b_type = b_dt;
     gemm_desc.c_type = c_dt;
-    gemm_desc.acc_type = c_dt;
+    gemm_desc.acc_type = acc_dt;
 
     primitive_attr_t gemm_attr(attr);
     if (!gemm_attr.is_initialized()) return status::out_of_memory;
@@ -72,6 +72,9 @@ inline status_t create_gemm_post_ops_pd(
     ++it;
     gemm_pd.reset(it.fetch_once());
     if (!gemm_pd) return status::unimplemented;
+    std::string impl_name(gemm_pd.get()->name());
+    if (impl_name.find("ref") != std::string::npos)
+        return status::unimplemented;
     return status::success;
 }
 } // namespace
@@ -119,35 +122,22 @@ struct gemm_post_ops_inner_product_fwd_t : public gpu_primitive_t {
                     = primitive_attr_t::skip_mask_t::oscale
                     | primitive_attr_t::skip_mask_t::post_ops;
             bool ok = is_fwd() && set_default_params() == success
-                            && (one_of(src_md()->data_type, s8, u8)
-                                    && weights_md()->data_type == s8
-                                    && IMPLICATION(with_bias(),
-                                            one_of(weights_md(1)->data_type, s8,
-                                                    u8, f32, s32))
-                                    && one_of(dst_md()->data_type, u8, s8, f32,
-                                            s32))
-                    || (utils::one_of(true,
-                               expect_data_types(f16, f16, f16, f16, f16),
-                               expect_data_types(f32, f32, f32, f32, f32)))
-                            && dense_consitency_check(
-                                    src_md(), weights_md(), dst_md())
-                            && dense_gemm_consitency_check(
-                                    src_md(), weights_md(), dst_md())
-                            && attr()->has_default_values(attr_skip_mask)
-                            && IMPLICATION(!attr()->output_scales_
-                                                    .has_default_values(),
-                                    attr()->scratchpad_mode_
-                                                    == scratchpad_mode::library
-                                            && one_of(attr()->output_scales_
-                                                              .mask_,
-                                                    0, 1 << 1))
-                            && attr()->post_ops_.len() <= 2
-                            && IMPLICATION(
-                                    ((attr_info_.with_eltwise
-                                             && attr_info_.with_sum)
-                                            || attr()->post_ops_.len() == 2),
-                                    attr_info_.sum_idx == 0
-                                            && attr_info_.eltwise_idx == 1);
+                    && IMPLICATION(utils::one_of(bf16, src_md()->data_type,
+                                           weights_md()->data_type,
+                                           dst_md()->data_type),
+                            expect_data_types(bf16, bf16, undef, bf16, f32))
+                    && dense_consitency_check(src_md(), weights_md(), dst_md())
+                    && dense_gemm_consitency_check(
+                            src_md(), weights_md(), dst_md())
+                    && attr()->has_default_values(attr_skip_mask)
+                    && IMPLICATION(!attr()->output_scales_.has_default_values(),
+                            one_of(attr()->output_scales_.mask_, 0, 1 << 1))
+                    && attr()->post_ops_.len() <= 2
+                    && IMPLICATION(
+                            ((attr_info_.with_eltwise && attr_info_.with_sum)
+                                    || attr()->post_ops_.len() == 2),
+                            attr_info_.sum_idx == 0
+                                    && attr_info_.eltwise_idx == 1);
             if (!ok) return unimplemented;
 
             // XXX: Empty attributes increase chances of creating a gemm
@@ -173,7 +163,7 @@ struct gemm_post_ops_inner_product_fwd_t : public gpu_primitive_t {
                             weights_md()->data_type, src_md()->data_type,
                             weights_md()->data_type == s8 ? s32
                                                           : dst_md()->data_type,
-                            gemm_attr);
+                            desc()->accum_data_type, gemm_attr);
             if (!gemm_ok) return status::unimplemented;
 
             status_t scratchpad_status = init_ip_scratchpad_md();
@@ -278,7 +268,8 @@ struct gemm_post_ops_inner_product_fwd_t : public gpu_primitive_t {
             def_data_type(kernel_ctx,
                     int8 ? data_type::s32 : pd()->dst_md()->data_type, "SRC");
             def_data_type(kernel_ctx,
-                    int8 ? data_type::f32 : pd()->dst_md()->data_type, "ACC");
+                    int8 ? data_type::f32 : pd()->desc()->accum_data_type,
+                    "ACC");
             def_data_type(kernel_ctx,
                     pd()->with_bias()
                             ? pd()->weights_md(int8 ? 1 : 0)->data_type

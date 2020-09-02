@@ -27,13 +27,13 @@ __kernel void gemm_post_ops_inner_product(__global SRC_DATA_T *src,
 
     const size_t data_idx = mb * OC + oc;
 #if USE_TEMP_DST == 1
-    ACC_DATA_T acc = TO_ACC(scratchpad[data_idx]);
+    ACC_DATA_T acc = TO_DEF_ACC_DATA_T(scratchpad[data_idx]);
 #else
-    ACC_DATA_T acc = TO_ACC(src[data_idx]);
+    ACC_DATA_T acc = TO_DEF_ACC_DATA_T(src[data_idx]);
 #endif
 
 #if WITH_BIAS == 1
-    acc += TO_ACC(bias[oc]);
+    acc += TO_DEF_ACC_DATA_T(bias[oc]);
 #endif
 
 #if WITH_SCALES
@@ -49,7 +49,7 @@ __kernel void gemm_post_ops_inner_product(__global SRC_DATA_T *src,
 
     // Apply postops
 #if WITH_SUM
-    acc += sum_scale * TO_ACC(dst[data_idx]);
+    acc += sum_scale * TO_DEF_ACC_DATA_T(dst[data_idx]);
 #endif
 
 #if WITH_ELTWISE

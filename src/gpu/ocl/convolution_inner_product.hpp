@@ -62,23 +62,6 @@ struct convolution_inner_product_fwd_t : public primitive_t {
                     && utils::one_of(desc()->prop_kind, forward_training,
                             forward_inference)
                     && set_default_params(true) == status::success
-                    && utils::one_of(true,
-                            expect_data_types(
-                                    u8, s8, data_type::undef, s8, s32),
-                            expect_data_types(
-                                    u8, s8, data_type::undef, u8, s32),
-                            expect_data_types(
-                                    u8, s8, data_type::undef, s32, s32),
-                            expect_data_types(
-                                    s8, s8, data_type::undef, s8, s32),
-                            expect_data_types(
-                                    s8, s8, data_type::undef, u8, s32),
-                            expect_data_types(
-                                    s8, s8, data_type::undef, s32, s32),
-                            expect_data_types(
-                                    bf16, bf16, data_type::undef, f32, f32),
-                            expect_data_types(f32, f32, f32, f32, f32),
-                            expect_data_types(f16, f16, f16, f16, f16))
                     && IMPLICATION(with_bias(),
                             utils::one_of(desc()->bias_desc.data_type, u8, s8,
                                     bf16, f16, f32))

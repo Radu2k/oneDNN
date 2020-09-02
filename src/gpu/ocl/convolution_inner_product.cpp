@@ -88,6 +88,9 @@ status_t convolution_inner_product_fwd_t::pd_t::init_conf(engine_t *engine) {
     ++it;
     cpd_.reset(it.fetch_once());
     if (!cpd_) return status::unimplemented;
+    std::string impl_name(cpd_.get()->name());
+    if (impl_name.find("ref") != std::string::npos)
+        return status::unimplemented;
 
     auto src_conv = *cpd_->src_md();
     auto wei_conv = *cpd_->weights_md();
