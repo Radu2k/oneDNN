@@ -614,7 +614,6 @@ void check_known_skipped_case(const prb_t *p, res_t *r) {
                 && IMPLICATION(!is_int8, pad_ok_f32)
                 && IMPLICATION(is_int8,
                         (p->ic % 16 == 0) && (p->oc % 16 == 0) && pad_ok_int8);
-
         bool bwd_is_syncable = IMPLICATION(
                 (p->dir & FLAG_BWD), dnnl::impl::dnnl_thr_syncable());
 
@@ -702,8 +701,8 @@ int doit(const prb_t *p, res_t *r) {
     const auto src_tag = get_abx_tag(p->ndims);
     const auto wei_tag = get_abx_tag(p->ndims + p->has_groups);
 
-    // Try to use CPU primitive as reference in GPU testing to reduce testing
-    // time
+    // Try to use CPU primitive as the reference in GPU testing to reduce
+    // testing time
     dnnl_primitive_t c_ref {};
 
     // Do not use CPU primitive for reference if any of these is true.

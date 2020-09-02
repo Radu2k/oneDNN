@@ -231,7 +231,7 @@ TEST_F(runtime_attr_test, TestInnerProduct) {
                     op_d, gen_attr_with_zp(true, arg), eng));
         }
     }
-} // namespace dnnl
+}
 
 TEST_F(runtime_attr_test, TestLNorm) {
     for (auto dt : {data_type::f32}) {

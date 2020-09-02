@@ -75,7 +75,6 @@ struct settings_t {
             dnnl_scratchpad_mode_library};
     attr_t attr = {};
     check_alg_t check_alg = ALG_AUTO;
-
     bool debug_check_ws = false;
     const char *pattern = NULL;
 

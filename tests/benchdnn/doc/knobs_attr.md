@@ -11,6 +11,7 @@
                     'DW_K3S2P1[:DST_DT[:OUTPUTSCALE]];'
                     'BINARY:DT[:POLICY];'
 ```
+
 `--attr-oscale` defines output scale primitive attribute. `POLICY` specifies the
 way scale values will be applied to the output tensor. `SCALE` is optional
 argument, parsed as a real number that specifies either a common output scale

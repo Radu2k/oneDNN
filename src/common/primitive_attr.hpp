@@ -524,6 +524,7 @@ struct dnnl_post_ops : public dnnl::impl::c_compatible {
             }
             CHECK(entry_[idx].copy_from(other.entry_[idx]));
         }
+
         return status::success;
     }
 

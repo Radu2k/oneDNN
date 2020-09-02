@@ -535,7 +535,6 @@ int doit(const prb_t *p, res_t *r) {
         args0.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt0);
 
         SAFE(execute_and_wait(c0, args0), WARN);
-
         SAFE(src_dt1.reorder(dst_dt0), WARN);
 
         args1.set(DNNL_ARG_SRC, src_dt1);
