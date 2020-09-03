@@ -2515,7 +2515,7 @@ struct post_ops : public handle<dnnl_post_ops_t> {
                 "could not append an elementwise post-op");
     }
 
-    /// Returns parameters of an elementwise post-up.
+    /// Returns parameters of an elementwise post-op.
     ///
     /// @param index Index of the post-op.
     /// @param scale Output scaling factor.
@@ -2696,21 +2696,40 @@ struct post_ops : public handle<dnnl_post_ops_t> {
         return;
     }
 
-    /// TODO: add doc
-    void append_binary(algorithm algorithm, const memory::desc &src1_desc) {
+    /// Appends a binary post-op.
+    ///
+    /// The kind of this post operation is #dnnl_binary.
+    ///
+    /// In the simplest case when the binary is the only post operation, the
+    /// computations would be:
+    ///
+    ///     dst[:] <- binary_op (dst[:], another_input[:])
+    ///
+    /// where binary_op is configured with the given parameters. binary_op
+    /// supports broadcast semantics for a second operand.
+    ///
+    /// @param aalgorithm Binary algorithm for the post-op.
+    /// @param src1_desc Memory descriptor of a second operand.
+    void append_binary(algorithm aalgorithm, const memory::desc &src1_desc) {
         error::wrap_c_api(dnnl_post_ops_append_binary(get(),
-                                  convert_to_c(algorithm), &src1_desc.data),
+                                  convert_to_c(aalgorithm), &src1_desc.data),
                 "could not append a binary post-op");
     }
 
-    /// TODO: add doc
+    /// Returns the parameters of a binary post-op.
+    ///
+    /// @param index Index of the binary post-op.
+    /// @param aalgorithm Output binary algorithm kind.
+    /// @param src1_desc Output memory descriptor of a second operand.
     void get_params_binary(
-            int index, algorithm &algorithm, memory::desc &src1_desc) const {
+            int index, algorithm &aalgorithm, memory::desc &src1_desc) const {
         dnnl_alg_kind_t c_alg;
-        error::wrap_c_api(dnnl_post_ops_get_params_binary(
-                                  get(), index, &c_alg, &src1_desc.data),
+        const dnnl_memory_desc_t *data;
+        error::wrap_c_api(
+                dnnl_post_ops_get_params_binary(get(), index, &c_alg, &data),
                 "could not get parameters of a binary post-op");
-        algorithm = static_cast<dnnl::algorithm>(c_alg);
+        aalgorithm = static_cast<dnnl::algorithm>(c_alg);
+        src1_desc.data = *data;
     }
 };
 

@@ -34,8 +34,8 @@ void check_correctness(const settings_t &s) {
     for_(const auto &i_tag : s.tag)
     for_(const auto &i_alg : s.alg)
     for_(const auto &i_mb : s.mb)
-    for_(const auto &i_scratchpad_mode : s.scratchpad_mode)
-    for (const auto &i_post_ops : s.post_ops) {
+    for_(const auto &i_post_ops : s.post_ops)
+    for (const auto &i_scratchpad_mode : s.scratchpad_mode) {
         attr_t attr;
         attr.insert(i_post_ops);
         attr.insert(i_scratchpad_mode);
@@ -75,7 +75,6 @@ int bench(int argc, char **argv) {
                 || parse_tag(s.tag, def.tag, argv[0])
                 || parse_alg(s.alg, def.alg, str2alg, argv[0])
                 || parse_mb(s.mb, def.mb, argv[0])
-                || parse_attr(s.attr, argv[0])
                 || parse_attr_post_ops(s.post_ops, argv[0])
                 || parse_attr_scratchpad_mode(
                         s.scratchpad_mode, def.scratchpad_mode, argv[0])

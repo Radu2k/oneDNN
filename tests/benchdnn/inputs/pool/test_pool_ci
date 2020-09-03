@@ -13,4 +13,5 @@
 --attr-post-ops='add:s8:per_dim_01'
 --dir=FWD_I
 --tag=axb
+--attr-post-ops='','add:f32:per_oc'
 --batch=shapes_basic

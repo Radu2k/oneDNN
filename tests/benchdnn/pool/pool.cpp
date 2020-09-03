@@ -27,6 +27,7 @@
 #include "dnnl_memory.hpp"
 #include "norm.hpp"
 
+#include "binary/binary.hpp"
 #include "pool/pool.hpp"
 
 namespace pool {
@@ -46,7 +47,9 @@ inline int compare_dat(const prb_t *p, data_kind_t kind, dnn_mem_t &mem_dt,
         const float diff = fabsf(fp - dt);
         const float rel_diff = diff / (fabsf(fp) > FLT_MIN ? fabsf(fp) : 1);
         bool ok = false;
-        if (fp < p->cfg[kind].min)
+        if (std::isinf(fp))
+            ok = std::isinf(dt) && std::signbit(fp) == std::signbit(dt);
+        else if (fp < p->cfg[kind].min)
             ok = dt == p->cfg[kind].min;
         else
             ok = (fabs(fp) > 1e-5 ? rel_diff : diff) <= p->cfg[kind].eps;
@@ -192,9 +195,9 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
                 WARN);
     }
 
-    attr_args_t aa;
-    aa.prepare_binary_post_op_mds(p->attr, p->ndims, dst_dims);
-    auto dnnl_attr = create_dnnl_attr_v2(p->attr, aa);
+    attr_args_t attr_args;
+    attr_args.prepare_binary_post_op_mds(p->attr, p->ndims, dst_dims);
+    auto dnnl_attr = create_dnnl_attr(p->attr, attr_args);
 
     dnnl_status_t init_status
             = dnnl_primitive_desc_create(&ppd, &pd, dnnl_attr, engine, hint);
@@ -290,10 +293,10 @@ int doit(const prb_t *p, res_t *r) {
     dnn_mem_t ws_fp(ws_md, test_engine);
     dnn_mem_t ws_dt(ws_md, test_engine);
     dnn_mem_t scratchpad_dt(scratchpad_md, test_engine);
-
     std::vector<dnn_mem_t> binary_po_fp, binary_po_dt;
     std::vector<int> binary_po_args;
-    SAFE(setup_binary(const_fpd, binary_po_args, binary_po_dt, binary_po_fp),
+    SAFE(binary::setup_binary_po(
+                 const_fpd, binary_po_args, binary_po_dt, binary_po_fp),
             WARN);
 
     dnn_mem_t d_src_dt, d_dst_dt;

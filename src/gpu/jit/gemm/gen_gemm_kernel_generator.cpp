@@ -72,6 +72,8 @@ static inline Immediate cast(Type T, U val) {
         case Type::s16: return int16_t(val);
         case Type::u32: return uint32_t(val);
         case Type::s32: return int32_t(val);
+        case Type::u64: return uint64_t(val);
+        case Type::s64: return int64_t(val);
         case Type::bf16:
         default: stub();
     }
@@ -103,6 +105,11 @@ void noop() {}
 
 static inline int div_up(int value, int divisor) {
     return (value + divisor - 1) / divisor;
+}
+
+// Round value down to a multiple of factor.
+static inline int align_down(int value, int factor) {
+    return factor * (value / factor);
 }
 
 // Round value up to a multiple of factor.
@@ -281,6 +288,13 @@ FlagRegister gemm_kernel_generator_t<hw>::getPhysicalFlag(
     }
 
     return FlagRegister::createFromIndex(pidx);
+}
+
+template <HW hw>
+void gemm_kernel_generator_t<hw>::allocVFlagStorage(
+        const CommonStrategy &strategy, CommonState &state) {
+    state.vflagStorage
+            = state.ra.alloc(getHint(HintType::LongTerm, strategy)).uw();
 }
 
 /************************/
@@ -1957,9 +1971,11 @@ bool gemm_kernel_generator_t<hw>::getSubblock(Type T, RegisterBlock &blockDst,
                     // Extra alignment path with small types.
                     // Check to see if we can still use this element size,
                     //  if not downgrade to scattered byte.
+                    // Note for surface accesses this requires shifting the addresses back.
                     auto bcount = blockDst.count * T;
                     if (bcount % 4) {
                         blockDst.ebytes = 1;
+                        blockDst.addrShift = 0;
                         blockDst.count = bcount;
                         if (blockDst.count > 4) stub();
                     } else
@@ -2121,6 +2137,45 @@ bool gemm_kernel_generator_t<hw>::getSubblocks(Type T,
         }
     }
     return true;
+}
+
+// Adjust address registers for subblock due to changes in access type.
+template <ngen::HW hw>
+void gemm_kernel_generator_t<hw>::adjustSubblockAddrs(
+        const vector<RegisterBlock> &sublayout,
+        const vector<GRFRange> &subaddrs, const vector<RegisterBlock> &layout,
+        const vector<GRFRange> &addrs, const MatrixAddressing &atype,
+        const CommonStrategy &strategy, const CommonState &state) {
+    bool a64 = (atype.base.getModel() == ModelA64);
+
+    auto nsubs = int(sublayout.size());
+    auto nblocks = int(layout.size());
+
+    for (int isub = 0; isub < nsubs; isub++) {
+        // Find parent block by comparing address registers.
+        auto &subaddr = subaddrs[isub];
+        const RegisterBlock *pptr = nullptr;
+        for (int i = 0; i < nblocks; i++) {
+            if (addrs[i].getBase() == subaddr.getBase()) {
+                pptr = &layout[i];
+                break;
+            }
+        }
+        if (!pptr) stub();
+
+        auto &block = *pptr;
+        auto &subblock = sublayout[isub];
+
+        // Perform any necessary shifts.
+        if (subblock.addrShift != block.addrShift) {
+            map(a64 ? Type::u64 : Type::u32, subaddr, subaddr, strategy,
+                    [&](int simd, GRF r, GRF _) {
+                        auto shift = block.addrShift - subblock.addrShift;
+                        (shift > 0) ? eshl(simd, r, r, +shift, strategy, state)
+                                    : eshr(simd, r, r, -shift, strategy, state);
+                    });
+        }
+    }
 }
 
 // Find all address pointers of a layout that are used by a given sub-layout.
@@ -2792,6 +2847,10 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
                         case Type::f32:
                             atomic(AtomicOp::fadd, mod, scattered_dword(),
                                     atype.base, addr[hoff], src + soff);
+                        case Type::u64:
+                        case Type::s64:
+                            atomic(AtomicOp::add, mod, scattered_qword(),
+                                    atype.base, addr[hoff], src + soff);
                             break;
                         case Type::u32:
                         case Type::s32:
@@ -2948,6 +3007,7 @@ static inline void releaseMaskAssignments(vector<MaskAssignment> &assignments,
         state.raVFlag.release(assignments[an].flag);
 
     assignments.resize(start);
+    state.wipeActiveVFlags();
 }
 
 // Assign mask registers to a register layout.
@@ -3634,6 +3694,8 @@ void gemm_kernel_generator_t<hw>::outerProduct(int h, int ha, int hb,
 
     // If crosspack nontrivial, do outer product every crosspack iterations.
     if ((h + 1) % kernelCP) return;
+    ha = align_down(ha, kernelCP);
+    hb = align_down(hb, kernelCP);
 
     // Loop over offsets.
     for (int o = 0; o < omax; o++) {
@@ -5944,6 +6006,10 @@ bool gemm_kernel_generator_t<hw>::gemmApplyCOffset(bool row, bool column,
     allocAddrRegs(CO_addrs, CO_layout, CO, CO_strategy, state);
     setupAddr(Tc, CO_addrs, state.effCO, CO_layout, Subregister(), CO,
             CO_strategy, strategy, state);
+
+    if (!assignMasks(CO_layout, LoopM, LoopN, masks, state)) return false;
+
+    loadMasks(masks, state.remainders, state);
     loadMatrix(CO_regs, CO_layout, CO, CO_strategy, CO_addrs, state);
     releaseMaskAssignments(masks, state);
 
@@ -7057,6 +7123,33 @@ bool gemm_kernel_generator_t<hw>::gemmKLoop(int ka_repack_in, int kb_repack_in,
                     problem.B, strategy.B))
             return false;
 
+        // Adjust A/B/Ai/Bi addresses if needed.
+        adjustSubblockAddrs(A_layout1, A_addrs1, state.A_layout, state.A_addrs,
+                problem.A, strategy, state);
+        adjustSubblockAddrs(B_layout1, B_addrs1, state.B_layout, state.B_addrs,
+                problem.B, strategy, state);
+
+        if (strategy.slmA && !state.A_slmScatter) {
+            vector<RegisterBlock> tempLayout;
+            vector<GRFRange> tempAddrs;
+            if (!getSubblocks(Ta, tempLayout, tempAddrs, state.Ai_layout,
+                        state.Ai_addrs, true, 0, 1, state.Ai.padded, state.Ai,
+                        state.Ai_strategy))
+                return false;
+            adjustSubblockAddrs(tempLayout, tempAddrs, state.Ai_layout,
+                    state.Ai_addrs, state.Ai, strategy, state);
+        }
+        if (strategy.slmB && !state.B_slmScatter) {
+            vector<RegisterBlock> tempLayout;
+            vector<GRFRange> tempAddrs;
+            if (!getSubblocks(Tb, tempLayout, tempAddrs, state.Bi_layout,
+                        state.Bi_addrs, false, 0, 1, state.Bi.padded, state.Bi,
+                        state.Bi_strategy))
+                return false;
+            adjustSubblockAddrs(tempLayout, tempAddrs, state.Bi_layout,
+                    state.Bi_addrs, state.Bi, strategy, state);
+        }
+
         // Adjust A and B pointers as necessary for backward GEMMs.
         int incA = 0, incB = 0;
         Subregister incASub, incBSub;
@@ -7249,9 +7342,9 @@ bool gemm_kernel_generator_t<hw>::gemmKLoop(int ka_repack_in, int kb_repack_in,
                 cmp<uint16_t>(16 | lt | flagMask, mask, mask, state.K.uw());
                 if (strategy.unrollKSLM > 16)
                     cmp<uint16_t>(16 | lt | flagMask, temp, temp, state.K.uw());
-                mov(16, mask.ub(), mask.uw());
+                mov(16, mask.ub(), mask.ub(0)(2));
                 if (strategy.unrollKSLM > 16)
-                    mov(16, mask.ub(16)(1), temp.uw());
+                    mov(16, mask.ub(16)(1), temp.ub(0)(2));
 
                 state.raVFlag.safeRelease(flagMask);
 
@@ -7664,8 +7757,7 @@ bool gemm_kernel_generator_t<hw>::gemmAccumulateC(
 
     if (!success && state.vflagStorage.isInvalid()) {
         status << "Retrying with virtual flags." << status_stream::endl;
-        state.vflagStorage
-                = state.ra.alloc(getHint(HintType::LongTerm, strategy)).uw();
+        allocVFlagStorage(strategy, state);
         success = assignMasks(state.A_layout, LoopM, LoopK, masks, state)
                 && assignMasks(state.B_layout, LoopK, LoopN, masks, state)
                 && (state.A_slmScatter
@@ -9705,6 +9797,9 @@ bool GEMMStrategy::minimize(HW hw, const GEMMProblem &problem) {
         better = true;
     }
 
+    // Reduce A/B copies.
+    A_copies = B_copies = 1;
+
     // Reduce k unroll for SLM copies.
     if (slmA || slmB) {
         auto oldUK = unroll[LoopK];
@@ -10055,6 +10150,9 @@ void gemm_kernel_generator_t<hw>::copySlice(
         state.ra.safeRelease(temp);
     }
 
+    // Quick exit if no work to do.
+    if (strategy.zBlocking) jmpi(1 | f0[1], labelExit);
+
     // D += x0 * ldd + y0 * (panel size)
     {
         Subregister temp0 = state.ra.alloc_sub(state.inputs.offsetD.getType(),
@@ -10357,9 +10455,7 @@ bool gemm_kernel_generator_t<hw>::copyBodyInternal(
 
         if (!success && state.vflagStorage.isInvalid()) {
             status << "Retrying with virtual flags." << status_stream::endl;
-            state.vflagStorage
-                    = state.ra.alloc(getHint(HintType::LongTerm, strategy))
-                              .uw();
+            allocVFlagStorage(strategy, state);
             success = assignMasks(state.S_layout, LoopM, LoopN, masks, state)
                     && assignMasks(state.D_layout, LoopM, LoopN, masks, state);
         }

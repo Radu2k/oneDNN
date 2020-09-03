@@ -380,12 +380,6 @@ void maybe_prepare_runtime_scales(dnn_mem_t &scales_m, const attr_t &attr,
         ((float *)scales_m)[c] = scales[c];
 }
 
-void maybe_prepare_runtime_scales(
-        dnn_mem_t &scales_m, const attr_bundle_t &attr_bundle) {
-    maybe_prepare_runtime_scales(scales_m, attr_bundle.attr,
-            (int64_t)attr_bundle.oscale.size(), attr_bundle.oscale.data());
-}
-
 void maybe_prepare_runtime_zero_points(dnn_mem_t &zero_points_m,
         const attr_t &attr, int arg, int64_t count,
         const int32_t *zero_points) {
@@ -475,15 +469,15 @@ int setup_binary(const_dnnl_primitive_desc_t pd, std::vector<int> &args,
         auto kind = dnnl_post_ops_get_kind(const_attr_po, idx);
         if (kind != dnnl_binary) continue;
 
-        dnnl_memory_desc_t po_md;
+        const dnnl_memory_desc_t *po_md;
         DNN_SAFE(dnnl_post_ops_get_params_binary(
                          const_attr_po, idx, NULL, &po_md),
                 WARN);
 
-        const auto tag = get_abx_tag(po_md.ndims);
-        mem_ref.emplace_back(po_md, dnnl_f32, tag, get_test_engine());
-        mem.emplace_back(po_md, get_test_engine());
-        args.push_back(DNNL_ARG_ATTR_POST_OP_0 + idx);
+        const auto tag = get_abx_tag(po_md->ndims);
+        mem_ref.emplace_back(*po_md, dnnl_f32, tag, get_test_engine());
+        mem.emplace_back(*po_md, get_test_engine());
+        args.push_back(DNNL_ARG_ATTR_MULTIPLE_POST_OP(idx) | DNNL_ARG_SRC_1);
 
         fill_src(idx, mem.back(), mem_ref.back());
     }

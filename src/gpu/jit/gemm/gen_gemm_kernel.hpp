@@ -105,6 +105,15 @@ struct gen_gemm_nocopy_kernel_t : public gen_gemm_kernel_t {
         problem_.B.base = ngen::AddressBase::createA64(true);
         problem_.C.base = ngen::AddressBase::createA64(true);
         problem_.batchedS = batch;
+        if (c_type == data_type::s32) {
+            problem_.abOffset = ABOffset::Calc;
+            problem_.cOffset = COffset::Post;
+            problem_.Ts = Type::f32;
+            problem_.CO.base = ngen::AddressBase::createBTS(0);
+            problem_.CO.crosspack = 1;
+            problem_.CO.padded = false;
+            problem_.CO.alignment = problem_.C.alignment;
+        }
 
         if (with_offset || bias) {
             assert(!(with_offset && bias));

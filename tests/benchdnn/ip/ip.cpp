@@ -101,9 +101,9 @@ static int init_pd(dnnl_engine_t engine, const prb_t *p,
                                                    : dnnl_unimplemented,
             CRIT);
 
-    attr_args_t aa;
-    aa.insert(DNNL_ARG_ATTR_OUTPUT_SCALES, p->oc, p->scales);
-    auto dnnl_attr = create_dnnl_attr_v2(p->attr, aa);
+    attr_args_t attr_args;
+    attr_args.prepare_output_scales(p->attr, p->scales, p->oc);
+    auto dnnl_attr = create_dnnl_attr(p->attr, attr_args);
 
     dnnl_status_t init_status = dnnl_success;
     init_status

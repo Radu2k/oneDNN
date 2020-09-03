@@ -69,7 +69,7 @@ const gemm_recipe_t gemm_recipes[] = {
     {ngen::HW::Gen9, "HHH", "TNN", {}, 32, 32, "as2 as8 ab l4 ca1 wg 1x8 acb"},
     {ngen::HW::Gen9, "HHH", "TTN", {}, 32, 16, "as8 ab4 ab k8 ra8 l4 cs"},
     {ngen::HW::Gen9, "HHH", "TTN", {}, 32, 32, "as8 ab2 ab k8 ra8 l4 cs"},
-    {ngen::HW::Gen9, "OOI", "NNN", {}, 32, 16, "ab4x2 as2x2 as l4 cb1 wg 8x1 acb nmk"},
+    {ngen::HW::Gen9, "OOI", "NNN", {}, 32, 16, "ab4/2x2 as2x2 as l4 cb1 wg 8x1 acb nmk"},
     {ngen::HW::Gen9, "OOI", "NTN", {}, 32, 16, "ab2 ab1x2 as l4 ca1 wg 1x8 acb"},
     {ngen::HW::Gen9, "OOI", "TNN", {}, 16, 16, "as8 as8 as l4 cab1 k32 wg 2x4 acb"},
     {ngen::HW::Gen9, "OOI", "TTN", {}, 16, 32, "as2x2 ab8/2x2 as l4 ca1 wg 1x8 acb"},

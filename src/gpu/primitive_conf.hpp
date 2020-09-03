@@ -925,7 +925,8 @@ inline int append_post_ops_to_arg_list(const exec_ctx_t &ctx,
         const post_ops_t &all_post_ops) {
     for (int idx = 0; idx < 10; ++idx) {
         if (all_post_ops.len() > idx && all_post_ops.entry_[idx].is_binary()) {
-            auto &binary_arg = CTX_IN_STORAGE(DNNL_ARG_ATTR_POST_OP_0 + idx);
+            auto &binary_arg = CTX_IN_STORAGE(
+                    DNNL_ARG_ATTR_MULTIPLE_POST_OP(idx) | DNNL_ARG_SRC_1);
             arg_list.set(post_op_idx++, binary_arg);
         } else {
             arg_list.set(post_op_idx++, memory_storage_t::empty_storage());
