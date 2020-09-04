@@ -879,6 +879,27 @@ dnnl_format_tag_t get_ABx16a16b_tag(int ndims) {
     return dnnl_format_tag_undef;
 }
 
+// TODO: Remove this when merge from dev-v2 comes
+dnnl_format_tag_t get_aBx32b_tag(int ndims) {
+    switch (ndims) {
+        case 3: return dnnl_aBc32b;
+        case 4: return dnnl_aBcd32b;
+        case 5: return dnnl_aBcde32b;
+        default: assert(!"unsupported ndims");
+    }
+    return dnnl_format_tag_undef;
+}
+
+dnnl_format_tag_t get_ABx32a32b_tag(int ndims) {
+    switch (ndims) {
+        case 3: return dnnl_ABc32a32b;
+        case 4: return dnnl_ABcd32a32b;
+        case 5: return dnnl_ABcde32a32b;
+        default: assert(!"unsupported ndims");
+    }
+    return dnnl_format_tag_undef;
+}
+
 dnnl_format_tag_t convert_tag(const std::string &tag_str, int ndims) {
     // List of supported meta-tags
     if (tag_str.compare("abx") == 0)
@@ -895,6 +916,10 @@ dnnl_format_tag_t convert_tag(const std::string &tag_str, int ndims) {
         return get_aBx16b_tag(ndims);
     else if (tag_str.compare("ABx16a16b") == 0)
         return get_ABx16a16b_tag(ndims);
+    else if (tag_str.compare("aBx32b") == 0)
+        return get_aBx32b_tag(ndims);
+    else if (tag_str.compare("ABx32a32b") == 0)
+        return get_ABx32a32b_tag(ndims);
     // fall-back to regular tag parse function
     return str2fmt_tag(tag_str.c_str());
 }
