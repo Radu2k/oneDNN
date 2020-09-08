@@ -523,7 +523,7 @@ struct reorder_conf_t {
     bool do_reorder, with_group, has_padding;
     bool scale_quant, with_sum_ab, with_sum_a;
     bool use_ref_impl, use_dense_vect;
-    bool plain_to_ABcd4axb;
+    bool plain_to_ABcd4axb, vectorize_last_dim;
     int ndims;
     size_t nelems;
 
