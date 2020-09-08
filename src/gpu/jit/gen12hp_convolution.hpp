@@ -229,6 +229,63 @@ private:
     compute::kernel_t kernel_;
 };
 
+struct gen12hp_convolution_bwd_weights_t : public gpu_primitive_t {
+    struct pd_t : public gpu_convolution_bwd_weights_pd_t {
+        using gpu_convolution_bwd_weights_pd_t::
+                gpu_convolution_bwd_weights_pd_t;
+
+        DECLARE_COMMON_PD_T("ngen:gen12hp", gen12hp_convolution_bwd_weights_t);
+
+        status_t init(engine_t *engine) {
+            using namespace prop_kind;
+            using namespace data_type;
+
+            auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine);
+
+            if (!compute_engine->is_gen12hp()) return status::unimplemented;
+            if (!compute_engine->mayiuse_ngen_kernels())
+                return status::unimplemented;
+
+            // XXX: supported configs:
+            // diff_src/diff_dst: bf16, acc: f32
+            // wei/bia: bf16,f32
+            bool ok = set_default_alg_kind(alg_kind::convolution_direct)
+                    && desc()->prop_kind == backward_weights
+                    && utils::one_of(true,
+                            expect_data_types(bf16, f32, f32, bf16, f32),
+                            expect_data_types(bf16, bf16, f32, bf16, f32),
+                            expect_data_types(bf16, f32, bf16, bf16, f32),
+                            expect_data_types(bf16, bf16, bf16, bf16, f32))
+                    && attr()->has_default_values();
+
+            if (!ok) return status::unimplemented;
+
+            CHECK(init_conf(engine));
+            init_scratchpad();
+
+            ok = set_default_formats_common(
+                    conf.src_tag, conf.wei_tag, conf.dst_tag);
+            return ok ? status::success : status::unimplemented;
+        }
+
+        status_t init_conf(engine_t *engine);
+        void init_scratchpad();
+
+        conv_conf_t conf;
+    };
+
+    using gpu_primitive_t::gpu_primitive_t;
+
+    status_t init(engine_t *engine) override;
+    status_t execute(const exec_ctx_t &ctx) const override;
+
+private:
+    const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
+
+    std::vector<compute::kernel_t> kernels_;
+};
+
 } // namespace jit
 } // namespace gpu
 } // namespace impl

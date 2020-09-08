@@ -16,6 +16,7 @@
 
 #include "gpu/jit/gen12hp_convolution.hpp"
 
+#include "gpu/jit/gen12hp_conv_bwd_wei_kernel.hpp"
 #include "gpu/jit/gen12hp_conv_data_kernel.hpp"
 #include "gpu/ocl/ocl_gpu_engine.hpp"
 
@@ -317,6 +318,168 @@ status_t gen12hp_convolution_bwd_data_t::execute(const exec_ctx_t &ctx) const {
     const auto &conf = pd()->conf;
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
     return parallel_for(ctx, nd_range, kernel_, arg_list);
+}
+
+status_t gen12hp_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
+    const convolution_desc_t &cd = *desc();
+    const memory_desc_wrapper src_mdw(src_md());
+    const memory_desc_wrapper wei_mdw(diff_weights_md());
+    const memory_desc_wrapper dst_mdw(diff_dst_md());
+    const memory_desc_wrapper bia_mdw(diff_weights_md(1));
+
+    set_default_conf(conf, cd, *src_md(), *diff_weights_md(), *diff_dst_md(),
+            *diff_weights_md(1), *attr());
+
+    if (conf.is_depthwise) return status::unimplemented;
+    if (conf.with_groups && conf.ngroups > 1) return status::unimplemented;
+    if (conf.mb < 16) return status::unimplemented;
+
+    // TODO: only 128ic x 128oc workgroup, add other configurations later
+    if (conf.ic % 128 != 0 || conf.oc % 128 != 0) return status::unimplemented;
+
+    conf.mb_block = 32;
+    conf.oc_block = 16;
+    conf.ic_block = 16;
+
+    conf.ic_blk_wg = 4;
+    conf.oc_blk_wg = 4;
+
+    conf.oc_group = 1;
+    conf.ow_group = 1;
+
+    conf.sub_group_size = 8;
+
+    conf.icb = utils::div_up(conf.ic, conf.ic_block);
+    conf.ocb = utils::div_up(conf.oc, conf.oc_block);
+
+    const int num_mb_blocks = utils::div_up(conf.mb, conf.mb_block);
+    const int kdhw_size = conf.kd * conf.kh * conf.kw;
+
+    conf.sp_block = 64;
+    conf.osp_chunk = utils::div_up(conf.od * conf.oh * conf.ow, conf.sp_block);
+
+    conf.gws_d[0]
+            = kdhw_size * (conf.icb / 2) * (conf.ocb / 2) * conf.sub_group_size;
+    conf.gws_d[1] = conf.osp_chunk;
+    conf.gws_d[2] = conf.ngroups * num_mb_blocks;
+
+    conf.lws_d[0] = conf.ic_blk_wg * conf.oc_blk_wg * conf.sub_group_size;
+    conf.lws_d[1] = 1;
+    conf.lws_d[2] = 1;
+
+    format_tag_t src_tag
+            = utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
+    format_tag_t dst_tag
+            = utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
+
+    format_tag_t wei_tag = conf.with_groups
+            ? utils::pick(conf.ndims - 3, gOIw16o16i, gOIhw16o16i, gOIdhw16o16i)
+            : utils::pick(conf.ndims - 3, OIw16o16i, OIhw16o16i, OIdhw16o16i);
+
+    if (src_mdw.format_kind() != format_kind::any
+            && src_mdw.matches_one_of_tag(src_tag) == format_kind::undef)
+        return status::unimplemented;
+
+    if (wei_mdw.format_kind() != format_kind::any
+            && wei_mdw.matches_one_of_tag(wei_tag) == format_kind::undef)
+        return status::unimplemented;
+
+    if (dst_mdw.format_kind() != format_kind::any
+            && dst_mdw.matches_one_of_tag(dst_tag) == format_kind::undef)
+        return status::unimplemented;
+
+    conf.src_tag = src_tag;
+    conf.wei_tag = wei_tag;
+    conf.dst_tag = dst_tag;
+
+    return status::success;
+}
+
+void gen12hp_convolution_bwd_weights_t::pd_t::init_scratchpad() {
+    auto scratchpad = scratchpad_registry().registrar();
+
+    if (conf.weights_data_type == data_type::bf16) {
+        size_t size = conf.ngroups * utils::rnd_up(conf.oc, conf.oc_block)
+                * utils::rnd_up(conf.ic, conf.ic_block) * conf.kd * conf.kh
+                * conf.kw;
+        scratchpad.book(memory_tracking::names::key_conv_wei_reduction, size,
+                types::data_type_size(data_type::f32));
+    }
+    if (conf.bias_data_type == data_type::bf16) {
+        size_t size = conf.ngroups * utils::rnd_up(conf.oc, conf.oc_block);
+        scratchpad.book(memory_tracking::names::key_conv_bia_reduction, size,
+                types::data_type_size(data_type::f32));
+    }
+}
+
+status_t gen12hp_convolution_bwd_weights_t::init(engine_t *engine) {
+    return gen12hp_conv_bwd_weights_create_kernels(
+            pd()->conf, kernels_, this, engine);
+}
+
+status_t gen12hp_convolution_bwd_weights_t::execute(
+        const exec_ctx_t &ctx) const {
+    auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
+    auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
+    auto &diff_wei = CTX_OUT_STORAGE(DNNL_ARG_DIFF_WEIGHTS);
+    auto &diff_bia = CTX_OUT_STORAGE(DNNL_ARG_DIFF_BIAS);
+
+    std::unique_ptr<memory_storage_t> temp_wei, temp_bia;
+
+    const auto &conf = pd()->conf;
+    const bool is_wei_bf16 = conf.weights_data_type == data_type::bf16;
+    const bool is_bia_bf16 = conf.bias_data_type == data_type::bf16;
+
+    if (is_wei_bf16)
+        temp_wei = ctx.get_scratchpad_grantor().get_memory_storage(
+                memory_tracking::names::key_conv_wei_reduction);
+    if (is_bia_bf16)
+        temp_bia = ctx.get_scratchpad_grantor().get_memory_storage(
+                memory_tracking::names::key_conv_bia_reduction);
+
+    auto &conv_wei = is_wei_bf16 ? *temp_wei : diff_wei;
+    auto &conv_bia = conf.with_bias ? (is_bia_bf16 ? *temp_bia : diff_bia)
+                                    : memory_storage_t::empty_storage();
+
+    {
+        compute::kernel_arg_list_t arg_list;
+        arg_list.set(0, conv_wei);
+        arg_list.set(1, conv_bia);
+
+        const size_t gws[3] = {size_t(conf.icb * conf.kd * conf.kh * conf.kw),
+                size_t(conf.ngroups * conf.ocb), 1};
+        const size_t lws[3] = {1, 1, 1};
+
+        auto nd_range = compute::nd_range_t(gws, lws);
+        CHECK(parallel_for(ctx, nd_range, kernels_[0], arg_list));
+    }
+    {
+        compute::kernel_arg_list_t arg_list;
+        arg_list.set(0, src);
+        arg_list.set(1, conv_wei);
+        arg_list.set(2, conv_bia);
+        arg_list.set(3, diff_dst);
+
+        auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
+        CHECK(parallel_for(ctx, nd_range, kernels_[1], arg_list));
+    }
+    if (is_wei_bf16 || is_bia_bf16) {
+        compute::kernel_arg_list_t arg_list;
+        arg_list.set(0, diff_wei);
+        arg_list.set(1, diff_bia);
+        arg_list.set(2, conv_wei);
+        arg_list.set(3, conv_bia);
+
+        const size_t gws[3] = {
+                size_t(conf.ic_block * conf.icb * conf.kd * conf.kh * conf.kw),
+                size_t(conf.ngroups * conf.ocb), 1};
+        const size_t lws[3] = {1, 1, 1};
+
+        auto nd_range = compute::nd_range_t(gws, lws);
+        CHECK(parallel_for(ctx, nd_range, kernels_[2], arg_list));
+    }
+
+    return status::success;
 }
 
 } // namespace jit
