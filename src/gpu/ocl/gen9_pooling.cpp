@@ -147,6 +147,8 @@ static status_t init_kernel_ctx_common(compute::kernel_ctx_t &kernel_ctx,
     kernel_ctx.define_int("CHUNKS_PER_C_BLOCK", conf.chunks_per_c_block);
     kernel_ctx.define_int("CHUNKS_PER_MB_BLOCK", conf.chunks_per_mb_block);
 
+    kernel_ctx.add_option("-Dcl_intel_subgroups_char");
+
     def_offsets(off.src_off, kernel_ctx, "SRC", conf.ndims);
     def_offsets(off.dst_off, kernel_ctx, "DST", conf.ndims);
 
