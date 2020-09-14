@@ -147,9 +147,9 @@ ref_post_ops_t::ref_post_ops_t(const post_ops_t &po) : po_(po) {
     for (auto idx = 0; idx < po_.len(); ++idx) {
         const auto &e = po_.entry_[idx];
         if (po_.contain(primitive_kind::eltwise, idx)) {
-            eltwise_po_.push_back(ref_eltwise_scalar_fwd_t(e.eltwise));
+            eltwise_po_.emplace_back(e.eltwise);
         } else if (po_.contain(primitive_kind::binary, idx)) {
-            binary_po_.push_back(ref_binary_scalar_t(e.binary));
+            binary_po_.emplace_back(e.binary);
         }
     }
 }
@@ -173,7 +173,7 @@ status_t ref_post_ops_t::execute(float &res, const args_t &args) const {
                 assert(args.dst_md);
 
                 const exec_ctx_t &ctx = *args.ctx;
-                const memory_desc_wrapper dst_d(args.dst_md);
+                const auto dst_d = ctx.memory_mdw(DNNL_ARG_DST, args.dst_md);
                 const auto &dst_dims = dst_d.dims();
                 const auto dst_ndims = dst_d.ndims();
 

@@ -102,7 +102,7 @@ double get_msec() {
     return 1e+3 * now.QuadPart / frequency.QuadPart;
 #else
     struct timeval time;
-    gettimeofday(&time, NULL);
+    gettimeofday(&time, nullptr);
     return 1e+3 * time.tv_sec + 1e-3 * time.tv_usec;
 #endif
 }
@@ -143,10 +143,11 @@ void clear_buf(char *buf, int &written) {
 
 #define CHECK_WRITTEN(buf, buf_len, written_now, written_total) \
     do { \
-        if (written_now < 0 || written_total + written_now > buf_len) { \
+        if ((written_now) < 0 \
+                || (written_total) + (written_now) > (buf_len)) { \
             clear_buf(buf, written_total); \
         } else { \
-            written_total += written_now; \
+            (written_total) += (written_now); \
         } \
     } while (0)
 
@@ -158,13 +159,13 @@ void clear_buf(char *buf, int &written) {
 
 #define MD2STR(buf, buf_len, written, md) \
     do { \
-        int l = dnnl_md2fmt_str(buf + written, buf_len - written, md); \
+        int l = dnnl_md2fmt_str((buf) + (written), (buf_len) - (written), md); \
         CHECK_WRITTEN(buf, buf_len, l, written); \
     } while (0)
 
 #define DIM2STR(buf, buf_len, written, md) \
     do { \
-        int l = dnnl_md2dim_str(buf + written, buf_len - written, md); \
+        int l = dnnl_md2dim_str((buf) + (written), (buf_len) - (written), md); \
         CHECK_WRITTEN(buf, buf_len, l, written); \
     } while (0)
 
@@ -778,27 +779,29 @@ static void init_info_pooling(engine_t *e, pd_t *s, char *buffer) {
         DPRINT(prb_str, DNNL_VERBOSE_PRB_LEN, prb_written,
                 "mb" DFMT "ic" DFMT
                 "_"
-                "id" DFMT "od" DFMT "kd" DFMT "sd" DFMT "pd" DFMT
+                "id" DFMT "od" DFMT "kd" DFMT "dd" DFMT "sd" DFMT "pd" DFMT
                 "_"
-                "ih" DFMT "oh" DFMT "kh" DFMT "sh" DFMT "ph" DFMT
+                "ih" DFMT "oh" DFMT "kh" DFMT "dh" DFMT "sh" DFMT "ph" DFMT
                 "_"
-                "iw" DFMT "ow" DFMT "kw" DFMT "sw" DFMT "pw" DFMT "",
-                s->MB(), s->C(), s->ID(), s->OD(), s->KD(), s->KSD(),
-                s->padFront(), s->IH(), s->OH(), s->KH(), s->KSH(), s->padT(),
-                s->IW(), s->OW(), s->KW(), s->KSW(), s->padL());
+                "iw" DFMT "ow" DFMT "kw" DFMT "dw" DFMT "sw" DFMT "pw" DFMT "",
+                s->MB(), s->C(), s->ID(), s->OD(), s->KD(), s->DD(), s->KSD(),
+                s->padFront(), s->IH(), s->OH(), s->KH(), s->DH(), s->KSH(),
+                s->padT(), s->IW(), s->OW(), s->KW(), s->DW(), s->KSW(),
+                s->padL());
     } else {
         DPRINT(prb_str, DNNL_VERBOSE_PRB_LEN, prb_written,
                 "mb" DFMT "ic" DFMT
                 "_"
-                "ih" DFMT "oh" DFMT "kh" DFMT "sh" DFMT "ph" DFMT
+                "ih" DFMT "oh" DFMT "kh" DFMT "dh" DFMT "sh" DFMT "ph" DFMT
                 "_"
-                "iw" DFMT "ow" DFMT "kw" DFMT "sw" DFMT "pw" DFMT,
-                s->MB(), s->C(), s->IH(), s->OH(), s->KH(), s->KSH(), s->padT(),
-                s->IW(), s->OW(), s->KW(), s->KSW(), s->padL());
+                "iw" DFMT "ow" DFMT "kw" DFMT "dw" DFMT "sw" DFMT "pw" DFMT,
+                s->MB(), s->C(), s->IH(), s->OH(), s->KH(), s->DH(), s->KSH(),
+                s->padT(), s->IW(), s->OW(), s->KW(), s->DW(), s->KSW(),
+                s->padL());
     }
 
-    verbose_templ(buffer, e, s->kind(), s->name(), s->desc()->prop_kind,
-            dat_str, attr_str, aux_str, prb_str);
+    verbose_templ(buffer, e, s->desc()->primitive_kind, s->name(),
+            s->desc()->prop_kind, dat_str, attr_str, aux_str, prb_str);
 }
 
 template <typename pd_t>
@@ -1018,7 +1021,7 @@ static void init_info_resampling(const engine_t *e, pd_t *s, char *buffer) {
             dat_str, attr_str, aux_str, prb_str);
 }
 
-static void init_info_zero_pad(
+void init_info_zero_pad(
         const engine_t *e, const primitive_desc_t *s, char *buffer) {
     DECL_DAT_AUX_PRB_STRS();
     verbose_templ(buffer, e, s->kind(), s->name(), prop_kind::undef, dat_str,
@@ -1035,6 +1038,7 @@ void pd_info_t::init(engine_t *engine, const primitive_desc_t *pd) {
         str_.resize(DNNL_VERBOSE_BUF_LEN, '\0');
 
         using logsoftmax_pd_t = softmax_pd_t;
+// clang-format off
 #define CASE(kind) \
     case primitive_kind::kind: \
         init_info_##kind(engine, (const kind##_pd_t *)pd, &str_[0]); \
@@ -1053,6 +1057,7 @@ void pd_info_t::init(engine_t *engine, const primitive_desc_t *pd) {
             CASE(lrn);
             CASE(logsoftmax);
             CASE(matmul);
+            case primitive_kind::pooling_v2:
             CASE(pooling);
             CASE(reorder);
             CASE(resampling);
@@ -1066,6 +1071,7 @@ void pd_info_t::init(engine_t *engine, const primitive_desc_t *pd) {
             default: assert(!"unknown primitive kind");
         }
 #undef CASE
+        // clang-format on
 
         is_initialized_ = true;
     });

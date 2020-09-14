@@ -250,6 +250,12 @@ status_t post_ops_t::append_binary(
     if (!alg_ok) return invalid_arguments;
     if (!memory_desc_sanity_check(src1_desc)) return invalid_arguments;
 
+    // Additional check to restrict run-time dimension usage until supported.
+    for (int d = 0; d < src1_desc->ndims; ++d) {
+        if (src1_desc->dims[d] == DNNL_RUNTIME_DIM_VAL)
+            return invalid_arguments;
+    }
+
     entry_.emplace_back();
     auto &e = entry_.back();
     e.kind = primitive_kind::binary;
@@ -314,7 +320,7 @@ status_t dnnl_primitive_attr_clone(
 }
 
 status_t dnnl_primitive_attr_destroy(primitive_attr_t *attr) {
-    if (attr) delete attr;
+    delete attr;
 
     return success;
 }
@@ -410,7 +416,7 @@ status_t dnnl_post_ops_create(post_ops_t **post_ops) {
 }
 
 status_t dnnl_post_ops_destroy(post_ops_t *post_ops) {
-    if (post_ops) delete post_ops;
+    delete post_ops;
 
     return success;
 }

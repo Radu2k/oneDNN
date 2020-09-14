@@ -82,7 +82,7 @@ interoperability with CPU or GPU runtime libraries used by the application.
 | `cpu_gomp`            | GNU\* OpenMP runtime
 | `cpu_vcomp`           | Microsoft Visual C OpenMP runtime
 | `cpu_tbb`             | Threading Building Blocks (TBB)
-| `cpu_dpcpp_gpu_dpcpp` | [Intel oneAPI DPC++ Compiler](https://software.intel.com/en-us/oneapi/dpc-compiler)
+| `cpu_dpcpp_gpu_dpcpp` | [Intel oneAPI DPC++ Compiler](https://software.intel.com/en-us/oneapi/dpc-compiler), TBB, OpenCL runtime, oneAPI Level Zero runtime
 
 The packages do not include library dependencies and these need to be resolved
 in the application at build time. See the
@@ -163,8 +163,10 @@ following additional requirements apply:
 * TBB runtime requires
 [Threading Building Blocks (TBB)](https://www.threadingbuildingblocks.org/)
 2017 or later.
-* DPCPP runtime requires[Intel oneAPI DPC++ Compiler](https://software.intel.com/en-us/oneapi/dpc-compiler)
+* DPCPP runtime requires
+  * [Intel oneAPI DPC++ Compiler](https://software.intel.com/en-us/oneapi/dpc-compiler)
   Beta
+  * [Threading Building Blocks (TBB)](https://www.threadingbuildingblocks.org/)
 
 Some implementations rely on OpenMP 4.0 SIMD extensions. For the best
 performance results on Intel Architecture Processors we recommend using the
@@ -182,8 +184,8 @@ is enabled:
       with Intel subgroups extension support
 * DPCPP runtime requires
     * [Intel oneAPI DPC++ Compiler](https://software.intel.com/en-us/oneapi/dpc-compiler) Beta
-    * [Level Zero Headers](https://github.com/oneapi-src/level-zero) (to use DPC++
-      with Level Zero backend)
+    * OpenCL\* runtime library (OpenCL version 1.2 or later)
+    * [oneAPI Level Zero](https://github.com/oneapi-src/level-zero)
 
 ### Runtime Dependencies
 
@@ -207,9 +209,9 @@ Runtime-specific dependencies:
 | `DNNL_CPU_RUNTIME=OMP`   | Intel C/C++ Compiler          | Intel OpenMP runtime (`libiomp5.so`)
 | `DNNL_CPU_RUNTIME=OMP`   | Clang                         | Intel OpenMP runtime (`libiomp5.so`)
 | `DNNL_CPU_RUNTIME=TBB`   | any                           | TBB (`libtbb.so`)
-| `DNNL_CPU_RUNTIME=DPCPP` | Intel oneAPI DPC++ Compiler   | Intel oneAPI DPC++ Compiler runtime (`libSYCL.so`), OpenCL runtime (`libOpenCL.so`)
-| `DNNL_GPU_RUNTIME=OCL`   | any                           | OpenCL runtime (libOpenCL.so)
-| `DNNL_GPU_RUNTIME=DPCPP` | Intel oneAPI DPC++ Compiler   | Intel oneAPI DPC++ Compiler runtime (`libSYCL.so`), OpenCL runtime (`libOpenCL.so`)
+| `DNNL_CPU_RUNTIME=DPCPP` | Intel oneAPI DPC++ Compiler   | Intel oneAPI DPC++ Compiler runtime (`libsycl.so`), TBB (`libtbb.so`), OpenCL loader (`libOpenCL.so`)
+| `DNNL_GPU_RUNTIME=OCL`   | any                           | OpenCL loader (`libOpenCL.so`)
+| `DNNL_GPU_RUNTIME=DPCPP` | Intel oneAPI DPC++ Compiler   | Intel oneAPI DPC++ Compiler runtime (`libsycl.so`), OpenCL loader (`libOpenCL.so`), oneAPI Level Zero loader (`libze_loader.so`)
 
 #### Windows
 
@@ -223,9 +225,9 @@ Runtime-specific dependencies:
 | `DNNL_CPU_RUNTIME=OMP`   | Microsoft Visual C++ Compiler | No additional requirements
 | `DNNL_CPU_RUNTIME=OMP`   | Intel C/C++ Compiler          | Intel OpenMP runtime (`iomp5.dll`)
 | `DNNL_CPU_RUNTIME=TBB`   | any                           | TBB (`tbb.dll`)
-| `DNNL_CPU_RUNTIME=DPCPP` | Intel oneAPI DPC++ Compiler   | Intel oneAPI DPC++ Compiler runtime (`SYCL.dll`)
-| `DNNL_GPU_RUNTIME=OCL`   | any                           | OpenCL runtime (`OpenCL.dll`)
-| `DNNL_GPU_RUNTIME=DPCPP` | Intel oneAPI DPC++ Compiler   | Intel oneAPI DPC++ Compiler runtime (`SYCL.dll`)
+| `DNNL_CPU_RUNTIME=DPCPP` | Intel oneAPI DPC++ Compiler   | Intel oneAPI DPC++ Compiler runtime (`sycl.dll`), TBB (`tbb.dll`), OpenCL loader (`OpenCL.dll`)
+| `DNNL_GPU_RUNTIME=OCL`   | any                           | OpenCL loader (`OpenCL.dll`)
+| `DNNL_GPU_RUNTIME=DPCPP` | Intel oneAPI DPC++ Compiler   | Intel oneAPI DPC++ Compiler runtime (`sycl.dll`), OpenCL loader (`OpenCL.dll`), oneAPI Level Zero loader (`ze_loader.dll`)
 
 #### macOS
 
@@ -244,28 +246,28 @@ Runtime-specific dependencies:
 CPU engine was validated on RedHat\* Enterprise Linux 7 with
 * GNU Compiler Collection 4.8, 5.4, 6.1, 7.2, and 8.1
 * Clang\* 3.8.0
-* [Intel C/C++ Compiler](https://software.intel.com/en-us/intel-parallel-studio-xe)
+* [Intel C/C++ Compiler](https://software.intel.com/content/www/us/en/develop/tools/parallel-studio-xe.html)
   17.0, 18.0, and 19.0
 * [Intel oneAPI DPC++ Compiler](https://software.intel.com/en-us/oneapi/dpc-compiler) Beta
 
 
 on Windows Server\* 2012 R2 with
 * Microsoft Visual C++ 14.0 (Visual Studio 2015 Update 3)
-* [Intel C/C++ Compiler](https://software.intel.com/en-us/intel-parallel-studio-xe)
+* [Intel C/C++ Compiler](https://software.intel.com/content/www/us/en/develop/tools/parallel-studio-xe.html)
   17.0 and 19.0
 * [Intel oneAPI DPC++ Compiler](https://software.intel.com/en-us/oneapi/dpc-compiler) Beta
 
 on macOS 10.13 (High Sierra) with
 * Apple LLVM version 9.2 (XCode 9.2)
-* [Intel C/C++ Compiler](https://software.intel.com/en-us/intel-parallel-studio-xe)
+* [Intel C/C++ Compiler](https://software.intel.com/content/www/us/en/develop/tools/parallel-studio-xe.html)
   18.0 and 19.0
 
 GPU engine was validated on Ubuntu\* 18.04 with
 * GNU Compiler Collection 6.1 and 8.1
 * Clang 3.8.1
-* [Intel C/C++ Compiler](https://software.intel.com/en-us/intel-parallel-studio-xe)
+* [Intel C/C++ Compiler](https://software.intel.com/content/www/us/en/develop/tools/parallel-studio-xe.html)
   19.0
-* [Intel SDK for OpenCL applications](https://software.intel.com/en-us/intel-opencl)
+* [Intel SDK for OpenCL applications](https://software.intel.com/content/www/us/en/develop/tools/opencl-sdk.html)
   2019 Update 3
 * [Intel Graphics Compute Runtime for OpenCL](https://github.com/intel/compute-runtime/releases)
   19.37.14191
@@ -274,9 +276,9 @@ GPU engine was validated on Ubuntu\* 18.04 with
 
 on Windows Server 2019 with
 * Microsoft Visual C++ 14.0 (Visual Studio 2015 Update 3)
-* [Intel C/C++ Compiler](https://software.intel.com/en-us/intel-parallel-studio-xe)
+* [Intel C/C++ Compiler](https://software.intel.com/content/www/us/en/develop/tools/parallel-studio-xe.html)
   19.0
-* [Intel SDK for OpenCL applications](https://software.intel.com/en-us/intel-opencl) 2019 Update 3
+* [Intel SDK for OpenCL applications](https://software.intel.com/content/www/us/en/develop/tools/opencl-sdk.html) 2019 Update 3
 * [Intel Graphics - Windows 10 DCH Drivers](https://downloadcenter.intel.com/download/28783/Intel-Graphics-Windows-10-DCH-Drivers) 26.20.100.6709
 * [Intel oneAPI DPC++ Compiler](https://software.intel.com/en-us/oneapi/dpc-compiler) Beta
 

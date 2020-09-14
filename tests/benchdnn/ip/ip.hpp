@@ -127,9 +127,9 @@ struct perf_report_t : public base_perf_report_t {
 
     void report(const prb_t *p, const res_t *r, const char *prb_str) {
         p_ = p;
-        stag_ = {fmt_tag2str(convert_tag(p_->stag, p_->ndims))};
-        wtag_ = fmt_tag2str(convert_tag(p_->wtag, p_->ndims));
-        dtag_ = fmt_tag2str(convert_tag(p_->dtag, p_->ndims));
+        stag_ = {normalize_tag(p_->stag, p_->ndims)};
+        wtag_ = normalize_tag(p_->wtag, p_->ndims);
+        dtag_ = normalize_tag(p_->dtag, p_->ndims);
         base_report(r, prb_str);
     }
 
@@ -177,7 +177,8 @@ inline size_t dst_off_f(const prb_t *p, int64_t mb, int64_t oc) {
 }
 
 void compute_ref_fwd(const engine_t &engine_tgt, const prb_t *p,
-        dnn_mem_t &src_m, dnn_mem_t &wei_m, dnn_mem_t &bia_m, dnn_mem_t &dst_m);
+        dnn_mem_t &src_m, dnn_mem_t &wei_m, dnn_mem_t &bia_m,
+        const std::vector<dnn_mem_t> &binary_po, dnn_mem_t &dst_m);
 void compute_ref_bwd_d(const prb_t *p, dnn_mem_t &diff_src_m, dnn_mem_t &wei_m,
         dnn_mem_t &diff_dst_m);
 void compute_ref_bwd_w(const prb_t *p, dnn_mem_t &src_m, dnn_mem_t &diff_wei_m,
