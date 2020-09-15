@@ -15,7 +15,7 @@
 *******************************************************************************/
 
 #include "gpu/jit/gen12hp_convolution.hpp"
-#include "gpu/jit/gen12hp_conv_fwd_kernel.hpp"
+#include "gpu/jit/gen12hp_conv_data_kernel.hpp"
 #include "gpu/ocl/ocl_gpu_engine.hpp"
 
 namespace dnnl {
@@ -26,14 +26,13 @@ namespace jit {
 using namespace dnnl::impl::data_type;
 using namespace dnnl::impl::format_tag;
 
-status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
-    const convolution_desc_t &cd = *desc();
-    const memory_desc_wrapper src_mdw(src_md());
-    const memory_desc_wrapper wei_mdw(weights_md());
-    const memory_desc_wrapper dst_mdw(dst_md());
+status_t gen12hp_convolution_data_common_init_conf(engine_t *engine,
+        conv_conf_t &conf, const memory_desc_t &src_md,
+        const memory_desc_t &wei_md, const memory_desc_t &dst_md) {
 
-    set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
-            *weights_md(1), *attr());
+    const memory_desc_wrapper src_mdw(src_md);
+    const memory_desc_wrapper wei_mdw(wei_md);
+    const memory_desc_wrapper dst_mdw(dst_md);
 
     bool is_1st = utils::one_of(conf.ic, 3, 4) && (conf.kw == 7);
 
@@ -96,40 +95,55 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     auto tag_40n32c
             = utils::pick(conf.ndims - 3, ABc40a32b, ABcd40a32b, ABcde40a32b);
 
-    auto tag_g_4o8i8o2i = utils::pick(
-            conf.ndims - 3, aBCd4b8c8b2c, aBCde4b8c8b2c, aBCdef4b8c8b2c);
-    auto tag_g_4o8i8o4i = utils::pick(
-            conf.ndims - 3, aBCd4b8c8b4c, aBCde4b8c8b4c, aBCdef4b8c8b4c);
-    auto tag_g_8o2i
-            = utils::pick(conf.ndims - 3, aBCd8b2c, aBCde8b2c, aBCdef8b2c);
-    auto tag_g_8o4i
-            = utils::pick(conf.ndims - 3, aBCd8b4c, aBCde8b4c, aBCdef8b4c);
+    if (conf.prop_kind == prop_kind::backward_data) {
+        // only f16, bf16 support, so only 16c variants
+        auto tag_g_4i8o8i2o = utils::pick(
+                conf.ndims - 3, aCBd4c8b8c2b, aCBde4c8b8c2b, aCBdef4c8b8c2b);
+        auto tag_4i8o8i2o = utils::pick(
+                conf.ndims - 3, BAc4b8a8b2a, BAcd4b8a8b2a, BAcde4b8a8b2a);
 
-    auto tag_4o8i8o2i = utils::pick(
-            conf.ndims - 3, ABc4a8b8a2b, ABcd4a8b8a2b, ABcde4a8b8a2b);
-    auto tag_4o8i8o4i = utils::pick(
-            conf.ndims - 3, ABc4a8b8a4b, ABcd4a8b8a4b, ABcde4a8b8a4b);
-    auto tag_8o2i = utils::pick(conf.ndims - 3, ABc8a2b, ABcd8a2b, ABcde8a2b);
-    auto tag_8o4i = utils::pick(conf.ndims - 3, ABc8a4b, ABcd8a4b, ABcde8a4b);
-
-    if (is_int8) {
-        src_tag = is_1st ? tag_4n4c
-                         : conf.mb_block == 32 ? tag_32n32c : tag_40n32c;
-        if (is_1st) {
-            wei_tag = conf.with_groups ? tag_g_8o4i : tag_8o4i;
-        } else {
-            wei_tag = conf.with_groups ? tag_g_4o8i8o4i : tag_4o8i8o4i;
-        }
-        dst_tag = conf.mb_block == 32 ? tag_32n32c : tag_40n32c;
-    } else { // f16 or bf16.
-        src_tag = is_1st ? tag_4n2c
-                         : conf.mb_block == 32 ? tag_32n16c : tag_40n16c;
-        if (is_1st) {
-            wei_tag = conf.with_groups ? tag_g_8o2i : tag_8o2i;
-        } else {
-            wei_tag = conf.with_groups ? tag_g_4o8i8o2i : tag_4o8i8o2i;
-        }
+        src_tag = conf.mb_block == 32 ? tag_32n16c : tag_40n16c;
+        wei_tag = conf.with_groups ? tag_g_4i8o8i2o : tag_4i8o8i2o;
         dst_tag = conf.mb_block == 32 ? tag_32n16c : tag_40n16c;
+    } else { // forward
+        auto tag_g_4o8i8o2i = utils::pick(
+                conf.ndims - 3, aBCd4b8c8b2c, aBCde4b8c8b2c, aBCdef4b8c8b2c);
+        auto tag_g_4o8i8o4i = utils::pick(
+                conf.ndims - 3, aBCd4b8c8b4c, aBCde4b8c8b4c, aBCdef4b8c8b4c);
+        auto tag_g_8o2i
+                = utils::pick(conf.ndims - 3, aBCd8b2c, aBCde8b2c, aBCdef8b2c);
+        auto tag_g_8o4i
+                = utils::pick(conf.ndims - 3, aBCd8b4c, aBCde8b4c, aBCdef8b4c);
+
+        auto tag_4o8i8o2i = utils::pick(
+                conf.ndims - 3, ABc4a8b8a2b, ABcd4a8b8a2b, ABcde4a8b8a2b);
+        auto tag_4o8i8o4i = utils::pick(
+                conf.ndims - 3, ABc4a8b8a4b, ABcd4a8b8a4b, ABcde4a8b8a4b);
+
+        auto tag_8o2i
+                = utils::pick(conf.ndims - 3, ABc8a2b, ABcd8a2b, ABcde8a2b);
+        auto tag_8o4i
+                = utils::pick(conf.ndims - 3, ABc8a4b, ABcd8a4b, ABcde8a4b);
+
+        if (is_int8) {
+            src_tag = is_1st ? tag_4n4c
+                             : conf.mb_block == 32 ? tag_32n32c : tag_40n32c;
+            if (is_1st) {
+                wei_tag = conf.with_groups ? tag_g_8o4i : tag_8o4i;
+            } else {
+                wei_tag = conf.with_groups ? tag_g_4o8i8o4i : tag_4o8i8o4i;
+            }
+            dst_tag = conf.mb_block == 32 ? tag_32n32c : tag_40n32c;
+        } else { // f16 or bf16.
+            src_tag = is_1st ? tag_4n2c
+                             : conf.mb_block == 32 ? tag_32n16c : tag_40n16c;
+            if (is_1st) {
+                wei_tag = conf.with_groups ? tag_g_8o2i : tag_8o2i;
+            } else {
+                wei_tag = conf.with_groups ? tag_g_4o8i8o2i : tag_4o8i8o2i;
+            }
+            dst_tag = conf.mb_block == 32 ? tag_32n16c : tag_40n16c;
+        }
     }
 
     if (src_mdw.format_kind() != format_kind::any
@@ -151,8 +165,17 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     return status::success;
 }
 
+status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
+    const convolution_desc_t &cd = *desc();
+
+    set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
+            *weights_md(1), *attr());
+    return gen12hp_convolution_data_common_init_conf(
+            engine, conf, *src_md(), *weights_md(), *dst_md());
+}
+
 status_t gen12hp_convolution_fwd_t::init(engine_t *engine) {
-    CHECK(gen12hp_conv_fwd_create_kernel(pd()->conf, &kernel_, this, engine));
+    CHECK(gen12hp_conv_data_create_kernel(pd()->conf, &kernel_, this, engine));
     return status::success;
 }
 
@@ -178,6 +201,41 @@ status_t gen12hp_convolution_fwd_t::execute(const exec_ctx_t &ctx) const {
     arg_list.set(4, oscales);
     arg_list.set(5, attr_info.common_oscales);
 
+    auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
+    return parallel_for(ctx, nd_range, kernel_, arg_list);
+}
+
+status_t gen12hp_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
+    const convolution_desc_t &cd = *desc();
+
+    // The data kernel is expressed in terms of FWD convolution
+    // So we need to swap diff_src and diff_dst mds to fill the conf properly
+    set_default_conf(conf, cd, *diff_dst_md(), *weights_md(), *diff_src_md(),
+            *weights_md(1), *attr());
+    return gen12hp_convolution_data_common_init_conf(
+            engine, conf, *diff_dst_md(), *weights_md(), *diff_src_md());
+}
+
+status_t gen12hp_convolution_bwd_data_t::init(engine_t *engine) {
+    CHECK(gen12hp_conv_data_create_kernel(pd()->conf, &kernel_, this, engine));
+    return status::success;
+}
+
+status_t gen12hp_convolution_bwd_data_t::execute(const exec_ctx_t &ctx) const {
+    // TODO: we can add bias here if we want to support deconvolution
+    auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
+    auto &wei = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
+    auto &diff_src = CTX_OUT_STORAGE(DNNL_ARG_DIFF_SRC);
+
+    compute::kernel_arg_list_t arg_list;
+    arg_list.set(0, diff_dst);
+    arg_list.set(1, wei);
+    arg_list.set(2, memory_storage_t::empty_storage());
+    arg_list.set(3, diff_src);
+    arg_list.set(4, memory_storage_t::empty_storage());
+    arg_list.set(5, memory_storage_t::empty_storage());
+
+    const auto &conf = pd()->conf;
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
     return parallel_for(ctx, nd_range, kernel_, arg_list);
 }

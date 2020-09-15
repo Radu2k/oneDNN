@@ -51,9 +51,7 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
                     | primitive_attr_t::skip_mask_t::post_ops
                     | primitive_attr_t::skip_mask_t::sum_dt;
             bool ok = set_default_alg_kind(alg_kind::convolution_direct)
-                    && utils::one_of(desc()->prop_kind, forward_training,
-                            forward_inference)
-                    && data_types_ok()
+                    && is_fwd() && data_types_ok()
                     && attr()->has_default_values(
                             attr_skip_mask, desc()->dst_desc.data_type)
                     && post_ops_ok(attr())
@@ -136,6 +134,89 @@ protected:
             engine_t *engine, gpu_resource_t *r) const override {
         return init_output_scales_res_storage(engine, r, OSCALES_);
     }
+
+private:
+    const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
+
+    compute::kernel_t kernel_;
+
+    const int OSCALES_ = 0;
+};
+
+struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
+    struct pd_t : public gpu_convolution_bwd_data_pd_t {
+        using gpu_convolution_bwd_data_pd_t::gpu_convolution_bwd_data_pd_t;
+
+        DECLARE_COMMON_PD_T("ngen:gen12hp", gen12hp_convolution_bwd_data_t);
+
+        status_t init(engine_t *engine) {
+            using namespace prop_kind;
+            using namespace data_type;
+
+            auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine);
+
+            if (!compute_engine->is_gen12hp()) return status::unimplemented;
+            if (!compute_engine->mayiuse_ngen_kernels())
+                return status::unimplemented;
+
+            bool ok = set_default_alg_kind(alg_kind::convolution_direct)
+                    && is_bwd_d() && data_types_ok()
+                    && attr()->has_default_values();
+
+            if (!ok) return status::unimplemented;
+
+            CHECK(init_conf(engine));
+            // We support only unit stride for now
+            bool has_w = conf.ow > 1 || conf.iw > 1 || conf.kw > 1;
+            bool has_h = conf.oh > 1 || conf.ih > 1 || conf.kh > 1;
+            bool has_d = conf.od > 1 || conf.id > 1 || conf.kd > 1;
+            ok = conf.stride_w == 1 && IMPLICATION(has_h, conf.stride_h == 1)
+                    && IMPLICATION(has_d, conf.stride_d == 1);
+            if (!ok) return status::unimplemented;
+
+            // In conf, we express bwd_data as a fwd convolution
+            // So we use the appropriate tags here
+            ok = set_default_formats_common(
+                    conf.dst_tag, conf.wei_tag, conf.src_tag);
+
+            return ok ? status::success : status::unimplemented;
+        }
+
+        bool data_types_ok() const {
+            using namespace data_type;
+
+            auto src_dt = invariant_src_md()->data_type;
+            auto wei_dt = invariant_wei_md()->data_type;
+            auto dst_dt = invariant_dst_md()->data_type;
+            auto acc_dt = desc_.accum_data_type;
+
+            // Ignore accumulator type set to f16 and use f32.
+            bool is_f16 = (acc_dt == f16 || acc_dt == f32);
+            is_f16 &= (src_dt == f16);
+            is_f16 &= (wei_dt == f16);
+            is_f16 &= utils::one_of(dst_dt, f16, f32);
+            if (is_f16) return true;
+
+            bool is_bf16 = (acc_dt == f32);
+            is_bf16 &= (src_dt == bf16);
+            is_bf16 &= (wei_dt == bf16);
+            is_bf16 &= utils::one_of(dst_dt, bf16, f32);
+            if (is_bf16) return true;
+
+            // Not supported.
+            return false;
+        }
+
+        status_t init_conf(engine_t *engine);
+
+        conv_conf_t conf;
+    };
+
+    using gpu_primitive_t::gpu_primitive_t;
+
+    status_t init(engine_t *engine) override;
+    status_t execute(const exec_ctx_t &ctx) const override;
 
 private:
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }

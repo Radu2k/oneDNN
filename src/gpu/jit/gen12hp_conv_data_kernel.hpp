@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GPU_JIT_GEN12HP_CONV_FWD_KERNEL_HPP
-#define GPU_JIT_GEN12HP_CONV_FWD_KERNEL_HPP
+#ifndef GPU_JIT_GEN12HP_CONV_DATA_KERNEL_HPP
+#define GPU_JIT_GEN12HP_CONV_DATA_KERNEL_HPP
 
 #include <CL/cl.h>
 
@@ -28,7 +28,7 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
-status_t gen12hp_conv_fwd_create_kernel(const conv_conf_t &conf,
+status_t gen12hp_conv_data_create_kernel(const conv_conf_t &conf,
         compute::kernel_t *kernel, gpu_primitive_t *primitive,
         engine_t *engine);
 

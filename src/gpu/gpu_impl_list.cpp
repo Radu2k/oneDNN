@@ -75,6 +75,7 @@ const pd_create_f gpu_impl_list[] = {
 
         // Convolution
         INSTANCE(jit::gen12hp_convolution_fwd_t),
+        INSTANCE(jit::gen12hp_convolution_bwd_data_t),
         INSTANCE(ocl::gen12hp_1x1_convolution_fwd_t),
         INSTANCE(ocl::gen12hp_bf16_convolution_bwd_weights_t),
         INSTANCE(ocl::gen12hp_convolution_fwd_t),

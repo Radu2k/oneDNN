@@ -14,7 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "gpu/jit/gen12hp_conv_fwd_kernel.hpp"
+#include "gpu/jit/gen12hp_conv_data_kernel.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -34,6 +34,7 @@ namespace gpu {
 namespace jit {
 
 using namespace ngen;
+using namespace prop_kind;
 
 // Controls for performance debugging.
 const bool enable_dpasw = true;
@@ -46,13 +47,13 @@ const bool enable_smem_write = true;
 
 const bool enable_barrier = true;
 
-class gen12hp_conv_fwd_kernel_t;
+class gen12hp_conv_data_kernel_t;
 
 // Convert registers between data types.
 // to_stride is always assumed to be 1.
 class convertor_t {
 public:
-    convertor_t(gen12hp_conv_fwd_kernel_t *host, int width, DataType to_type,
+    convertor_t(gen12hp_conv_data_kernel_t *host, int width, DataType to_type,
             DataType from_type, int from_stride = 1)
         : host_(host)
         , width_(width)
@@ -122,7 +123,7 @@ private:
         return grf[(new_off % 32) / sub.getBytes()];
     }
 
-    gen12hp_conv_fwd_kernel_t *host_;
+    gen12hp_conv_data_kernel_t *host_;
 
     int width_;
     DataType to_type_;
@@ -137,7 +138,7 @@ private:
 // Represents an (mb_len x w_len) region to read.
 class nw_read_region_t {
 public:
-    nw_read_region_t(gen12hp_conv_fwd_kernel_t *host, int mb_len, int w_val,
+    nw_read_region_t(gen12hp_conv_data_kernel_t *host, int mb_len, int w_val,
             int w_shift, int w_len)
         : host(host)
         , mb_len(mb_len)
@@ -145,7 +146,7 @@ public:
         , w_shift(w_shift)
         , w_len(w_len) {}
 
-    nw_read_region_t(gen12hp_conv_fwd_kernel_t *host, int mb_len, int w_len)
+    nw_read_region_t(gen12hp_conv_data_kernel_t *host, int mb_len, int w_len)
         : host(host)
         , mb_len(mb_len)
         , w_val(INT_MAX)
@@ -156,7 +157,7 @@ public:
 
     void read_and_reorder();
 
-    gen12hp_conv_fwd_kernel_t *host;
+    gen12hp_conv_data_kernel_t *host;
 
     int mb_len;
     int w_val;
@@ -166,12 +167,12 @@ public:
     Label label;
 };
 
-class gen12hp_conv_fwd_kernel_t : public jit_generator<HW::Gen12HP> {
+class gen12hp_conv_data_kernel_t : public jit_generator<HW::Gen12HP> {
 public:
     friend class convertor_t;
     friend class nw_read_region_t;
 
-    gen12hp_conv_fwd_kernel_t(const conv_conf_t &conf)
+    gen12hp_conv_data_kernel_t(const conv_conf_t &conf)
         : conf(conf), attr_info(conf.attr_info), ra(HW::Gen12HP) {
 
         src_type = convert_dnnl_type_to_ngen(conf.src_data_type);
@@ -246,7 +247,7 @@ public:
         newArgument("oscales", ExternalArgumentType::GlobalPtr);
         newArgument("common_oscales", DataType::f);
 
-        externalName("gen12hp_conv_fwd");
+        externalName("gen12hp_conv_data");
         requireLocalID(3);
         requireLocalSize();
         requireGRF(256);
@@ -412,27 +413,41 @@ public:
             mov(1, oh, odh);
         }
 
+        int pad_sign = (conf.prop_kind == backward_data) ? 1 : -1;
         if (has_d) {
-            mul(1, id_init, od, uint16_t(conf.stride_d));
-            if (conf.f_pad > 0) add(1, id_init, id_init, -conf.f_pad);
+            if (conf.prop_kind == backward_data)
+                mov(1, id_init, od);
+            else
+                mul(1, id_init, od, uint16_t(conf.stride_d));
+            if (conf.f_pad > 0) add(1, id_init, id_init, pad_sign * conf.f_pad);
         }
 
         if (has_h) {
-            mul(1, ih_init, oh, uint16_t(conf.stride_h));
-            if (conf.t_pad > 0) add(1, ih_init, ih_init, -conf.t_pad);
+            if (conf.prop_kind == backward_data)
+                mov(1, ih_init, oh);
+            else
+                mul(1, ih_init, oh, uint16_t(conf.stride_h));
+            if (conf.t_pad > 0) add(1, ih_init, ih_init, pad_sign * conf.t_pad);
         }
 
-        mov(1, iw_tg, ow_tg);
-        mul(1, iw_tg, ow_tg, uint16_t(conf.stride_w));
-        if (conf.l_pad > 0) add(1, iw_tg, iw_tg, -conf.l_pad);
+        if (conf.prop_kind == backward_data)
+            mov(1, iw_tg, ow_tg);
+        else
+            mul(1, iw_tg, ow_tg, uint16_t(conf.stride_w));
+        if (conf.l_pad > 0) add(1, iw_tg, iw_tg, pad_sign * conf.l_pad);
 
-        // iw to start reading from global memory.
-        if (is_1st) {
-            mad(1, iw_init, iw_tg, ithr1, uint16_t(conf.stride_w));
+        if (conf.prop_kind == backward_data) {
+            // No need to take is_1st in consideration since there is
+            // no such case on bwd.
+            add(1, iw_init, iw_tg, ithr0);
         } else {
-            mad(1, iw_init, iw_tg, ithr0, uint16_t(conf.stride_w));
+            // iw to start reading from global memory.
+            if (is_1st) {
+                mad(1, iw_init, iw_tg, ithr1, uint16_t(conf.stride_w));
+            } else {
+                mad(1, iw_init, iw_tg, ithr0, uint16_t(conf.stride_w));
+            }
         }
-
         // Initialize SLM write offsets for A and B in owords.
         if (is_1st) {
             mul(1, a_slm_off_wr_init, ithr1, uint16_t(a_slm_block_size / 16));
@@ -621,9 +636,9 @@ public:
         if (do_kw_loop) {
             // Advance kw = kw + 1.
             add(1, src_off_rd_kw, src_off_rd_kw,
-                    (1 + conf.dilate_w) * mb_block * 32);
+                    -pad_sign * (1 + conf.dilate_w) * mb_block * 32);
             add(1, kw, kw, 1);
-            add(1, iw, iw, 1 + conf.dilate_w);
+            add(1, iw, iw, -pad_sign * (1 + conf.dilate_w));
             cmp(8 | lt | f0[0] | SWSB(2), kw, conf.kw);
             while_(8 | f0[0], kw_loop);
         }
@@ -633,7 +648,7 @@ public:
 
             // Advance kh = kh + 1.
             add(1, kh, kh, 1);
-            add(1, ih, ih, 1 + conf.dilate_h);
+            add(1, ih, ih, -pad_sign * (1 + conf.dilate_h));
             if (is_1st) {
                 // NCx4n2c or NCx4n4c.
                 add(1, src_off_rd_kh, src_off_rd_kh,
@@ -641,7 +656,8 @@ public:
             } else {
                 // NCx<mb_block>n16c or NCx<mb_block>n32c.
                 add(1, src_off_rd_kh, src_off_rd_kh,
-                        (1 + conf.dilate_h) * conf.iw * mb_block * 32);
+                        -pad_sign * (1 + conf.dilate_h) * conf.iw * mb_block
+                                * 32);
             }
             cmp(8 | lt | f0[0] | SWSB(2), kh, conf.kh);
             while_(8 | f0[0], kh_loop);
@@ -652,7 +668,7 @@ public:
 
             // Advance kd = kd + 1.
             add(1, kd, kd, 1);
-            add(1, id, id, 1 + conf.dilate_d);
+            add(1, id, id, -pad_sign * (1 + conf.dilate_d));
             if (is_1st) {
                 // NCx4n2c or NCx4n4c.
                 add(1, src_off_rd_kd, src_off_rd_kd,
@@ -660,8 +676,8 @@ public:
             } else {
                 // NCx<mb_block>n16c or NCx<mb_block>n32c.
                 add(1, src_off_rd_kd, src_off_rd_kd,
-                        (1 + conf.dilate_d) * conf.ih * conf.iw * mb_block
-                                * 32);
+                        -pad_sign * (1 + conf.dilate_d) * conf.ih * conf.iw
+                                * mb_block * 32);
             }
             cmp(8 | lt | f0[0] | SWSB(2), kd, conf.kd);
             while_(8 | f0[0], kd_loop);
@@ -1004,10 +1020,19 @@ public:
             // TODO: No padding and non-multiple OW case does not require >= 0
             // check.
             if (check_src_load_w) {
-                // iw + ithr * SW < IW
-                cmp(8 | lt | f1[0], iw, conf.iw - ithr * conf.stride_w);
-                // iw + ithr * SW >= 0
-                cmp(8 | f1[0] | ge, iw, -ithr * conf.stride_w);
+                // FWD:
+                // - iw + ithr * SW < IW
+                // - iw + ithr * SW >= 0
+                // BWD:
+                // - (iw + ithr) / SW < IW
+                // - (iw + ithr) / SW >= 0
+                if (conf.prop_kind == backward_data) {
+                    cmp(8 | lt | f1[0], iw, conf.iw * conf.stride_w - ithr);
+                    cmp(8 | f1[0] | ge, iw, -ithr);
+                } else {
+                    cmp(8 | lt | f1[0], iw, conf.iw - ithr * conf.stride_w);
+                    cmp(8 | f1[0] | ge, iw, -ithr * conf.stride_w);
+                }
                 if_(8 | f1[0], src_skip, src_end);
             }
             load(16 | SWSB(gmem_a_sbid(iter, 0), 1), A_tmp[iter * A_block_regs],
@@ -1931,10 +1956,10 @@ void nw_read_region_t::read_and_reorder() {
     }
 }
 
-status_t gen12hp_conv_fwd_create_kernel(const conv_conf_t &conf,
+status_t gen12hp_conv_data_create_kernel(const conv_conf_t &conf,
         compute::kernel_t *kernel, gpu_primitive_t *primitive,
         engine_t *engine) {
-    gen12hp_conv_fwd_kernel_t ngen_kernel(conf);
+    gen12hp_conv_data_kernel_t ngen_kernel(conf);
     return primitive->create_kernel(engine, kernel, ngen_kernel);
 }
 
