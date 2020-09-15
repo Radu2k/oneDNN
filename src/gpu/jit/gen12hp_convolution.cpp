@@ -63,7 +63,7 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     if (is_1st) {
         conf.ic_block = is_int8 ? 4 : 2;
     } else {
-        conf.ic_block = 32;
+        conf.ic_block = is_int8 ? 32 : 16;
     }
 
     bool enable_40n = (getenv_int("DNNL_ENABLE_CONV_40N", 0) != 0);
