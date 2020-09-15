@@ -289,6 +289,7 @@ inline DATA_T read_c_block(const __global DATA_T *ptr, int c) {
     int tail = C_WO_PADDING - c;
     return (local_id < tail) ? ptr[local_id] : 0;
 #else
+    if (c >= C_WO_PADDING) { return 0; }
     return AS_DATA_T(BLOCK_READ((const __global BLOCK_DATA_T *)ptr));
 #endif
 }
@@ -310,7 +311,8 @@ inline VECT_DATA_T read_vect_c_block(int idx, const __global DATA_T *ptr, int c,
             const int ptr_offset = local_c_block_index * SUB_GROUP_SIZE
                     + global_c_block_index * blocks_stride;
             const int c_off
-                    = (USE_ONLY_C_BLOCK ? offset_index * SUB_GROUP_SIZE : 0);
+                    = (USE_ONLY_C_BLOCK ? offset_index * SUB_GROUP_SIZE
+                                        : local_c_block_index * SUB_GROUP_SIZE);
 #if VECT_DT_N == 1
             ret = read_c_block(ptr + ptr_offset, c + c_off);
 #else
@@ -327,6 +329,7 @@ inline int read_c_block_int(const __global int *ptr, int c) {
     int tail = C_WO_PADDING - c;
     return (local_id < tail) ? ptr[local_id] : 0;
 #else
+    if (c >= C_WO_PADDING) { return 0; }
     return as_int(intel_sub_group_block_read((const __global uint *)ptr));
 #endif
 }
@@ -348,7 +351,8 @@ inline VECT_INT_T read_vect_c_block_int(int idx, const __global int *ptr, int c,
             const int ptr_offset = local_c_block_index * SUB_GROUP_SIZE
                     + global_c_block_index * blocks_stride;
             const int c_off
-                    = (USE_ONLY_C_BLOCK ? offset_index * SUB_GROUP_SIZE : 0);
+                    = (USE_ONLY_C_BLOCK ? offset_index * SUB_GROUP_SIZE
+                                        : local_c_block_index * SUB_GROUP_SIZE);
 #if VECT_DT_N == 1
             ret = read_c_block_int(ptr + ptr_offset, c + c_off);
 #else
@@ -365,6 +369,7 @@ inline void write_c_block(__global DATA_T *ptr, int c, DATA_T value) {
     int tail = C_WO_PADDING - c;
     if (local_id < tail) ptr[local_id] = value;
 #else
+    if (c >= C_WO_PADDING) { return; }
     BLOCK_WRITE((__global BLOCK_DATA_T *)ptr, AS_BLOCK_DATA_T(value));
 #endif
 }
@@ -386,7 +391,8 @@ inline void write_vect_c_block(int idx, __global DATA_T *ptr, int c,
             const int ptr_offset = local_c_block_index * SUB_GROUP_SIZE
                     + global_c_block_index * blocks_stride;
             const int c_off
-                    = (USE_ONLY_C_BLOCK ? offset_index * SUB_GROUP_SIZE : 0);
+                    = (USE_ONLY_C_BLOCK ? offset_index * SUB_GROUP_SIZE
+                                        : local_c_block_index * SUB_GROUP_SIZE);
 #if VECT_DT_N == 1
             write_c_block(ptr + ptr_offset, c + c_off, block);
 #else
@@ -402,6 +408,7 @@ inline void write_c_block_int(__global int *ptr, int c, int value) {
     int tail = C_WO_PADDING - c;
     if (local_id < tail) ptr[local_id] = value;
 #else
+    if (c >= C_WO_PADDING) { return; }
     intel_sub_group_block_write((__global uint *)ptr, as_uint(value));
 #endif
 }
@@ -422,7 +429,8 @@ inline void write_vect_c_block_int(int idx, __global int *ptr, int c,
             const int ptr_offset = local_c_block_index * SUB_GROUP_SIZE
                     + global_c_block_index * blocks_stride;
             const int c_off
-                    = (USE_ONLY_C_BLOCK ? offset_index * SUB_GROUP_SIZE : 0);
+                    = (USE_ONLY_C_BLOCK ? offset_index * SUB_GROUP_SIZE
+                                        : local_c_block_index * SUB_GROUP_SIZE);
 #if VECT_DT_N == 1
             write_c_block_int(ptr + ptr_offset, c + c_off, block);
 #else

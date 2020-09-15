@@ -57,7 +57,6 @@ static status_t init_conf_common(pool_conf_t &conf, offsets_t &off,
     conf.use_mb_c_block = false;
     conf.use_only_c_block = false;
     int c_padded = utils::rnd_up(conf.c, conf.sub_group_size);
-    if (is_c_blocked_by(src_mdw, 32)) { c_padded = utils::rnd_up(conf.c, 32); }
 
     if (src_mdw.matches_one_of_tag(NCw16n16c, NChw16n16c, NCdhw16n16c)) {
         conf.use_mb_c_block = true;
@@ -67,6 +66,7 @@ static status_t init_conf_common(pool_conf_t &conf, offsets_t &off,
         conf.chunks_per_mb_block
                 = conf.vect_dt_n * conf.nvect / conf.chunks_per_c_block;
     } else if (src_mdw.matches_one_of_tag(NCw32n32c, NChw32n32c, NCdhw32n32c)) {
+        c_padded = utils::rnd_up(conf.c, 32);
         conf.use_mb_c_block = true;
         conf.vect_dt_n = 8;
         conf.nvect = 1;
