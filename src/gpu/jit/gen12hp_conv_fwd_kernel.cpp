@@ -668,7 +668,6 @@ public:
         }
 
         if (do_ic_loop) {
-            assert(!is_1st);
             // Advance ic_bytes.
             add(1, ic_bytes, ic_bytes, conf.ic_block * src_size);
             if (is_1st) {
