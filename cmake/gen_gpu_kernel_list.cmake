@@ -21,7 +21,7 @@ function(parse_kernels ker_name ker_path)
 
     file(READ ${ker_path} contents)
     string(REGEX MATCHALL
-	"(kernel|_GENX_MAIN_)[ \n]+void[ \n]+([a-z0-9_]+)"
+        "kernel[ \n]+void[ \n]+([a-z0-9_]+)"
         kernels ${contents})
     set(cur_ker_names)
     foreach(k ${kernels})

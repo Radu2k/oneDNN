@@ -16,7 +16,6 @@
 
 #include "gpu/gpu_impl_list.hpp"
 
-#include "cm/simple_sum.hpp"
 #include "common/utils.hpp"
 #include "gpu/gpu_sum_pd.hpp"
 #include "gpu/jit/gen9_simple_sum.hpp"
@@ -32,7 +31,6 @@ using spd_create_f = engine_t::sum_primitive_desc_create_f;
 namespace {
 #define INSTANCE(...) __VA_ARGS__::pd_t::create
 const spd_create_f sum_impl_list[] = {
-        INSTANCE(cm::simple_sum_t),
         // TODO: Re-enable nGEN-based implementation after architecture
         // dispatching is implemented.
         // INSTANCE(jit::gen9_simple_sum_t),

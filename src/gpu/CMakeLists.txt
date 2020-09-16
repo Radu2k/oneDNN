@@ -31,6 +31,5 @@ set_property(GLOBAL APPEND PROPERTY DNNL_LIB_DEPS
     $<TARGET_OBJECTS:${OBJ_LIB}>)
 
 add_subdirectory(compute)
-add_subdirectory(cm)
 add_subdirectory(jit)
 add_subdirectory(ocl)

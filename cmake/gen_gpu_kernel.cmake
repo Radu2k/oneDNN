@@ -68,11 +68,7 @@ string(REGEX REPLACE "__BRACKET1__" "]" ker_lines "${ker_lines}")
 
 get_filename_component(ker_name ${KER_FILE} NAME_WE)
 
-if ("${KER_FILE}" MATCHES ".*\\.cl")
-    set(ker_lang "ocl")
-else()
-    set(ker_lang "cm")
-endif()
+set(ker_lang "ocl")
 
 set(ker_contents  "const char *${ker_name}_kernel[] ={ \"${ker_lines}\", nullptr };")
 set(ker_contents "namespace ${ker_lang} {\n${ker_contents}\n}")
