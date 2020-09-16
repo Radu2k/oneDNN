@@ -1871,7 +1871,8 @@ void nw_read_region_t::read_and_reorder() {
 
     auto get_sbid = [&](int idx) {
         idx = (idx + 1) % 16;
-        if (idx >= host->gmem_b_sbid().set.getID()) return SBID((idx + 1) % 16);
+        if (idx >= (int)host->gmem_b_sbid().set.getID())
+            return SBID((idx + 1) % 16);
         return SBID(idx);
     };
 
