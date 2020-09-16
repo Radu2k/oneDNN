@@ -57,7 +57,7 @@
 --cfg=u8,bf16,f32
 --alg=MAX,AVG_NP,AVG_P
 --dir=FWD_I
---attr-post-ops='sum;add:f32;min:u8:per_dim_01;linear:0.5:1.5;mul:f32:per_dim_0;add:f32:per_dim_01;max:f16;mul:s8;add:f32:per_oc;sum'
+--attr-post-ops='add:f32;min:u8:per_dim_01;linear:0.5:1.5;mul:f32:per_dim_0;add:f32:per_dim_01;max:f16;mul:s8;add:f32:per_oc'
 --mb=1,2
 --tag=abx,aBx16b
 --batch=shapes_3d_small
