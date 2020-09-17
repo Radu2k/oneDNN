@@ -580,12 +580,6 @@ void check_known_skipped_case(const prb_t *p, res_t *r) {
             {p->cfg[SRC].dt, p->cfg[WEI].dt, p->cfg[DST].dt}, p->dir, r);
     if (r->state == SKIPPED) return;
 
-    // TODO: temporary disable binary post-op on GPU
-    if (engine_tgt_kind == dnnl_gpu && p->attr.post_ops.binary_index() != -1) {
-        r->state = SKIPPED, r->reason = CASE_NOT_SUPPORTED;
-        return;
-    }
-
     // Winograd implementation limitations.
     if (p->alg == WINO) {
         static auto isa = dnnl_get_effective_cpu_isa();
