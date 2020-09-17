@@ -21,7 +21,6 @@
 #include <vector>
 #include <CL/cl.h>
 
-#include "common/z_magic.hpp"
 #include "gpu/compute/device_info.hpp"
 #include "gpu/ocl/ocl_utils.hpp"
 
@@ -34,89 +33,42 @@ class ocl_gpu_device_info_t : public compute::device_info_t {
 public:
     ocl_gpu_device_info_t(cl_device_id device) : device_(device) {}
 
-    status_t init_name(std::string &ret) const override {
-        size_t size_name {0};
-        cl_int err = clGetDeviceInfo(
-                device_, CL_DEVICE_NAME, 0, nullptr, &size_name);
-        OCL_CHECK(err);
-
-        ret.resize(size_name);
-        err = clGetDeviceInfo(
-                device_, CL_DEVICE_NAME, size_name, &ret[0], &size_name);
-        OCL_CHECK(err);
-        return status::success;
+    bool has(compute::device_ext_t ext) const override {
+        return this->extensions_ & (uint64_t)ext;
     }
 
-    status_t init_runtime_version(
-            compute::runtime_version_t &ret) const override {
-        size_t size_driver_version {0};
-        cl_int err = clGetDeviceInfo(
-                device_, CL_DRIVER_VERSION, 0, nullptr, &size_driver_version);
-        OCL_CHECK(err);
-        std::string driver_version;
-        driver_version.resize(size_driver_version);
-        err = clGetDeviceInfo(device_, CL_DRIVER_VERSION, size_driver_version,
-                &driver_version[0], nullptr);
-        OCL_CHECK(err);
+    compute::gpu_arch_t gpu_arch() const override { return gpu_arch_; }
 
-        driver_version[size_driver_version - 1] = '\0';
-        if (ret.set_from_string(&driver_version[0]) != status::success) {
-            ret.major = 0;
-            ret.minor = 0;
-            ret.build = 0;
-        }
-        return status::success;
+    int eu_count() const override { return eu_count_; }
+    int hw_threads() const override { return hw_threads_[0]; }
+    int hw_threads(bool large_grf_mode) const override {
+        return hw_threads_[!!large_grf_mode];
     }
+    size_t llc_cache_size() const override { return llc_cache_size_; }
 
-    status_t init_eu_count(int &ret) const override {
-        cl_uint max_units;
-        cl_int err = clGetDeviceInfo(device_, CL_DEVICE_MAX_COMPUTE_UNITS,
-                sizeof(cl_uint), &max_units, nullptr);
-        OCL_CHECK(err);
-        ret = (int)max_units;
-        return status::success;
-    }
-
-    status_t init_extension_string(std::string &ret) const override {
-        size_t size_ext {0};
-        cl_int err = clGetDeviceInfo(
-                device_, CL_DEVICE_EXTENSIONS, 0, nullptr, &size_ext);
-        OCL_CHECK(err);
-
-        ret.resize(size_ext);
-        err = clGetDeviceInfo(
-                device_, CL_DEVICE_EXTENSIONS, size_ext, &ret[0], &size_ext);
-        OCL_CHECK(err);
-        return status::success;
-    }
-
-    std::string get_cl_ext_options() const {
-        using namespace compute;
-
-        std::string opts;
-        for (uint64_t i_ext = 1; i_ext < (uint64_t)device_ext_t::last;
-                i_ext <<= 1) {
-            auto ext = (device_ext_t)i_ext;
-            // Use real GPU extensions
-            if (!compute::has(real_extensions_, ext)) continue;
-
-            // These extensions are not handled properly by the OpenCL runtime.
-            // Pass macros for them manually.
-            if (utils::one_of(ext, device_ext_t::intel_dot_accumulate,
-                        device_ext_t::intel_subgroup_local_block_io,
-                        device_ext_t::intel_subgroup_matrix_multiply_accumulate,
-                        device_ext_t::
-                                intel_subgroup_split_matrix_multiply_accumulate,
-                        device_ext_t::intel_global_float_atomics,
-                        device_ext_t::future_bf16_cvt))
-                opts += std::string("-D") + ext2cl_str(ext) + " ";
-        }
-        if (!opts.empty()) { opts[opts.size() - 1] = '\0'; }
-        return opts;
-    }
+    std::string get_cl_ext_options() const;
 
 private:
+    status_t init_arch() override;
+    status_t init_device_name() override;
+    status_t init_runtime_version() override;
+    status_t init_extensions() override;
+    status_t init_attributes() override;
+
+    size_t get_llc_cache_size() const;
+
     cl_device_id device_ = nullptr;
+
+    // total number of hardware threads:
+    // [0] - default mode
+    // [1] - large GRF mode
+    int32_t hw_threads_[2] = {0, 0};
+    int32_t eu_count_ = 0;
+    size_t llc_cache_size_ = 0;
+
+    // extensions_ and gpu_arch_ describe effective extensions and GPU architecture.
+    uint64_t extensions_ = 0;
+    compute::gpu_arch_t gpu_arch_ = compute::gpu_arch_t::unknown;
 };
 
 } // namespace ocl

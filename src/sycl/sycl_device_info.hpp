@@ -21,7 +21,6 @@
 #include <CL/sycl.hpp>
 
 #include "gpu/compute/device_info.hpp"
-#include "gpu/ocl/ocl_utils.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -31,44 +30,37 @@ class sycl_device_info_t : public gpu::compute::device_info_t {
 public:
     sycl_device_info_t(const cl::sycl::device &device) : device_(device) {}
 
-    status_t init_runtime_version(
-            gpu::compute::runtime_version_t &ret) const override {
-        auto driver_version
-                = device_.get_info<cl::sycl::info::device::driver_version>();
-        if (ret.set_from_string(driver_version.c_str()) != status::success) {
-            ret.major = 0;
-            ret.minor = 0;
-            ret.build = 0;
-        }
-        return status::success;
+    bool has(gpu::compute::device_ext_t ext) const override {
+        return this->extensions_ & (uint64_t)ext;
     }
 
-    status_t init_name(std::string &ret) const override {
-        ret = device_.get_info<cl::sycl::info::device::name>();
-        return status::success;
-    }
+    gpu::compute::gpu_arch_t gpu_arch() const override { return gpu_arch_; }
 
-    status_t init_eu_count(int &ret) const override {
-        ret = device_.get_info<cl::sycl::info::device::max_compute_units>();
-        return status::success;
+    int eu_count() const override { return eu_count_; }
+    int hw_threads() const override { return hw_threads_[0]; }
+    int hw_threads(bool large_grf_mode) const override {
+        return hw_threads_[!!large_grf_mode];
     }
-
-    status_t init_extension_string(std::string &ret) const override {
-        using namespace gpu::compute;
-
-        ret = "";
-        for (uint64_t i_ext = 1; i_ext < (uint64_t)device_ext_t::last;
-                i_ext <<= 1) {
-            const char *s_ext = ext2cl_str((device_ext_t)i_ext);
-            if (s_ext && device_.has_extension(s_ext)) {
-                ret += std::string(s_ext) + " ";
-            }
-        }
-        return status::success;
-    }
+    size_t llc_cache_size() const override { return llc_cache_size_; }
 
 private:
+    status_t init_arch() override;
+    status_t init_device_name() override;
+    status_t init_runtime_version() override;
+    status_t init_extensions() override;
+    status_t init_attributes() override;
+
     cl::sycl::device device_;
+
+    // total number of hardware threads:
+    // [0] - default mode
+    // [1] - large GRF mode
+    int32_t hw_threads_[2] = {0, 0};
+    int32_t eu_count_ = 0;
+    size_t llc_cache_size_ = 0;
+
+    uint64_t extensions_ = 0;
+    gpu::compute::gpu_arch_t gpu_arch_ = gpu::compute::gpu_arch_t::unknown;
 };
 
 } // namespace sycl

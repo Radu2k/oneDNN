@@ -94,6 +94,9 @@ public:
         return device_info_->gpu_arch() == gpu_arch_t::gen12lp;
     }
     bool is_gen12hp() const {
+        return device_info_->gpu_arch_env() == gpu_arch_t::gen12hp;
+    }
+    bool is_jit_gen12hp() const {
         return device_info_->gpu_arch() == gpu_arch_t::gen12hp;
     }
 

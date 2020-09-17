@@ -24,7 +24,6 @@
 #include "common/c_types_map.hpp"
 #include "common/utils.hpp"
 #include "common/z_magic.hpp"
-#include "cpu/platform.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -36,6 +35,36 @@ enum class gpu_arch_t {
     gen9,
     gen12lp,
     gen12hp,
+};
+
+enum class device_ext_t : uint64_t {
+    // clang-format off
+    // OpenCL data types
+    khr_fp16 = 1ull << 0,
+    khr_fp64 = 1ull << 1,
+    // OpenCL atomics
+    khr_global_int32_base_atomics     = 1ull << 2,
+    khr_global_int32_extended_atomics = 1ull << 3,
+    khr_int64_base_atomics            = 1ull << 4,
+    khr_int64_extended_atomics        = 1ull << 5,
+    khr_local_int32_base_atomics      = 1ull << 6,
+    khr_local_int32_extended_atomics  = 1ull << 7,
+    // Intel specific Gen9+
+    intel_subgroups              = 1ull << 16,
+    intel_required_subgroup_size = 1ull << 17,
+    intel_subgroups_char         = 1ull << 18,
+    intel_subgroups_short        = 1ull << 19,
+    intel_subgroups_long         = 1ull << 20,
+    // Intel specific Gen12LP+
+    intel_subgroup_local_block_io = 1ull << 21,
+    intel_dot_accumulate          = 1ull << 22,
+    // Intel specific Gen12HP+
+    intel_global_float_atomics                      = 1ull << 23,
+    intel_subgroup_matrix_multiply_accumulate       = 1ull << 24,
+    intel_subgroup_split_matrix_multiply_accumulate = 1ull << 25,
+    intel_variable_eu_thread_count                  = 1ull << 26,
+    last
+    // clang-format on
 };
 
 inline gpu_arch_t str2gpu_arch(const char *str) {
@@ -63,65 +92,36 @@ inline const char *gpu_arch2str(gpu_arch_t arch) {
 #undef CASE
 }
 
-enum class device_ext_t : int64_t {
-    intel_subgroups = 1 << 0,
-    intel_subgroups_short = 1 << 1,
-    khr_fp16 = 1 << 2,
-    khr_int64_base_atomics = 1 << 3,
-    intel_dot_accumulate = 1 << 4,
-    intel_subgroup_local_block_io = 1 << 5,
-    intel_subgroup_matrix_multiply_accumulate = 1 << 6,
-    intel_subgroup_split_matrix_multiply_accumulate = 1 << 7,
-    intel_global_float_atomics = 1 << 8,
-    future_bf16_cvt = 1 << 9,
-    last
-};
-
-static bool has(uint64_t extensions, device_ext_t ext) {
-    return extensions & (uint64_t)ext;
-}
-
 static inline const char *ext2cl_str(device_ext_t ext) {
-
 #define CASE(x) \
     case device_ext_t::x: return STRINGIFY(CONCAT2(cl_, x));
     switch (ext) {
-        CASE(intel_subgroups);
-        CASE(intel_subgroups_short);
-        CASE(intel_dot_accumulate);
-        CASE(intel_subgroup_local_block_io);
-        CASE(intel_subgroup_matrix_multiply_accumulate);
-        CASE(intel_subgroup_split_matrix_multiply_accumulate);
-        CASE(intel_global_float_atomics);
-        CASE(khr_fp16);
-        CASE(khr_int64_base_atomics);
-        CASE(future_bf16_cvt);
+        CASE(khr_fp16)
+        CASE(khr_fp64)
+
+        CASE(khr_global_int32_base_atomics)
+        CASE(khr_global_int32_extended_atomics)
+        CASE(khr_int64_base_atomics)
+        CASE(khr_int64_extended_atomics)
+        CASE(khr_local_int32_base_atomics)
+        CASE(khr_local_int32_extended_atomics)
+
+        CASE(intel_subgroups)
+        CASE(intel_required_subgroup_size)
+        CASE(intel_subgroups_char)
+        CASE(intel_subgroups_short)
+        CASE(intel_subgroups_long)
+
+        CASE(intel_subgroup_local_block_io)
+        CASE(intel_dot_accumulate)
+
+        CASE(intel_global_float_atomics)
+        CASE(intel_subgroup_matrix_multiply_accumulate)
+        CASE(intel_subgroup_split_matrix_multiply_accumulate)
+        CASE(intel_variable_eu_thread_count)
         default: return nullptr;
     }
 #undef CASE
-}
-
-static device_ext_t get_extensions(gpu_arch_t gpu_arch) {
-    uint64_t extensions = 0;
-    switch (gpu_arch) {
-        case gpu_arch_t::gen12hp:
-            extensions |= (uint64_t)
-                    device_ext_t::intel_subgroup_matrix_multiply_accumulate;
-            extensions |= (uint64_t)device_ext_t::
-                    intel_subgroup_split_matrix_multiply_accumulate;
-            extensions |= (uint64_t)device_ext_t::intel_global_float_atomics;
-            extensions |= (uint64_t)device_ext_t::future_bf16_cvt;
-        case gpu_arch_t::gen12lp:
-            extensions |= (uint64_t)device_ext_t::intel_dot_accumulate;
-            extensions |= (uint64_t)device_ext_t::intel_subgroup_local_block_io;
-        case gpu_arch_t::gen9:
-            extensions |= (uint64_t)device_ext_t::khr_fp16;
-            extensions |= (uint64_t)device_ext_t::intel_subgroups;
-            extensions |= (uint64_t)device_ext_t::intel_subgroups_short;
-            break;
-        case gpu_arch_t::unknown: break;
-    }
-    return (device_ext_t)extensions;
 }
 
 struct runtime_version_t {
@@ -190,137 +190,85 @@ struct device_info_t {
 public:
     virtual ~device_info_t() = default;
 
-    virtual status_t init_runtime_version(runtime_version_t &ret) const = 0;
-    virtual status_t init_name(std::string &ret) const = 0;
-    virtual status_t init_eu_count(int &ret) const = 0;
-    virtual status_t init_extension_string(std::string &ret) const = 0;
-
-    virtual status_t init() {
-        CHECK(init_runtime_version(runtime_version_));
-        CHECK(init_name(name_));
-        CHECK(init_eu_count(eu_count_));
-        CHECK(init_extension_string(extension_string_));
-
+    status_t init() {
+        CHECK(init_device_name());
         CHECK(init_arch());
+        CHECK(init_arch_env());
+        CHECK(init_runtime_version());
         CHECK(init_extensions());
         CHECK(init_attributes());
 
         return status::success;
     }
 
-    status_t init_arch() {
-        if (name().find("Gen9") != std::string::npos)
-            real_gpu_arch_ = gpu_arch_t::gen9;
-        else if (name().find("Gen12LP") != std::string::npos)
-            real_gpu_arch_ = gpu_arch_t::gen12lp;
-        else if (name().find("Gen12HP") != std::string::npos)
-            real_gpu_arch_ = gpu_arch_t::gen12hp;
-        else
-            real_gpu_arch_ = gpu_arch_t::unknown;
+    virtual bool has(device_ext_t ext) const = 0;
 
-        gpu_arch_t env_gpu_arch = gpu_arch_t::unknown;
-        char gpu_arch_str[32];
-        if (getenv("DNNL_GPU_ARCH", gpu_arch_str, sizeof(gpu_arch_str)) > 0) {
-            env_gpu_arch = str2gpu_arch(gpu_arch_str);
-        }
-
-        // GPU architecture is not overriden from environment, set and return.
-        if (env_gpu_arch == gpu_arch_t::unknown) {
-            gpu_arch_ = real_gpu_arch_;
-            return status::success;
-        }
-
-        // Environment GPU architecture is different from the detected one, use
-        // emulation.
-
-        // Do not allow emulating older architectures
-        if ((int)env_gpu_arch < (int)real_gpu_arch_) {
-            assert(!"not expected");
-            return status::runtime_error;
-        }
-        gpu_arch_ = env_gpu_arch;
-
-        return status::success;
-    }
+    virtual gpu_arch_t gpu_arch() const = 0;
+    virtual int eu_count() const = 0;
+    virtual int hw_threads() const = 0;
+    virtual int hw_threads(bool large_grf_mode) const = 0;
+    virtual size_t llc_cache_size() const = 0;
 
     const runtime_version_t &runtime_version() const {
         return runtime_version_;
     }
     const std::string &name() const { return name_; }
-    int eu_count() const { return eu_count_; }
 
-    int hw_threads() const { return hw_threads_; }
-    size_t llc_cache_size() const { return llc_cache_size_; }
-
-    gpu_arch_t gpu_arch() const { return gpu_arch_; }
-    gpu_arch_t real_gpu_arch() const { return real_gpu_arch_; }
-
-    bool has(device_ext_t ext) const { return compute::has(extensions_, ext); }
+    gpu_arch_t gpu_arch_env() const {
+        if (gpu_arch_env_ != gpu_arch_t::unknown) return gpu_arch_env_;
+        return gpu_arch();
+    }
 
 protected:
-    status_t init_extensions() {
-        for (uint64_t i_ext = 1; i_ext < (uint64_t)device_ext_t::last;
-                i_ext <<= 1) {
-            const char *s_ext = ext2cl_str((device_ext_t)i_ext);
-            if (s_ext && extension_string_.find(s_ext) != std::string::npos) {
-                extensions_ |= i_ext;
-                real_extensions_ |= i_ext;
-            }
-        }
-
-        // This is to handle extensions that are not yet properly supported by
-        // OpenCL/Level Zero/DPC++ runtimes.
-        extensions_ |= (uint64_t)get_extensions(gpu_arch());
-        real_extensions_ |= (uint64_t)get_extensions(real_gpu_arch());
-
-        return status::success;
+    void set_runtime_version(const runtime_version_t &runtime_version) {
+        runtime_version_ = runtime_version;
     }
 
-    status_t init_attributes() {
-        // Assume 7 threads by default
-        int32_t threads_per_eu = 7;
+    void set_name(const std::string &name) { name_ = name; }
 
-        switch (gpu_arch()) {
-            case gpu_arch_t::gen9: threads_per_eu = 7; break;
-            case gpu_arch_t::gen12lp: threads_per_eu = 7; break;
-            case gpu_arch_t::gen12hp:
-                // Default is 8 threads, 128 GRF registers per thread. But we
-                // set 4 threads configuration (with 256 registers) for better
-                // performance.
-                threads_per_eu = 4;
-                break;
-            default: break;
-        }
+private:
+    virtual status_t init_arch() = 0;
+    virtual status_t init_device_name() = 0;
+    virtual status_t init_runtime_version() = 0;
+    virtual status_t init_extensions() = 0;
+    virtual status_t init_attributes() = 0;
 
-        hw_threads_ = eu_count_ * threads_per_eu;
-
-        // TODO: Fix for discrete GPUs. The code below is written for
-        // integrated GPUs assuming that last-level cache for GPU is shared
-        // with CPU.
-        size_t cache_size = cpu::platform::get_per_core_cache_size(3)
-                * cpu::platform::get_num_cores();
-        llc_cache_size_ = (size_t)cache_size;
-        return status::success;
-    }
+    inline status_t init_arch_env();
 
     runtime_version_t runtime_version_;
     std::string name_;
-    int32_t eu_count_ = 0;
-    std::string extension_string_;
 
-    int32_t hw_threads_ = 0;
-    size_t llc_cache_size_ = 0;
-
-    // Effective extensions.
-    uint64_t extensions_ = 0;
-    // Effective GPU architecture.
-    gpu_arch_t gpu_arch_ = gpu_arch_t::unknown;
-
-    // Real extensions.
-    uint64_t real_extensions_ = 0;
-    // Real GPU architecture.
-    gpu_arch_t real_gpu_arch_ = gpu_arch_t::unknown;
+    // XXX: GPU architecture value from enviroment
+    // This is needed to test kernels with emulation support on older hardware
+    gpu_arch_t gpu_arch_env_ = gpu_arch_t::unknown;
 };
+
+status_t device_info_t::init_arch_env() {
+    gpu_arch_t gpu_arch_env = gpu_arch_t::unknown;
+    gpu_arch_t gpu_arch_hw = gpu_arch();
+
+    // Check enviroment if we want kernels to be emulated on older hardware
+    char gpu_arch_str[32];
+    if (getenv("DNNL_GPU_ARCH", gpu_arch_str, sizeof(gpu_arch_str)) > 0) {
+        gpu_arch_env = str2gpu_arch(gpu_arch_str);
+    }
+
+    // GPU architecture is not overriden, return
+    if (gpu_arch_env == gpu_arch_t::unknown) return status::success;
+
+    // GPU architecture is the same as detected, return
+    if (gpu_arch_env == gpu_arch_hw) return status::success;
+
+    // Do not allow emulating older architectures
+    if ((int)gpu_arch_env < (int)gpu_arch_hw) {
+        assert(!"not expected");
+        return status::runtime_error;
+    }
+
+    gpu_arch_env_ = gpu_arch_env;
+
+    return status::success;
+}
 
 } // namespace compute
 } // namespace gpu
