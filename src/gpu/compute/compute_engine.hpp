@@ -99,6 +99,7 @@ public:
     bool is_jit_gen12hp() const {
         return device_info_->gpu_arch() == gpu_arch_t::gen12hp;
     }
+    virtual bool mayiuse_non_uniform_work_groups() const { return false; }
 
     dispatch_t create_dispatch(const memory_desc_t *md = nullptr) const {
         return dispatch_t(this, md);

@@ -1063,4 +1063,21 @@
 #define NAMED_KERNEL_ATTR(name) \
     CONCAT2(NAMED_KERNEL_ATTR_SG, CONCAT2(GWS_WITH_SG_, name))(name)
 
+// Macro to emulate behavior of non-uniform work-groups. It is expected to be
+// called at the beginning of the kernel.
+// NOTE: The kernel cannot use synchronization within work-group (barrier,
+// etc).
+#define MAYBE_SKIP_NON_UNIFORM_WG() \
+    do { \
+        if ((GWS_0 != GWS_ORIG_0) && (GWS_ORIG_0 % LWS_0 != 0) \
+                && (get_global_id(0) >= GWS_ORIG_0)) \
+            return; \
+        if ((GWS_1 != GWS_ORIG_1) && (GWS_ORIG_1 % LWS_1 != 0) \
+                && (get_global_id(1) >= GWS_ORIG_1)) \
+            return; \
+        if ((GWS_2 != GWS_ORIG_2) && (GWS_ORIG_2 % LWS_2 != 0) \
+                && (get_global_id(2) >= GWS_ORIG_2)) \
+            return; \
+    } while (0)
+
 #endif

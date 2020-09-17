@@ -284,6 +284,9 @@ struct conv_conf_t {
     int ow_group;
 
     size_t gws_d[3], lws_d[3];
+    // Original global work sizes, before applying rounding in case when
+    // non-uniform work-groups are not supported.
+    size_t gws_orig_d[3];
     compute::dispatch_t dispatch;
 
     bool with_bias, with_groups;

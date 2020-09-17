@@ -108,6 +108,8 @@ public:
         return std::make_tuple(0, reinterpret_cast<uint64_t>(device()), 0);
     }
 
+    bool mayiuse_non_uniform_work_groups() const override { return true; }
+
     virtual bool mayiuse_ngen_kernels() override {
         check_mayiuse_ngen_kernels();
         return enable_ngen_kernels_;

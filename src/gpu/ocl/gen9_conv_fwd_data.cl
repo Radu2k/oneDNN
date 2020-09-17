@@ -667,6 +667,8 @@ __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) __kernel void
 gen9_conv_fwd(const __global DATA_T *src, const __global DATA_T *wei,
         const __global DATA_T *bia, __global DATA_T *dst POST_OP_ARGS) {
 
+    MAYBE_SKIP_NON_UNIFORM_WG();
+
     int sglid = get_sub_group_local_id();
     int g_ocb = get_group_id(0) * (LWS_0 / SUB_GROUP_SIZE) + get_sub_group_id();
     int g = g_ocb / (OCB / OC_BLOCK);

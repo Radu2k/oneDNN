@@ -14,7 +14,10 @@
 * limitations under the License.
 *******************************************************************************/
 
+#define DT_UNDEF
+
 #include "gpu/ocl/ocl_math_utils.h"
+#include "gpu/ocl/ocl_types.h"
 
 #if OD > 1
 #define CASE_3D 1
@@ -36,6 +39,8 @@ __kernel void
 gen9_conv_bwd_weights(__global float *src,
         volatile __global atomic_float *diff_wei,
         volatile __global atomic_float *diff_bias, __global float *diff_dst) {
+
+    MAYBE_SKIP_NON_UNIFORM_WG();
 
 #if VER_16MB16C == 1
 

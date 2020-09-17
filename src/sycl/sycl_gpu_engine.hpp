@@ -40,6 +40,11 @@ public:
         assert(dev.is_gpu());
     }
 
+    bool mayiuse_non_uniform_work_groups() const override {
+        // Level Zero backend does not support non-uniform work-groups.
+        return backend() == backend_t::opencl;
+    }
+
     virtual status_t create_memory_storage(memory_storage_t **storage,
             unsigned flags, size_t size, void *handle) override {
         return sycl_engine_base_t::create_memory_storage(

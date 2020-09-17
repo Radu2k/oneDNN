@@ -29,6 +29,8 @@ __kernel void
 gen9_conv_dw_fwd(const __global DATA_T *src, const __global DATA_T *wei,
         const __global DATA_T *bias, __global DATA_T *dst POST_OP_ARGS) {
 
+    MAYBE_SKIP_NON_UNIFORM_WG();
+
 #if VER_8OW16C
     const int osp = get_global_id(1);
     const int od = osp / (OWB * OH);

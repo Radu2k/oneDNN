@@ -24,6 +24,8 @@ __kernel void
 gen9_conv_dw_bwd_data(__global DATA_T *diff_src, __global DATA_T *wei,
         __global DATA_T *diff_dst, __global DATA_T *bias) {
 
+    MAYBE_SKIP_NON_UNIFORM_WG();
+
 #if VER_16MB16C == 1
     const int mb_unroll = 16;
 

@@ -88,6 +88,15 @@ static void fwd_compute_block_sizes(
     conf.ocb = utils::max_div(conf.oc / 16, 8) * 16;
 }
 
+static void maybe_fix_non_uniform_work_sizes(
+        bool has_non_uniform_wg, conv_conf_t &conf) {
+    for (int i = 0; i < 3; i++) {
+        conf.gws_orig_d[i] = conf.gws_d[i];
+        if (!has_non_uniform_wg)
+            conf.gws_d[i] = utils::rnd_up(conf.gws_d[i], conf.lws_d[i]);
+    }
+}
+
 status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
 
     const convolution_desc_t &cd = *desc();
@@ -156,6 +165,8 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
     const bool is_gen12hp = compute_engine->is_gen12hp();
+    const bool has_non_uniform_wg
+            = compute_engine->mayiuse_non_uniform_work_groups();
 
     const bool is_fp16 = src_mdw.data_type() == data_type::f16;
 
@@ -224,6 +235,8 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
         }
         default: return status::unimplemented;
     }
+
+    maybe_fix_non_uniform_work_sizes(has_non_uniform_wg, conf);
 
     format_tag_t src_tag, dst_tag, wei_tag;
 
@@ -404,6 +417,14 @@ status_t gen9_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("DST_32N16C",
             utils::one_of(conf.dst_tag, NCw32n16c, NChw32n16c, NCdhw32n16c));
 
+    kernel_ctx.define_int("GWS_0", conf.gws_d[0]);
+    kernel_ctx.define_int("GWS_1", conf.gws_d[1]);
+    kernel_ctx.define_int("GWS_2", conf.gws_d[2]);
+
+    kernel_ctx.define_int("GWS_ORIG_0", conf.gws_orig_d[0]);
+    kernel_ctx.define_int("GWS_ORIG_1", conf.gws_orig_d[1]);
+    kernel_ctx.define_int("GWS_ORIG_2", conf.gws_orig_d[2]);
+
     kernel_ctx.define_int("LWS_0", conf.lws_d[0]);
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);
     kernel_ctx.define_int("LWS_2", conf.lws_d[2]);
@@ -475,6 +496,8 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
     const bool is_gen12hp = compute_engine->is_gen12hp();
+    const bool has_non_uniform_wg
+            = compute_engine->mayiuse_non_uniform_work_groups();
 
     status_t status = status::success;
     switch (conf.ver) {
@@ -550,6 +573,8 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
         }
         default: status = status::unimplemented;
     }
+
+    maybe_fix_non_uniform_work_sizes(has_non_uniform_wg, conf);
 
     format_tag_t src_tag, dst_tag, wei_tag;
 
@@ -658,6 +683,14 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("OC_BLOCK", conf.oc_block);
     kernel_ctx.define_int("IC_BLOCK", conf.ic_block);
     kernel_ctx.define_int("WITH_BIAS", conf.with_bias);
+
+    kernel_ctx.define_int("GWS_0", conf.gws_d[0]);
+    kernel_ctx.define_int("GWS_1", conf.gws_d[1]);
+    kernel_ctx.define_int("GWS_2", conf.gws_d[2]);
+
+    kernel_ctx.define_int("GWS_ORIG_0", conf.gws_orig_d[0]);
+    kernel_ctx.define_int("GWS_ORIG_1", conf.gws_orig_d[1]);
+    kernel_ctx.define_int("GWS_ORIG_2", conf.gws_orig_d[2]);
 
     kernel_ctx.define_int("LWS_0", conf.lws_d[0]);
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);
@@ -919,6 +952,8 @@ status_t gen9_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
     const bool is_gen12hp = compute_engine->is_gen12hp();
+    const bool has_non_uniform_wg
+            = compute_engine->mayiuse_non_uniform_work_groups();
 
     conf.sub_group_size = 16;
     conf.lws_d[0] = is_gen12hp ? 32 : 16;
@@ -934,6 +969,8 @@ status_t gen9_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
     conf.gws_d[1] = conf.kh * conf.kw * conf.kd;
     conf.gws_d[2] = conf.nchunk * utils::div_up(conf.ic, conf.icb)
             * utils::div_up(conf.oc, conf.ocb);
+
+    maybe_fix_non_uniform_work_sizes(has_non_uniform_wg, conf);
 
     format_tag_t src_tag, dst_tag, wei_tag;
 
@@ -1068,6 +1105,14 @@ status_t gen9_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int(
             "MB_CHUNK_SIZE", utils::div_up(conf.mb, conf.mb_chunk));
     kernel_ctx.define_int("OW_BLOCK", conf.ow_block);
+
+    kernel_ctx.define_int("GWS_0", conf.gws_d[0]);
+    kernel_ctx.define_int("GWS_1", conf.gws_d[1]);
+    kernel_ctx.define_int("GWS_2", conf.gws_d[2]);
+
+    kernel_ctx.define_int("GWS_ORIG_0", conf.gws_orig_d[0]);
+    kernel_ctx.define_int("GWS_ORIG_1", conf.gws_orig_d[1]);
+    kernel_ctx.define_int("GWS_ORIG_2", conf.gws_orig_d[2]);
 
     kernel_ctx.define_int("LWS_0", conf.lws_d[0]);
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);
