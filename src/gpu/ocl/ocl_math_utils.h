@@ -335,6 +335,10 @@ float8 mmad8x8_f16(uint8 a, int8 b, float8 acc) {
     return intel_sub_group_f16_f16_matrix_mad_k16(as_int8(a), b, acc);
 }
 
+float4 mmad8x4_f16(uint4 a, int8 b, float4 acc) {
+    return intel_sub_group_f16_f16_matrix_mad_k16(as_int4(a), b, acc);
+}
+
 #if MATH_UTILS_DECLARE_BF16
 float8 mmad8x8_bf16(uint8 a, int8 b, float8 acc) {
     return intel_sub_group_bf16_bf16_matrix_mad_k16(as_int8(a), b, acc);
