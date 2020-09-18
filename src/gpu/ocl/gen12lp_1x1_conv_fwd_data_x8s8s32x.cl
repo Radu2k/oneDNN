@@ -405,7 +405,7 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
             QUANTIZE_ADD_BIAS(); \
             for (int didx = 0; didx < 4; ++didx) { \
                 float tmp_i = tmp[didx]; \
-                SUM_DATA_T dni_i = AS_SUM_DATA_T(D[n_i][didx]); \
+                float dni_i = convert_float(AS_SUM_DATA_T(D[n_i][didx])); \
                 int po_mb; \
                 if (MB_BLOCK == 32) \
                     po_mb = (mb_group_id * MB_BLOCK / 2 + mb_stride * 8 + n_i) \
@@ -415,8 +415,8 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
                 const int po_oc = (oc_group_id * OC_BLOCK + sg_local_id \
                                           + didx * SUB_GROUP_SIZE) \
                         % (OC * G); \
-                APPLY_POST_OPS(tmp_i, float, dni_i, SUM_DATA_T, po_mb, 1, \
-                        po_oc, 1, 0, 1, 0, 1, 0, 1, 0, 1); \
+                APPLY_POST_OPS(tmp_i, float, dni_i, float, po_mb, 1, po_oc, 1, \
+                        0, 1, 0, 1, 0, 1, 0, 1); \
                 tmp[didx] = tmp_i; \
             } \
             ADD_DST_COMPENSATION(); \

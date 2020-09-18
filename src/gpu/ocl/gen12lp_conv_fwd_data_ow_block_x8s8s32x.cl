@@ -423,14 +423,14 @@ conv_fwd_ow_block_x8s8s32x(const __global SRC_DATA_T *src,
             QUANTIZE_ADD_BIAS(); \
             for (int didx = 0; didx < 4; ++didx) { \
                 float tmp_i = tmp[didx]; \
-                SUM_DATA_T d_i = AS_SUM_DATA_T(D[n_i][didx]); \
+                float d_i = convert_float(AS_SUM_DATA_T(D[n_i][didx])); \
                 const int po_mb = group_mb * MB_BLOCK; \
                 const int po_oc = (group_oc * OC_BLOCK + oc * OC_BLOCK \
                                           + ((didx * SUB_GROUP_SIZE) % OC) \
                                           + ocl_local_id % SUB_GROUP_SIZE) \
                         % (OC * G); \
-                APPLY_POST_OPS(tmp_i, float, d_i, SUM_DATA_T, po_mb, 1, po_oc, \
-                        1, 0, 1, 0, 1, 0, 1, 0, 1); \
+                APPLY_POST_OPS(tmp_i, float, d_i, float, po_mb, 1, po_oc, 1, \
+                        0, 1, 0, 1, 0, 1, 0, 1); \
                 tmp[didx] = tmp_i; \
             } \
             ADD_DST_COMPENSATION(); \

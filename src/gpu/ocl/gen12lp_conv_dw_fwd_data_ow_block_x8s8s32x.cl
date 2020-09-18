@@ -625,13 +625,24 @@ conv_dw_fwd_ow_block_x8s8s32x(const __global uchar *src,
         block_read_dst(OW_BLOCK - 8, &D1, dst + 8 * OC_BLOCK);
     }
 #endif // WITH_SUM
-    SUM_DATA16_T SUM0 = AS_SUM_DATA16_T(D0);
-    SUM_DATA16_T SUM1 = AS_SUM_DATA16_T(D1);
 
-    APPLY_POST_OPS(ACC0, ACC_DATA_TYPE, SUM0, SUM_DATA_T, 0, 1, 0, 1, 0, 1, 0,
-            1, 0, 1, 0, 1);
-    APPLY_POST_OPS(ACC1, ACC_DATA_TYPE, SUM1, SUM_DATA_T, 0, 1, 0, 1, 0, 1, 0,
-            1, 0, 1, 0, 1);
+    SUM_DATA16_T D0_sdt = AS_SUM_DATA16_T(D0);
+    SUM_DATA16_T D1_sdt = AS_SUM_DATA16_T(D1);
+
+#define APPLY_POST_OPS_COMMON(accumulator, sum, offset) \
+    { \
+        for (int didx = 0; didx < 16; ++didx) { \
+            int po_mb = mb; \
+            int po_oc = g * OC + 2 * get_sub_group_local_id() + (didx % 2); \
+            ACC_DATA_TYPE accum = accumulator[didx]; \
+            SUM_DATA_T sum_di = sum[didx]; \
+            APPLY_POST_OPS(accum, ACC_DATA_TYPE, sum_di, SUM_DATA_T, po_mb, 1, \
+                    po_oc, 1, 0, 1, 0, 1, 0, 1, 0, 1); \
+            accumulator[didx] = accum; \
+        } \
+    }
+    APPLY_POST_OPS_COMMON(ACC0, D0_sdt, 0);
+    APPLY_POST_OPS_COMMON(ACC1, D1_sdt, 8);
 
     DST_DATA16_T R0 = CONVERT_DST_DATA16_T(ACC0);
     DST_DATA16_T R1 = CONVERT_DST_DATA16_T(ACC1);
