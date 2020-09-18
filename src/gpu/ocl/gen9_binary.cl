@@ -36,6 +36,12 @@
 #if SRC1_DT_S8
 #define SRC1_BLOCK_READ(src) \
     as_char(intel_sub_group_block_read_uc((const __global uchar *)(src)))
+#define SRC1_BLOCK_READ2(src) \
+    as_char2(intel_sub_group_block_read_uc2((const __global uchar *)(src)))
+#define SRC1_BLOCK_READ4(src) \
+    as_char4(intel_sub_group_block_read_uc4((const __global uchar *)(src)))
+#define SRC1_BLOCK_READ8(src) \
+    as_char8(intel_sub_group_block_read_uc8((const __global uchar *)(src)))
 #endif // SRC_DT_S8
 
 #if SRC0_DT_U8
@@ -52,6 +58,12 @@
 #if SRC1_DT_U8
 #define SRC1_BLOCK_READ(src) \
     as_uchar(intel_sub_group_block_read_uc((const __global uchar *)(src)))
+#define SRC1_BLOCK_READ2(src) \
+    as_uchar2(intel_sub_group_block_read_uc2((const __global uchar *)(src)))
+#define SRC1_BLOCK_READ4(src) \
+    as_uchar4(intel_sub_group_block_read_uc4((const __global uchar *)(src)))
+#define SRC1_BLOCK_READ8(src) \
+    as_uchar8(intel_sub_group_block_read_uc8((const __global uchar *)(src)))
 #endif // SRC1_DT_U8
 
 #if SRC0_DT_F16
@@ -68,6 +80,12 @@
 #if SRC1_DT_F16
 #define SRC1_BLOCK_READ(src) \
     as_half(intel_sub_group_block_read_us((const __global ushort *)(src)))
+#define SRC1_BLOCK_READ2(src) \
+    as_half2(intel_sub_group_block_read_us2((const __global ushort *)(src)))
+#define SRC1_BLOCK_READ4(src) \
+    as_half4(intel_sub_group_block_read_us4((const __global ushort *)(src)))
+#define SRC1_BLOCK_READ8(src) \
+    as_half8(intel_sub_group_block_read_us8((const __global ushort *)(src)))
 #endif // SRC1_DT_F16
 
 #if SRC0_DT_S32
@@ -84,6 +102,12 @@
 #if SRC1_DT_S32
 #define SRC1_BLOCK_READ(src) \
     as_int(intel_sub_group_block_read((const __global uint *)(src)))
+#define SRC1_BLOCK_READ2(src) \
+    as_int2(intel_sub_group_block_read2((const __global uint *)(src)))
+#define SRC1_BLOCK_READ4(src) \
+    as_int4(intel_sub_group_block_read4((const __global uint *)(src)))
+#define SRC1_BLOCK_READ8(src) \
+    as_int8(intel_sub_group_block_read8((const __global uint *)(src)))
 #endif // SRC1_DT_S32
 
 #if SRC0_DT_F32
@@ -100,6 +124,12 @@
 #if SRC1_DT_F32
 #define SRC1_BLOCK_READ(src) \
     as_float(intel_sub_group_block_read((const __global uint *)(src)))
+#define SRC1_BLOCK_READ2(src) \
+    as_float2(intel_sub_group_block_read2((const __global uint *)(src)))
+#define SRC1_BLOCK_READ4(src) \
+    as_float4(intel_sub_group_block_read4((const __global uint *)(src)))
+#define SRC1_BLOCK_READ8(src) \
+    as_float8(intel_sub_group_block_read8((const __global uint *)(src)))
 #endif // SRC1_DT_F32
 
 #if SRC0_DT_BF16
@@ -116,6 +146,12 @@
 #if SRC1_DT_BF16
 #define SRC1_BLOCK_READ(src) \
     as_ushort(intel_sub_group_block_read_us((const __global ushort *)(src)))
+#define SRC1_BLOCK_READ2(src) \
+    as_ushort2(intel_sub_group_block_read_us2((const __global ushort *)(src)))
+#define SRC1_BLOCK_READ4(src) \
+    as_ushort4(intel_sub_group_block_read_us4((const __global ushort *)(src)))
+#define SRC1_BLOCK_READ8(src) \
+    as_ushort8(intel_sub_group_block_read_us8((const __global ushort *)(src)))
 #endif // SRC1_DT_BF16
 
 #if DST_DT_S8
