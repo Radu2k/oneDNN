@@ -44,6 +44,7 @@ struct gen12hp_bf16_convolution_bwd_weights_t : public gpu_primitive_t {
             using namespace data_type;
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
+            if (!compute_engine->is_gen12hp()) return status::unimplemented;
 
             bool ok = desc()->prop_kind == backward_weights
                     && desc()->alg_kind == alg_kind::convolution_direct
@@ -60,21 +61,19 @@ struct gen12hp_bf16_convolution_bwd_weights_t : public gpu_primitive_t {
 
             if (!ok) return status::unimplemented;
 
-            status_t status = init_conf();
+            status_t status = init_conf(engine);
             if (status != status::success) return status;
 
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
-            is_gen12hp = compute_engine->is_gen12hp();
             return ok ? status::success : status::unimplemented;
         }
 
-        status_t init_conf();
+        status_t init_conf(engine_t *engine);
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
         conv_conf_t conf;
         offsets_t off;
-        bool is_gen12hp = false;
     };
 
     status_t init(engine_t *engine) override {

@@ -44,6 +44,9 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
             using namespace prop_kind;
             using namespace data_type;
             assert(engine->kind() == engine_kind::gpu);
+            auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine);
+            if (!compute_engine->is_gen12hp()) return status::unimplemented;
 
             const auto attr_skip_mask
                     = primitive_attr_t::skip_mask_t::oscale_runtime
@@ -80,7 +83,7 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
 
             if (!ok) return status::unimplemented;
 
-            status_t status = init_conf();
+            status_t status = init_conf(engine);
 
             attr_info_ = attr_info_t::create(attr());
             if (status != status::success) return status;
@@ -90,15 +93,10 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
 
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
-
-            auto *compute_engine
-                    = utils::downcast<compute::compute_engine_t *>(engine);
-            is_gen12hp = compute_engine->is_gen12hp();
-
             return ok ? status::success : status::unimplemented;
         }
 
-        status_t init_conf();
+        status_t init_conf(engine_t *engine);
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
         const memory_desc_t *scales_md() const { return &scales_md_; }
@@ -106,7 +104,6 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
         conv_conf_t conf;
 
         attr_info_t attr_info_ = {};
-        bool is_gen12hp = false;
 
     private:
         status_t init_scales_md() {

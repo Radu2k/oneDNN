@@ -42,6 +42,9 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
             using namespace prop_kind;
             using namespace data_type;
             assert(engine->kind() == engine_kind::gpu);
+            auto *compute_engine
+                    = utils::downcast<compute::compute_engine_t *>(engine);
+            if (!compute_engine->is_gen12hp()) return status::unimplemented;
 
             const auto attr_skip_mask
                     = primitive_attr_t::skip_mask_t::oscale_runtime
@@ -72,7 +75,7 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
                                             1 << 1));
             if (!ok) return status::unimplemented;
 
-            status_t status = init_conf();
+            status_t status = init_conf(engine);
             if (status != status::success) return status;
 
             auto scales_status = init_scales_md();
@@ -81,15 +84,10 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
 
-            auto *compute_engine
-                    = utils::downcast<compute::compute_engine_t *>(engine);
-            is_gen12hp = compute_engine->is_gen12hp();
-
             return ok ? status::success : status::unimplemented;
         }
 
-        bool is_gen12hp = false;
-        status_t init_conf();
+        status_t init_conf(engine_t *engine);
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
         const memory_desc_t *scales_md() const { return &scales_md_; }
@@ -173,6 +171,7 @@ struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
             assert(engine->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
+            if (!compute_engine->is_gen12hp()) return status::unimplemented;
 
             const auto attr_skip_mask = primitive_attr_t::skip_mask_t::oscale
                     | primitive_attr_t::skip_mask_t::post_ops;
@@ -193,19 +192,18 @@ struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
 
             if (!ok) return status::unimplemented;
 
-            status_t status = init_conf();
+            status_t status = init_conf(engine);
             if (status != status::success) return status;
 
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
-            is_gen12hp = compute_engine->is_gen12hp();
 
             return ok ? status::success : status::unimplemented;
         }
 
-        status_t init_conf();
+        status_t init_conf(engine_t *engine);
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
-        bool is_gen12hp = false;
+
         conv_conf_t conf;
 
         bool support_bias() const override { return true; }

@@ -29,7 +29,7 @@ namespace ocl {
 using namespace data_type;
 using namespace format_tag;
 
-status_t gen12hp_convolution_fwd_t::pd_t::init_conf() {
+status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     const convolution_desc_t &cd = *desc();
     set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
             *weights_md(1), *attr());
@@ -40,6 +40,10 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf() {
 
     if (conf.mb < 8) return status::unimplemented;
     if (conf.ic <= 4) return status::unimplemented;
+
+    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+    conf.use_256grf_per_thread = compute_engine->mayiuse(
+            compute::device_ext_t::intel_variable_eu_thread_count);
 
     conf.mb_block = 32;
     conf.oc_block = (utils::one_of(conf.src_data_type, u8, s8)) ? 32 : 16;
@@ -167,7 +171,8 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
     kernel_ctx.add_option("-Dcl_intel_subgroups_long");
 
-    if (is_gen12hp) kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
+    if (conf.use_256grf_per_thread)
+        kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
 
     return status::success;
 }
@@ -214,7 +219,7 @@ status_t gen12hp_convolution_fwd_t::execute_forward(
     return status;
 }
 
-status_t gen12hp_convolution_bwd_data_t::pd_t::init_conf() {
+status_t gen12hp_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
     const convolution_desc_t &cd = *desc();
     set_default_conf(conf, cd, *diff_src_md(), *weights_md(), *diff_dst_md(),
             *weights_md(1), *attr());
@@ -222,6 +227,10 @@ status_t gen12hp_convolution_bwd_data_t::pd_t::init_conf() {
     status_t status = status::success;
 
     if (conf.mb < 8) return status::unimplemented;
+
+    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+    conf.use_256grf_per_thread = compute_engine->mayiuse(
+            compute::device_ext_t::intel_variable_eu_thread_count);
 
     conf.mb_block = 32;
     conf.oc_block = (utils::one_of(conf.src_data_type, u8, s8)) ? 32 : 16;
@@ -346,7 +355,8 @@ status_t gen12hp_convolution_bwd_data_t::pd_t::init_kernel_ctx(
 
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
 
-    if (is_gen12hp) kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
+    if (conf.use_256grf_per_thread)
+        kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
 
     return status::success;
 }

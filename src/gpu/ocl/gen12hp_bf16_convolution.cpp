@@ -28,13 +28,19 @@ namespace ocl {
 
 using namespace dnnl::impl::memory_tracking::names;
 
-status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_conf() {
+status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_conf(
+        engine_t *engine) {
     const convolution_desc_t &cd = *desc();
+
     set_default_conf(conf, cd, *src_md(), *diff_weights_md(), *diff_dst_md(),
             *diff_weights_md(1), *attr());
 
     //TODO: add depthwise
     if (conf.is_depthwise) return status::unimplemented;
+
+    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+    conf.use_256grf_per_thread = compute_engine->mayiuse(
+            compute::device_ext_t::intel_variable_eu_thread_count);
 
     conf.with_bias = cd.diff_bias_desc.format_kind != format_kind::undef;
 
@@ -269,7 +275,8 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
     kernel_ctx.add_option("-cl-std=CL2.0");
     kernel_ctx.add_option("-cl-uniform-work-group-size");
 
-    if (is_gen12hp) kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
+    if (conf.use_256grf_per_thread)
+        kernel_ctx.add_option("-cl-intel-256-GRF-per-thread");
 
     kernel_ctx.print_options();
     return status::success;
