@@ -59,6 +59,7 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
 
                 memory_desc_wrapper a_mdw(&desc_.b_desc);
                 memory_desc_wrapper b_mdw(&desc_.a_desc);
+                memory_desc_wrapper c_mdw(&desc_.c_desc);
 
                 if (a_mdw.format_any())
                     CHECK(memory_desc_init_by_tag(desc_.b_desc, a_packed_tag));
@@ -70,9 +71,14 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
                 else if (b_mdw.matches_one_of_tag(b_packed_tag, ab, ba)
                         == undef)
                     return false;
+                if (c_mdw.format_any())
+                    CHECK(memory_desc_init_by_tag(desc_.c_desc, b_packed_tag));
+                else if (c_mdw.matches_one_of_tag(b_packed_tag, ab) == undef)
+                    return false;
 
                 packed_a_ = a_mdw.matches_tag(a_packed_tag);
                 packed_b_ = b_mdw.matches_tag(b_packed_tag);
+                packed_c_ = c_mdw.matches_tag(b_packed_tag);
             }
 
             return gpu_gemm_pd_t::set_default_formats();
@@ -107,6 +113,7 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
 
         bool packed_a() const { return packed_a_; }
         bool packed_b() const { return packed_b_; }
+        bool packed_c() const { return packed_c_; }
 
         dim_t lda_packed() const {
             return packed_a() ? desc()->b_desc.padded_dims[0] : 0;
@@ -114,10 +121,13 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
         dim_t ldb_packed() const {
             return packed_b() ? desc()->a_desc.padded_dims[1] : 0;
         }
+        dim_t ldc_packed() const {
+            return packed_c() ? desc()->c_desc.padded_dims[1] : 0;
+        }
 
     private:
         attr_info_t attr_info_ = {};
-        bool packed_a_ = false, packed_b_ = false;
+        bool packed_a_ = false, packed_b_ = false, packed_c_ = false;
     };
 
     status_t init(engine_t *engine);

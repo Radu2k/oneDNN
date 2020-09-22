@@ -42,6 +42,7 @@ public:
         bool b_bias = false;
         bias_t c_bias = bias_t::none;
         bool early_c_bias = false;
+        bool c_packed = false;
 
         bool alt_barriers = false;
         bool use_slm_fence = true;

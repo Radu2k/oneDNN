@@ -49,12 +49,13 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     // - batch is not supported
     // - runtime dims are not supported
     bool limits_ok = d->batch() == 1
-            && !utils::one_of(
-                    DNNL_RUNTIME_DIM_VAL, d->m(), d->n(), d->k(), d->ldc());
+            && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m(), d->n(), d->k());
     if (!packed_a())
         limits_ok = limits_ok && (d->lda() != DNNL_RUNTIME_DIM_VAL);
     if (!packed_b())
         limits_ok = limits_ok && (d->ldb() != DNNL_RUNTIME_DIM_VAL);
+    if (!packed_c())
+        limits_ok = limits_ok && (d->ldc() != DNNL_RUNTIME_DIM_VAL);
 
     bool dt_float_ok = (d->a_type() == d->b_type()
             && utils::one_of(d->a_type(), bf16, f16)
@@ -154,6 +155,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
         cfg.eltwise_scale = attr_info->eltwise_scale;
     }
     cfg.a_bias = cfg.b_bias = ab_zero_points_;
+    cfg.c_packed = pd()->packed_c();
 
     int cmask = -1;
 
@@ -503,12 +505,13 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
 
     bool packed_a = pd()->packed_a();
     bool packed_b = pd()->packed_b();
+    bool packed_c = pd()->packed_c();
     bool transa = (pd()->desc()->transa() == dnnl_trans);
     bool transb = (pd()->desc()->transb() == dnnl_trans);
 
     auto lda = packed_a ? 0 : pd()->desc()->lda();
     auto ldb = packed_b ? 0 : pd()->desc()->ldb();
-    auto ldc = pd()->desc()->ldc();
+    auto ldc = packed_c ? pd()->ldc_packed() : pd()->desc()->ldc();
 
     auto alpha = pd()->alpha();
     auto beta = pd()->beta();

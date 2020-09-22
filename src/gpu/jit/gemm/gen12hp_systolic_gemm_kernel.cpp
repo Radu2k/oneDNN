@@ -39,32 +39,56 @@ void gen12hp_systolic_gemm_kernel_t::scattered_setup_c(int stride, bool load) {
                     0, 0));
     mov<uint16_t>(4, uheaders[15][0](4), uheaders[15][0](1));
     add<uint64_t>(4, uheaders[0], uc_base, uheaders[15].uw(0)(4));
-    add<uint64_t>(4, uheaders[1], uheaders[0], uint16_t(stride * 4));
-    add<uint64_t>(8, uheaders[2], uheaders[0], uint16_t(stride * 8));
-    add<uint64_t>(8, uheaders[4], uheaders[0], uint16_t(stride * 16));
-    add<uint64_t>(8, uheaders[6], uheaders[0], uint16_t(stride * 24));
-    for (int q = 8; q < 16; q += 2)
-        add<uint64_t>(8, uheaders[q], uheaders[q - 8], uldc);
+    add<uint64_t>(4, uheaders[1], uheaders[0], stride * 4);
+    add<uint64_t>(8, uheaders[2], uheaders[0], stride * 8);
+    if (cfg.c_packed) {
+        add<uint64_t>(8, uheaders[4], uheaders[0], stride * 16 * unroll_n);
+        add<uint64_t>(
+                8, uheaders[6], uheaders[0], stride * (16 * unroll_n + 8));
+        for (int q = 8; q < 16; q += 2)
+            add<uint64_t>(8, uheaders[q], uheaders[q - 8], stride * 16);
+    } else {
+        add<uint64_t>(8, uheaders[4], uheaders[0], stride * 16);
+        add<uint64_t>(8, uheaders[6], uheaders[0], stride * 24);
+        for (int q = 8; q < 16; q += 2)
+            add<uint64_t>(8, uheaders[q], uheaders[q - 8], uldc);
+    }
 }
 
 void gen12hp_systolic_gemm_kernel_t::block_setup_c(bool remainder, bool load) {
+    auto c_elem_bytes = getBytes(cfg.c_type);
     if (remainder) {
         // 8 blocks, each 16x1.
         mov<uint64_t>(1, uheaders[0][0], uc_base);
-        add<uint64_t>(1, uheaders[1][0], uc_base,
-                uint16_t(getBytes(cfg.c_type) * 16));
-        add<uint64_t>(8, uheaders[2], uheaders[0], uldc);
-        add<uint64_t>(8, uheaders[4], uheaders[0], uldc_x2);
-        add<uint64_t>(8, uheaders[6], uheaders[2], uldc_x2);
-        for (int q = 8; q < 16; q += 2)
-            add<uint64_t>(8, uheaders[q], uheaders[q - 8], uldc_x4);
+        if (cfg.c_packed) {
+            add<uint64_t>(
+                    1, uheaders[1][0], uc_base, c_elem_bytes * 16 * unroll_n);
+            for (int q = 2; q < 16; q += 2)
+                add<uint64_t>(
+                        8, uheaders[q], uheaders[0], c_elem_bytes * 16 * q / 2);
+        } else {
+            add<uint64_t>(1, uheaders[1][0], uc_base, c_elem_bytes * 16);
+            add<uint64_t>(8, uheaders[2], uheaders[0], uldc);
+            add<uint64_t>(8, uheaders[4], uheaders[0], uldc_x2);
+            add<uint64_t>(8, uheaders[6], uheaders[2], uldc_x2);
+            for (int q = 8; q < 16; q += 2)
+                add<uint64_t>(8, uheaders[q], uheaders[q - 8], uldc_x4);
+        }
     } else {
         // 4 blocks, each 32x1.
         mov<uint64_t>(1, uheaders[0][0], uc_base);
-        add<uint64_t>(1, uheaders[1][0], uc_base, uldc);
-        add<uint64_t>(8, uheaders[2], uheaders[0], uldc_x2);
-        add<uint64_t>(8, uheaders[4], uheaders[0], uldc_x4);
-        add<uint64_t>(8, uheaders[6], uheaders[2], uldc_x4);
+        if (cfg.c_packed) {
+            add<uint64_t>(
+                    1, uheaders[1][0], uc_base, c_elem_bytes * 16 * unroll_n);
+            add<uint64_t>(8, uheaders[2], uheaders[0], c_elem_bytes * 16 * 2);
+            add<uint64_t>(8, uheaders[4], uheaders[0], c_elem_bytes * 16 * 4);
+            add<uint64_t>(8, uheaders[6], uheaders[0], c_elem_bytes * 16 * 6);
+        } else {
+            add<uint64_t>(1, uheaders[1][0], uc_base, uldc);
+            add<uint64_t>(8, uheaders[2], uheaders[0], uldc_x2);
+            add<uint64_t>(8, uheaders[4], uheaders[0], uldc_x4);
+            add<uint64_t>(8, uheaders[6], uheaders[2], uldc_x4);
+        }
     }
 }
 
@@ -149,14 +173,15 @@ void gen12hp_systolic_gemm_kernel_t::load_update_c_internal(
                             A64, uheaders[8 * j1 + 4]);
                 }
                 if (j + 2 < 48) {
-                    add<uint64_t>(8, uheaders[8 * j1 + 0], uheaders[8 * j1 + 0],
-                            uldc_x2);
-                    add<uint64_t>(8, uheaders[8 * j1 + 2], uheaders[8 * j1 + 2],
-                            uldc_x2);
-                    add<uint64_t>(8, uheaders[8 * j1 + 4], uheaders[8 * j1 + 4],
-                            uldc_x2);
-                    add<uint64_t>(8, uheaders[8 * j1 + 6], uheaders[8 * j1 + 6],
-                            uldc_x2);
+                    for (int q = 0; q < 8; q += 2) {
+                        if (cfg.c_packed)
+                            add<uint64_t>(8, uheaders[8 * j1 + q],
+                                    uheaders[8 * j1 + q],
+                                    c_elem_bytes * 16 * 2);
+                        else
+                            add<uint64_t>(8, uheaders[8 * j1 + q],
+                                    uheaders[8 * j1 + q], uldc_x2);
+                    }
                 }
             }
         }
@@ -166,12 +191,24 @@ void gen12hp_systolic_gemm_kernel_t::load_update_c_internal(
             for (int j = j0; j < j0 + 4; j++) {
                 auto jj = (j & 7);
                 if (remainder) {
-                    add<uint64_t>(1, uheaders[2 * jj + 0], uheaders[2 * jj + 0],
-                            uldc_x8);
-                    add<uint64_t>(1, uheaders[2 * jj + 1], uheaders[2 * jj + 1],
-                            uldc_x8);
-                } else
-                    add<uint64_t>(1, uheaders[jj], uheaders[jj], uldc_x8);
+                    if (cfg.c_packed) {
+                        add<uint64_t>(1, uheaders[2 * jj + 0],
+                                uheaders[2 * jj + 0], c_elem_bytes * 16 * 8);
+                        add<uint64_t>(1, uheaders[2 * jj + 1],
+                                uheaders[2 * jj + 1], c_elem_bytes * 16 * 8);
+                    } else {
+                        add<uint64_t>(1, uheaders[2 * jj + 0],
+                                uheaders[2 * jj + 0], uldc_x8);
+                        add<uint64_t>(1, uheaders[2 * jj + 1],
+                                uheaders[2 * jj + 1], uldc_x8);
+                    }
+                } else {
+                    if (cfg.c_packed)
+                        add<uint64_t>(1, uheaders[jj], uheaders[jj],
+                                c_elem_bytes * 16 * 8);
+                    else
+                        add<uint64_t>(1, uheaders[jj], uheaders[jj], uldc_x8);
+                }
             }
         }
 
@@ -200,6 +237,12 @@ void gen12hp_systolic_gemm_kernel_t::load_update_c_internal(
 
         // Get (sub)register in loaded C submatrix at offset (ii*8, jj).
         auto get_load_reg = [&](DataType dt, int ii, int jj) {
+            if (cfg.c_packed && c_align16 && !remainder) {
+                int bi = (ii & 2) >> 1;
+                int bj = (jj & 1) << 1;
+                ii = (ii & ~2) | bj;
+                jj = (jj & ~1) | bi;
+            }
             auto bytes = c_align16 ? getBytes(dt) : 4;
             auto stride = bytes / getBytes(dt);
             auto per_reg = 4 / bytes;
@@ -350,6 +393,12 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
 
         // Get (sub)register in stored C submatrix at offset (ii*8, jj).
         auto get_store_reg = [&](int ii, int jj) {
+            if (cfg.c_packed && c_align16 && !remainder) {
+                int bi = (ii & 2) >> 1;
+                int bj = (jj & 1) << 1;
+                ii = (ii & ~2) | bj;
+                jj = (jj & ~1) | bi;
+            }
             auto bytes = c_align16 ? c_elem_bytes : 4;
             auto stride = bytes / c_elem_bytes;
             auto per_reg = 4 / bytes;
@@ -404,8 +453,13 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
                 if ((jj == 7) && (j0 + 8 < 48)) {
                     // Increment all block write pointers.
                     sync(SyncFunction::allrd);
-                    for (int q = 0; q < (remainder ? 16 : 8); q += 2)
-                        add<uint64_t>(8, uheaders[q], uheaders[q], uldc_x8);
+                    for (int q = 0; q < (remainder ? 16 : 8); q += 2) {
+                        if (cfg.c_packed)
+                            add<uint64_t>(8, uheaders[q], uheaders[q],
+                                    c_elem_bytes * 16 * 8);
+                        else
+                            add<uint64_t>(8, uheaders[q], uheaders[q], uldc_x8);
+                    }
                 }
             } else {
                 // Scattered dword or byte store, possibly masked.
@@ -430,8 +484,13 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
                 if ((j1 == 1) && (j + 2 < 48)) {
                     // Increment all scattered pointers at once.
                     sync(SyncFunction::allrd);
-                    for (int q = 0; q < 16; q += 2)
-                        add<uint64_t>(8, uheaders[q], uheaders[q], uldc_x2);
+                    for (int q = 0; q < 16; q += 2) {
+                        if (cfg.c_packed)
+                            add<uint64_t>(8, uheaders[q], uheaders[q],
+                                    c_elem_bytes * 16 * 2);
+                        else
+                            add<uint64_t>(8, uheaders[q], uheaders[q], uldc_x2);
+                    }
                 }
             }
         }
@@ -441,7 +500,6 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
 }
 
 void gen12hp_systolic_gemm_kernel_t::load_c_bias(bool remainder) {
-    // To fix: co accesses may go out of bounds.
     if (!remainder && getBytes(cfg.co_type) == 4)
         load_c_bias_block();
     else
@@ -693,14 +751,19 @@ void gen12hp_systolic_gemm_kernel_t::update_c(bool remainder) {
     }
 
     // Set up headers and multiples of LDC (= ldc in bytes). TODO collapse into one instruction.
-    shl(1, uldc_x2, uldc, uint16_t(1));
-    shl(1, uldc_x4, uldc, uint16_t(2));
-    shl(1, uldc_x8, uldc, uint16_t(3));
+    if (!cfg.c_packed) {
+        shl(1, uldc_x2, uldc, uint16_t(1));
+        shl(1, uldc_x4, uldc, uint16_t(2));
+        shl(1, uldc_x8, uldc, uint16_t(3));
+    }
 
     // Check whether C pointer has given (power of 2) alignment. Result stored in f1.1.
     auto check_c_align = [&](int align) {
         auto uc_align = r18.ud(0);
-        or_(1, uc_align, uldc, uc_base.ud(0));
+        if (cfg.c_packed)
+            uc_align = uc_base.ud(0);
+        else
+            or_(1, uc_align, uldc, uc_base.ud(0));
         and_(1 | ze | f1[1], null.ud(), uc_align, uint16_t(align - 1));
     };
 
@@ -1139,6 +1202,7 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     auto suboffset_b = r26.ud(1);
     auto thd1_adjust = r27.ud(0);
     auto temp = r28.ud(0);
+    auto temp2 = r28.ud(1);
     auto save_copy = r32.ud();
     auto k_counter_copy = r32.ud(0);
     auto ldc_copy = r32.ud(1);
@@ -1184,6 +1248,7 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     shl(1, ldc_copy, ldc, lg2_c_elem_bytes);
     shl(1, suboffset_a, local_id_y, uint16_t(8));
     mul(1, suboffset_b, local_id_x, uint16_t(12 * 32 / 8));
+    if (cfg.c_packed) mul(1, temp2, m0, unroll_n);
     assert(ldc_save.getByteOffset() == ldc_copy.getByteOffset());
     mov(1, ldc_save.ud(), ldc_copy.ud());
     shr(1, k_counter_copy, k_counter_copy, ngen::utils::log2(this_unroll_k()));
@@ -1196,7 +1261,10 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
         case bias_t::row: add(1, off_co_copy, in_offset_co, m0); break;
         case bias_t::column: add(1, off_co_copy, in_offset_co, n0); break;
     }
-    add(1, offset_c, offset_c, m0);
+    if (cfg.c_packed)
+        add(1, offset_c, offset_c, temp2);
+    else
+        add(1, offset_c, offset_c, m0);
     add(1, offset_a, offset_a, in_offset_a); // TODO: combine
     add(1, offset_b, offset_b, in_offset_b);
     add(1, offset_c, offset_c, in_offset_c);
