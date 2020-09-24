@@ -154,6 +154,7 @@ DECL_TRAITS(abcde, _, _, 5);
 DECL_TRAITS(abcdef, _, _, 6);
 DECL_TRAITS(abdc, _, _, 4);
 DECL_TRAITS(abdec, _, _, 5);
+DECL_TRAITS(abdfce, _, _, 6);
 DECL_TRAITS(acb, _, _, 3);
 DECL_TRAITS(acbde, _, _, 5);
 DECL_TRAITS(acbdef, _, _, 6);

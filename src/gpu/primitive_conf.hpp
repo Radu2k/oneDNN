@@ -529,6 +529,7 @@ struct reorder_conf_t {
     bool scale_quant, with_sum_ab, with_sum_a;
     bool use_ref_impl, use_dense_vect;
     bool plain_to_ABcd4axb, vectorize_last_dim;
+    bool plain_xFxE_to_abcdef;
     int ndims;
     size_t nelems;
 
