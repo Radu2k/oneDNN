@@ -25,14 +25,21 @@ namespace gpu {
 namespace ocl {
 
 status_t ocl_gpu_device_info_t::init_arch() {
+    cl_int err = CL_SUCCESS;
+
+    // skip other vendors
+    const cl_uint intel_vendor_id = 0x8086;
+    cl_uint vendor_id;
+    err = clGetDeviceInfo(
+            device_, CL_DEVICE_VENDOR_ID, sizeof(cl_uint), &vendor_id, nullptr);
+    OCL_CHECK(err);
+    if (vendor_id != intel_vendor_id) return status::success;
+
     // try to detect gpu by device name first
     gpu_arch_ = detect_gpu_arch_by_device_name(name());
     if (gpu_arch_ != compute::gpu_arch_t::unknown) return status::success;
 
     // if failed, use slower method
-    if (utils::any_null(device_)) return status::invalid_arguments;
-
-    cl_int err = CL_SUCCESS;
     cl_context context
             = clCreateContext(nullptr, 1, &device_, nullptr, nullptr, &err);
     OCL_CHECK(err);

@@ -28,6 +28,14 @@ namespace impl {
 namespace sycl {
 
 status_t sycl_device_info_t::init_arch() {
+    // skip cpu engines
+    if (!device_.is_gpu()) return status::success;
+
+    // skip other vendors
+    const int intel_vendor_id = 0x8086;
+    auto vendor_id = device_.get_info<cl::sycl::info::device::vendor_id>();
+    if (vendor_id != intel_vendor_id) return status::success;
+
     // try to detect gpu by device name first
     gpu_arch_ = gpu::ocl::detect_gpu_arch_by_device_name(name());
     if (gpu_arch_ != gpu::compute::gpu_arch_t::unknown) return status::success;
