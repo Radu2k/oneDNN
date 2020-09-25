@@ -79,19 +79,8 @@ public:
         auto ok = data.ud(0);
         auto header = r64;
 
+        prologue();
         setDefaultNoMask();
-
-        if (hw >= HW::Gen12HP) {
-            // First 8 instructions: load local IDs (not needed).
-            for (int i = 0; i < 8; i++)
-                sync(SyncFunction::nop);
-
-            // Second entrypoint: load arguments.
-            mov<uint32_t>(8, header, uint32_t(0));
-            and_<uint32_t>(1, header[2], r0[0], uint32_t(0xFFFFFFE0));
-            load(16 | SWSB(sb1, 1), r4, aligned_block_oword(8), A32NC, header);
-            sync(SyncFunction::nop, sb1.dst);
-        }
 
         // Default: test failure.
         mov(1, ok, uint16_t(0));
@@ -180,10 +169,7 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
     // this is tracked by MFDNN-3532.
 
     // DO_NOT_PROMOTE : Return true unless flag is set to zero value
-    *ok = dnnl::impl::getenv_int("DNNL_ENABLE_NGEN", 1) != 0;
-    return status::success;
 
-#if 0
     auto gpu_engine = utils::downcast<compute::compute_engine_t *>(engine);
     if (!gpu_engine) return status::invalid_arguments;
 
@@ -268,7 +254,6 @@ status_t gpu_supports_binary_format(bool *ok, engine_t *engine) {
 
     *ok = (result != 0);
     return status::success;
-#endif
 }
 
 } // namespace jit
