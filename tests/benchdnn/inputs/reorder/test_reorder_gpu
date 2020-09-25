@@ -22,6 +22,11 @@
 --dtag=abcdef
 1x1x3x2x16x2
 
+# test transpose16x16 kernel
+--stag=abcd,aBcd16b
+--dtag=abcd,aBcd16b
+1x256x360x640 1x64x720x1280 15x64x31x64 16x16x16x16
+
 ### test types
 --reset
 --sdt=f32,s32,s8,u8,f16,bf16
