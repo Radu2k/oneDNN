@@ -36,8 +36,6 @@ namespace gpu {
 namespace ocl {
 
 status_t ocl_gpu_engine_t::init() {
-    CHECK(compute_engine_t::init());
-
     cl_int err = CL_SUCCESS;
     err = clRetainDevice(device_);
     if (err != CL_SUCCESS) {
@@ -57,8 +55,8 @@ status_t ocl_gpu_engine_t::init() {
 
     OCL_CHECK(err);
 
-    status_t status = check_device(engine_kind::gpu, device_, context_);
-    if (status != status::success) return status;
+    CHECK(check_device(engine_kind::gpu, device_, context_));
+    CHECK(compute_engine_t::init());
 
     status = jit::gpu_supports_binary_format(&enable_ngen_kernels_, this);
     if (status != status::success) return status;
