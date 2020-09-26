@@ -58,7 +58,8 @@ status_t ocl_gpu_engine_t::init() {
     CHECK(check_device(engine_kind::gpu, device_, context_));
     CHECK(compute_engine_t::init());
 
-    status = jit::gpu_supports_binary_format(&enable_ngen_kernels_, this);
+    status_t status
+            = jit::gpu_supports_binary_format(&enable_ngen_kernels_, this);
     if (status != status::success) return status;
 
     if (get_verbose())
