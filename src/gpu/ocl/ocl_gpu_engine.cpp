@@ -58,9 +58,7 @@ status_t ocl_gpu_engine_t::init() {
     CHECK(check_device(engine_kind::gpu, device_, context_));
     CHECK(compute_engine_t::init());
 
-    status_t status
-            = jit::gpu_supports_binary_format(&enable_ngen_kernels_, this);
-    if (status != status::success) return status;
+    CHECK(jit::gpu_supports_binary_format(&enable_ngen_kernels_, this));
 
     if (get_verbose())
         printf("dnnl_verbose,info,gpu,binary_kernels:%s\n",
