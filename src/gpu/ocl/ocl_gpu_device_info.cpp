@@ -104,6 +104,7 @@ static uint64_t get_future_extensions(compute::gpu_arch_t gpu_arch) {
                     intel_subgroup_split_matrix_multiply_accumulate;
             extensions
                     |= (uint64_t)device_ext_t::intel_variable_eu_thread_count;
+            extensions |= (uint64_t)device_ext_t::future_bf16_cvt;
         case gpu_arch_t::gen12lp:
             extensions |= (uint64_t)device_ext_t::intel_dot_accumulate;
             break;
@@ -201,7 +202,8 @@ std::string ocl_gpu_device_info_t::get_cl_ext_options() const {
                     device_ext_t::intel_global_float_atomics,
                     device_ext_t::intel_subgroup_matrix_multiply_accumulate,
                     device_ext_t::
-                            intel_subgroup_split_matrix_multiply_accumulate))
+                            intel_subgroup_split_matrix_multiply_accumulate,
+                    device_ext_t::future_bf16_cvt))
             opts += std::string("-D") + ext2cl_str(ext) + " ";
     }
     if (!opts.empty()) { opts[opts.size() - 1] = '\0'; }

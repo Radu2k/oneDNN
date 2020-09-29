@@ -63,6 +63,8 @@ enum class device_ext_t : uint64_t {
     intel_subgroup_matrix_multiply_accumulate       = 1ull << 24,
     intel_subgroup_split_matrix_multiply_accumulate = 1ull << 25,
     intel_variable_eu_thread_count                  = 1ull << 26,
+    // Future extensions
+    future_bf16_cvt                                 = 1ull << 31,
     last
     // clang-format on
 };
@@ -119,6 +121,8 @@ static inline const char *ext2cl_str(device_ext_t ext) {
         CASE(intel_subgroup_matrix_multiply_accumulate)
         CASE(intel_subgroup_split_matrix_multiply_accumulate)
         CASE(intel_variable_eu_thread_count)
+
+        CASE(future_bf16_cvt)
         default: return nullptr;
     }
 #undef CASE
