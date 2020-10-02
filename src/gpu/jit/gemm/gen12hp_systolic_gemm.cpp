@@ -306,7 +306,9 @@ gen12hp_systolic_gemm_t::get_blocking() const {
     int64_t block_k = default_block_k(dt);
     int64_t nblock_k = utils::div_up(k, block_k);
     block_k = utils::div_up(k, nblock_k);
-    block_k = utils::rnd_up(block_k, unroll_k);
+    block_k = utils::rnd_up(
+            (pd()->desc()->acc_type != pd()->desc()->c_type) ? k : block_k,
+            unroll_k);
 
     return std::make_tuple(block_m, block_n, block_k);
 }
