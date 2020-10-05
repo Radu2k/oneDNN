@@ -344,6 +344,9 @@ float8 mmad8x8_bf16(uint8 a, int8 b, float8 acc) {
     return intel_sub_group_bf16_bf16_matrix_mad_k16(as_int8(a), b, acc);
 }
 
+float4 mmad8x4_bf16(uint4 a, int8 b, float4 acc) {
+    return intel_sub_group_bf16_bf16_matrix_mad_k16(as_int4(a), b, acc);
+}
 #ifdef cl_intel_subgroup_split_matrix_multiply_accumulate
 
 float8 mmad8x8_bf16_split(uint4 a, int8 b, float8 acc) {

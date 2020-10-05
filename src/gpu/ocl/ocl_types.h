@@ -332,6 +332,9 @@
 #define MMAD_ACC_DATA4_T int4
 #define MMAD_ACC_DATA8_T int8
 #elif DT_S32 == 1
+#define MMAD_DATA_T uint
+#define MMAD_DATA4_T uint4
+#define MMAD_DATA8_T uint8
 #define DATA_T int
 #define DATA4_T int4
 #define DATA_TO_REF convert_float
