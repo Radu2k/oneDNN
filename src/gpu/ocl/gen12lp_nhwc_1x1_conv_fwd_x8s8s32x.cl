@@ -51,7 +51,7 @@
     do { \
         uint *d = (uint *)&data; \
         unroll_for(uint _i = (start); _i < (end); ++_i) { \
-            d[_i + d_idx] = AS_MMAD_DATA_T(intel_sub_group_block_read( \
+            d[_i + d_idx] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read( \
                     (__global uint *)&src[idx + _i * SW * G * IC])); \
         } \
     } while (0);
