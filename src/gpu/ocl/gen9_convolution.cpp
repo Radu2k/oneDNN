@@ -546,7 +546,7 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
             if (conf.is_depthwise) {
                 conf.icb = conf.ngroups;
                 conf.lws_d[0] = 1;
-                conf.lws_d[1] = is_gen12hp ? 32 : 16;
+                conf.lws_d[1] = conf.ic_block;
                 conf.lws_d[2] = 1;
                 conf.gws_d[0] = conf.ih * utils::div_up(conf.iw, conf.iw_block)
                         * conf.id;
@@ -554,12 +554,12 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
                 conf.gws_d[2] = conf.mb;
             } else {
                 conf.icb = 64;
-                while (conf.icb > 16) {
+                while (conf.icb > conf.ic_block) {
                     if (utils::rnd_up(conf.ic, conf.ic_block) % conf.icb == 0)
                         break;
                     conf.icb /= 2;
                 }
-                conf.lws_d[0] = is_gen12hp ? 32 : 16;
+                conf.lws_d[0] = conf.ic_block;
                 conf.lws_d[1] = 1;
                 conf.lws_d[2] = 1;
                 conf.gws_d[0] = conf.icb;
