@@ -39,23 +39,23 @@
 
 #if (MB_BLOCK == 32) || (SW == 1 && SH == 1 && SD == 1)
 #define BLOCK_READ_SRC_4x32(data, idx) \
-    data = AS_MMAD_DATA4_T( \
+    data = AS_SRC_MMAD_DATA4_T( \
             intel_sub_group_block_read4((__global uint *)&src[idx]));
 #define BLOCK_READ_SRC_8x32(data, idx) \
-    data = AS_MMAD_DATA8_T( \
+    data = AS_SRC_MMAD_DATA8_T( \
             intel_sub_group_block_read8((__global uint *)&src[idx]));
 #else
 #define BLOCK_READ_SRC_4x32(data, idx) \
     do { \
         unroll_for(uint _i = 0; _i < 4; ++_i) { \
-            data[_i] = AS_MMAD_DATA_T(intel_sub_group_block_read( \
+            data[_i] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read( \
                     (__global uint *)&src[idx + _i * SW * IC_BLOCK])); \
         } \
     } while (0);
 #define BLOCK_READ_SRC_8x32(data, idx) \
     do { \
         unroll_for(uint _i = 0; _i < 8; ++_i) { \
-            data[_i] = AS_MMAD_DATA_T(intel_sub_group_block_read( \
+            data[_i] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read( \
                     (__global uint *)&src[idx + _i * SW * IC_BLOCK])); \
         } \
     } while (0);
@@ -64,11 +64,8 @@
 #if SP_BLOCK == 4
 #define BLOCK0 4
 #define ACC_DATA_BLOCK int4
-
 #define SRC_DATA_BLOCK_T SRC_MMAD_DATA4_T
-#define BLOCK_READ_SRC(data, idx) \
-    data = AS_SRC_MMAD_DATA4_T( \
-            intel_sub_group_block_read4((__global uint *)&src[idx]));
+#define BLOCK_READ_SRC BLOCK_READ_SRC_4x32
 
 DECLARE_MMAD_EMU(mmad_tail0, idot4, IC_NBLOCKS_TAIL, 4, SRC_DATA_BLOCK_T, int8,
         ACC_DATA_BLOCK)
@@ -79,9 +76,7 @@ DECLARE_MMAD_EMU(mmad_tail0, idot4, IC_NBLOCKS_TAIL, 4, SRC_DATA_BLOCK_T, int8,
 #define BLOCK0 8
 #define ACC_DATA_BLOCK int8
 #define SRC_DATA_BLOCK_T SRC_MMAD_DATA8_T
-#define BLOCK_READ_SRC(data, idx) \
-    data = AS_SRC_MMAD_DATA8_T( \
-            intel_sub_group_block_read8((__global uint *)&src[idx]));
+#define BLOCK_READ_SRC BLOCK_READ_SRC_8x32
 
 DECLARE_MMAD_EMU(mmad_tail0, idot4, IC_NBLOCKS_TAIL, 8, SRC_DATA_BLOCK_T, int8,
         ACC_DATA_BLOCK)
@@ -95,9 +90,7 @@ DECLARE_MMAD_EMU(mmad_tail0, idot4, IC_NBLOCKS_TAIL, 8, SRC_DATA_BLOCK_T, int8,
 #define ACC_DATA_BLOCK1 int4
 #define SRC_DATA_BLOCK_T1 SRC_MMAD_DATA4_T
 #define DST_DATA_BLOCK_T1 uint4
-#define BLOCK_READ_SRC1(data, idx) \
-    data = AS_SRC_MMAD_DATA4_T( \
-            intel_sub_group_block_read4((__global uint *)&src[idx]));
+#define BLOCK_READ_SRC1 BLOCK_READ_SRC_4x32
 
 DECLARE_MMAD_EMU(mmad_tail1, idot4, IC_NBLOCKS_TAIL, 4, SRC_DATA_BLOCK_T1, int8,
         ACC_DATA_BLOCK1)
@@ -109,9 +102,7 @@ DECLARE_MMAD_EMU(mmad_tail1, idot4, IC_NBLOCKS_TAIL, 4, SRC_DATA_BLOCK_T1, int8,
 #define ACC_DATA_BLOCK1 int8
 #define SRC_DATA_BLOCK_T1 SRC_MMAD_DATA8_T
 #define DST_DATA_BLOCK_T1 uint8
-#define BLOCK_READ_SRC1(data, idx) \
-    data = AS_SRC_MMAD_DATA8_T( \
-            intel_sub_group_block_read8((__global uint *)&src[idx]));
+#define BLOCK_READ_SRC1 BLOCK_READ_SRC_8x32
 DECLARE_MMAD_EMU(mmad_tail1, idot4, IC_NBLOCKS_TAIL, 8, SRC_DATA_BLOCK_T1, int8,
         ACC_DATA_BLOCK1)
 #define MMAD_FULL1 mmad8x8
@@ -246,14 +237,14 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
 #if OUT_SP_TAIL < 8
                 S0 = 0;
                 for (int i = 0; i < OUT_SP_TAIL; ++i) {
-                    S0[i] = AS_MMAD_DATA_T(intel_sub_group_block_read(
+                    S0[i] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read(
                             (__global uint *)&src[i * SW * IC_BLOCK]));
                 }
 #else
                 BLOCK_READ_SRC(S0, 0 * IC_BLOCK);
                 S1 = 0;
                 for (int i = 8; i < OUT_SP_TAIL; ++i) {
-                    S1[i - 8] = AS_MMAD_DATA_T(intel_sub_group_block_read(
+                    S1[i - 8] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read(
                             (__global uint *)&src[i * SW * IC_BLOCK]));
                 }
 #endif
@@ -429,7 +420,8 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
 #if INT8_WEI_SLM && SP_TAIL
     if (ow < OW)
 #endif
-        if (OUT_SP_TAIL && sp + SP_BLOCK > OW * OH) {
+    {
+        if (OUT_SP_TAIL && ow + SP_BLOCK > OW) {
             STORE_DST(min(BLOCK0, OUT_SP_TAIL), C00, C01, C02, C03, D0, dst, 0);
             STORE_DST(OUT_SP_TAIL - 8, C10, C11, C12, C13, D1,
                     dst + 8 * OC_BLOCK, 1);
@@ -439,7 +431,7 @@ gen12lp_1x1_conv_fwd_x8s8s32x(const __global SRC_DATA_T *src,
                 STORE_DST(
                         BLOCK1, C10, C11, C12, C13, D1, dst + 8 * OC_BLOCK, 1);
         }
-}
+    }
 }
 
 // Reads (n * 4) elements per work-item.
