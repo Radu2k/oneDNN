@@ -534,6 +534,7 @@ struct reorder_conf_t {
     bool plain_to_ABcd4axb, vectorize_last_dim;
     bool plain_xFxE_to_abcdef;
     int transpose16x16; // 3-state logic
+    bool nchw;
     int ndims;
     size_t nelems;
 
