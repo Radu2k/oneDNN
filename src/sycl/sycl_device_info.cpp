@@ -108,6 +108,9 @@ status_t sycl_device_info_t::init_extensions() {
         }
     }
 
+    // Handle future extensions, not yet supported by the DPC++ API
+    extensions_ |= (uint64_t)get_future_extensions(gpu_arch());
+
     return status::success;
 }
 

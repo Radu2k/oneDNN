@@ -190,6 +190,29 @@ struct runtime_version_t {
     }
 };
 
+// Needed workaround for future HW extensions
+static uint64_t get_future_extensions(compute::gpu_arch_t gpu_arch) {
+    using namespace compute;
+
+    uint64_t extensions = 0;
+    switch (gpu_arch) {
+        case gpu_arch_t::gen12hp:
+            extensions |= (uint64_t)device_ext_t::intel_global_float_atomics;
+            extensions |= (uint64_t)
+                    device_ext_t::intel_subgroup_matrix_multiply_accumulate;
+            extensions |= (uint64_t)device_ext_t::
+                    intel_subgroup_split_matrix_multiply_accumulate;
+            extensions
+                    |= (uint64_t)device_ext_t::intel_variable_eu_thread_count;
+            extensions |= (uint64_t)device_ext_t::future_bf16_cvt;
+        case gpu_arch_t::gen12lp:
+            extensions |= (uint64_t)device_ext_t::intel_dot_accumulate;
+            break;
+        default: break;
+    }
+    return extensions;
+}
+
 struct device_info_t {
 public:
     virtual ~device_info_t() = default;
