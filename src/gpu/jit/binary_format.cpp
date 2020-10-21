@@ -58,6 +58,7 @@ public:
         newArgument("src_ptr", ExternalArgumentType::GlobalPtr);
         newArgument("ok", ExternalArgumentType::GlobalPtr);
 
+        setDefaultAutoSWSB();
         requireSIMD(8);
         requireLocalID(3); // r1-r3
         requireLocalSize(); // r7.0-2:ud
