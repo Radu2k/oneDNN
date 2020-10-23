@@ -1,5 +1,6 @@
 #===============================================================================
 # Copyright 2019-2020 Intel Corporation
+# Copyright 2020 Arm Ltd. and affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,6 +37,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
         ${CMAKE_CURRENT_SOURCE_DIR}/*resampling*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/*normalization*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ref_eltwise.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/nhwc_pooling.cpp
         )
     if(WIN32)
         set_source_files_properties(${FILES_REQUIRED_PREC_SQRT}
@@ -79,4 +81,7 @@ set_property(GLOBAL APPEND PROPERTY DNNL_LIB_DEPS
 
 if (DNNL_TARGET_ARCH STREQUAL "X64")
     add_subdirectory(x64)
+endif()
+if (DNNL_TARGET_ARCH STREQUAL "AARCH64")
+    add_subdirectory(aarch64)
 endif()

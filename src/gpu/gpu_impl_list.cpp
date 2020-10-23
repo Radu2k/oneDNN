@@ -38,6 +38,7 @@
 #include "gpu/ocl/gen9_convolution.hpp"
 #include "gpu/ocl/gen9_pooling.hpp"
 #include "gpu/ocl/gen9_softmax.hpp"
+#include "gpu/ocl/gen9_wino_convolution.hpp"
 #include "gpu/ocl/ref_batch_normalization.hpp"
 #include "gpu/ocl/ref_binary.hpp"
 #include "gpu/ocl/ref_convolution.hpp"
@@ -48,6 +49,7 @@
 #include "gpu/ocl/ref_lrn.hpp"
 #include "gpu/ocl/ref_matmul.hpp"
 #include "gpu/ocl/ref_pooling.hpp"
+#include "gpu/ocl/ref_reduction.hpp"
 #include "gpu/ocl/ref_resampling.hpp"
 #include "gpu/ocl/ref_shuffle.hpp"
 #include "gpu/ocl/ref_softmax.hpp"
@@ -83,6 +85,7 @@ const pd_create_f gpu_impl_list[] = {
         INSTANCE(ocl::gen12lp_x8s8s32x_1x1_convolution_fwd_t),
         INSTANCE(ocl::gen12lp_x8s8s32x_convolution_fwd_t),
         INSTANCE(ocl::gen12lp_x8s8s32x_convolution_bwd_data_t),
+        INSTANCE(ocl::gen9_wino_convolution_fwd_t),
         INSTANCE(ocl::gen9_convolution_fwd_t),
         INSTANCE(ocl::gen9_convolution_bwd_data_t),
         INSTANCE(ocl::gen9_convolution_bwd_weights_t),
@@ -147,6 +150,9 @@ const pd_create_f gpu_impl_list[] = {
         // MatMul
         INSTANCE(ocl::gemm_matmul_t),
         INSTANCE(ocl::ref_matmul_t),
+
+        // Reduction
+        INSTANCE(ocl::ref_reduction_t),
 
         // Resampling
         INSTANCE(ocl::ref_resampling_fwd_t),

@@ -17,8 +17,8 @@
 /// @file
 /// C API types definitions
 
-#ifndef DNNL_TYPES_H
-#define DNNL_TYPES_H
+#ifndef ONEAPI_DNNL_DNNL_TYPES_H
+#define ONEAPI_DNNL_DNNL_TYPES_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -181,6 +181,12 @@ typedef enum {
     dnnl_acbd, ///< plain 4D tensor
     dnnl_abcde, ///< plain 5D tensor
     dnnl_abcdef, ///< plain 6D tensor
+    dnnl_abcdefg, ///< plain 7D tensor
+    dnnl_abcdefgh, ///< plain 8D tensor
+    dnnl_abcdefghi, ///< plain 9D tensor
+    dnnl_abcdefghij, ///< plain 10D tensor
+    dnnl_abcdefghijk, ///< plain 11D tensor
+    dnnl_abcdefghijkl, ///< plain 12D tensor
 
     // Permuted plain formats
 
@@ -195,7 +201,6 @@ typedef enum {
     dnnl_ba, ///< permuted 2D tensor
     dnnl_bac, ///< permuted 3D tensor
     dnnl_bacd, ///< permuted 4D tensor
-
     dnnl_bacde, ///< permuted 5D tensor
     dnnl_bca, ///< permuted 3D tensor
     dnnl_bcda, ///< permuted 4D tensor
@@ -206,6 +211,14 @@ typedef enum {
     dnnl_cdeba, ///< permuted 5D tensor
     dnnl_decab, ///< permuted 5D tensor
     dnnl_defcab, ///< permuted 6D tensor
+    dnnl_abced, ///< permuted 5D tensor
+    dnnl_abcdfe, ///< permuted 6D tensor
+    dnnl_abcdegf, ///< permuted 7D tensor
+    dnnl_abcdefhg, ///< permuted 8D tensor
+    dnnl_abcdefgih, ///< permuted 9D tensor
+    dnnl_abcdefghji, ///< permuted 10D tensor
+    dnnl_abcdefghikj, ///< permuted 11D tensor
+    dnnl_abcdefghijlk, ///< permuted 12D tensor
 
     // Opaque blocked formats
 
@@ -221,7 +234,6 @@ typedef enum {
     dnnl_aBc16b,
     dnnl_ABc16b16a,
     dnnl_Abc4a,
-
     /// 3D tensor blocked by 2nd dimension with block size 32
     dnnl_aBc32b,
     /// 3D tensor blocked by 2nd dimension with block size 4
@@ -235,6 +247,15 @@ typedef enum {
     dnnl_ABc8a8b,
     dnnl_ABc8a2b,
     dnnl_ABc8a4b,
+    dnnl_AB16b16a,
+    dnnl_AB16b32a,
+    dnnl_AB16b64a,
+    dnnl_AB8b16a2b,
+    dnnl_AB8b32a2b,
+    dnnl_AB8b64a2b,
+    dnnl_AB4b16a4b,
+    dnnl_AB4b32a4b,
+    dnnl_AB4b64a4b,
     /// 3D tensor blocked by 2nd dimension with block size 8
     dnnl_aBc8b,
     dnnl_ABc8b16a2b,
@@ -254,7 +275,6 @@ typedef enum {
     dnnl_aBCd16b16c,
     dnnl_aBCd16c16b,
     dnnl_Abcd4a,
-
     /// 4D tensor blocked by 2nd dimension with block size 32
     dnnl_aBcd32b,
     /// 4D tensor blocked by 2nd dimension with block size 4
@@ -310,7 +330,6 @@ typedef enum {
     dnnl_aBCde16c16b,
     dnnl_aBCde2c8b4c,
     dnnl_Abcde4a,
-
     /// 5D tensor blocked by 2nd dimension with block size 32
     dnnl_aBcde32b,
     /// 5D tensor blocked by 2nd dimension with block size 4
@@ -442,6 +461,10 @@ typedef enum {
     dnnl_aCBdef4c8b8c4b,
     dnnl_BAcde16a16b,
     dnnl_aCBdef16b16c,
+    dnnl_AB32a32b8a4b,
+    dnnl_AB8a4b,
+    dnnl_AB32a32b8a2b,
+    dnnl_AB8a2b,
 
     /// Just a sentinel, not real memory format tag. Must be changed after new
     /// format tag is added.
@@ -498,7 +521,6 @@ typedef enum {
     dnnl_iohw = dnnl_bacd,
     /// 5D CNN weights tensor, an alias to #dnnl_abcde
     dnnl_oidhw = dnnl_abcde,
-
     /// 5D CNN weights tensor, an alias to #dnnl_bacde
     dnnl_iodhw = dnnl_bacde,
     /// 5D CNN weights tensor, an alias to #dnnl_cdeba
@@ -614,7 +636,16 @@ typedef enum {
     dnnl_NCw40n32c = dnnl_ABc40a32b,
     dnnl_NChw40n32c = dnnl_ABcd40a32b,
     dnnl_NCdhw40n32c = dnnl_ABcde40a32b,
-
+    // weights, 2D
+    dnnl_OI16i16o = dnnl_AB16b16a,
+    dnnl_OI16i32o = dnnl_AB16b32a,
+    dnnl_OI16i64o = dnnl_AB16b64a,
+    dnnl_OI8i16o2i = dnnl_AB8b16a2b,
+    dnnl_OI8i32o2i = dnnl_AB8b32a2b,
+    dnnl_OI8i64o2i = dnnl_AB8b64a2b,
+    dnnl_OI4i16o4i = dnnl_AB4b16a4b,
+    dnnl_OI4i32o4i = dnnl_AB4b32a4b,
+    dnnl_OI4i64o4i = dnnl_AB4b64a4b,
     // weights, 3D
     dnnl_IOw16o16i = dnnl_BAc16a16b,
     dnnl_IOw16i16o = dnnl_BAc16b16a,
@@ -693,6 +724,7 @@ typedef enum {
     // weights w/ groups, 3D
     dnnl_Goiw16g = dnnl_Abcd16a,
     dnnl_Goiw8g = dnnl_Abcd8a,
+    dnnl_Goiw4g = dnnl_Abcd4a,
     dnnl_gIOw16o16i = dnnl_aCBd16b16c,
     dnnl_gIOw16i16o = dnnl_aCBd16c16b,
     dnnl_gOIw16i16o = dnnl_aBCd16c16b,
@@ -743,6 +775,7 @@ typedef enum {
     dnnl_gOIhw4o4i = dnnl_aBCde4b4c,
     dnnl_gOihw4o = dnnl_aBcde4b,
     dnnl_Goihw8g = dnnl_Abcde8a,
+    dnnl_Goihw4g = dnnl_Abcde4a,
     dnnl_gOIhw8i16o2i = dnnl_aBCde8c16b2c,
     dnnl_gOIhw8i8o = dnnl_aBCde8c8b,
     dnnl_gOIhw8o16i2o = dnnl_aBCde8b16c2b,
@@ -890,6 +923,8 @@ typedef enum {
     dnnl_resampling,
     /// A pooling version 2 primitive (pooling with dilation support).
     dnnl_pooling_v2,
+    /// A reduction primitive.
+    dnnl_reduction,
 
     /// Parameter to allow internal only primitives without undefined behavior.
     /// This parameter is chosen to be valid for so long as sizeof(int) >= 2.
@@ -996,10 +1031,32 @@ typedef enum {
     dnnl_binary_max = 0x1fff2,
     /// Binary min
     dnnl_binary_min = 0x1fff3,
+    /// Binary div
+    dnnl_binary_div = 0x1fff4,
+    /// Binary sub
+    dnnl_binary_sub = 0x1fff5,
     /// Nearest Neighbor Resampling Method
     dnnl_resampling_nearest = 0x2fff0,
     /// Linear Resampling Method
     dnnl_resampling_linear = 0x2fff1,
+    /// Reduction using max
+    dnnl_reduction_max,
+    /// Reduction using min
+    dnnl_reduction_min,
+    /// Reduction using sum
+    dnnl_reduction_sum,
+    /// Reduction using mul
+    dnnl_reduction_mul,
+    /// Reduction using mean
+    dnnl_reduction_mean,
+    /// Reduction using lp norm
+    dnnl_reduction_norm_lp_max,
+    /// Reduction using lp norm
+    dnnl_reduction_norm_lp_sum,
+    /// Reduction using lp norm without final pth-root
+    dnnl_reduction_norm_lp_power_p_max,
+    /// Reduction using lp norm without final pth-root
+    dnnl_reduction_norm_lp_power_p_sum,
 } dnnl_alg_kind_t;
 
 /// Flags for normalization primitives.
@@ -1148,7 +1205,8 @@ typedef struct {
 typedef enum {
     dnnl_packed_format_undef = 0,
     dnnl_ldigo_p,
-    dnnl_ldgoi_p
+    dnnl_ldgoi_p,
+    dnnl_ldio_p
 } dnnl_rnn_packed_memory_format_t;
 
 /// Maximum number of parts of RNN weights tensor that require separate
@@ -1182,6 +1240,7 @@ typedef enum {
     dnnl_memory_extra_flag_compensation_conv_s8s8 = 0x1U,
     dnnl_memory_extra_flag_scale_adjust = 0x2U,
     dnnl_memory_extra_flag_gpu_rnn_u8s8_compensation = 0x4U,
+    dnnl_memory_extra_flag_compensation_conv_asymmetric_src = 0x8U,
 } dnnl_memory_extra_flags_t;
 
 /// Description of extra information stored in memory
@@ -1193,8 +1252,10 @@ typedef struct {
     int compensation_mask;
     /// Scale applied to the data
     float scale_adjust;
+    /// Compensation mask for asymmetric quantization
+    int asymm_compensation_mask;
     /// For future backwards compatibility
-    char reserved[64];
+    char reserved[60];
 } dnnl_memory_extra_desc_t;
 
 /// Memory descriptor. The description is based on a number of dimensions,
@@ -1480,12 +1541,7 @@ typedef struct {
     dnnl_data_type_t accum_data_type;
 } dnnl_pooling_desc_t;
 
-/// @} dnnl_api_pooling
-
-/// @addtogroup dnnl_api_pooling_v2
-/// @{
-
-/// A descriptor of a pooling operation.
+/// A descriptor of a pooling (version 2) operation.
 typedef struct {
     /// The kind of primitive. Used for self-identifying the primitive
     /// descriptor. Must be #dnnl_pooling_v2.
@@ -1520,7 +1576,7 @@ typedef struct {
     dnnl_dims_t dilation;
 } dnnl_pooling_v2_desc_t;
 
-/// @} dnnl_api_pooling_v2
+/// @} dnnl_api_pooling
 
 /// @addtogroup dnnl_api_lrn
 /// @{
@@ -1770,8 +1826,8 @@ typedef struct {
     /// descriptor. Must be #dnnl_binary.
     dnnl_primitive_kind_t primitive_kind;
     /// The kind of the binary algorithm. Possible values:
-    /// #dnnl_binary_add, #dnnl_binary_mul, #dnnl_binary_max and
-    /// #dnnl_binary_min.
+    /// #dnnl_binary_add, #dnnl_binary_mul, #dnnl_binary_max, #dnnl_binary_min,
+    /// #dnnl_binary_div and #dnnl_binary_sub.
     dnnl_alg_kind_t alg_kind;
     /// Source memory descriptors.
     dnnl_memory_desc_t src_desc[2];
@@ -1836,6 +1892,40 @@ typedef struct {
 } dnnl_resampling_desc_t;
 
 /// @} dnnl_api_resampling
+
+/// @addtogroup dnnl_api_reduction
+/// @{
+
+/// A descriptor of reduction operation.
+typedef struct {
+    /// The kind of primitive. Used for self-identifying the primitive
+    /// descriptor. Must be #dnnl_reduction.
+    dnnl_primitive_kind_t primitive_kind;
+    /// The kind of reduction algorithm. Possible values:
+    /// #dnnl_reduction_max, #dnnl_reduction_min, #dnnl_reduction_sum,
+    /// #dnnl_reduction_mul, #dnnl_reduction_mean, #dnnl_reduction_norm_lp_max,
+    /// #dnnl_reduction_norm_lp_sum, #dnnl_reduction_norm_lp_power_p_max,
+    /// #dnnl_reduction_norm_lp_power_p_sum.
+    dnnl_alg_kind_t alg_kind;
+    /// Source memory descriptor.
+    dnnl_memory_desc_t src_desc;
+    /// Destination memory descriptor.
+    dnnl_memory_desc_t dst_desc;
+    /// Algorithm specific parameters.
+    /// Accordance table:
+    /// #dnnl_reduction_max: @p p and @p eps are ignored
+    /// #dnnl_reduction_min: @p p and @p eps are ignored
+    /// #dnnl_reduction_norm_lp_max: @p p -- power, @p eps -- epsilon
+    /// #dnnl_reduction_norm_lp_sum: @p p -- power, @p eps -- epsilon
+    /// #dnnl_reduction_norm_lp_power_p_max: @p p -- power, @p eps -- epsilon
+    /// #dnnl_reduction_norm_lp_power_p_sum: @p p -- power, @p eps -- epsilon
+    /// #dnnl_reduction_sum: @p p and @p eps are ignored
+    /// #dnnl_reduction_mul: @p p and @p eps are ignored
+    /// #dnnl_reduction_mean: @p p and @p eps are ignored
+    float p, eps;
+} dnnl_reduction_desc_t;
+
+/// @} dnnl_api_reduction
 
 /// @} dnnl_api_primitives
 
@@ -2258,6 +2348,7 @@ typedef enum {
     dnnl_query_matmul_d, ///< matrix multiplication (matmul) descriptor
     dnnl_query_resampling_d, ///< resampling descriptor
     dnnl_query_pooling_v2_d, ///< pooling version 2 descriptor
+    dnnl_query_reduction_d, ///< reduction descriptor
 
     // memory descriptor section
     dnnl_query_some_md = 128, ///< stub
@@ -2302,13 +2393,6 @@ struct dnnl_stream;
 typedef struct dnnl_stream *dnnl_stream_t;
 /// A constant execution stream handle.
 typedef const struct dnnl_stream *const_dnnl_stream_t;
-
-/// An opaque structure to describe execution stream attrbutes.
-struct dnnl_stream_attr;
-/// An execution stream attributes handle.
-typedef struct dnnl_stream_attr *dnnl_stream_attr_t;
-/// A constant execution stream attributes handle.
-typedef const struct dnnl_stream_attr *const_dnnl_stream_attr_t;
 
 /// @} dnnl_api_stream
 

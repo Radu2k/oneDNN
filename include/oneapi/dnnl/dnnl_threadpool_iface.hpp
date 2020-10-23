@@ -14,12 +14,23 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef DNNL_THREADPOOL_IFACE_HPP
-#define DNNL_THREADPOOL_IFACE_HPP
+#ifndef ONEAPI_DNNL_DNNL_THREADPOOL_IFACE_HPP
+#define ONEAPI_DNNL_DNNL_THREADPOOL_IFACE_HPP
 
 #include <functional>
 
+/// @addtogroup dnnl_api
+/// @{
+
 namespace dnnl {
+
+/// @addtogroup dnnl_api_interop
+/// @{
+
+/// @addtogroup dnnl_api_threadpool_interop
+/// @{
+
+namespace threadpool_interop {
 
 /// Abstract threadpool interface. The users are expected to subclass this
 /// interface and pass an object to the library during CPU stream creation or
@@ -48,6 +59,14 @@ struct threadpool_iface {
     virtual ~threadpool_iface() {}
 };
 
+} // namespace threadpool_interop
+
+/// @} dnnl_api_threadpool_interop
+
+/// @} dnnl_api_interop
+
 } // namespace dnnl
+
+/// @} dnnl_api
 
 #endif

@@ -28,7 +28,6 @@
       <tab type="usergroup" title="Interoperability with DPC++ and OpenCL">
         <tab type="user" title="OpenCL Interoperability" url="@ref dev_guide_opencl_interoperability"/>
         <tab type="user" title="DPC++ Interoperability" url="@ref dev_guide_dpcpp_interoperability"/>
-        <tab type="user" title="Unified Shared Memory with DPC++" url="@ref dev_guide_dpcpp_usm"/>
         <tab type="user" title="DPC++ Backends" url="@ref dev_guide_dpcpp_backends"/>
       </tab>
     </tab>
@@ -50,6 +49,7 @@
       <tab type="user" title="Softmax" url="@ref dev_guide_softmax"/>
       <tab type="user" title="Sum" url="@ref dev_guide_sum"/>
       <tab type="user" title="Reorder" url="@ref dev_guide_reorder"/>
+      <tab type="user" title="Reduction" url="@ref dev_guide_reduction"/>
     </tab>
     <tab type="user" title="Examples" url="@ref dev_guide_examples"/>
     <tab type="usergroup" title="Performance Profiling and Inspection">

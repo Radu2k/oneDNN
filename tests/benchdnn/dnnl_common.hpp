@@ -26,9 +26,11 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <cmath>
 #include <vector>
 
-#include "dnnl.h"
+#include "oneapi/dnnl/dnnl.h"
 #include "src/common/bfloat16.hpp"
 #include "src/common/float16.hpp"
 #include "src/common/nstl.hpp"
@@ -188,13 +190,14 @@ inline float max_dt(dnnl_data_type_t dt) {
 #undef CASE_ALL
 
 template <dnnl_data_type_t dt>
-inline float saturate(float val) {
-    auto res = MAX2((float)dnnl::impl::nstl::numeric_limits<
-                            typename prec_traits<dt>::type>::lowest(),
-            MIN2((float)dnnl::impl::nstl::numeric_limits<
-                         typename prec_traits<dt>::type>::max(),
-                    val));
-    return mxcsr_cvt(res);
+inline float saturate_and_round(float val) {
+    const float dt_max = (float)dnnl::impl::nstl::numeric_limits<
+            typename prec_traits<dt>::type>::max();
+    const float dt_min = (float)dnnl::impl::nstl::numeric_limits<
+            typename prec_traits<dt>::type>::lowest();
+    if (val > dt_max) val = dt_max;
+    if (val < dt_min || (std::isnan(val) && std::signbit(val))) val = dt_min;
+    return mxcsr_cvt(val);
 }
 
 inline float maybe_saturate(dnnl_data_type_t dt, float value) {
@@ -202,7 +205,7 @@ inline float maybe_saturate(dnnl_data_type_t dt, float value) {
         switch (dt) {
 #define CASE(dt) \
     case dt: { \
-        return saturate<dt>(value); \
+        return saturate_and_round<dt>(value); \
     }
             CASE(dnnl_s32);
             CASE(dnnl_s8);
@@ -266,17 +269,15 @@ inline int create_dnnl_stream(
     dnnl_engine_kind_t engine_kind;
     DNN_SAFE(dnnl_engine_get_kind(engine, &engine_kind), CRIT);
 
-    dnnl_stream_attr_t stream_attr;
-    DNN_SAFE(dnnl_stream_attr_create(&stream_attr, engine_kind), CRIT);
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
     if (engine_kind == dnnl_cpu) {
-        SAFE_V(dnnl_stream_attr_set_threadpool(stream_attr,
+        SAFE_V(dnnl_threadpool_interop_stream_create(stream, engine,
                 dnnl::impl::threadpool_utils::get_active_threadpool()));
+        return OK;
     }
 #endif
 
-    DNN_SAFE(dnnl_stream_create_v2(stream, engine, flags, stream_attr), CRIT);
-    dnnl_stream_attr_destroy(stream_attr);
+    DNN_SAFE(dnnl_stream_create(stream, engine, flags), CRIT);
     return OK;
 }
 

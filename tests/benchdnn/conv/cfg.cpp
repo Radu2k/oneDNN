@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "dnnl.h"
+#include "oneapi/dnnl/dnnl.h"
 
 #include "dnnl_common.hpp"
 
@@ -43,6 +43,16 @@ const _dt_conf_t conf_f16 = {
                 0.},
         {dnnl_f16, -int_max_exact_half, int_max_exact_half, -4, 4, 0, 1, .25,
                 0.},
+        {dnnl_f16},
+};
+
+const double int_f16_max = max_dt(dnnl_f16);
+const double int_f16_lowest = lowest_dt(dnnl_f16);
+const _dt_conf_t conf_f16_no_limits = {
+        {dnnl_f16, int_f16_lowest, int_f16_max, -4, 4, 0, 1, .25, 0.},
+        {dnnl_f16, int_f16_lowest, int_f16_max, -2, 2, -2, 1, 1.0, 0.},
+        {dnnl_f16, int_f16_lowest, int_f16_max, -8, 8, 0, 1, 1.0, 0.},
+        {dnnl_f16, int_f16_lowest, int_f16_max, -4, 4, 0, 1, .25, 0.},
         {dnnl_f16},
 };
 
@@ -214,6 +224,7 @@ const dt_conf_t *str2cfg(const char *str) {
 #define CASE(cfg) \
     if (!strcasecmp(STRINGIFY(cfg), str)) return CONCAT2(conf_, cfg)
     CASE(f16);
+    CASE(f16_no_limits);
     CASE(f32);
     CASE(f32_no_limits);
     CASE(f32_full);
@@ -246,6 +257,7 @@ std::ostream &operator<<(std::ostream &s, const dt_conf_t *cfg) {
 #define CASE(_cfg) \
     if (cfg == CONCAT2(conf_, _cfg)) return s << STRINGIFY(_cfg)
     CASE(f16);
+    CASE(f16_no_limits);
     CASE(f32);
     CASE(f32_no_limits);
     CASE(f32_full);

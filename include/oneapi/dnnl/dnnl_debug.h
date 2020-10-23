@@ -18,14 +18,14 @@
 
 // clang-format off
 
-#ifndef DNNL_DEBUG_H
-#define DNNL_DEBUG_H
+#ifndef ONEAPI_DNNL_DNNL_DEBUG_H
+#define ONEAPI_DNNL_DNNL_DEBUG_H
 
 /// @file
 /// Debug capabilities
 
-#include "dnnl_config.h"
-#include "dnnl_types.h"
+#include "oneapi/dnnl/dnnl_config.h"
+#include "oneapi/dnnl/dnnl_types.h"
 
 #ifdef __cplusplus
 extern "C" {

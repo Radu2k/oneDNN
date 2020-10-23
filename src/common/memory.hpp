@@ -20,7 +20,7 @@
 #include <assert.h>
 #include <memory>
 
-#include "dnnl.h"
+#include "oneapi/dnnl/dnnl.h"
 
 #include "c_types_map.hpp"
 #include "memory_desc_wrapper.hpp"
@@ -67,6 +67,10 @@ struct dnnl_memory : public dnnl::impl::c_compatible {
     /** zeros padding */
     dnnl::impl::status_t zero_pad(dnnl::impl::stream_t *stream) const;
     dnnl::impl::status_t zero_pad(const dnnl::impl::exec_ctx_t &ctx) const;
+
+    dnnl::impl::status_t reset_memory_storage(
+            std::unique_ptr<dnnl::impl::memory_storage_t> &&memory_storage,
+            bool do_zero_pad = true);
 
 protected:
     dnnl::impl::engine_t *engine_;

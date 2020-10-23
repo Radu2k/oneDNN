@@ -41,6 +41,8 @@ status_t gen9_binary_t::pd_t::init_conf(engine_t *engine) {
     conf.is_mul = (alg == alg_kind::binary_mul);
     conf.is_max = (alg == alg_kind::binary_max);
     conf.is_min = (alg == alg_kind::binary_min);
+    conf.is_div = (alg == alg_kind::binary_div);
+    conf.is_sub = (alg == alg_kind::binary_sub);
     conf.is_tensor_op = is_tensor_op();
     conf.is_dense = dst_d.is_dense();
     conf.same_src_dt = (src0_d.data_type() == src1_d.data_type());
@@ -61,16 +63,12 @@ status_t gen9_binary_t::pd_t::init_conf(engine_t *engine) {
     using namespace dnnl::impl::format_tag;
     conf.is_ncX_layout = dst_d.matches_one_of_tag(nc, ncw, nchw, ncdhw);
 
-    const auto blocking = src_md(0)->format_desc.blocking;
-    if (!(((!conf.is_ncX_layout && blocking.inner_nblks == 1
-                   && blocking.inner_idxs[0] == 1
-                   && blocking.inner_blks[0] == 16
-                   && src_md(0)->dims[1] % 16 == 0)
-                || (conf.is_ncX_layout
-                        && dst_md()->dims[dst_md()->ndims - 1] % 16 == 0))))
-        return status::unimplemented;
-
     if (!conf.is_ncX_layout) {
+        const auto blocking = src_md(0)->format_desc.blocking;
+        if (!(blocking.inner_nblks == 1 && blocking.inner_idxs[0] == 1
+                    && blocking.inner_blks[0] == 16
+                    && src_md(0)->dims[1] % 16 == 0))
+            return status::unimplemented;
         // Setting the MB as the innermost dim for optimized performance
         // Hence starting i = 1, ignoring MB
         conf.dispatch.define_dim_with_nesting_level(
@@ -90,6 +88,8 @@ status_t gen9_binary_t::pd_t::init_conf(engine_t *engine) {
             }
         }
     } else {
+        if (dst_md()->dims[dst_md()->ndims - 1] % 16 != 0)
+            return status::unimplemented;
         conf.nvect = 16;
         while ((dst_d.dims()[ndims - 1] / 16) % conf.nvect != 0) {
             --conf.nvect;
@@ -117,6 +117,8 @@ status_t gen9_binary_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("IS_ADD", conf.is_add);
     kernel_ctx.define_int("IS_MAX", conf.is_max);
     kernel_ctx.define_int("IS_MIN", conf.is_min);
+    kernel_ctx.define_int("IS_DIV", conf.is_div);
+    kernel_ctx.define_int("IS_SUB", conf.is_sub);
     kernel_ctx.define_int("SAME_SRC_DT", conf.same_src_dt);
     kernel_ctx.define_int("BCAST_DIM0", conf.bcast_dims[0]);
     kernel_ctx.define_int("BCAST_DIM1", conf.bcast_dims[1]);

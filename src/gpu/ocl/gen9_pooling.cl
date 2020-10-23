@@ -154,7 +154,7 @@ __kernel void gen9_pooling_fwd(__global DATA_T *src, __global int *ws,
 #else // USE_MB_C_BLOCK
             const int po_oc = c + idx * SUB_GROUP_SIZE + local_id;
             int po_mb = mb;
-#endif // USE_MB_BLOCK
+#endif // USE_MB_C_BLOCK
 
             POST_OP_DATA_T d0_i = D0[idx];
             POST_OP_DATA_T sum0_i = DATA_TO_REF(sum0[idx]);

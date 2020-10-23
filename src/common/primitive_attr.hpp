@@ -20,7 +20,7 @@
 #include <map>
 #include <initializer_list>
 
-#include "dnnl.h"
+#include "oneapi/dnnl/dnnl.h"
 
 #include "c_types_map.hpp"
 #include "nstl.hpp"
@@ -57,10 +57,6 @@ struct rnn_data_qparams_t : public c_compatible {
 struct rnn_tparams_t : public c_compatible {
     rnn_tparams_t()
         : test_mode_(false), scales_(nullptr), ngates_(0), cscale_(0.0f) {}
-
-    rnn_tparams_t(const rnn_tparams_t &rhs) : rnn_tparams_t() {
-        set(rhs.test_mode_, rhs.ngates_, rhs.scales_, rhs.cscale_);
-    }
 
     ~rnn_tparams_t() {
         test_mode_ = false;
@@ -118,6 +114,9 @@ struct rnn_tparams_t : public c_compatible {
     float *scales_;
     dim_t ngates_; /* ngates is equel to the number of scales */
     float cscale_; /* =0.0f if no c state */
+
+private:
+    DNNL_DISALLOW_COPY_AND_ASSIGN(rnn_tparams_t);
 };
 
 struct scales_t : public c_compatible {
@@ -125,10 +124,6 @@ struct scales_t : public c_compatible {
     scales_t(dim_t count, int mask, const float *scales)
         : scales_(scales_buf_) {
         set(count, mask, scales);
-    }
-
-    scales_t(const scales_t &rhs) : scales_t() {
-        set(rhs.count_, rhs.mask_, rhs.scales_);
     }
 
     ~scales_t() { cleanup(); }
@@ -174,7 +169,7 @@ private:
         scales_ = scales_buf_;
     }
 
-    scales_t &operator=(const scales_t &other) = delete;
+    DNNL_DISALLOW_COPY_AND_ASSIGN(scales_t);
 };
 
 struct arg_scales_t : public c_compatible {
@@ -559,6 +554,8 @@ struct dnnl_primitive_attr : public dnnl::impl::c_compatible {
         CHECK(post_ops_.copy_from(other.post_ops_));
         rnn_data_qparams_ = other.rnn_data_qparams_;
         CHECK(rnn_weights_qparams_.copy_from(other.rnn_weights_qparams_));
+        CHECK(rnn_weights_projection_qparams_.copy_from(
+                other.rnn_weights_projection_qparams_));
         CHECK(rnn_tparams_.copy_from(other.rnn_tparams_));
 
         return status::success;
@@ -577,7 +574,8 @@ struct dnnl_primitive_attr : public dnnl::impl::c_compatible {
         rnn_data_qparams = 1u << 6,
         rnn_weights_qparams = 1u << 7,
         rnn_tparams = 1u << 8,
-        sum_dt = 1 << 9
+        sum_dt = 1 << 9,
+        rnn_weights_projection_qparams = 1u << 10
     };
 
     /** Returns true if the attributes have default values.
@@ -596,6 +594,8 @@ struct dnnl_primitive_attr : public dnnl::impl::c_compatible {
                 && post_ops_ == rhs.post_ops_
                 && rnn_data_qparams_ == rhs.rnn_data_qparams_
                 && rnn_weights_qparams_ == rhs.rnn_weights_qparams_
+                && rnn_weights_projection_qparams_
+                        == rhs.rnn_weights_projection_qparams_
                 && rnn_tparams_ == rhs.rnn_tparams_;
         return ret;
     }
@@ -612,6 +612,7 @@ struct dnnl_primitive_attr : public dnnl::impl::c_compatible {
     dnnl::impl::post_ops_t post_ops_;
     dnnl::impl::rnn_data_qparams_t rnn_data_qparams_;
     dnnl::impl::scales_t rnn_weights_qparams_;
+    dnnl::impl::scales_t rnn_weights_projection_qparams_;
     dnnl::impl::rnn_tparams_t rnn_tparams_;
 
     dnnl_primitive_attr &operator=(const dnnl_primitive_attr &other) = delete;

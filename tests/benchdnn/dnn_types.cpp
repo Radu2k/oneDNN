@@ -16,7 +16,7 @@
 
 #include <assert.h>
 #include <cctype>
-#include <math.h>
+#include <cmath>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +24,11 @@
 
 #include <sstream>
 
-#include "dnnl.h"
+#include "oneapi/dnnl/dnnl.h"
+
+#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
+#include "oneapi/dnnl/dnnl_threadpool.h"
+#endif
 
 #include "common.hpp"
 #include "dnn_types.hpp"
@@ -105,14 +109,16 @@ dir_t str2dir(const char *str) {
 }
 
 dnnl_prop_kind_t prop2prop_kind(const dir_t dir) {
-    if (dir == FWD_D) return dnnl_forward;
+    if (dir == FWD_D) return dnnl_forward_training;
+    if (dir == FWD_I) return dnnl_forward_inference;
     if (dir == BWD_DW) return dnnl_backward;
     assert(!"unknown dir");
     return dnnl_prop_kind_undef;
 }
 
 const char *prop2str(dnnl_prop_kind_t prop) {
-    if (prop == dnnl_forward) return "FWD_D";
+    if (prop == dnnl_forward_training) return "FWD_D";
+    if (prop == dnnl_forward_inference) return "FWD_I";
     if (prop == dnnl_backward) return "BWD_DW";
     assert(!"unknown prop_kind");
     return "unknown prop_kind";
@@ -322,9 +328,11 @@ static po_table_entry_t kind_table[] = {
         // binary
         {pk_t::BINARY_START, "binary_undef", dnnl_alg_kind_undef},
         {pk_t::ADD, "add", dnnl_binary_add},
+        {pk_t::DIV, "div", dnnl_binary_div},
         {pk_t::MAX, "max", dnnl_binary_max},
         {pk_t::MIN, "min", dnnl_binary_min},
         {pk_t::MUL, "mul", dnnl_binary_mul},
+        {pk_t::SUB, "sub", dnnl_binary_sub},
         {pk_t::BINARY_END, "binary_undef", dnnl_alg_kind_undef},
         // guard entry
         {pk_t::KIND_TOTAL, "kind_undef", dnnl_alg_kind_undef}};
@@ -1061,6 +1069,9 @@ float compute_eltwise_fwd(
         pk_t kind, float src, float scale, float alpha, float beta) {
     using namespace dnnl::impl::math;
 
+    // don't compute on nan, propagate it
+    if (std::isnan(src)) return src;
+
     switch (kind) {
         case pk_t::RELU: return scale * relu_fwd(src, alpha);
         case pk_t::TANH: return scale * tanh_fwd(src);
@@ -1129,6 +1140,9 @@ float compute_eltwise_bwd(
 }
 
 float compute_binary(pk_t kind, float src0, float src1) {
+    // don't compute on nan, propagate it
+    if (std::isnan(src0) || std::isnan(src1)) return NAN;
+
     if (kind == pk_t::ADD) {
         return src0 + src1;
     } else if (kind == pk_t::MUL) {
@@ -1137,10 +1151,14 @@ float compute_binary(pk_t kind, float src0, float src1) {
         return MAX2(src0, src1);
     } else if (kind == pk_t::MIN) {
         return MIN2(src0, src1);
+    } else if (kind == pk_t::DIV) {
+        return src0 / src1;
+    } else if (kind == pk_t::SUB) {
+        return src0 - src1;
     } else {
         assert(!"operation not supported!");
     }
-    return 0;
+    return NAN;
 }
 
 void maybe_post_ops(const attr_t &attr, float &val, float sum_val,
@@ -1197,18 +1215,14 @@ stream_t::stream_t(dnnl_engine_t engine) {
     dnnl_engine_kind_t engine_kind;
     DNN_SAFE_V(dnnl_engine_get_kind(engine, &engine_kind));
 
-    dnnl_stream_attr_t stream_attr;
-    DNN_SAFE_V(dnnl_stream_attr_create(&stream_attr, engine_kind));
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
     if (engine_kind == dnnl_cpu) {
-        SAFE_V(dnnl_stream_attr_set_threadpool(
-                stream_attr, dnnl::testing::get_threadpool()));
+        SAFE_V(dnnl_threadpool_interop_stream_create(
+                &stream_, engine, dnnl::testing::get_threadpool()));
+        return;
     }
 #endif
-
-    DNN_SAFE_V(dnnl_stream_create_v2(
-            &stream_, engine, dnnl_stream_default_flags, stream_attr));
-    dnnl_stream_attr_destroy(stream_attr);
+    DNN_SAFE_V(dnnl_stream_create(&stream_, engine, dnnl_stream_default_flags));
 }
 
 stream_t::~stream_t() {

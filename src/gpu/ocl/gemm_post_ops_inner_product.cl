@@ -18,10 +18,8 @@
 #include "gpu/ocl/ocl_types.h"
 
 __kernel void gemm_post_ops_inner_product(__global SRC_DATA_T *src,
-        __global BIAS_DATA_T *bias, __global DST_DATA_T *dst,
-        float eltwise_alpha, float eltwise_beta, float eltwise_scale,
-        float sum_scale, __global SPAD_DATA_T *scratchpad,
-        global float *scales) {
+        __global BIAS_DATA_T *bias, __global DST_DATA_T *dst POST_OP_ARGS,
+        __global SPAD_DATA_T *scratchpad, global float *scales) {
     const size_t mb = get_global_id(0) / OC;
     const size_t oc = get_global_id(0) % OC;
 
@@ -48,13 +46,14 @@ __kernel void gemm_post_ops_inner_product(__global SRC_DATA_T *src,
 #endif
 
     // Apply postops
+    float sum_src;
 #if WITH_SUM
-    acc += sum_scale * TO_DEF_ACC_DATA_T(dst[data_idx]);
+    sum_src = TO_ACC(dst[data_idx]);
 #endif
 
-#if WITH_ELTWISE
-    acc = fwd_eltwise(acc, eltwise_alpha, eltwise_beta, eltwise_scale);
-#endif
+    float accumulator = acc;
+    APPLY_POST_OPS(accumulator, float, sum_src, float, mb, 1, oc, 1, 0, 1, 0, 1,
+            0, 1, 0, 1);
 
-    dst[data_idx] = TO_DST(acc);
+    dst[data_idx] = TO_DST(accumulator);
 }

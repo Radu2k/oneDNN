@@ -1,5 +1,6 @@
 /*******************************************************************************
 * Copyright 2016-2020 Intel Corporation
+* Copyright 2020 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -19,7 +20,7 @@
 
 #include <assert.h>
 
-#include "dnnl.h"
+#include "oneapi/dnnl/dnnl.h"
 
 #include "common/c_types_map.hpp"
 #include "common/engine.hpp"
@@ -28,6 +29,9 @@
 
 #define CPU_INSTANCE(...) &primitive_desc_t::create<__VA_ARGS__::pd_t>,
 #define CPU_INSTANCE_X64(...) DNNL_X64_ONLY(CPU_INSTANCE(__VA_ARGS__))
+#define CPU_INSTANCE_AARCH64(...) DNNL_AARCH64_ONLY(CPU_INSTANCE(__VA_ARGS__))
+#define CPU_INSTANCE_AARCH64_ACL(...) \
+    DNNL_AARCH64_ACL_ONLY(CPU_INSTANCE(__VA_ARGS__))
 
 namespace dnnl {
 namespace impl {
@@ -48,6 +52,7 @@ DECLARE_IMPL_LIST(lrn);
 DECLARE_IMPL_LIST(logsoftmax);
 DECLARE_IMPL_LIST(matmul);
 DECLARE_IMPL_LIST(pooling_v2);
+DECLARE_IMPL_LIST(reduction);
 DECLARE_IMPL_LIST(resampling);
 DECLARE_IMPL_LIST(rnn);
 DECLARE_IMPL_LIST(shuffle);
@@ -85,6 +90,7 @@ public:
             CASE(matmul);
             case primitive_kind::pooling:
             CASE(pooling_v2);
+            CASE(reduction);
             CASE(resampling);
             CASE(rnn);
             CASE(shuffle);
@@ -105,8 +111,12 @@ public:
     virtual status_t create_memory_storage(memory_storage_t **storage,
             unsigned flags, size_t size, void *handle) override;
 
-    virtual status_t create_stream(stream_t **stream, unsigned flags,
-            const stream_attr_t *attr) override;
+    virtual status_t create_stream(stream_t **stream, unsigned flags) override;
+
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+    virtual status_t create_stream(stream_t **stream,
+            dnnl::threadpool_interop::threadpool_iface *threadpool) override;
+#endif
 
     virtual const concat_primitive_desc_create_f *
     get_concat_implementation_list() const override {

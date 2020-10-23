@@ -20,7 +20,7 @@
 #include <assert.h>
 #include <math.h>
 
-#include "dnnl.h"
+#include "oneapi/dnnl/dnnl.h"
 
 #include "bit_cast.hpp"
 #include "c_types_map.hpp"
@@ -146,15 +146,16 @@ inline format_kind_t format_tag_to_kind(format_tag_t tag) {
 
 inline bool memory_extra_desc_is_equal(
         const memory_extra_desc_t &lhs, const memory_extra_desc_t &rhs) {
+    using namespace memory_extra_flags;
     return true && lhs.flags == rhs.flags
-            && IMPLICATION(
-                    lhs.flags & memory_extra_flags::compensation_conv_s8s8,
+            && IMPLICATION(lhs.flags & compensation_conv_s8s8,
                     lhs.compensation_mask == rhs.compensation_mask)
-            && IMPLICATION(
-                    lhs.flags & memory_extra_flags::gpu_rnn_u8s8_compensation,
+            && IMPLICATION(lhs.flags & gpu_rnn_u8s8_compensation,
                     lhs.compensation_mask == rhs.compensation_mask)
-            && IMPLICATION(lhs.flags & memory_extra_flags::scale_adjust,
-                    lhs.scale_adjust == rhs.scale_adjust);
+            && IMPLICATION(lhs.flags & scale_adjust,
+                    lhs.scale_adjust == rhs.scale_adjust)
+            && IMPLICATION(lhs.flags & compensation_conv_asymmetric_src,
+                    lhs.asymm_compensation_mask == rhs.asymm_compensation_mask);
 }
 
 inline bool blocking_desc_is_equal(const memory_desc_t &lhs_md,
@@ -463,6 +464,17 @@ inline bool operator==(const pooling_v2_desc_t &lhs, const pooling_v2_desc_t &rh
             && COMPARE_DESC_ARRAY_MEMBERS(padding[1], DNNL_MAX_NDIMS)
             && COMPARE_DESC_ARRAY_MEMBERS(dilation, DNNL_MAX_NDIMS)
             && COMPARE_DESC_MEMBERS(accum_data_type);
+    return ret;
+}
+
+inline bool operator==(
+        const reduction_desc_t &lhs, const reduction_desc_t &rhs) {
+    bool ret = COMPARE_DESC_MEMBERS(primitive_kind)
+            && COMPARE_DESC_MEMBERS(alg_kind)
+            && COMPARE_DESC_MEMBERS(src_desc)
+            && COMPARE_DESC_MEMBERS(dst_desc)
+            && COMPARE_DESC_MEMBERS(p)
+            && COMPARE_DESC_MEMBERS(eps);
     return ret;
 }
 

@@ -37,12 +37,10 @@ struct jit_args_t {
     size_t work_amount;
 };
 
-struct jit_uni_eltwise_int_kernel : public c_compatible {
+struct jit_uni_eltwise_int_kernel : public jit_generator {
     jit_uni_eltwise_int_kernel(const eltwise_desc_t &desc) : desc_(desc) {}
-    virtual ~jit_uni_eltwise_int_kernel() = default;
 
-    virtual void operator()(jit_args_t *p) = 0;
-    virtual status_t create_kernel() = 0;
+    void operator()(jit_args_t *p) { jit_generator::operator()(p); }
 
 protected:
     data_type_t data_type() const { return desc_.data_desc.data_type; }
@@ -59,12 +57,11 @@ namespace {
 using namespace Xbyak;
 
 template <cpu_isa_t isa>
-struct jit_uni_subkernel_int_t : public jit_uni_eltwise_int_kernel,
-                                 public jit_generator {
+struct jit_uni_subkernel_int_t : public jit_uni_eltwise_int_kernel {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_uni_subkernel_int)
 
     jit_uni_subkernel_int_t(const eltwise_desc_t &desc)
-        : jit_uni_eltwise_int_kernel(desc), jit_generator() {
+        : jit_uni_eltwise_int_kernel(desc) {
         using namespace data_type;
 
         // Relu and linear for int types: s32, s8, u8; Only forward direction
@@ -72,12 +69,6 @@ struct jit_uni_subkernel_int_t : public jit_uni_eltwise_int_kernel,
                 alg_kind::eltwise_linear));
         assert(utils::one_of(data_type(), s32, s8, u8));
         assert(utils::one_of(isa, sse41, avx2, avx512_common));
-    }
-
-    status_t create_kernel() override { return jit_generator::create_kernel(); }
-
-    void operator()(jit_args_t *p) override {
-        return jit_generator::operator()(p);
     }
 
     void generate() override {
@@ -144,14 +135,14 @@ private:
     Reg64 imm_addr64 = rbx;
     Reg64 reg_int8 = r9;
 
-    Xmm xmm_alpha = Xmm(13);
-    Xmm xmm_beta = Xmm(14);
-
-    Vmm vmm_tmp = Vmm(isa == avx512_common ? 26 : 11);
-    Vmm vmm_alpha = Vmm(isa == avx512_common ? 27 : 13);
-    Vmm vmm_beta = Vmm(isa == avx512_common ? 28 : 14);
-    Vmm vmm_zero = Vmm(isa == avx512_common ? 29 : 15);
-    Vmm vmm_mask = Vmm(isa == avx512_common ? 30 : 12);
+    Vmm vmm_tmp = Vmm(isa == avx512_common ? 25 : 10);
+    Vmm vmm_saturation_ubound = Vmm(isa == avx512_common ? 26 : 11);
+    Vmm vmm_alpha = Vmm(isa == avx512_common ? 27 : 12);
+    Xmm xmm_alpha = Xmm(12);
+    Vmm vmm_beta = Vmm(isa == avx512_common ? 28 : 13);
+    Xmm xmm_beta = Xmm(13);
+    Vmm vmm_zero = Vmm(isa == avx512_common ? 29 : 14);
+    Vmm vmm_mask = Vmm(isa == avx512_common ? 30 : 15);
 
     opmask_t k_mask = k1;
     opmask_t k_mask_int8 = k2; // Mask for store 1 byte in case of AVX512
@@ -270,12 +261,11 @@ void jit_uni_subkernel_int_t<isa>::process_linear(
     uni_vfmadd213ps(vr_to, vmm_alpha, vmm_beta);
 
     // Saturate before converting from f32 to s32
-    Vmm vmm_saturation_ubound = vmm_tmp;
     Reg64 reg_tmp = r10;
     uni_vpxor(vmm_zero, vmm_zero, vmm_zero);
     init_saturate_f32(vmm_zero, vmm_saturation_ubound, reg_tmp, data_type::f32,
             data_type());
-    saturate_f32(vr_to, vmm_zero, vmm_saturation_ubound, data_type());
+    saturate_f32(vr_to, vmm_zero, vmm_saturation_ubound, vmm_tmp, data_type());
 
     uni_vcvtps2dq(vr_to, vr_to);
 }

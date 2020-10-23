@@ -23,8 +23,8 @@
 #include "cpu/x64/jit_avx512_core_bf16cvt.hpp"
 #include "cpu/x64/jit_generator.hpp"
 
+#include "cpu/x64/injectors/jit_uni_eltwise_injector.hpp"
 #include "cpu/x64/jit_uni_eltwise.hpp"
-#include "cpu/x64/jit_uni_eltwise_injector.hpp"
 
 #define GET_OFF(field) offsetof(jit_args_t, field)
 
@@ -42,12 +42,10 @@ struct jit_args_t {
     size_t work_amount;
 };
 
-struct jit_uni_eltwise_kernel : public c_compatible {
+struct jit_uni_eltwise_kernel : public jit_generator {
     jit_uni_eltwise_kernel(const eltwise_pd_t *pd) : pd_(pd) {}
-    virtual ~jit_uni_eltwise_kernel() = default;
 
-    virtual void operator()(jit_args_t *args) = 0;
-    virtual status_t create_kernel() = 0;
+    void operator()(jit_args_t *p) { jit_generator::operator()(p); }
 
 protected:
     const eltwise_pd_t *pd_;
@@ -122,11 +120,10 @@ private:
 };
 
 template <cpu_isa_t isa>
-struct jit_uni_kernel_t : public jit_uni_eltwise_kernel, public jit_generator {
+struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_uni_kernel)
 
-    jit_uni_kernel_t(const eltwise_pd_t *pd)
-        : jit_uni_eltwise_kernel(pd), jit_generator() {
+    jit_uni_kernel_t(const eltwise_pd_t *pd) : jit_uni_eltwise_kernel(pd) {
         if (is_bf16()) {
             if (!mayiuse(avx512_core_bf16))
                 bf16_emu_.reset(new bf16_emulation_t(this, bf16_emu_reserv_1,
@@ -246,10 +243,6 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel, public jit_generator {
 
         eltwise_injector_->prepare_table();
     }
-
-    status_t create_kernel() override { return jit_generator::create_kernel(); }
-
-    void operator()(jit_args_t *p) override { jit_generator::operator()(p); }
 
 private:
     using Vmm = typename cpu_isa_traits<isa>::Vmm;
@@ -422,11 +415,13 @@ status_t jit_uni_eltwise_bwd_t<isa, d_type>::execute(
 }
 
 template struct jit_uni_eltwise_fwd_t<sse41, data_type::f32>;
+template struct jit_uni_eltwise_fwd_t<avx, data_type::f32>;
 template struct jit_uni_eltwise_fwd_t<avx2, data_type::f32>;
 template struct jit_uni_eltwise_fwd_t<avx512_common, data_type::f32>;
 template struct jit_uni_eltwise_fwd_t<avx512_core, data_type::bf16>;
 
 template struct jit_uni_eltwise_bwd_t<sse41, data_type::f32>;
+template struct jit_uni_eltwise_bwd_t<avx, data_type::f32>;
 template struct jit_uni_eltwise_bwd_t<avx2, data_type::f32>;
 template struct jit_uni_eltwise_bwd_t<avx512_common, data_type::f32>;
 template struct jit_uni_eltwise_bwd_t<avx512_core, data_type::bf16>;

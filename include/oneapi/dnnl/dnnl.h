@@ -17,24 +17,12 @@
 /// @file
 /// C API
 
-#ifndef DNNL_H
-#define DNNL_H
+#ifndef ONEAPI_DNNL_DNNL_H
+#define ONEAPI_DNNL_DNNL_H
 
-#include "dnnl_config.h"
-#include "dnnl_types.h"
-#include "dnnl_version.h"
-
-/// @cond DO_NOT_DOCUMENT_THIS
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-
-// Set target version for OpenCL explicitly to suppress a compiler warning.
-#ifndef CL_TARGET_OPENCL_VERSION
-#define CL_TARGET_OPENCL_VERSION 120
-#endif
-
-#include <CL/cl.h>
-#endif
-/// @endcond
+#include "oneapi/dnnl/dnnl_config.h"
+#include "oneapi/dnnl/dnnl_types.h"
+#include "oneapi/dnnl/dnnl_version.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -1165,28 +1153,6 @@ dnnl_status_t DNNL_API dnnl_memory_set_data_handle(
 dnnl_status_t DNNL_API dnnl_memory_set_data_handle_v2(
         dnnl_memory_t memory, void *handle, dnnl_stream_t stream);
 
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-/// Returns an OpenCL memory object associated with a memory object.
-///
-/// @param memory Memory object.
-/// @param mem_object Output OpenCL memory object.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_memory_get_ocl_mem_object(
-        const_dnnl_memory_t memory, cl_mem *mem_object);
-
-/// Sets OpenCL memory object associated with a memory object.
-///
-/// For behavioral details, see dnnl_memory_set_data_handle().
-///
-/// @param memory Memory object.
-/// @param mem_object OpenCL memory object.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_memory_set_ocl_mem_object(
-        dnnl_memory_t memory, cl_mem mem_object);
-#endif
-
 /// Destroys a memory object.
 ///
 /// @param memory Memory object to destroy.
@@ -1286,7 +1252,8 @@ dnnl_status_t DNNL_API dnnl_sum_primitive_desc_create(
 ///
 /// @param binary_desc Output descriptor for a binary primitive.
 /// @param alg_kind Algorithm kind. Valid values are #dnnl_binary_add,
-///     #dnnl_binary_mul, #dnnl_binary_max and #dnnl_binary_min.
+///     #dnnl_binary_mul, #dnnl_binary_max, #dnnl_binary_min, #dnnl_binary_div
+///     and #dnnl_binary_sub.
 /// @param src0_desc Source 0 memory descriptor.
 /// @param src1_desc Source 1 memory descriptor.
 /// @param dst_desc Destination memory descriptor.
@@ -2291,6 +2258,20 @@ dnnl_status_t DNNL_API dnnl_inner_product_backward_weights_desc_init(
 dnnl_status_t DNNL_API dnnl_primitive_attr_set_rnn_data_qparams(
         dnnl_primitive_attr_t attr, const float scale, const float shift);
 
+/// Returns the quantization scale and shift parameters for RNN data tensors.
+///
+/// @note
+///     Quantization scale and shift are common for src_layer, src_iter,
+///     dst_iter, and dst_layer.
+///
+/// @param attr Primitive attributes.
+/// @param scale The value to scale the data by.
+/// @param shift The value to shift the data by.
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise.
+dnnl_status_t DNNL_API dnnl_primitive_attr_get_rnn_data_qparams(
+        const_dnnl_primitive_attr_t attr, float *scale, float *shift);
+
 /// Sets quantization scaling factors for RNN weights tensors. The
 /// low-precision configuration of the RNN primitives expects input weights to
 /// use the signed 8-bit integer data type. The scaling factors are used to
@@ -2323,6 +2304,74 @@ dnnl_status_t DNNL_API dnnl_primitive_attr_set_rnn_data_qparams(
 dnnl_status_t DNNL_API dnnl_primitive_attr_set_rnn_weights_qparams(
         dnnl_primitive_attr_t attr, dnnl_dim_t count, int mask,
         const float *scales);
+
+/// Returns the quantization scaling factors for RNN weights tensors.
+///
+/// @param attr Primitive attributes.
+/// @param count Number of elements in the @p scales array.
+/// @param mask Scaling factors correspondence mask that defines the
+///     correspondence between the output tensor dimensions and the @p
+///     scales vector. The set i-th bit indicates that a dedicated scaling
+///     factor should be used for each index along that dimension. Set the
+///     mask to 0 to use a common scaling factor for the whole output
+///     tensor.
+/// @param scales Array of output scaling factors that contain @p count
+///     values and the following equality must hold:
+///     \f[count = \prod\limits_{d \in mask} weights.dims[d].\f]
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise.
+dnnl_status_t DNNL_API dnnl_primitive_attr_get_rnn_weights_qparams(
+        const_dnnl_primitive_attr_t attr, dnnl_dim_t *count, int *mask,
+        const float **scales);
+
+/// Sets quantization scaling factors for RNN projection weights tensors. The
+/// low-precision configuration of the RNN primitives expects input weights to
+/// use the signed 8-bit integer data type. The scaling factors are used to
+/// quantize floating-point data to signed integer and must be passed to RNN
+/// primitives using attributes.
+///
+/// @note
+///     The dimension order is always native and does not depend on the actual
+///     layout used. For example, five-dimensional weights always have (l, d,
+///     i, g, o) logical dimension ordering.
+///
+/// @param attr Primitive attributes.
+/// @param count Number of elements in the @p scales array.
+/// @param mask Scaling factors correspondence mask that defines the
+///     correspondence between the output tensor dimensions and the @p
+///     scales vector. The set i-th bit indicates that a dedicated scaling
+///     factor should be used for each index along that dimension. Set the
+///     mask to 0 to use a common scaling factor for the whole output
+///     tensor.
+/// @param scales Array of output scaling factors that must contain @p count
+///     values and the following equality must hold:
+///     \f[count = \prod\limits_{d \in mask} weights.dims[d].\f]
+///     Violations can only be detected when the attributes are used to create
+///     a primitive descriptor.
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise.
+dnnl_status_t DNNL_API dnnl_primitive_attr_set_rnn_weights_projection_qparams(
+        dnnl_primitive_attr_t attr, dnnl_dim_t count, int mask,
+        const float *scales);
+
+/// Returns the quantization scaling factors for RNN projection weights tensors.
+///
+/// @param attr Primitive attributes.
+/// @param count Number of elements in the @p scales array.
+/// @param mask Scaling factors correspondence mask that defines the
+///     correspondence between the output tensor dimensions and the @p
+///     scales vector. The set i-th bit indicates that a dedicated scaling
+///     factor should be used for each index along that dimension. Set the
+///     mask to 0 to use a common scaling factor for the whole output
+///     tensor.
+/// @param scales Array of output scaling factors that contain @p count
+///     values and the following equality must hold:
+///     \f[count = \prod\limits_{d \in mask} weights.dims[d].\f]
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise.
+dnnl_status_t DNNL_API dnnl_primitive_attr_get_rnn_weights_projection_qparams(
+        const_dnnl_primitive_attr_t attr, dnnl_dim_t *count, int *mask,
+        const float **scales);
 
 /// @} dnnl_api_attributes
 
@@ -3166,6 +3215,35 @@ dnnl_status_t DNNL_API dnnl_resampling_backward_desc_init(
 
 /// @} dnnl_api_resampling
 
+/// @addtogroup dnnl_api_reduction Reduction
+/// @{
+
+/// Initializes a descriptor for a reduction primitive.
+///
+/// @note
+///     Destination memory descriptor is allowed to be initialized with
+///     #dnnl_format_tag_any or with format_kind set to #dnnl_format_kind_any.
+///
+///
+/// @param desc Output descriptor for a reduction primitive.
+/// @param alg_kind reduction algorithm kind. Possible values:
+///     #dnnl_reduction_max, #dnnl_reduction_min, #dnnl_reduction_sum,
+///     #dnnl_reduction_mul, #dnnl_reduction_mean, #dnnl_reduction_norm_lp_max,
+///     #dnnl_reduction_norm_lp_sum, #dnnl_reduction_norm_lp_power_p_max,
+///     #dnnl_reduction_norm_lp_power_p_sum.
+/// @param p Algorithm specific parameter.
+/// @param eps Algorithm specific parameter.
+/// @param src_desc Source memory descriptor.
+/// @param dst_desc Destination memory descriptor.
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise.
+///
+dnnl_status_t DNNL_API dnnl_reduction_desc_init(dnnl_reduction_desc_t *desc,
+        dnnl_alg_kind_t alg_kind, const dnnl_memory_desc_t *src_desc,
+        const dnnl_memory_desc_t *dst_desc, float p, float eps);
+
+/// @} dnnl_api_reduction
+
 /// @} dnnl_api_primitives
 
 /// @addtogroup dnnl_api_engine
@@ -3188,19 +3266,6 @@ size_t DNNL_API dnnl_engine_get_count(dnnl_engine_kind_t kind);
 dnnl_status_t DNNL_API dnnl_engine_create(
         dnnl_engine_t *engine, dnnl_engine_kind_t kind, size_t index);
 
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-/// Creates an engine associated with an OpenCL device and an OpenCL context.
-///
-/// @param engine Output engine.
-/// @param kind Engine kind.
-/// @param device Underlying OpenCL device to use for the engine.
-/// @param context Underlying OpenCL context to use for the engine.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_engine_create_ocl(dnnl_engine_t *engine,
-        dnnl_engine_kind_t kind, cl_device_id device, cl_context context);
-#endif
-
 /// Returns the kind of an engine.
 ///
 /// @param engine Engine to query.
@@ -3209,26 +3274,6 @@ dnnl_status_t DNNL_API dnnl_engine_create_ocl(dnnl_engine_t *engine,
 ///     otherwise.
 dnnl_status_t DNNL_API dnnl_engine_get_kind(
         dnnl_engine_t engine, dnnl_engine_kind_t *kind);
-
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-/// Returns the OpenCL context associated with an engine.
-///
-/// @param engine Engine to query.
-/// @param context Output underlying OpenCL context of the engine.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_engine_get_ocl_context(
-        dnnl_engine_t engine, cl_context *context);
-
-/// Returns the OpenCL device associated with an engine.
-///
-/// @param engine Engine to query.
-/// @param device Output underlying OpenCL device of the engine.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_engine_get_ocl_device(
-        dnnl_engine_t engine, cl_device_id *device);
-#endif
 
 /// Destroys an engine.
 ///
@@ -3242,52 +3287,6 @@ dnnl_status_t DNNL_API dnnl_engine_destroy(dnnl_engine_t engine);
 /// @addtogroup dnnl_api_stream
 /// @{
 
-/// Creates execution stream attributes for a stream that runs on an engine of
-/// a particular kind.
-///
-/// @param attr Output execution stream attributes.
-/// @param kind Target engine kind.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_stream_attr_create(
-        dnnl_stream_attr_t *attr, dnnl_engine_kind_t kind);
-
-/// Destroys execution stream attributes.
-///
-/// @param attr Execution stream attributes to destroy.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_stream_attr_destroy(dnnl_stream_attr_t attr);
-
-#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
-/// Sets a threadpool to be used by the execution stream. Always returns
-/// dnnl_invalid_arguments unless oneDNN is built with threadpool runtime.
-///
-/// @sa @ref dev_guide_threadpool
-///
-/// @param attr Execution stream attributes.
-/// @param threadpool Pointer to an instance of a C++ class that implements
-///     dnnl::threapdool_iface interface.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_stream_attr_set_threadpool(
-        dnnl_stream_attr_t attr, void *threadpool);
-
-/// Returns a threadpool to be used by the execution stream. Always returns
-/// dnnl_invalid_arguments unless oneDNN is built with threadpool runtime.
-///
-/// @sa @ref dev_guide_threadpool
-///
-/// @param attr Execution stream attributes.
-/// @param threadpool Output pointer to an instance of a C++ class that
-///     implements dnnl::threapdool_iface interface. Set to NULL if the
-///     threadpool attribute was never set.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_stream_attr_get_threadpool(
-        dnnl_stream_attr_t attr, void **threadpool);
-#endif
-
 /// Creates an execution stream.
 ///
 /// @param stream Output execution stream.
@@ -3298,30 +3297,6 @@ dnnl_status_t DNNL_API dnnl_stream_attr_get_threadpool(
 dnnl_status_t DNNL_API dnnl_stream_create(
         dnnl_stream_t *stream, dnnl_engine_t engine, unsigned flags);
 
-/// Creates an execution stream.
-///
-/// @param stream Output execution stream.
-/// @param engine Engine to create the execution stream on.
-/// @param flags Stream behavior flags (@sa dnnl_stream_flags_t).
-/// @param attr Stream attributes.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_stream_create_v2(dnnl_stream_t *stream,
-        dnnl_engine_t engine, unsigned flags, const_dnnl_stream_attr_t attr);
-
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-/// Creates an execution stream for a given engine associated with
-/// an OpenCL command queue.
-///
-/// @param stream Output execution stream.
-/// @param engine Engine to create the execution stream on.
-/// @param queue OpenCL command queue to use.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_stream_create_ocl(
-        dnnl_stream_t *stream, dnnl_engine_t engine, cl_command_queue queue);
-#endif
-
 /// Returns the engine of a stream object.
 ///
 /// @param stream Stream object.
@@ -3330,17 +3305,6 @@ dnnl_status_t DNNL_API dnnl_stream_create_ocl(
 ///     otherwise.
 dnnl_status_t DNNL_API dnnl_stream_get_engine(
         const_dnnl_stream_t stream, dnnl_engine_t *engine);
-
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-/// Returns the OpenCL command queue associated with an execution stream.
-///
-/// @param stream Execution stream to query.
-/// @param queue Output OpenCL command queue.
-/// @returns #dnnl_success on success and a status describing the error
-///     otherwise.
-dnnl_status_t DNNL_API dnnl_stream_get_ocl_command_queue(
-        dnnl_stream_t stream, cl_command_queue *queue);
-#endif
 
 /// Waits for all primitives in the execution stream to finish computations.
 ///
@@ -3700,34 +3664,6 @@ dnnl_status_t DNNL_API dnnl_gemm_s8s8s32(char transa, char transb, char offsetc,
         dnnl_dim_t M, dnnl_dim_t N, dnnl_dim_t K, float alpha, const int8_t *A,
         dnnl_dim_t lda, int8_t ao, const int8_t *B, dnnl_dim_t ldb, int8_t bo,
         float beta, int32_t *C, dnnl_dim_t ldc, const int32_t *co);
-
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-/// @copydoc dnnl_sgemm()
-/// @param tp A pointer to a threadpool interface (only when built with the
-///     THREADPOOL CPU runtime).
-dnnl_status_t DNNL_API dnnl_sgemm_tp(char transa, char transb, dnnl_dim_t M,
-        dnnl_dim_t N, dnnl_dim_t K, float alpha, const float *A, dnnl_dim_t lda,
-        const float *B, dnnl_dim_t ldb, float beta, float *C, dnnl_dim_t ldc,
-        void *tp);
-
-/// @copydoc dnnl_gemm_u8s8s32()
-/// @param tp A pointer to a threadpool interface (only when built with the
-///     THREADPOOL CPU runtime).
-dnnl_status_t DNNL_API dnnl_gemm_u8s8s32_tp(char transa, char transb,
-        char offsetc, dnnl_dim_t M, dnnl_dim_t N, dnnl_dim_t K, float alpha,
-        const uint8_t *A, dnnl_dim_t lda, uint8_t ao, const int8_t *B,
-        dnnl_dim_t ldb, int8_t bo, float beta, int32_t *C, dnnl_dim_t ldc,
-        const int32_t *co, void *tp);
-
-/// @copydoc dnnl_gemm_s8s8s32()
-/// @param tp A pointer to a threadpool interface (only when built with the
-///     THREADPOOL CPU runtime).
-dnnl_status_t DNNL_API dnnl_gemm_s8s8s32_tp(char transa, char transb,
-        char offsetc, dnnl_dim_t M, dnnl_dim_t N, dnnl_dim_t K, float alpha,
-        const int8_t *A, dnnl_dim_t lda, int8_t ao, const int8_t *B,
-        dnnl_dim_t ldb, int8_t bo, float beta, int32_t *C, dnnl_dim_t ldc,
-        const int32_t *co, void *tp);
-#endif
 
 /// @} dnnl_api_blas
 

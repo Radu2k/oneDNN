@@ -17,7 +17,7 @@
 #include "dnnl_test_common.hpp"
 #include "gtest/gtest.h"
 
-#include "dnnl.hpp"
+#include "oneapi/dnnl/dnnl.hpp"
 
 namespace dnnl {
 
@@ -80,9 +80,9 @@ HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestScratchpadArg) {
         attr.set_scratchpad_mode(m);
         auto softmax_pd = softmax_forward::primitive_desc(softmax_d, attr, eng);
 
-        memory src(softmax_pd.src_desc(), eng);
-        memory dst(softmax_pd.dst_desc(), eng);
-        memory scratchpad(softmax_pd.scratchpad_desc(), eng);
+        auto src = test::make_memory(softmax_pd.src_desc(), eng);
+        auto dst = test::make_memory(softmax_pd.dst_desc(), eng);
+        auto scratchpad = test::make_memory(softmax_pd.scratchpad_desc(), eng);
 
         fill_data<float>(src.get_desc().get_size() / sizeof(float), src);
 
@@ -213,6 +213,81 @@ HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestScales) {
     ASSERT_EQ(scales[0], 1.);
     ASSERT_EQ(scales[1], 2.);
     ASSERT_EQ(scales[2], 3.);
+}
+
+HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestRNNDataQuantization) {
+    dnnl::primitive_attr attr;
+
+    float scale, shift;
+
+    // default scale and shift
+    attr.get_rnn_data_qparams(scale, shift);
+    ASSERT_EQ(scale, 1.f);
+    ASSERT_EQ(shift, 0.f);
+
+    // non-default
+    attr.set_rnn_data_qparams(0.5f, 2.f);
+    attr.get_rnn_data_qparams(scale, shift);
+    ASSERT_EQ(scale, 0.5f);
+    ASSERT_EQ(shift, 2.f);
+}
+
+HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestRNNWeightsQuantization) {
+    dnnl::primitive_attr attr;
+
+    int scales_mask;
+    std::vector<float> scales;
+
+    // default scale and shift
+    attr.get_rnn_weights_qparams(scales_mask, scales);
+    ASSERT_EQ(scales_mask, 0);
+    ASSERT_EQ(scales.size(), 1U);
+    ASSERT_EQ(scales[0], 1.f);
+
+    // single non-default scales
+    attr.set_rnn_weights_qparams(0, {2.f});
+    attr.get_rnn_weights_qparams(scales_mask, scales);
+    ASSERT_EQ(scales_mask, 0);
+    ASSERT_EQ(scales.size(), 1U);
+    ASSERT_EQ(scales[0], 2.f);
+
+    // multiple scales
+    attr.set_rnn_weights_qparams(1 << 1, {1.f, 2.f, 4.f});
+    attr.get_rnn_weights_qparams(scales_mask, scales);
+    ASSERT_EQ(scales_mask, 1 << 1);
+    ASSERT_EQ(scales.size(), 3U);
+    ASSERT_EQ(scales[0], 1.f);
+    ASSERT_EQ(scales[1], 2.f);
+    ASSERT_EQ(scales[2], 4.f);
+}
+
+HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestRNNProjWeightsQuantization) {
+    dnnl::primitive_attr attr;
+
+    int scales_mask;
+    std::vector<float> scales;
+
+    // default scale and shift
+    attr.get_rnn_weights_projection_qparams(scales_mask, scales);
+    ASSERT_EQ(scales_mask, 0);
+    ASSERT_EQ(scales.size(), 1U);
+    ASSERT_EQ(scales[0], 1.f);
+
+    // single non-default scales
+    attr.set_rnn_weights_projection_qparams(0, {2.f});
+    attr.get_rnn_weights_projection_qparams(scales_mask, scales);
+    ASSERT_EQ(scales_mask, 0);
+    ASSERT_EQ(scales.size(), 1U);
+    ASSERT_EQ(scales[0], 2.f);
+
+    // multiple scales
+    attr.set_rnn_weights_projection_qparams(1 << 1, {1.f, 2.f, 4.f});
+    attr.get_rnn_weights_projection_qparams(scales_mask, scales);
+    ASSERT_EQ(scales_mask, 1 << 1);
+    ASSERT_EQ(scales.size(), 3U);
+    ASSERT_EQ(scales[0], 1.f);
+    ASSERT_EQ(scales[1], 2.f);
+    ASSERT_EQ(scales[2], 4.f);
 }
 
 TEST_F(attr_test_t, TestScalesExpectFailure) {

@@ -110,7 +110,13 @@ static const Xbyak::Reg64 abi_param1(Xbyak::Operand::RDI),
 
 } // namespace
 
-class jit_generator : public Xbyak::CodeGenerator {
+class jit_generator : public Xbyak::CodeGenerator, public c_compatible {
+public:
+    using c_compatible::operator new;
+    using c_compatible::operator new[];
+    using c_compatible::operator delete;
+    using c_compatible::operator delete[];
+
 private:
     const size_t xmm_len = 16;
 #ifdef _WIN32
@@ -317,13 +323,25 @@ public:
     }
 
     void uni_vmovss(const Xbyak::Address &addr, const Xbyak::Xmm &x) {
-        movss(addr, x);
+        if (mayiuse(avx))
+            vmovss(addr, x);
+        else
+            movss(addr, x);
+    }
+    void uni_vmovss(const Xbyak::Xmm &x, const Xbyak::Address &addr) {
+        if (mayiuse(avx))
+            vmovss(x, addr);
+        else
+            movss(x, addr);
+    }
+    void uni_vmovss(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2) {
+        if (mayiuse(avx))
+            vmovss(x1, x1, x2);
+        else
+            movss(x1, x2);
     }
     void uni_vmovss(const Xbyak::Address &addr, const Xbyak::Ymm &x) {
         vmovss(addr, Xbyak::Xmm(x.getIdx()));
-    }
-    void uni_vmovss(const Xbyak::Xmm &x, const Xbyak::Operand &op) {
-        movss(x, op);
     }
     void uni_vmovss(const Xbyak::Ymm &x, const Xbyak::Address &addr) {
         vmovss(Xbyak::Xmm(x.getIdx()), addr);
@@ -420,15 +438,20 @@ public:
     }
 
     void uni_vpbroadcastd(const Xbyak::Xmm &x, const Xbyak::Operand &op) {
-        movsd(x, op);
+        movss(x, op);
         pshufd(x, x, 0x0);
     }
     void uni_vpbroadcastd(const Xbyak::Ymm &x, const Xbyak::Operand &op) {
         if (mayiuse(avx2)) {
             vpbroadcastd(x, op);
         } else {
-            Xbyak::Xmm t(x.getIdx());
-            if (!t.isEqualIfNotInherited(op)) movsd(t, op);
+            const Xbyak::Xmm t(x.getIdx());
+            if (!t.isEqualIfNotInherited(op)) {
+                if (op.isMEM())
+                    vmovss(t, op.getAddress());
+                else
+                    vmovss(t, t, op);
+            }
             vinsertf128(x, x, t, 1);
             vshufps(x, x, x, 0);
         }
@@ -528,6 +551,16 @@ public:
         vpsubd(x1, x2, op);
     }
 
+    void uni_vpsubb(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op = Xbyak::Operand()) {
+        assert(x1.getIdx() == x2.getIdx());
+        psubb(x1, op);
+    }
+    void uni_vpsubb(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
+            const Xbyak::Operand &op = Xbyak::Operand()) {
+        vpsubb(x1, x2, op);
+    }
+
     void uni_vsubss(const Xbyak::Xmm &x, const Xbyak::Operand &op1,
             const Xbyak::Operand &op2 = Xbyak::Operand()) {
         assert(x.isEqualIfNotInherited(op1));
@@ -560,10 +593,28 @@ public:
         vsubps(x, op1, op2);
     }
 
+    void uni_vpmulld(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op = Xbyak::Operand()) {
+        if (mayiuse(avx)) {
+            vpmulld(x1, x2, op);
+        } else {
+            if (x1.getIdx() != x2.getIdx()) movdqa(x1, x2);
+            pmulld(x1, op);
+        }
+    }
+    void uni_vpmulld(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
+            const Xbyak::Operand &op = Xbyak::Operand()) {
+        vpmulld(x1, x2, op);
+    }
+
     void uni_vmulps(const Xbyak::Xmm &x, const Xbyak::Operand &op1,
             const Xbyak::Operand &op2 = Xbyak::Operand()) {
-        assert(x.isEqualIfNotInherited(op1));
-        mulps(x, op2);
+        if (mayiuse(avx))
+            vmulps(x, op1, op2);
+        else {
+            assert(x.isEqualIfNotInherited(op1));
+            mulps(x, op2);
+        }
     }
     void uni_vmulps(const Xbyak::Ymm &x, const Xbyak::Operand &op1,
             const Xbyak::Operand &op2 = Xbyak::Operand()) {
@@ -594,7 +645,15 @@ public:
     }
     void uni_vfmadd132ps(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
             const Xbyak::Operand &op) {
-        vfmadd132ps(x1, x2, op);
+        if (mayiuse(avx2))
+            vfmadd132ps(x1, x2, op);
+        else {
+            // Note: x1 gets overriden by x1*op
+            // This is incorrect if x1 == x2
+            assert(x1.getIdx() != x2.getIdx());
+            vmulps(x1, x1, op);
+            vaddps(x1, x1, x2);
+        }
     }
 
     void uni_vfmadd213ps(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
@@ -607,7 +666,15 @@ public:
     }
     void uni_vfmadd213ps(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
             const Xbyak::Operand &op) {
-        vfmadd213ps(x1, x2, op);
+        if (mayiuse(avx2))
+            vfmadd213ps(x1, x2, op);
+        else {
+            // Note: x1 gets overriden by x1*x2
+            // This is incorrect if x1 == op
+            assert(!x1.isEqualIfNotInherited(op));
+            vmulps(x1, x1, x2);
+            vaddps(x1, x1, op);
+        }
     }
 
     void uni_vfmadd213ss(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
@@ -620,7 +687,15 @@ public:
     }
     void uni_vfmadd213ss(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
             const Xbyak::Operand &op) {
-        vfmadd213ss(x1, x2, op);
+        if (mayiuse(avx2))
+            vfmadd213ss(x1, x2, op);
+        else {
+            // Note: x1 gets overriden by x1*x2
+            // This is incorrect if x1 == op
+            assert(!x1.isEqualIfNotInherited(op));
+            vmulss(x1, x1, x2);
+            vaddss(x1, x1, op);
+        }
     }
 
     void uni_vfmadd231ps(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
@@ -633,7 +708,15 @@ public:
     }
     void uni_vfmadd231ps(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
             const Xbyak::Operand &op) {
-        vfmadd231ps(x1, x2, op);
+        if (mayiuse(avx2))
+            vfmadd231ps(x1, x2, op);
+        else {
+            // Note: x2 gets overriden by x2*op
+            // This is incorrect if x1 == x2
+            assert(x1.getIdx() != x2.getIdx());
+            vmulps(x2, x2, op);
+            vaddps(x1, x1, x2);
+        }
     }
     void uni_vfmadd231ss(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
             const Xbyak::Operand &op) {
@@ -645,7 +728,15 @@ public:
     }
     void uni_vfmadd231ss(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
             const Xbyak::Operand &op) {
-        vfmadd231ss(Xbyak::Xmm(x1.getIdx()), Xbyak::Xmm(x2.getIdx()), op);
+        if (mayiuse(avx2))
+            vfmadd231ss(Xbyak::Xmm(x1.getIdx()), Xbyak::Xmm(x2.getIdx()), op);
+        else {
+            // Note: x2 gets overriden by x2*op
+            // This is incorrect if x1 == x2
+            assert(x1.getIdx() != x2.getIdx());
+            vmulss(x2, x2, op);
+            vaddss(x1, x1, x2);
+        }
     }
 
     void uni_vfnmadd231ps(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
@@ -659,7 +750,15 @@ public:
 
     void uni_vfnmadd231ps(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
             const Xbyak::Operand &op) {
-        vfnmadd231ps(x1, x2, op);
+        if (mayiuse(avx2))
+            vfnmadd231ps(x1, x2, op);
+        else {
+            // Note: x2 gets overriden by x2*op
+            // This is incorrect if x1 == x2
+            assert(x1.getIdx() != x2.getIdx());
+            vmulps(x2, x2, op);
+            vsubps(x1, x1, x2);
+        }
     }
 
     void uni_vfmsub213ps(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
@@ -672,7 +771,15 @@ public:
     }
     void uni_vfmsub213ps(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
             const Xbyak::Operand &op) {
-        vfmsub213ps(x1, x2, op);
+        if (mayiuse(avx2))
+            vfmsub213ps(x1, x2, op);
+        else {
+            // Note: x1 gets overriden by x1*x2
+            // This is incorrect if x1 == op
+            assert(!x1.isEqualIfNotInherited(op));
+            vmulps(x1, x1, x2);
+            vsubps(x1, x1, op);
+        }
     }
 
     void uni_vsqrtps(const Xbyak::Xmm &x, const Xbyak::Operand &op) {
@@ -694,6 +801,20 @@ public:
     void uni_vpaddd(const Xbyak::Ymm &x1, const Xbyak::Xmm &x2,
             const Xbyak::Operand &op) {
         vpaddd(x1, x2, op);
+    }
+
+    void uni_vpaddb(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op) {
+        if (mayiuse(avx))
+            vpaddb(x1, x2, op);
+        else {
+            if (x1.getIdx() != x2.getIdx()) movdqa(x1, x2);
+            paddb(x1, op);
+        }
+    }
+    void uni_vpaddb(const Xbyak::Ymm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op) {
+        vpaddb(x1, x2, op);
     }
 
     void uni_vpmaddwd(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
@@ -916,10 +1037,23 @@ public:
         vpackuswb(x1, x2, op);
     }
 
+    void uni_vpacksswb(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op) {
+        assert(x1.getIdx() == x1.getIdx());
+        packsswb(x1, op);
+    }
+    void uni_vpacksswb(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
+            const Xbyak::Operand &op) {
+        vpacksswb(x1, x2, op);
+    }
+
     void uni_vpinsrb(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
             const Xbyak::Operand &op, const int imm) {
         assert(x1.getIdx() == x2.getIdx());
-        pinsrb(x1, op, imm);
+        if (mayiuse(avx))
+            vpinsrb(x1, x2, op, imm);
+        else
+            pinsrb(x1, op, imm);
     }
 
     void uni_vpinsrb(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
@@ -927,14 +1061,107 @@ public:
         vpinsrb(x1, x2, op, imm);
     }
 
+    void uni_vpinsrd(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op, const int imm) {
+        assert(x1.getIdx() == x2.getIdx());
+        if (mayiuse(avx))
+            vpinsrd(x1, x2, op, imm);
+        else
+            pinsrd(x1, op, imm);
+    }
+    void uni_vpinsrd(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
+            const Xbyak::Operand &op, const int imm) {
+        vpinsrd(x1, x2, op, imm);
+    }
+
+    void uni_vpinsrq(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op, const int imm) {
+        assert(x1.getIdx() == x2.getIdx());
+        if (mayiuse(avx))
+            vpinsrq(x1, x2, op, imm);
+        else
+            pinsrq(x1, op, imm);
+    }
+    void uni_vpinsrq(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
+            const Xbyak::Operand &op, const int imm) {
+        vpinsrq(x1, x2, op, imm);
+    }
+
+    void uni_vpinsrw(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op, const int imm) {
+        assert(x1.getIdx() == x2.getIdx());
+        if (mayiuse(avx))
+            vpinsrw(x1, x2, op, imm);
+        else
+            pinsrw(x1, op, imm);
+    }
+    void uni_vpinsrw(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
+            const Xbyak::Operand &op, const int imm) {
+        vpinsrw(x1, x2, op, imm);
+    }
+
     void uni_vpextrb(
             const Xbyak::Operand &op, const Xbyak::Xmm &x, const int imm) {
-        pextrb(op, x, imm);
+        if (mayiuse(avx))
+            vpextrb(op, x, imm);
+        else
+            pextrb(op, x, imm);
     }
 
     void uni_vpextrb(
             const Xbyak::Operand &op, const Xbyak::Ymm &x, const int imm) {
         vpextrb(op, x, imm);
+    }
+
+    void uni_vpextrw(
+            const Xbyak::Operand &op, const Xbyak::Xmm &x, const int imm) {
+        if (mayiuse(avx))
+            vpextrw(op, x, imm);
+        else
+            pextrw(op, x, imm);
+    }
+    void uni_vpextrw(
+            const Xbyak::Operand &op, const Xbyak::Ymm &x, const int imm) {
+        vpextrw(op, x, imm);
+    }
+
+    void uni_vpextrd(
+            const Xbyak::Operand &op, const Xbyak::Xmm &x, const int imm) {
+        if (mayiuse(avx))
+            vpextrd(op, x, imm);
+        else
+            pextrd(op, x, imm);
+    }
+    void uni_vpextrd(
+            const Xbyak::Operand &op, const Xbyak::Ymm &x, const int imm) {
+        vpextrd(op, x, imm);
+    }
+
+    void uni_vpextrq(
+            const Xbyak::Operand &op, const Xbyak::Xmm &x, const int imm) {
+        if (mayiuse(avx))
+            vpextrq(op, x, imm);
+        else
+            pextrq(op, x, imm);
+    }
+    void uni_vpextrq(
+            const Xbyak::Operand &op, const Xbyak::Ymm &x, const int imm) {
+        vpextrq(op, x, imm);
+    }
+
+    void uni_vpmaxsd(const Xbyak::Xmm &x1, const Xbyak::Xmm &x2,
+            const Xbyak::Operand &op) {
+        if (mayiuse(avx))
+            vpmaxsd(x1, x2, op);
+        else {
+            if (x1.getIdx() != x2.getIdx()) movdqa(x1, x2);
+            pmaxsd(x1, op);
+        }
+    }
+
+    void uni_vpmaxsd(const Xbyak::Ymm &x1, const Xbyak::Ymm &x2,
+            const Xbyak::Operand &op) {
+        vpmaxsd(x1, x2, op);
     }
 
     void mul_by_const(
@@ -998,29 +1225,51 @@ public:
             uni_vshufps(vmm_ubound, tmp, tmp, 0);
     }
 
+    // This function is used to saturate to odt in f32 before converting to s32
+    // in order to avoid bad saturation due to cvtps2dq behavior (it returns
+    // INT_MIN if the f32 is out of the s32 range)
     template <typename Vmm>
     void saturate_f32(const Vmm &vmm, const Vmm &vmm_lbound,
-            const Vmm &vmm_ubound, data_type_t odt) {
-        // This function is used to saturate to odt in f32 before converting
-        // to s32 in order to avoid bad saturation due to cvtps2dq
-        // behavior (it returns INT_MIN if the f32 is out of the
-        // s32 range)
+            const Vmm &vmm_ubound, const Vmm &vmm_tmp, data_type_t odt) {
         using namespace data_type;
         if (!utils::one_of(odt, u8, s8, s32)) return;
 
-        // no need to apply lower saturation bound when odt is
-        // signed, as cvtps2dq will return MIN_INT if the value
-        // does not fit
+        // no need to apply lower saturation bound when odt is signed, as
+        // cvtps2dq will return MIN_INT if the value does not fit.
+        // The comment below for a certain order applied for maxps instruction
+        // as well. No changes here since NaN with positive sign was not met
+        // yet.
         if (odt == u8) {
             if (mayiuse(avx))
                 vmaxps(vmm, vmm, vmm_lbound);
             else
                 maxps(vmm, vmm_lbound);
         }
+
+        // Order matters for minps due to peculiar behavior of the instruction
+        // with NaNs:
+        //     if (SRC1 == NaN)
+        //         return SRC2;
+        //     else if (SRC2 == NaN)
+        //         return SRC2;
+        // that's why we keep user's data at SRC2 reg to pass NaNs further to
+        // cvtps2dq which handles them properly.
         if (mayiuse(avx))
-            vminps(vmm, vmm, vmm_ubound);
-        else
-            minps(vmm, vmm_ubound);
+            vminps(vmm, vmm_ubound, vmm);
+        else {
+            movups(vmm_tmp, vmm_ubound);
+            minps(vmm_tmp, vmm);
+            movups(vmm, vmm_tmp);
+        }
+    }
+
+    // AVX+ version of saturate_f32 which does not require an additional vector
+    // register.
+    template <typename Vmm>
+    void saturate_f32(const Vmm &vmm, const Vmm &vmm_lbound,
+            const Vmm &vmm_ubound, data_type_t odt) {
+        assert(mayiuse(avx));
+        saturate_f32(vmm, vmm_lbound, vmm_ubound, Vmm(), odt);
     }
 
     /**
@@ -1034,7 +1283,6 @@ public:
     * for (int idx = 0; idx < load_size; ++idx)
     *     vpinsrb(xmm, xmm, ptr[reg + offset + idx], idx);
     *
-    * TODO: Implement this routine for every ISA.
     * TODO: Add an option to zero-out unloaded bytes in the Xmm register.
     * TODO: Add an option for unsafe_load wherein one could read outside the
     * provided memory buffer so as to minimize the total number of read
@@ -1042,12 +1290,14 @@ public:
     */
     template <typename Vmm>
     void load_bytes(const Vmm &vmm, const Xbyak::Reg64 &reg, int64_t offset,
-            int load_size) {
+            int load_size, bool force_sse = false) {
 
         constexpr bool is_xmm = std::is_same<Vmm, Xbyak::Xmm>::value;
         constexpr bool is_ymm = std::is_same<Vmm, Xbyak::Ymm>::value;
         static_assert(
                 is_xmm || is_ymm, "only Xmm or Ymm registers are allowed");
+        const bool use_avx = mayiuse(avx) && !force_sse;
+
         MAYBE_UNUSED(is_xmm);
         MAYBE_UNUSED(is_ymm);
 
@@ -1057,10 +1307,11 @@ public:
         // Ensure offset is at most 4 bytes to be encoded in the instruction
         assert(offset >= INT_MIN && offset <= INT_MAX);
 
+        // At most 16 bytes can fit inside the Xmm register
         assert(IMPLICATION(load_size > 16, is_ymm));
 
-        // TODO: Support this routine for every isa
-        assert(mayiuse(avx) && "routine is not supported for the current isa");
+        assert(mayiuse(sse41)
+                && "routine is not supported for the current isa");
 
         auto xmm = Xbyak::Xmm(vmm.getIdx());
         auto ymm = Xbyak::Ymm(vmm.getIdx());
@@ -1069,6 +1320,26 @@ public:
         const auto addr = [&](int bytes_offset) {
             return ptr[reg + offset + bytes_offset * sizeof(int8_t)];
         };
+
+        // VEX-fying macro when AVX and SSE41 instructions have
+        // same number of arguments
+#define MAYBE_VEX2(instr, arg1, arg2) \
+    do { \
+        if (use_avx) \
+            CONCAT2(v, instr)(arg1, arg2); \
+        else \
+            instr(arg1, arg2); \
+    } while (0)
+
+        // VEX-fying macro when AVX have one extra argument for
+        // destination (namely, the first argument)
+#define MAYBE_VEX(instr, arg1, arg2, arg3) \
+    do { \
+        if (use_avx) \
+            CONCAT2(v, instr)(arg1, arg1, arg2, arg3); \
+        else \
+            instr(arg1, arg2, arg3); \
+    } while (0)
 
         if (load_size == 32) {
             vmovups(ymm, addr(0));
@@ -1085,52 +1356,52 @@ public:
         }
 
         if (bytes_to_load >= 8 && bytes_to_load < 16)
-            vpinsrq(xmm, xmm, addr(start_bytes), 0);
+            MAYBE_VEX(pinsrq, xmm, addr(start_bytes), 0);
         else if (bytes_to_load == 16)
-            vmovdqu(xmm, addr(start_bytes));
+            MAYBE_VEX2(movdqu, xmm, addr(start_bytes));
 
         switch (bytes_to_load) {
             case 0: break;
-            case 1: vpinsrb(xmm, xmm, addr(start_bytes), 0); break;
-            case 2: vpinsrw(xmm, xmm, addr(start_bytes), 0); break;
+            case 1: MAYBE_VEX(pinsrb, xmm, addr(start_bytes), 0); break;
+            case 2: MAYBE_VEX(pinsrw, xmm, addr(start_bytes), 0); break;
             case 3:
-                vpinsrw(xmm, xmm, addr(start_bytes), 0);
-                vpinsrb(xmm, xmm, addr(start_bytes + 2), 2);
+                MAYBE_VEX(pinsrw, xmm, addr(start_bytes), 0);
+                MAYBE_VEX(pinsrb, xmm, addr(start_bytes + 2), 2);
                 break;
-            case 4: vpinsrd(xmm, xmm, addr(start_bytes), 0); break;
+            case 4: MAYBE_VEX(pinsrd, xmm, addr(start_bytes), 0); break;
             case 5:
-                vpinsrd(xmm, xmm, addr(start_bytes), 0);
-                vpinsrb(xmm, xmm, addr(start_bytes + 4), 4);
+                MAYBE_VEX(pinsrd, xmm, addr(start_bytes), 0);
+                MAYBE_VEX(pinsrb, xmm, addr(start_bytes + 4), 4);
                 break;
             case 6:
-                vpinsrd(xmm, xmm, addr(start_bytes), 0);
-                vpinsrw(xmm, xmm, addr(start_bytes + 4), 2);
+                MAYBE_VEX(pinsrd, xmm, addr(start_bytes), 0);
+                MAYBE_VEX(pinsrw, xmm, addr(start_bytes + 4), 2);
                 break;
             case 7:
-                vpinsrd(xmm, xmm, addr(start_bytes), 0);
-                vpinsrw(xmm, xmm, addr(start_bytes + 4), 2);
-                vpinsrb(xmm, xmm, addr(start_bytes + 6), 6);
+                MAYBE_VEX(pinsrd, xmm, addr(start_bytes), 0);
+                MAYBE_VEX(pinsrw, xmm, addr(start_bytes + 4), 2);
+                MAYBE_VEX(pinsrb, xmm, addr(start_bytes + 6), 6);
                 break;
             case 8: break;
-            case 9: vpinsrb(xmm, xmm, addr(start_bytes + 8), 8); break;
-            case 10: vpinsrw(xmm, xmm, addr(start_bytes + 8), 4); break;
+            case 9: MAYBE_VEX(pinsrb, xmm, addr(start_bytes + 8), 8); break;
+            case 10: MAYBE_VEX(pinsrw, xmm, addr(start_bytes + 8), 4); break;
             case 11:
-                vpinsrw(xmm, xmm, addr(start_bytes + 8), 4);
-                vpinsrb(xmm, xmm, addr(start_bytes + 10), 10);
+                MAYBE_VEX(pinsrw, xmm, addr(start_bytes + 8), 4);
+                MAYBE_VEX(pinsrb, xmm, addr(start_bytes + 10), 10);
                 break;
-            case 12: vpinsrd(xmm, xmm, addr(start_bytes + 8), 2); break;
+            case 12: MAYBE_VEX(pinsrd, xmm, addr(start_bytes + 8), 2); break;
             case 13:
-                vpinsrd(xmm, xmm, addr(start_bytes + 8), 2);
-                vpinsrb(xmm, xmm, addr(start_bytes + 12), 12);
+                MAYBE_VEX(pinsrd, xmm, addr(start_bytes + 8), 2);
+                MAYBE_VEX(pinsrb, xmm, addr(start_bytes + 12), 12);
                 break;
             case 14:
-                vpinsrd(xmm, xmm, addr(start_bytes + 8), 2);
-                vpinsrw(xmm, xmm, addr(start_bytes + 12), 6);
+                MAYBE_VEX(pinsrd, xmm, addr(start_bytes + 8), 2);
+                MAYBE_VEX(pinsrw, xmm, addr(start_bytes + 12), 6);
                 break;
             case 15:
-                vpinsrd(xmm, xmm, addr(start_bytes + 8), 2);
-                vpinsrw(xmm, xmm, addr(start_bytes + 12), 6);
-                vpinsrb(xmm, xmm, addr(start_bytes + 14), 14);
+                MAYBE_VEX(pinsrd, xmm, addr(start_bytes + 8), 2);
+                MAYBE_VEX(pinsrw, xmm, addr(start_bytes + 12), 6);
+                MAYBE_VEX(pinsrb, xmm, addr(start_bytes + 14), 14);
                 break;
             case 16: break;
             default: assert(!"improper load size");
@@ -1140,6 +1411,8 @@ public:
             vinsertf128(ymm, ymm, xmm, 1); // insert to upper bits of ymm
             vinsertf128(ymm, ymm, addr(0), 0); // insert to lower bits of ymm
         }
+#undef MAYBE_VEX2
+#undef MAYBE_VEX
     }
 
     /**
@@ -1156,19 +1429,20 @@ public:
     * for (int idx = 0; idx < store_size; ++idx)
     *     vpextrb(ptr[reg + offset + idx], xmm, idx);
     *
-    * TODO: Implement this routine for every ISA.
     * TODO: Add an option for unsafe_store wherein one could store extra dwords
     * past the provided memory buffer so as to minimize the total number of
     * write memory instructions.
     */
     template <typename Vmm>
     void store_bytes(const Vmm &vmm, const Xbyak::Reg64 &reg, int64_t offset,
-            int store_size) {
+            int store_size, bool force_sse = false) {
 
         constexpr bool is_xmm = std::is_same<Vmm, Xbyak::Xmm>::value;
         constexpr bool is_ymm = std::is_same<Vmm, Xbyak::Ymm>::value;
         static_assert(
                 is_xmm || is_ymm, "only Xmm or Ymm registers are allowed");
+        const bool use_avx = mayiuse(avx) && !force_sse;
+
         MAYBE_UNUSED(is_xmm);
         MAYBE_UNUSED(is_ymm);
 
@@ -1178,9 +1452,11 @@ public:
         // Ensure offset is at most 4 bytes to be encoded in the instruction
         assert(offset >= INT_MIN && offset <= INT_MAX);
 
+        // At most 16 bytes can fit inside the Xmm register
         assert(IMPLICATION(store_size > 16, is_ymm));
 
-        assert(mayiuse(avx) && "routine is not supported for the current isa");
+        assert(mayiuse(sse41)
+                && "routine is not supported for the current isa");
 
         auto xmm = Xbyak::Xmm(vmm.getIdx());
         auto ymm = Xbyak::Ymm(vmm.getIdx());
@@ -1188,6 +1464,24 @@ public:
         const auto addr = [&](int bytes_offset) {
             return ptr[reg + offset + bytes_offset * sizeof(int8_t)];
         };
+
+        // VEX-fying macro when AVX and SSE41 instructions have
+        // same number of arguments
+#define MAYBE_VEX2(instr, arg1, arg2) \
+    do { \
+        if (use_avx) \
+            CONCAT2(v, instr)(arg1, arg2); \
+        else \
+            instr(arg1, arg2); \
+    } while (0)
+
+#define MAYBE_VEX3(instr, arg1, arg2, arg3) \
+    do { \
+        if (use_avx) \
+            CONCAT2(v, instr)(arg1, arg2, arg3); \
+        else \
+            instr(arg1, arg2, arg3); \
+    } while (0)
 
         if (store_size == 32) {
             vmovups(addr(0), ymm);
@@ -1205,56 +1499,58 @@ public:
         }
 
         if (bytes_to_store >= 8 && bytes_to_store < 16)
-            vpextrq(addr(start_bytes), xmm, 0);
+            MAYBE_VEX3(pextrq, addr(start_bytes), xmm, 0);
         else if (bytes_to_store == 16)
-            vmovdqu(addr(start_bytes), xmm);
+            MAYBE_VEX2(movdqu, addr(start_bytes), xmm);
 
         switch (bytes_to_store) {
             case 0: break;
-            case 1: vpextrb(addr(start_bytes), xmm, 0); break;
-            case 2: vpextrw(addr(start_bytes), xmm, 0); break;
+            case 1: MAYBE_VEX3(pextrb, addr(start_bytes), xmm, 0); break;
+            case 2: MAYBE_VEX3(pextrw, addr(start_bytes), xmm, 0); break;
             case 3:
-                vpextrw(addr(start_bytes), xmm, 0);
-                vpextrb(addr(start_bytes + 2), xmm, 2);
+                MAYBE_VEX3(pextrw, addr(start_bytes), xmm, 0);
+                MAYBE_VEX3(pextrb, addr(start_bytes + 2), xmm, 2);
                 break;
-            case 4: vpextrd(addr(start_bytes), xmm, 0); break;
+            case 4: MAYBE_VEX3(pextrd, addr(start_bytes), xmm, 0); break;
             case 5:
-                vpextrd(addr(start_bytes), xmm, 0);
-                vpextrb(addr(start_bytes + 4), xmm, 4);
+                MAYBE_VEX3(pextrd, addr(start_bytes), xmm, 0);
+                MAYBE_VEX3(pextrb, addr(start_bytes + 4), xmm, 4);
                 break;
             case 6:
-                vpextrd(addr(start_bytes), xmm, 0);
-                vpextrw(addr(start_bytes + 4), xmm, 2);
+                MAYBE_VEX3(pextrd, addr(start_bytes), xmm, 0);
+                MAYBE_VEX3(pextrw, addr(start_bytes + 4), xmm, 2);
                 break;
             case 7:
-                vpextrd(addr(start_bytes), xmm, 0);
-                vpextrw(addr(start_bytes + 4), xmm, 2);
-                vpextrb(addr(start_bytes + 6), xmm, 6);
+                MAYBE_VEX3(pextrd, addr(start_bytes), xmm, 0);
+                MAYBE_VEX3(pextrw, addr(start_bytes + 4), xmm, 2);
+                MAYBE_VEX3(pextrb, addr(start_bytes + 6), xmm, 6);
                 break;
             case 8: break;
-            case 9: vpextrb(addr(start_bytes + 8), xmm, 8); break;
-            case 10: vpextrw(addr(start_bytes + 8), xmm, 4); break;
+            case 9: MAYBE_VEX3(pextrb, addr(start_bytes + 8), xmm, 8); break;
+            case 10: MAYBE_VEX3(pextrw, addr(start_bytes + 8), xmm, 4); break;
             case 11:
-                vpextrw(addr(start_bytes + 8), xmm, 4);
-                vpextrb(addr(start_bytes + 10), xmm, 10);
+                MAYBE_VEX3(pextrw, addr(start_bytes + 8), xmm, 4);
+                MAYBE_VEX3(pextrb, addr(start_bytes + 10), xmm, 10);
                 break;
-            case 12: vpextrd(addr(start_bytes + 8), xmm, 2); break;
+            case 12: MAYBE_VEX3(pextrd, addr(start_bytes + 8), xmm, 2); break;
             case 13:
-                vpextrd(addr(start_bytes + 8), xmm, 2);
-                vpextrb(addr(start_bytes + 12), xmm, 12);
+                MAYBE_VEX3(pextrd, addr(start_bytes + 8), xmm, 2);
+                MAYBE_VEX3(pextrb, addr(start_bytes + 12), xmm, 12);
                 break;
             case 14:
-                vpextrd(addr(start_bytes + 8), xmm, 2);
-                vpextrw(addr(start_bytes + 12), xmm, 6);
+                MAYBE_VEX3(pextrd, addr(start_bytes + 8), xmm, 2);
+                MAYBE_VEX3(pextrw, addr(start_bytes + 12), xmm, 6);
                 break;
             case 15:
-                vpextrd(addr(start_bytes + 8), xmm, 2);
-                vpextrw(addr(start_bytes + 12), xmm, 6);
-                vpextrb(addr(start_bytes + 14), xmm, 14);
+                MAYBE_VEX3(pextrd, addr(start_bytes + 8), xmm, 2);
+                MAYBE_VEX3(pextrw, addr(start_bytes + 12), xmm, 6);
+                MAYBE_VEX3(pextrb, addr(start_bytes + 14), xmm, 14);
                 break;
             case 16: break;
             default: assert(!"improper store size");
         }
+#undef MAYBE_VEX2
+#undef MAYBE_VEX3
     }
 
     /**
@@ -1295,8 +1591,8 @@ public:
         // Ensure offset is at most 4 bytes to be encoded in the instruction
         assert(offset >= INT_MIN && offset <= INT_MAX);
 
-        // TODO: Support this routine for every isa
-        assert(mayiuse(avx2) && "routine is not supported for the current isa");
+        assert(mayiuse(sse41)
+                && "routine is not supported for the current isa");
 
         // For load_size == 8/4, do load/extension in one go
         if (load_size == 8) {
@@ -1308,168 +1604,15 @@ public:
         } else if (load_size == 4) {
             const auto xmm = Xbyak::Xmm(vmm.getIdx());
             if (is_signed)
-                vpmovsxbd(xmm, ptr[reg + offset]);
+                uni_vpmovsxbd(xmm, ptr[reg + offset]);
             else
-                vpmovzxbd(xmm, ptr[reg + offset]);
+                uni_vpmovzxbd(xmm, ptr[reg + offset]);
         } else {
             load_bytes(vmm, reg, offset, load_size);
             if (is_signed)
-                vpmovsxbd(vmm, vmm);
+                uni_vpmovsxbd(vmm, vmm);
             else
-                vpmovzxbd(vmm, vmm);
-        }
-    }
-
-    /** store_dwords is a generalized version of vmovups
-     * assembly instruction. The data in memory (pointed by ptr[reg + offset])
-     * is assumed to be contiguous and of store_size many dword are written.
-     *
-     * Valid values for the store_size variable are:
-     * [0..4] for XMM version of the function
-     * [0..8] for YMM version of the function.
-     *
-     * Note: Content of Vmm register is not guaranteed to be preserved after the
-     * invocation of this routine.
-     *
-     * TODO: Implement this routine for every ISA.
-     * TODO: Add an option for unsafe_store wherein one could write extra dwords
-     * past the provided memory buffer so as to minimize the total number of
-     * write memory instructions.
-     * TODO: Merge this routine with store_bytes when the latter is generalized
-     * to handle Ymm registers as well.
-     */
-    template <typename Vmm>
-    void store_dwords(const Vmm &vmm, const Xbyak::Reg64 &reg, int64_t offset,
-            int store_size) {
-
-        constexpr bool is_xmm = std::is_same<Vmm, Xbyak::Xmm>::value;
-        constexpr bool is_ymm = std::is_same<Vmm, Xbyak::Ymm>::value;
-        static_assert(
-                is_xmm || is_ymm, "only Xmm or Ymm registers are allowed");
-        MAYBE_UNUSED(is_xmm);
-        MAYBE_UNUSED(is_ymm);
-
-        // Ensure double words fit inside Ymm (32 * store_size <= 256)
-        assert(store_size >= 0 && store_size <= 8);
-        // For Xmm register, store capacity is halved (32 * store_size <= 128)
-        assert(IMPLICATION(is_xmm, store_size <= 4));
-
-        // Ensure offset is at most 4 bytes to be encoded in the instruction
-        assert(offset >= INT_MIN && offset <= INT_MAX);
-
-        // TODO: Support this routine for every isa
-        assert(mayiuse(avx2) && "routine is not supported for the current isa");
-
-        const auto ymm = Xbyak::Ymm(vmm.getIdx());
-        const auto xmm = Xbyak::Xmm(vmm.getIdx());
-
-        // addr(i) denotes the memory pointed by ptr[reg + offset + (i dwords)]
-        const auto addr = [&](int dwords_offset) {
-            return ptr[reg + offset + dwords_offset * sizeof(int32_t)];
-        };
-
-        switch (store_size) {
-            case 0: break;
-            case 1: vpextrd(addr(0), xmm, 0); break;
-            case 2: vpextrq(addr(0), xmm, 0); break;
-            case 3:
-                vpextrq(addr(0), xmm, 0);
-                vpextrd(addr(2), xmm, 2);
-                break;
-            case 4: vmovdqu(addr(0), xmm); break;
-            case 5:
-                vmovdqu(addr(0), xmm);
-                vextracti128(xmm, ymm, 1);
-                vpextrd(addr(4), xmm, 0);
-                break;
-            case 6:
-                vmovdqu(addr(0), xmm);
-                vextracti128(xmm, ymm, 1);
-                vpextrq(addr(4), xmm, 0);
-                break;
-            case 7:
-                vmovdqu(addr(0), xmm);
-                vextracti128(xmm, ymm, 1);
-                vpextrq(addr(4), xmm, 0);
-                vpextrd(addr(6), xmm, 2);
-                break;
-            case 8: vmovdqu(addr(0), ymm); break;
-            default: assert(!"improper store size");
-        }
-    }
-
-    /** load_dwords is a generalized version of vmovups
-     * assembly instruction. The data in memory (pointed by ptr[reg + offset])
-     * is assumed to be contiguous and of load_size many dword are read.
-     *
-     * Valid values for the load_size variable are:
-     * [0..4] for XMM version of the function
-     * [0..8] for YMM version of the function.
-     *
-     * TODO: Implement this routine for every ISA.
-     * TODO: Add an option for unsafe_load wherein one could read outside the
-     * provided memory buffer so as to minimize the total number of read
-     * memory instructions.
-     * TODO: Merge this routine with load_bytes when the latter is generalized
-     * to handle Ymm registers as well.
-     */
-    template <typename Vmm>
-    void load_dwords(const Vmm &vmm, const Xbyak::Reg64 &reg, int64_t offset,
-            int load_size) {
-
-        constexpr bool is_xmm = std::is_same<Vmm, Xbyak::Xmm>::value;
-        constexpr bool is_ymm = std::is_same<Vmm, Xbyak::Ymm>::value;
-        static_assert(
-                is_xmm || is_ymm, "only Xmm or Ymm registers are allowed");
-        MAYBE_UNUSED(is_xmm);
-        MAYBE_UNUSED(is_ymm);
-
-        // Ensure double words fit inside Ymm (32 * load_size <= 256)
-        assert(load_size >= 0 && load_size <= 8);
-        // For Xmm register, load capacity is halved (32 * load_size <= 128)
-        assert(IMPLICATION(is_xmm, load_size <= 4));
-
-        // Ensure offset is at most 4 bytes to be encoded in the instruction
-        assert(offset >= INT_MIN && offset <= INT_MAX);
-
-        // TODO: Support this routine for every isa
-        assert(mayiuse(avx2) && "routine is not supported for the current isa");
-
-        const auto ymm = Xbyak::Ymm(vmm.getIdx());
-        const auto xmm = Xbyak::Xmm(vmm.getIdx());
-
-        // addr(i) denotes the memory pointed by ptr[reg + offset + (i dwords)]
-        const auto addr = [&](int dwords_offset) {
-            return ptr[reg + offset + dwords_offset * sizeof(int32_t)];
-        };
-
-        switch (load_size) {
-            case 0: break;
-            case 1: vpinsrd(xmm, xmm, addr(0), 0); break;
-            case 2: vpinsrq(xmm, xmm, addr(0), 0); break;
-            case 3:
-                vpinsrq(xmm, xmm, addr(0), 0);
-                vpinsrd(xmm, xmm, addr(2), 2);
-                break;
-            case 4: vmovdqu(xmm, addr(0)); break;
-            case 5:
-                vpinsrd(xmm, xmm, addr(4), 0);
-                vperm2i128(ymm, ymm, ymm, 1);
-                vinserti128(ymm, ymm, addr(0), 0);
-                break;
-            case 6:
-                vpinsrq(xmm, xmm, addr(4), 0);
-                vperm2i128(ymm, ymm, ymm, 1);
-                vinserti128(ymm, ymm, addr(0), 0);
-                break;
-            case 7:
-                vpinsrq(xmm, xmm, addr(4), 0);
-                vpinsrd(xmm, xmm, addr(6), 2);
-                vperm2i128(ymm, ymm, ymm, 1);
-                vinserti128(ymm, ymm, addr(0), 0);
-                break;
-            case 8: vmovdqu(ymm, addr(0)); break;
-            default: assert(!"improper load size");
+                uni_vpmovzxbd(vmm, vmm);
         }
     }
 
@@ -1480,29 +1623,34 @@ public:
      * Note: Content of Vmm register is not guaranteed to be preserved after the
      * invocation of this routine.
      *
-     * TODO: Implement this routine for every ISA.
      * TODO: Support for every possible data type.
      */
     template <typename Vmm>
     void store_data(data_type_t type_out, const Vmm &vmm,
             const Xbyak::Reg64 &reg, int64_t offset, int store_size) {
 
-        assert(mayiuse(avx2) && "routine is not supported for the current isa");
+        assert(mayiuse(sse41)
+                && "routine is not supported for the current isa");
+        constexpr bool is_xmm = std::is_same<Vmm, Xbyak::Xmm>::value;
+        // Avoid using Ymm with avx isa
+        assert(IMPLICATION(!mayiuse(avx2), is_xmm));
+        MAYBE_UNUSED(is_xmm);
+
         auto ymm = Xbyak::Ymm(vmm.getIdx());
 
         switch (type_out) {
             case data_type::f32:
             case data_type::s32:
-                store_dwords(vmm, reg, offset, store_size);
+                store_bytes(vmm, reg, offset, sizeof(int32_t) * store_size);
                 break;
             case data_type::u8:
             case data_type::s8:
-                vpackssdw(vmm, vmm, vmm);
-                vpermq(ymm, ymm, 0x08);
+                uni_vpackssdw(vmm, vmm, vmm);
+                if (mayiuse(avx2)) vpermq(ymm, ymm, 0x08);
                 if (type_out == data_type::s8)
-                    vpacksswb(vmm, vmm, vmm);
+                    uni_vpacksswb(vmm, vmm, vmm);
                 else
-                    vpackuswb(vmm, vmm, vmm);
+                    uni_vpackuswb(vmm, vmm, vmm);
                 store_bytes(vmm, reg, offset, store_size);
                 break;
             default: assert(!"unsupported destination data type");
@@ -1513,19 +1661,19 @@ public:
      * from the memory. Moreover load_size many chunks are read from the memory
      * beginning with ptr[reg + offset] address.
      *
-     * TODO: Implement this routine for every ISA.
      * TODO: Support for every possible data type.
      */
     template <typename Vmm>
     void load_data(data_type_t type_in, const Vmm &vmm, const Xbyak::Reg64 &reg,
             int64_t offset, int load_size) {
 
-        assert(mayiuse(avx2) && "routine is not supported for the current isa");
+        assert(mayiuse(sse41)
+                && "routine is not supported for the current isa");
 
         switch (type_in) {
             case data_type::f32:
             case data_type::s32:
-                load_dwords(vmm, reg, offset, load_size);
+                load_bytes(vmm, reg, offset, sizeof(int32_t) * load_size);
                 break;
             case data_type::s8:
             case data_type::u8:
@@ -1583,7 +1731,7 @@ private:
 
 protected:
     virtual void generate() = 0;
-    const Xbyak::uint8 *jit_ker_;
+    const Xbyak::uint8 *jit_ker_ = nullptr;
 };
 
 } // namespace x64

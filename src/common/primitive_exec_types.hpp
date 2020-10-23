@@ -19,7 +19,7 @@
 
 #include <unordered_map>
 
-#include "dnnl_types.h"
+#include "oneapi/dnnl/dnnl_types.h"
 
 #include "c_types_map.hpp"
 #include "memory.hpp"
@@ -49,7 +49,7 @@ struct primitive_desc_t;
 
 using exec_args_t = std::unordered_map<int, memory_arg_t>;
 
-status_t cvt_primtive_args(const primitive_desc_t *pd, int nargs,
+status_t cvt_primitive_args(const primitive_desc_t *pd, int nargs,
         const dnnl_exec_arg_t *c_args, exec_args_t &args);
 
 /** Primitive execution context (helps passing stream, memories, and events. */

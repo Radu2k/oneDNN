@@ -21,13 +21,22 @@
 #include "dnnl_thread.hpp"
 #include "gtest/gtest.h"
 
-#include "dnnl.h"
-#include "dnnl_types.h"
+#include "oneapi/dnnl/dnnl.h"
+#include "oneapi/dnnl/dnnl_types.h"
+
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+#include "oneapi/dnnl/dnnl_ocl.hpp"
+#endif
+
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
+#include "oneapi/dnnl/dnnl_sycl.hpp"
+#endif
 
 #if DNNL_X64
 #include "src/cpu/x64/cpu_isa_traits.hpp"
 #endif
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 #include <type_traits>
@@ -262,36 +271,12 @@ inline test_params make_test_params_pack(
     return params;
 }
 
-/* FIXME: remove this when possible.
- * Currently, USM suffers from two issues:
- * 1. Accessing it from multiple threads might lead to old (not updated results)
- * 2. USM pointers accessed on host only from TBB parallel region could also
- *    be updated at random point in time.
- * Accessing the data (traversing all pages) from the main thread seems to fix
- * both issues for now.
- */
-template <typename c_dt>
-void maybe_sync_mem(const test_memory &c_mem, int64_t size) {
-#if defined(DNNL_SYCL_DPCPP) && defined(DNNL_USE_DPCPP_USM)
-    size *= sizeof(c_dt);
-
-    auto c = map_memory<char>(c_mem);
-
-    const size_t step = 4096;
-    char *c_begin = c, *c_end = c_begin + size;
-
-    for (volatile char *c_ptr = c_begin; c_ptr < c_end; c_ptr += step)
-        *c_ptr ^= 0x3c;
-    *(c_end - 1) ^= 0x3c;
-
-    for (volatile char *c_ptr = c_begin; c_ptr < c_end; c_ptr += step)
-        *c_ptr ^= 0x3c;
-    *(c_end - 1) ^= 0x3c;
-#else
-    UNUSED(c_mem);
-    UNUSED(size);
-#endif
+#if defined(DNNL_SYCL_DPCPP)
+bool is_memory_kind_buffer(const test_memory &mem) {
+    return sycl_interop::get_memory_kind(mem.get())
+            == sycl_interop::memory_kind::buffer;
 }
+#endif
 
 /* Test implementation description.
  *
@@ -409,6 +394,13 @@ void prepare_matrix(const test_memory &M_mem, int64_t off_beg, layout_t layout,
             });
         }
     }
+
+    // To test if igemm row/col sum are correct when performing sign/zero
+    // extensions.
+    if (dt == memory::data_type::u8)
+        M[off_beg] = data_t(UINT8_MAX);
+    else if (dt == memory::data_type::s8)
+        M[off_beg] = data_t(-64);
 }
 
 /** Extends columns of the matrix M according to the mapper_c */
@@ -459,8 +451,6 @@ struct ref_gemm {
     static void call(const test_params &p, int64_t M, int64_t N,
             const test_memory &a_mem, const test_memory &b_mem,
             const test_memory &c_mem, const test_memory &) {
-        maybe_sync_mem<c_dt>(c_mem, p.off.c + p.M * p.ldc);
-
         auto a = map_memory<a_dt>(a_mem);
         auto b = map_memory<b_dt>(b_mem);
         auto c = map_memory<c_dt>(c_mem);
@@ -541,8 +531,6 @@ struct ref_gemm<a_dt, b_dt, int32_t> {
 template <typename a_dt, typename c_dt>
 void compare(const test_params &p, const test_memory &c_mem,
         const test_memory &c_ref_mem) {
-    maybe_sync_mem<c_dt>(c_mem, p.off.c + p.M * p.ldc);
-
     using data_type = memory::data_type;
     auto c = map_memory<c_dt>(c_mem);
     auto c_ref = map_memory<c_dt>(c_ref_mem);
@@ -592,16 +580,7 @@ inline test_memory get_matrix_memory(
         memory::dim n, memory::dim off, engine &eng) {
     auto d = create_md(
             {n + off}, data_traits<T>::data_type, memory::format_tag::x);
-#if defined(DNNL_SYCL_DPCPP) && defined(DNNL_USE_DPCPP_USM)
-    auto dev = eng.get_sycl_device();
-    auto ctx = eng.get_sycl_context();
-    auto f_malloc
-            = [=](size_t sz) { return cl::sycl::malloc_shared(sz, dev, ctx); };
-    auto f_free = [=](void *ptr) { return cl::sycl::free(ptr, ctx); };
-    return test_memory(d, eng, f_malloc, f_free);
-#else
     return test_memory(d, eng);
-#endif
 }
 
 template <typename a_dt, typename b_dt, typename c_dt>
@@ -658,36 +637,43 @@ struct dnnl_gemm<float16_t, float16_t, float16_t> {
         stream s(eng);
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            cl_command_queue q = s.get_ocl_command_queue();
+            cl_command_queue q = ocl_interop::get_command_queue(s);
             auto status = dnnl_ocl_hgemm(q, p.transA, p.transB, p.M, p.N, p.K,
-                    p.alpha, a_mem.get().get_ocl_mem_object(), p.off.a, p.lda,
-                    b_mem.get().get_ocl_mem_object(), p.off.b, p.ldb, p.beta,
-                    c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc);
+                    p.alpha, ocl_interop::get_mem_object(a_mem.get()), p.off.a,
+                    p.lda, ocl_interop::get_mem_object(b_mem.get()), p.off.b,
+                    p.ldb, p.beta, ocl_interop::get_mem_object(c_mem.get()),
+                    p.off.c, p.ldc);
             s.wait();
             return status;
         }
 #elif DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            cl::sycl::queue sycl_queue = s.get_sycl_queue();
-#ifdef DNNL_USE_DPCPP_USM
-            // Test USM API
-            auto a = static_cast<cl::sycl::half *>(
-                    a_mem.get().get_data_handle());
-            auto b = static_cast<cl::sycl::half *>(
-                    b_mem.get().get_data_handle());
-            auto c = static_cast<cl::sycl::half *>(
-                    c_mem.get().get_data_handle());
-            dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K, p.alpha,
-                    a, p.lda, b, p.ldb, p.beta, c, p.ldc);
-#else
-            // Test buffer API
-            auto a = a_mem.get().get_sycl_buffer<cl::sycl::half>();
-            auto b = b_mem.get().get_sycl_buffer<cl::sycl::half>();
-            auto c = c_mem.get().get_sycl_buffer<cl::sycl::half>();
-            dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K, p.alpha,
-                    a, p.off.a, p.lda, b, p.off.b, p.ldb, p.beta, c, p.off.c,
-                    p.ldc);
-#endif
+            cl::sycl::queue sycl_queue = sycl_interop::get_queue(s);
+            if (is_memory_kind_buffer(a_mem)) {
+                // Test buffer API
+                assert(is_memory_kind_buffer(b_mem));
+                assert(is_memory_kind_buffer(c_mem));
+                auto a = sycl_interop::get_buffer<cl::sycl::half>(a_mem.get());
+                auto b = sycl_interop::get_buffer<cl::sycl::half>(b_mem.get());
+                auto c = sycl_interop::get_buffer<cl::sycl::half>(c_mem.get());
+                dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K,
+                        p.alpha, a, p.off.a, p.lda, b, p.off.b, p.ldb, p.beta,
+                        c, p.off.c, p.ldc);
+            } else {
+                // Test USM API
+                assert(!is_memory_kind_buffer(a_mem));
+                assert(!is_memory_kind_buffer(b_mem));
+                assert(!is_memory_kind_buffer(c_mem));
+
+                auto a = static_cast<cl::sycl::half *>(
+                        a_mem.get().get_data_handle());
+                auto b = static_cast<cl::sycl::half *>(
+                        b_mem.get().get_data_handle());
+                auto c = static_cast<cl::sycl::half *>(
+                        c_mem.get().get_data_handle());
+                dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K,
+                        p.alpha, a, p.lda, b, p.ldb, p.beta, c, p.ldc);
+            }
             s.wait();
             return dnnl_success;
         }
@@ -778,33 +764,39 @@ struct dnnl_gemm<float, float, float> {
 
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            cl_command_queue q = s.get_ocl_command_queue();
+            cl_command_queue q = ocl_interop::get_command_queue(s);
             auto status = dnnl_ocl_sgemm(q, p.transA, p.transB, p.M, p.N, p.K,
-                    p.alpha, a_mem.get().get_ocl_mem_object(), p.off.a, p.lda,
-                    b_mem.get().get_ocl_mem_object(), p.off.b, p.ldb, p.beta,
-                    c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc);
+                    p.alpha, ocl_interop::get_mem_object(a_mem.get()), p.off.a,
+                    p.lda, ocl_interop::get_mem_object(b_mem.get()), p.off.b,
+                    p.ldb, p.beta, ocl_interop::get_mem_object(c_mem.get()),
+                    p.off.c, p.ldc);
             s.wait();
             return status;
         }
 #elif DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            cl::sycl::queue sycl_queue = s.get_sycl_queue();
-#if DNNL_USE_DPCPP_USM
-            // Test USM API
-            auto a = static_cast<float *>(a_mem.get().get_data_handle());
-            auto b = static_cast<float *>(b_mem.get().get_data_handle());
-            auto c = static_cast<float *>(c_mem.get().get_data_handle());
-            dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K, p.alpha,
-                    a, p.lda, b, p.ldb, p.beta, c, p.ldc);
-#else
-            // Test buffer API
-            auto a = a_mem.get().get_sycl_buffer<float>();
-            auto b = b_mem.get().get_sycl_buffer<float>();
-            auto c = c_mem.get().get_sycl_buffer<float>();
-            dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K, p.alpha,
-                    a, p.off.a, p.lda, b, p.off.b, p.ldb, p.beta, c, p.off.c,
-                    p.ldc);
-#endif
+            cl::sycl::queue sycl_queue = sycl_interop::get_queue(s);
+            if (is_memory_kind_buffer(a_mem)) {
+                // Test buffer API
+                assert(is_memory_kind_buffer(b_mem));
+                assert(is_memory_kind_buffer(c_mem));
+                auto a = sycl_interop::get_buffer<float>(a_mem.get());
+                auto b = sycl_interop::get_buffer<float>(b_mem.get());
+                auto c = sycl_interop::get_buffer<float>(c_mem.get());
+                dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K,
+                        p.alpha, a, p.off.a, p.lda, b, p.off.b, p.ldb, p.beta,
+                        c, p.off.c, p.ldc);
+            } else {
+                // Test USM API
+                assert(!is_memory_kind_buffer(a_mem));
+                assert(!is_memory_kind_buffer(b_mem));
+                assert(!is_memory_kind_buffer(c_mem));
+                auto a = static_cast<float *>(a_mem.get().get_data_handle());
+                auto b = static_cast<float *>(b_mem.get().get_data_handle());
+                auto c = static_cast<float *>(c_mem.get().get_data_handle());
+                dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K,
+                        p.alpha, a, p.lda, b, p.ldb, p.beta, c, p.ldc);
+            }
             s.wait();
             return dnnl_success;
         }
@@ -915,14 +907,15 @@ struct dnnl_gemm<int8_t, int8_t, int32_t> {
         if (get_test_engine_kind() == engine::kind::gpu) {
             engine eng = get_test_engine();
             stream s(eng);
-            cl_command_queue q = s.get_ocl_command_queue();
+            cl_command_queue q = ocl_interop::get_command_queue(s);
             auto status = dnnl_ocl_gemm_s8s8s32(q, p.transA, p.transB,
                     p.igemm_params.offsetc, p.M, p.N, p.K, p.alpha,
-                    a_mem.get().get_ocl_mem_object(), p.off.a, p.lda,
-                    p.igemm_params.oa(), b_mem.get().get_ocl_mem_object(),
-                    p.off.b, p.ldb, p.igemm_params.ob(), p.beta,
-                    c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc,
-                    oc_mem.get().get_ocl_mem_object(), p.off.co);
+                    ocl_interop::get_mem_object(a_mem.get()), p.off.a, p.lda,
+                    p.igemm_params.oa(),
+                    ocl_interop::get_mem_object(b_mem.get()), p.off.b, p.ldb,
+                    p.igemm_params.ob(), p.beta,
+                    ocl_interop::get_mem_object(c_mem.get()), p.off.c, p.ldc,
+                    ocl_interop::get_mem_object(oc_mem.get()), p.off.co);
             s.wait();
             return status;
         }
@@ -951,14 +944,15 @@ struct dnnl_gemm<int8_t, uint8_t, int32_t> {
         if (get_test_engine_kind() == engine::kind::gpu) {
             engine eng = get_test_engine();
             stream s(eng);
-            cl_command_queue q2 = s.get_ocl_command_queue();
+            cl_command_queue q2 = ocl_interop::get_command_queue(s);
             auto status = dnnl_ocl_gemm_s8u8s32(q2, p.transA, p.transB,
                     p.igemm_params.offsetc, p.M, p.N, p.K, p.alpha,
-                    a_mem.get().get_ocl_mem_object(), p.off.a, p.lda,
-                    p.igemm_params.oa(), b_mem.get().get_ocl_mem_object(),
-                    p.off.b, p.ldb, (uint8_t)p.igemm_params.ob(), p.beta,
-                    c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc,
-                    oc_mem.get().get_ocl_mem_object(), p.off.co);
+                    ocl_interop::get_mem_object(a_mem.get()), p.off.a, p.lda,
+                    p.igemm_params.oa(),
+                    ocl_interop::get_mem_object(b_mem.get()), p.off.b, p.ldb,
+                    (uint8_t)p.igemm_params.ob(), p.beta,
+                    ocl_interop::get_mem_object(c_mem.get()), p.off.c, p.ldc,
+                    ocl_interop::get_mem_object(oc_mem.get()), p.off.co);
             s.wait();
             return status;
         }
@@ -977,15 +971,15 @@ struct dnnl_gemm<uint8_t, uint8_t, int32_t> {
         if (get_test_engine_kind() == engine::kind::gpu) {
             engine eng = get_test_engine();
             stream s(eng);
-            cl_command_queue q = s.get_ocl_command_queue();
+            cl_command_queue q = ocl_interop::get_command_queue(s);
             auto status = dnnl_ocl_gemm_u8u8s32(q, p.transA, p.transB,
                     p.igemm_params.offsetc, p.M, p.N, p.K, p.alpha,
-                    a_mem.get().get_ocl_mem_object(), p.off.a, p.lda,
+                    ocl_interop::get_mem_object(a_mem.get()), p.off.a, p.lda,
                     (uint8_t)p.igemm_params.oa(),
-                    b_mem.get().get_ocl_mem_object(), p.off.b, p.ldb,
+                    ocl_interop::get_mem_object(b_mem.get()), p.off.b, p.ldb,
                     (uint8_t)p.igemm_params.ob(), p.beta,
-                    c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc,
-                    oc_mem.get().get_ocl_mem_object(), p.off.co);
+                    ocl_interop::get_mem_object(c_mem.get()), p.off.c, p.ldc,
+                    ocl_interop::get_mem_object(oc_mem.get()), p.off.co);
             s.wait();
             return status;
         }
@@ -1088,14 +1082,15 @@ struct dnnl_gemm<uint8_t, int8_t, int32_t> {
         if (get_test_engine_kind() == engine::kind::gpu) {
             engine eng = get_test_engine();
             stream s(eng);
-            cl_command_queue q = s.get_ocl_command_queue();
+            cl_command_queue q = ocl_interop::get_command_queue(s);
             auto status = dnnl_ocl_gemm_u8s8s32(q, p.transA, p.transB,
                     p.igemm_params.offsetc, p.M, p.N, p.K, p.alpha,
-                    a_mem.get().get_ocl_mem_object(), p.off.a, p.lda,
-                    p.igemm_params.oa(), b_mem.get().get_ocl_mem_object(),
-                    p.off.b, p.ldb, p.igemm_params.ob(), p.beta,
-                    c_mem.get().get_ocl_mem_object(), p.off.c, p.ldc,
-                    oc_mem.get().get_ocl_mem_object(), p.off.co);
+                    ocl_interop::get_mem_object(a_mem.get()), p.off.a, p.lda,
+                    p.igemm_params.oa(),
+                    ocl_interop::get_mem_object(b_mem.get()), p.off.b, p.ldb,
+                    p.igemm_params.ob(), p.beta,
+                    ocl_interop::get_mem_object(c_mem.get()), p.off.c, p.ldc,
+                    ocl_interop::get_mem_object(oc_mem.get()), p.off.co);
             s.wait();
             return status;
         }
@@ -1126,36 +1121,41 @@ struct dnnl_gemm<float16_t, float16_t, float> {
         stream s(eng);
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            cl_command_queue q = s.get_ocl_command_queue();
+            cl_command_queue q = ocl_interop::get_command_queue(s);
             auto status = dnnl_ocl_gemm_f16f16f32(q, p.transA, p.transB, p.M,
-                    p.N, p.K, p.alpha, a_mem.get().get_ocl_mem_object(),
-                    p.off.a, p.lda, b_mem.get().get_ocl_mem_object(), p.off.b,
-                    p.ldb, p.beta, c_mem.get().get_ocl_mem_object(), p.off.c,
-                    p.ldc);
+                    p.N, p.K, p.alpha, ocl_interop::get_mem_object(a_mem.get()),
+                    p.off.a, p.lda, ocl_interop::get_mem_object(b_mem.get()),
+                    p.off.b, p.ldb, p.beta,
+                    ocl_interop::get_mem_object(c_mem.get()), p.off.c, p.ldc);
             s.wait();
             return status;
         }
 #elif DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            cl::sycl::queue sycl_queue = s.get_sycl_queue();
-#if DNNL_USE_DPCPP_USM
-            // Test USM API
-            auto a = static_cast<cl::sycl::half *>(
-                    a_mem.get().get_data_handle());
-            auto b = static_cast<cl::sycl::half *>(
-                    b_mem.get().get_data_handle());
-            auto c = static_cast<float *>(c_mem.get().get_data_handle());
-            dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K, p.alpha,
-                    a, p.lda, b, p.ldb, p.beta, c, p.ldc);
-#else
-            // Test buffer API
-            auto a = a_mem.get().get_sycl_buffer<cl::sycl::half>();
-            auto b = b_mem.get().get_sycl_buffer<cl::sycl::half>();
-            auto c = c_mem.get().get_sycl_buffer<float>();
-            dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K, p.alpha,
-                    a, p.off.a, p.lda, b, p.off.b, p.ldb, p.beta, c, p.off.c,
-                    p.ldc);
-#endif
+            cl::sycl::queue sycl_queue = sycl_interop::get_queue(s);
+            if (is_memory_kind_buffer(a_mem)) {
+                // Test buffer API
+                assert(is_memory_kind_buffer(b_mem));
+                assert(is_memory_kind_buffer(c_mem));
+                auto a = sycl_interop::get_buffer<cl::sycl::half>(a_mem.get());
+                auto b = sycl_interop::get_buffer<cl::sycl::half>(b_mem.get());
+                auto c = sycl_interop::get_buffer<float>(c_mem.get());
+                dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K,
+                        p.alpha, a, p.off.a, p.lda, b, p.off.b, p.ldb, p.beta,
+                        c, p.off.c, p.ldc);
+            } else {
+                // Test USM API
+                assert(!is_memory_kind_buffer(a_mem));
+                assert(!is_memory_kind_buffer(b_mem));
+                assert(!is_memory_kind_buffer(c_mem));
+                auto a = static_cast<cl::sycl::half *>(
+                        a_mem.get().get_data_handle());
+                auto b = static_cast<cl::sycl::half *>(
+                        b_mem.get().get_data_handle());
+                auto c = static_cast<float *>(c_mem.get().get_data_handle());
+                dnnl::gemm(sycl_queue, p.transA, p.transB, p.M, p.N, p.K,
+                        p.alpha, a, p.lda, b, p.ldb, p.beta, c, p.ldc);
+            }
             s.wait();
             return dnnl_success;
         }
@@ -1241,34 +1241,39 @@ struct dnnl_gemm<bfloat16_t, bfloat16_t, float> {
         stream s(eng);
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            cl_command_queue q = s.get_ocl_command_queue();
+            cl_command_queue q = ocl_interop::get_command_queue(s);
             auto status = dnnl_ocl_gemm_bf16bf16f32(q, p.transA, p.transB, p.M,
-                    p.N, p.K, p.alpha, a_mem.get().get_ocl_mem_object(),
-                    p.off.a, p.lda, b_mem.get().get_ocl_mem_object(), p.off.b,
-                    p.ldb, p.beta, c_mem.get().get_ocl_mem_object(), p.off.c,
-                    p.ldc);
+                    p.N, p.K, p.alpha, ocl_interop::get_mem_object(a_mem.get()),
+                    p.off.a, p.lda, ocl_interop::get_mem_object(b_mem.get()),
+                    p.off.b, p.ldb, p.beta,
+                    ocl_interop::get_mem_object(c_mem.get()), p.off.c, p.ldc);
             s.wait();
             return status;
         }
 #elif DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            cl::sycl::queue sycl_queue = s.get_sycl_queue();
-#if DNNL_USE_DPCPP_USM
-            // Test USM API
-            auto a = static_cast<uint16_t *>(a_mem.get().get_data_handle());
-            auto b = static_cast<uint16_t *>(b_mem.get().get_data_handle());
-            auto c = static_cast<float *>(c_mem.get().get_data_handle());
-            dnnl::gemm_bf16bf16f32(sycl_queue, p.transA, p.transB, p.M, p.N,
-                    p.K, p.alpha, a, p.lda, b, p.ldb, p.beta, c, p.ldc);
-#else
-            // Test buffer API
-            auto a = a_mem.get().get_sycl_buffer<uint16_t>();
-            auto b = b_mem.get().get_sycl_buffer<uint16_t>();
-            auto c = c_mem.get().get_sycl_buffer<float>();
-            dnnl::gemm_bf16bf16f32(sycl_queue, p.transA, p.transB, p.M, p.N,
-                    p.K, p.alpha, a, p.off.a, p.lda, b, p.off.b, p.ldb, p.beta,
-                    c, p.off.c, p.ldc);
-#endif
+            cl::sycl::queue sycl_queue = sycl_interop::get_queue(s);
+            if (is_memory_kind_buffer(a_mem)) {
+                // Test buffer API
+                assert(is_memory_kind_buffer(b_mem));
+                assert(is_memory_kind_buffer(c_mem));
+                auto a = sycl_interop::get_buffer<uint16_t>(a_mem.get());
+                auto b = sycl_interop::get_buffer<uint16_t>(b_mem.get());
+                auto c = sycl_interop::get_buffer<float>(c_mem.get());
+                dnnl::gemm_bf16bf16f32(sycl_queue, p.transA, p.transB, p.M, p.N,
+                        p.K, p.alpha, a, p.off.a, p.lda, b, p.off.b, p.ldb,
+                        p.beta, c, p.off.c, p.ldc);
+            } else {
+                // Test USM API
+                assert(!is_memory_kind_buffer(a_mem));
+                assert(!is_memory_kind_buffer(b_mem));
+                assert(!is_memory_kind_buffer(c_mem));
+                auto a = static_cast<uint16_t *>(a_mem.get().get_data_handle());
+                auto b = static_cast<uint16_t *>(b_mem.get().get_data_handle());
+                auto c = static_cast<float *>(c_mem.get().get_data_handle());
+                dnnl::gemm_bf16bf16f32(sycl_queue, p.transA, p.transB, p.M, p.N,
+                        p.K, p.alpha, a, p.lda, b, p.ldb, p.beta, c, p.ldc);
+            }
             s.wait();
             return dnnl_success;
         }
@@ -1293,34 +1298,40 @@ struct dnnl_gemm<bfloat16_t, bfloat16_t, bfloat16_t> {
         stream s(eng);
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            cl_command_queue q = s.get_ocl_command_queue();
+            cl_command_queue q = ocl_interop::get_command_queue(s);
             auto status = dnnl_ocl_gemm_bf16bf16bf16(q, p.transA, p.transB, p.M,
-                    p.N, p.K, p.alpha, a_mem.get().get_ocl_mem_object(),
-                    p.off.a, p.lda, b_mem.get().get_ocl_mem_object(), p.off.b,
-                    p.ldb, p.beta, c_mem.get().get_ocl_mem_object(), p.off.c,
-                    p.ldc);
+                    p.N, p.K, p.alpha, ocl_interop::get_mem_object(a_mem.get()),
+                    p.off.a, p.lda, ocl_interop::get_mem_object(b_mem.get()),
+                    p.off.b, p.ldb, p.beta,
+                    ocl_interop::get_mem_object(c_mem.get()), p.off.c, p.ldc);
             s.wait();
             return status;
         }
 #elif DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
         if (get_test_engine_kind() == engine::kind::gpu) {
-            cl::sycl::queue sycl_queue = s.get_sycl_queue();
-#ifdef DNNL_USE_DPCPP_USM
-            // Test USM API
-            auto a = static_cast<uint16_t *>(a_mem.get().get_data_handle());
-            auto b = static_cast<uint16_t *>(b_mem.get().get_data_handle());
-            auto c = static_cast<uint16_t *>(c_mem.get().get_data_handle());
-            dnnl::gemm_bf16bf16bf16(sycl_queue, p.transA, p.transB, p.M, p.N,
-                    p.K, p.alpha, a, p.lda, b, p.ldb, p.beta, c, p.ldc);
-#else
-            // Test buffer API
-            auto a = a_mem.get().get_sycl_buffer<uint16_t>();
-            auto b = b_mem.get().get_sycl_buffer<uint16_t>();
-            auto c = c_mem.get().get_sycl_buffer<uint16_t>();
-            dnnl::gemm_bf16bf16bf16(sycl_queue, p.transA, p.transB, p.M, p.N,
-                    p.K, p.alpha, a, p.off.a, p.lda, b, p.off.b, p.ldb, p.beta,
-                    c, p.off.c, p.ldc);
-#endif
+            cl::sycl::queue sycl_queue = sycl_interop::get_queue(s);
+            if (is_memory_kind_buffer(a_mem)) {
+                // Test buffer API
+                assert(is_memory_kind_buffer(b_mem));
+                assert(is_memory_kind_buffer(c_mem));
+                auto a = sycl_interop::get_buffer<uint16_t>(a_mem.get());
+                auto b = sycl_interop::get_buffer<uint16_t>(b_mem.get());
+                auto c = sycl_interop::get_buffer<uint16_t>(c_mem.get());
+                dnnl::gemm_bf16bf16bf16(sycl_queue, p.transA, p.transB, p.M,
+                        p.N, p.K, p.alpha, a, p.off.a, p.lda, b, p.off.b, p.ldb,
+                        p.beta, c, p.off.c, p.ldc);
+            } else {
+                // Test USM API
+                assert(!is_memory_kind_buffer(a_mem));
+                assert(!is_memory_kind_buffer(b_mem));
+                assert(!is_memory_kind_buffer(c_mem));
+                auto a = static_cast<uint16_t *>(a_mem.get().get_data_handle());
+                auto b = static_cast<uint16_t *>(b_mem.get().get_data_handle());
+                auto c = static_cast<uint16_t *>(c_mem.get().get_data_handle());
+                dnnl::gemm_bf16bf16bf16(sycl_queue, p.transA, p.transB, p.M,
+                        p.N, p.K, p.alpha, a, p.lda, b, p.ldb, p.beta, c,
+                        p.ldc);
+            }
             s.wait();
             return dnnl_success;
         }
@@ -1445,14 +1456,14 @@ protected:
         if (get_test_engine_kind() == engine::kind::gpu) {
             const auto &p = ::testing::TestWithParam<test_params>::GetParam();
 
-#ifdef DNNL_USE_DPCPP_USM
+#if defined(TEST_DNNL_DPCPP_BUFFER)
+            // Test SYCL buffer interfaces
+            run_test_gemm<a_dt, b_dt, c_dt>::call(p);
+#else
             // Test SYCL USM interfaces
             bool zero_off = (p.off.a == 0 && p.off.b == 0 && p.off.c == 0);
             SKIP_IF(!zero_off, "USM interfaces do not support offsets.");
 
-            run_test_gemm<a_dt, b_dt, c_dt>::call(p);
-#else
-            // Test SYCL buffer interfaces
             run_test_gemm<a_dt, b_dt, c_dt>::call(p);
 #endif
 

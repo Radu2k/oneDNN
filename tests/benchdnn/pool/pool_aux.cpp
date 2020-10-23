@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "dnnl.h"
+#include "oneapi/dnnl/dnnl.h"
 
 #include "dnnl_common.hpp"
 #include "dnnl_debug.hpp"
@@ -76,16 +76,16 @@ int str2desc(desc_t *desc, const char *str) {
     const char *s = str;
     assert(s);
 
-#define CASE_NN(p, c) \
+#define CASE_NN(prb, c) \
     do { \
-        if (!strncmp(p, s, strlen(p))) { \
+        if (!strncmp(prb, s, strlen(prb))) { \
             ok = 1; \
-            s += strlen(p); \
+            s += strlen(prb); \
             char *end_s; \
             d.c = strtol(s, &end_s, 10); \
             s += (end_s - s); \
             if (d.c < 0) return FAIL; \
-            /* printf("@@@debug: %s: %ld\n", p, d. c); */ \
+            /* printf("@@@debug: %s: %ld\n", prb, d. c); */ \
         } \
     } while (0)
 #define CASE_N(c) CASE_NN(#c, c)
@@ -125,8 +125,8 @@ int str2desc(desc_t *desc, const char *str) {
     if (d.sd <= 0 || d.sh <= 0 || d.sw <= 0) return FAIL;
 
     auto compute_out
-            = [](int64_t i, int64_t k, int64_t d, int64_t s, int64_t p) {
-                  return (i - (k - 1) * d + k + 2 * p) / s + 1;
+            = [](int64_t i, int64_t k, int64_t d, int64_t s, int64_t prb) {
+                  return (i - (k - 1) * d + k + 2 * prb) / s + 1;
               };
     auto compute_pad
             = [](int64_t o, int64_t i, int64_t k, int64_t d, int64_t s) {
@@ -201,25 +201,27 @@ std::ostream &operator<<(std::ostream &s, const desc_t &d) {
         print_spatial("sd", d.sd, "sh", d.sh, "sw", d.sw);
 
     print_spatial("pd", d.pd, "ph", d.ph, "pw", d.pw);
-    print_spatial("dd", d.dd, "dh", d.dh, "dw", d.dw);
+
+    if (canonical || d.dh != 0 || d.dw != 0 || d.dd != 0)
+        print_spatial("dd", d.dd, "dh", d.dh, "dw", d.dw);
 
     if (d.name) s << "n" << d.name;
 
     return s;
 }
 
-std::ostream &operator<<(std::ostream &s, const prb_t &p) {
+std::ostream &operator<<(std::ostream &s, const prb_t &prb) {
     dump_global_params(s);
     settings_t def;
 
-    if (canonical || p.dir != def.dir[0]) s << "--dir=" << p.dir << " ";
-    if (canonical || p.cfg != def.cfg[0]) s << "--cfg=" << p.cfg << " ";
-    if (canonical || p.tag != def.tag[0]) s << "--tag=" << p.tag << " ";
-    if (canonical || p.alg != def.alg[0])
-        s << "--alg=" << alg2str(p.alg) << " ";
+    if (canonical || prb.dir != def.dir[0]) s << "--dir=" << prb.dir << " ";
+    if (canonical || prb.cfg != def.cfg[0]) s << "--cfg=" << prb.cfg << " ";
+    if (canonical || prb.tag != def.tag[0]) s << "--tag=" << prb.tag << " ";
+    if (canonical || prb.alg != def.alg[0])
+        s << "--alg=" << alg2str(prb.alg) << " ";
 
-    s << p.attr;
-    s << static_cast<const desc_t &>(p);
+    s << prb.attr;
+    s << static_cast<const desc_t &>(prb);
 
     return s;
 }

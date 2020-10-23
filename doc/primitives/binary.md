@@ -16,8 +16,8 @@ between tensors source 0 and source 1 (the variable names follow the standard
         \src_0(\overline{x}) \mathbin{op} \src_1(\overline{x}),
 \f]
 
-where \f$op\f$ is addition, multiplication, get maximum value or get minimum
-value.
+where \f$op\f$ is addition, subtraction, multiplication, division, get maximum 
+value or get minimum value.
 
 The binary primitive does not have a notion of forward or backward propagations.
 
@@ -52,7 +52,7 @@ argument index as specified by the following table.
 
  * The binary primitive supports in-place operations, meaning that source 0
    tensor may be used as the destination, in which case its data will
-   be overwritten. In-place mode requres the \dst and source 0 data types to be
+   be overwritten. In-place mode requires the \dst and source 0 data types to be
    either the same or an arbitrary combination of `int8` data types. 
 
 ### Post-ops and Attributes

@@ -21,9 +21,9 @@
 #include <windows.h>
 #endif
 
-#include "dnnl.h"
-#include "dnnl_debug.h"
-#include "dnnl_version.h"
+#include "oneapi/dnnl/dnnl.h"
+#include "oneapi/dnnl/dnnl_debug.h"
+#include "oneapi/dnnl/dnnl_version.h"
 
 #include "c_types_map.hpp"
 #include "verbose.hpp"
@@ -40,6 +40,7 @@
 #include "lrn_pd.hpp"
 #include "matmul_pd.hpp"
 #include "pooling_pd.hpp"
+#include "reduction_pd.hpp"
 #include "reorder_pd.hpp"
 #include "resampling_pd.hpp"
 #include "rnn_pd.hpp"
@@ -847,7 +848,7 @@ static void init_info_rnn(engine_t *e, pd_t *s, char *buffer) {
         DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, "src_layer_");
         MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
     }
-    { // src iter
+    if (s->with_src_iter()) { // src iter
         auto md = s->is_fwd() ? s->src_md(1) : s->diff_src_md(1);
         DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " src_iter_");
         MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
@@ -868,7 +869,13 @@ static void init_info_rnn(engine_t *e, pd_t *s, char *buffer) {
         DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " wei_peephole_");
         MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
     }
-    { // bias
+    if (s->is_lstm_projection()) { // wei_projection
+        auto md = s->arg_md(s->is_fwd() ? DNNL_ARG_WEIGHTS_PROJECTION
+                                        : DNNL_ARG_DIFF_WEIGHTS_PROJECTION);
+        DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " wei_proj_");
+        MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
+    }
+    if (s->with_bias()) { // bias
         auto md = s->arg_md(s->is_fwd() ? DNNL_ARG_BIAS : DNNL_ARG_DIFF_BIAS);
         DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " bias_");
         MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
@@ -878,7 +885,7 @@ static void init_info_rnn(engine_t *e, pd_t *s, char *buffer) {
         DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " dst_layer_");
         MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
     }
-    { // dst iter
+    if (s->with_dst_iter()) { // dst iter
         auto md = s->is_fwd() ? s->dst_md(1) : s->diff_dst_md(1);
         DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " dst_iter_");
         MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
@@ -894,8 +901,8 @@ static void init_info_rnn(engine_t *e, pd_t *s, char *buffer) {
 
     DPRINT(prb_str, DNNL_VERBOSE_PRB_LEN, prb_written,
             "l" DFMT "t" DFMT "mb" DFMT "sic" DFMT "slc" DFMT "dhc" DFMT
-            "dlc" DFMT,
-            s->L(), s->T(), s->MB(), s->SIC(), s->SLC(), s->DHC(), s->DLC());
+            "dic" DFMT,
+            s->L(), s->T(), s->MB(), s->SIC(), s->SLC(), s->DHC(), s->DIC());
 
     verbose_templ(buffer, e, s->kind(), s->name(), s->desc()->prop_kind,
             dat_str, attr_str, aux_str, prb_str);
@@ -1028,6 +1035,34 @@ void init_info_zero_pad(
             attr_str, aux_str, prb_str);
 }
 
+template <typename pd_t>
+static void init_info_reduction(const engine_t *e, pd_t *s, char *buffer) {
+    DECL_DAT_AUX_PRB_STRS();
+
+    { // src
+        auto md = s->src_md();
+        DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, "src_");
+        MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
+        DIM2STR(prb_str, DNNL_VERBOSE_PRB_LEN, prb_written, md);
+        DPRINT(prb_str, DNNL_VERBOSE_PRB_LEN, prb_written, ":");
+    }
+    { // dst
+        auto md = s->dst_md();
+        DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " dst_");
+        MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
+        DIM2STR(prb_str, DNNL_VERBOSE_PRB_LEN, prb_written, md);
+    }
+
+    attr2str(attr_str, DNNL_VERBOSE_ATTR_LEN, attr_written, s->attr());
+
+    DPRINT(aux_str, DNNL_VERBOSE_AUX_LEN, aux_written, "alg:%s p:%g eps:%g",
+            dnnl_alg_kind2str(s->desc()->alg_kind), s->desc()->p,
+            s->desc()->eps);
+
+    verbose_templ(buffer, e, s->kind(), s->name(), prop_kind::undef, dat_str,
+            attr_str, aux_str, prb_str);
+}
+
 #undef DPRINT
 } // namespace
 
@@ -1059,6 +1094,7 @@ void pd_info_t::init(engine_t *engine, const primitive_desc_t *pd) {
             CASE(matmul);
             case primitive_kind::pooling_v2:
             CASE(pooling);
+            CASE(reduction);
             CASE(reorder);
             CASE(resampling);
             CASE(rnn);
