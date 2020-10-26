@@ -128,9 +128,10 @@ struct dnnl_gemm_desc_t {
         // because the bias mask is in row major, we have to convert
         // to col major here by swapping two last dimensions
         int m_idx = is_batched();
-        mask |= (bias_desc.dims[m_idx] > 1) ? 1 << bias_desc.ndims - m_idx : 0;
+        mask |= (bias_desc.dims[m_idx] > 1) ? 1 << (bias_desc.ndims - m_idx)
+                                            : 0;
         mask |= (bias_desc.dims[m_idx + 1] > 1)
-                ? 1 << bias_desc.ndims - (m_idx + 1)
+                ? 1 << (bias_desc.ndims - (m_idx + 1))
                 : 0;
         return mask;
     }
