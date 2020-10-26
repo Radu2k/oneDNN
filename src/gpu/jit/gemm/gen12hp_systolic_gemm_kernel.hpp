@@ -1,7 +1,7 @@
 /*******************************************************************************
 * Copyright 2019-2020 Intel Corporation
 *
-* Licensed under the apache License, Version 2.0 (the "License");
+* Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
 * You may obtain a copy of the License at
 *
@@ -21,6 +21,7 @@
 
 #include "common/c_types_map.hpp"
 #include "common/type_helpers.hpp"
+#include "gpu/jit/gemm/gen_gemm_kernel_common.hpp"
 #include "gpu/jit/jit_eltwise_injector.hpp"
 #include "gpu/jit/jit_generator.hpp"
 
@@ -31,11 +32,12 @@ namespace jit {
 
 class gen12hp_systolic_gemm_kernel_t : public jit_generator<gpu_gen12hp> {
 public:
-    enum class bias_t { none, fixed, row, column };
+    enum class bias_t { none, fixed, row, column, runtime };
 
     struct config_t {
         ngen::DataType a_type, b_type, c_type, acc_type;
         ngen::DataType co_type = ngen::DataType::invalid;
+        ngen::DataType scale_type = ngen::DataType::f;
         bool alpha1, beta0, beta1;
 
         bool a_bias = false;
@@ -74,12 +76,11 @@ public:
             }
             ok &= (alt_barriers || use_slm_fence);
             ok &= (c_bias == bias_t::none
-                    || early_c_bias
-                            && (co_type == acc_type || co_type == a_type)
+                    || (early_c_bias
+                            && (co_type == acc_type || co_type == a_type))
                     || co_type == c_type);
 
             if (have_post_op()) ok &= injector_t::is_supported(post_op);
-
             return ok;
         }
     };
@@ -114,9 +115,9 @@ public:
     int this_unroll_k() const { return unroll_k_bytes / getBytes(cfg.a_type); }
 
 private:
-    using injector_t = jit_eltwise_injector_f32<gpu_gen12hp>;
-
     config_t cfg;
+
+    using injector_t = jit_eltwise_injector_f32<gpu_gen12hp>;
     std::unique_ptr<injector_t> post_op_injector;
 
     // Surface assignments
@@ -158,6 +159,7 @@ private:
     ngen::AccumulatorRegister r0_save = acc2;
     ngen::Subregister off_asum_save = a0.ud(0);
     ngen::Subregister off_bsum_save = a0.ud(1);
+    ngen::Subregister flags_save = a0.ud(2);
 
     ngen::InstructionModifier dep_addr0 {}, dep_addr1 {}, dep_addr2 {},
             dep_addr3 {}; // Dependencies for addr registers.
@@ -168,13 +170,6 @@ private:
     ngen::GRFRange upost_op_scratch = r16 - r21;
     ngen::GRFRange uoffset = r22 - r27;
 
-    ngen::Subregister uldc_x2 = r31.ud(1);
-    ngen::Subregister uldc_x4 = r31.ud(2);
-    ngen::Subregister uldc_x8 = r31.ud(3);
-
-    ngen::Subregister uc_base = r29.uq(0);
-    ngen::Subregister uoff_co2 = r29.ud(2);
-    ngen::Subregister uao_bo_k = r30.ud(0);
     ngen::GRF ubase = r28.ud();
     ngen::Subregister uldc = r28.ud(1);
     ngen::Subregister uoff_co = r28.ud(2);
@@ -185,6 +180,16 @@ private:
     ngen::Subregister ubo = r28.w(11);
     ngen::Subregister ualpha_regs[2] = {r28.f(6), r30.f(6)};
     ngen::Subregister ubeta_regs[2] = {r28.f(7), r30.f(7)};
+
+    ngen::Subregister uc_base = r29.uq(0);
+    ngen::Subregister uoff_co2 = r29.ud(2);
+
+    ngen::Subregister uao_bo_k = r30.ud(0);
+    ngen::Subregister uflags = r30.ud(1);
+
+    ngen::Subregister uldc_x2 = r31.ud(1);
+    ngen::Subregister uldc_x4 = r31.ud(2);
+    ngen::Subregister uldc_x8 = r31.ud(3);
 
     // Scoreboard usage:
     //   $0-2   B SLM loads
@@ -199,6 +204,8 @@ private:
     //   $15    Barriers/SLM fences
 
     static constexpr int acc_stride = 48;
+    static constexpr uint16_t flag_c_bias_row = FlagCORow;
+    static constexpr uint16_t flag_c_bias_col = FlagCOColumn;
 
     int slm_buf_size() const {
         return cfg.pad_a
@@ -213,10 +220,12 @@ private:
 
     int interleave(int j);
 
-    void load_c_bias_scattered(bool remainder);
-    void load_c_bias_block();
+    void load_c_bias_scattered(bias_t c_bias, bool remainder);
+    void load_c_bias_block(bias_t c_bias);
+    void load_c_bias(bias_t c_bias, bool remainder);
     void load_c_bias(bool remainder);
-    void convert_c_bias(ngen::DataType dst_type);
+    void convert_c_bias(bias_t c_bias, ngen::DataType dst_type);
+    void add_c_bias(bias_t c_bias);
     void add_c_bias();
     bool merge_abc_bias();
     void add_ab_bias();

@@ -1,7 +1,7 @@
 /*******************************************************************************
 * Copyright 2019-2020 Intel Corporation
 *
-* Licensed under the apache License, Version 2.0 (the "License");
+* Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
 * You may obtain a copy of the License at
 *
@@ -24,6 +24,8 @@ namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace jit {
+
+using dnnl::impl::utils::one_of;
 
 void gen12hp_systolic_gemm_kernel_t::zero_c() {
     // Use floats to avoid contentions with integer unit.
@@ -291,8 +293,7 @@ void gen12hp_systolic_gemm_kernel_t::load_update_c_internal(
         // Half-precision C must be upconverted to single precision separately (no hf/f mixed mode support in Gen12HP).
         // Similarly integer C must be upconverted if alpha or beta float.
         auto old_type = cfg.c_type;
-        if ((float_update
-                    && utils::one_of(cfg.c_type, DataType::d, DataType::ud))
+        if ((float_update && one_of(cfg.c_type, DataType::d, DataType::ud))
                 || (cfg.c_type == DataType::hf)) {
             for (int jj = 0; jj < 4; jj++) {
                 for (int ii = 0; ii < 4; ii += 2) {
@@ -500,20 +501,45 @@ void gen12hp_systolic_gemm_kernel_t::store_c(bool remainder, bool c_align16) {
 }
 
 void gen12hp_systolic_gemm_kernel_t::load_c_bias(bool remainder) {
-    if (!remainder && getBytes(cfg.co_type) == 4)
-        load_c_bias_block();
-    else
-        load_c_bias_scattered(remainder);
+    if (cfg.c_bias == bias_t::runtime) {
+        Label label_row, label_col, label_done;
+        and_(1 | nz | f1[0], null.ud(), uflags, flag_c_bias_col);
+        and_(1 | nz | f1[1], null.ud(), uflags, flag_c_bias_row);
+        jmpi(1 | f1[0], label_col);
+        jmpi(1 | f1[1], label_row);
+
+        load_c_bias(bias_t::fixed, remainder);
+        jmpi(1, label_done);
+
+        mark(label_col);
+        load_c_bias(bias_t::column, remainder);
+        jmpi(1, label_done);
+
+        mark(label_row);
+        load_c_bias(bias_t::row, remainder);
+
+        mark(label_done);
+    } else
+        load_c_bias(cfg.c_bias, remainder);
 }
 
-void gen12hp_systolic_gemm_kernel_t::load_c_bias_block() {
+void gen12hp_systolic_gemm_kernel_t::load_c_bias(
+        bias_t c_bias, bool remainder) {
+    if (!remainder && getBytes(cfg.co_type) == 4)
+        load_c_bias_block(c_bias);
+    else
+        load_c_bias_scattered(c_bias, remainder);
+}
+
+void gen12hp_systolic_gemm_kernel_t::load_c_bias_block(bias_t c_bias) {
     assert(uoff_co.getOffset() == 2 && uoff_co2.getOffset() == 2);
 
-    switch (cfg.c_bias) {
+    switch (c_bias) {
         case bias_t::none: break;
         case bias_t::fixed:
-            load(1, uoffset[0], scattered_dword(1), Surface(co_surface),
-                    uoff_co);
+            mov(1, uheaders[0].ud(0), uoff_co);
+            load(1, uoffset[0], surface_dword(ChannelMask::r),
+                    Surface(co_surface), uheaders[0]);
             break;
         case bias_t::row:
             load(16, uoffset[0], aligned_block_oword(8), Surface(co_surface),
@@ -526,14 +552,16 @@ void gen12hp_systolic_gemm_kernel_t::load_c_bias_block() {
             load(16, uoffset[4], aligned_block_oword(4), Surface(co_surface),
                     uoff_co2);
             break;
+        case bias_t::runtime: assert(!"Bias type not specified");
     }
 }
 
-void gen12hp_systolic_gemm_kernel_t::load_c_bias_scattered(bool remainder) {
+void gen12hp_systolic_gemm_kernel_t::load_c_bias_scattered(
+        bias_t c_bias, bool remainder) {
     auto bytes = getBytes(cfg.co_type);
     auto lg2_bytes = ngen::utils::log2(bytes);
 
-    switch (cfg.c_bias) {
+    switch (c_bias) {
         case bias_t::none: break;
         case bias_t::fixed:
             mov(1, uheaders[0].ud(0), uoff_co);
@@ -542,7 +570,7 @@ void gen12hp_systolic_gemm_kernel_t::load_c_bias_scattered(bool remainder) {
             break;
         case bias_t::row:
         case bias_t::column: {
-            bool column = (cfg.c_bias == bias_t::column);
+            bool column = (c_bias == bias_t::column);
             auto index_vec = uheaders[6].uw();
             auto index_plus_16 = uheaders[7].uw();
             auto index_plus_32 = uheaders[8].uw();
@@ -590,10 +618,12 @@ void gen12hp_systolic_gemm_kernel_t::load_c_bias_scattered(bool remainder) {
 
             break;
         }
+        case bias_t::runtime: assert(!"Bias type not specified");
     }
 }
 
-void gen12hp_systolic_gemm_kernel_t::convert_c_bias(ngen::DataType dst_type) {
+void gen12hp_systolic_gemm_kernel_t::convert_c_bias(
+        bias_t c_bias, ngen::DataType dst_type) {
     auto src_type = cfg.co_type;
 
     auto convert = [&](int simd, RegData dst, RegData src) {
@@ -607,7 +637,7 @@ void gen12hp_systolic_gemm_kernel_t::convert_c_bias(ngen::DataType dst_type) {
     };
 
     if (src_type != dst_type) {
-        switch (cfg.c_bias) {
+        switch (c_bias) {
             case bias_t::none: break;
             case bias_t::fixed:
                 convert(1, uoffset[0].sub(0, dst_type),
@@ -616,21 +646,45 @@ void gen12hp_systolic_gemm_kernel_t::convert_c_bias(ngen::DataType dst_type) {
             case bias_t::row:
             case bias_t::column: {
                 assert(getBytes(dst_type) == 4);
-                int nreg = (cfg.c_bias == bias_t::column) ? 6 : 4;
+                int nreg = (c_bias == bias_t::column) ? 6 : 4;
                 auto src_stride = 4 / getBytes(src_type);
                 for (int q = 0; q < nreg; q += 2)
                     convert(16, uoffset[q].sub(0, dst_type)(1),
                             uoffset[q].sub(0, src_type)(src_stride));
                 break;
             }
+            case bias_t::runtime: assert(!"Bias type not specified");
         }
     }
 }
 
 void gen12hp_systolic_gemm_kernel_t::add_c_bias() {
+    if (cfg.c_bias == bias_t::runtime) {
+        Label label_row, label_col, label_done;
+        and_(1 | nz | f1[0], null.ud(), uflags, flag_c_bias_col);
+        and_(1 | nz | f1[1], null.ud(), uflags, flag_c_bias_row);
+        jmpi(1 | f1[0], label_col);
+        jmpi(1 | f1[1], label_row);
+
+        add_c_bias(bias_t::fixed);
+        jmpi(1, label_done);
+
+        mark(label_col);
+        add_c_bias(bias_t::column);
+        jmpi(1, label_done);
+
+        mark(label_row);
+        add_c_bias(bias_t::row);
+
+        mark(label_done);
+    } else
+        add_c_bias(cfg.c_bias);
+}
+
+void gen12hp_systolic_gemm_kernel_t::add_c_bias(bias_t c_bias) {
     auto cur_type = cfg.early_c_bias ? cfg.acc_type : cfg.c_type;
 
-    convert_c_bias(cur_type);
+    convert_c_bias(c_bias, cur_type);
 
     auto co_fixed = uoffset[0].sub(0, cur_type);
     if (merge_abc_bias()) add(1, co_fixed, co_fixed, uao_bo_k);
@@ -639,7 +693,7 @@ void gen12hp_systolic_gemm_kernel_t::add_c_bias() {
         for (int j = 0; j < 48; j += 2) {
             auto a_reg
                     = c_regs[interleave(j) + ii * acc_stride].retype(cur_type);
-            switch (cfg.c_bias) {
+            switch (c_bias) {
                 case bias_t::none: break;
                 case bias_t::fixed: add(16, a_reg, a_reg, co_fixed); break;
                 case bias_t::row:
@@ -664,6 +718,7 @@ void gen12hp_systolic_gemm_kernel_t::add_c_bias() {
                                 uoffset[j >> 3].sub((j + 1) & 7, cur_type)(0));
                     }
                     break;
+                case bias_t::runtime: assert(!"Bias type not specified");
             }
         }
     }
@@ -798,8 +853,10 @@ void gen12hp_systolic_gemm_kernel_t::update_c() {
     // Turn on auto-SWSB for the remainder of the kernel.
     setDefaultAutoSWSB();
 
-    // Move C pointer to safety.
-    mov(2, uc_base, c_ptr_mem);
+    // Move C pointer to safety. Also bias flags if needed.
+    mov(1, uc_base, c_ptr_mem);
+
+    if (cfg.c_bias == bias_t::runtime) mov(1, uflags, flags_save);
 
     // Pull saved data from accumulators. Note moves to/from accumulator don't support full swizzling, so
     //  the subregister offsets for the following movs must match.
@@ -1143,14 +1200,15 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     newArgument("offset_c", DataType::q);
     newArgument("m", DataType::d);
     newArgument("n", DataType::d);
-    newArgument("alpha", DataType::f);
-    newArgument("beta", DataType::f);
+    newArgument("alpha", cfg.scale_type);
+    newArgument("beta", cfg.scale_type);
     newArgument("lda", DataType::d);
     newArgument("ldb", DataType::d);
     if (cfg.a_bias || cfg.b_bias) newArgument("abo", DataType::ud);
     if (cfg.c_bias != bias_t::none) {
         newArgument("co", ExternalArgumentType::GlobalPtr);
         newArgument("offset_co", DataType::d);
+        if (cfg.c_bias == bias_t::runtime) newArgument("flags", DataType::ud);
     }
     requireBarrier();
     requireDPAS();
@@ -1185,6 +1243,7 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     ap_surface = getArgumentSurface("ap");
     bp_surface = getArgumentSurface("bp");
     if (cfg.c_bias != bias_t::none) co_surface = getArgumentSurface("co");
+    auto flags = getArgumentIfExists("flags");
 
     // Temporaries
     auto n0 = r10.ud(0);
@@ -1193,7 +1252,7 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     auto offset_b = r12.uq(1);
     auto offset_c = r12.uq(2);
     auto offset_asum = r14.ud(0);
-    auto offset_bsum = r14.ud(1);
+    auto offset_bsum = r14.ud(2);
     auto global_n0 = r18.ud(0);
     auto global_m0 = r18.ud(1);
     auto local_n0 = r20.ud(0);
@@ -1211,8 +1270,8 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     auto mrem_copy = r32.uw(8);
     auto nrem_copy = r32.uw(9);
     auto abo_copy = r32.ud(5);
-    auto alpha_copy = r32.ud(6);
-    auto beta_copy = r32.ud(7);
+    auto alpha_copy = r32.f(6);
+    auto beta_copy = r32.f(7);
 
     setDefaultAutoSWSB(true);
     prologue();
@@ -1260,6 +1319,14 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
         case bias_t::fixed: mov(1, off_co_copy, in_offset_co); break;
         case bias_t::row: add(1, off_co_copy, in_offset_co, m0); break;
         case bias_t::column: add(1, off_co_copy, in_offset_co, n0); break;
+        case bias_t::runtime: {
+            mov(1, off_co_copy, in_offset_co);
+            and_(1 | nz | f0[0], null.ud(), flags, flag_c_bias_col);
+            and_(1 | nz | f1[0], null.ud(), flags, flag_c_bias_row);
+            add(1 | f0[0], off_co_copy, off_co_copy, n0);
+            add(1 | f1[0], off_co_copy, off_co_copy, m0);
+            break;
+        }
     }
     if (cfg.c_packed)
         add(1, offset_c, offset_c, temp2);
@@ -1270,15 +1337,19 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     add(1, offset_c, offset_c, in_offset_c);
     if (getBytes(cfg.a_type) > 1)
         shl(2, offset_a(1), offset_a(1), lg2_a_elem_bytes); // A, B
-    if (cfg.a_bias) mad(1, offset_asum, offset_a.ud(), k, 32);
-    if (cfg.b_bias) mad(1, offset_bsum, offset_b.ud(), k, 48);
+    if (cfg.a_bias)
+        mad(1, offset_asum, offset_a.ud(), k_counter_copy,
+                32 * this_unroll_k());
+    if (cfg.b_bias)
+        mad(1, offset_bsum, offset_b.ud(), k_counter_copy,
+                48 * this_unroll_k());
     add(1, offset_a, offset_a, suboffset_a);
     add(1, offset_b, offset_b, suboffset_b);
     shl(1, offset_c, offset_c, lg2_c_elem_bytes);
     add(1, a_ptr_mem, ap, offset_a);
     add(1, b_ptr_mem, bp, offset_b);
     add(1, c_ptr_mem, c_ptr, offset_c);
-    if (utils::one_of(cfg.c_bias, bias_t::row, bias_t::column))
+    if (cfg.c_bias != bias_t::none)
         shl(1, off_co_copy, off_co_copy, uint16_t(lg2_co_elem_bytes));
 
     and_(1, temp, local_id_x, uint16_t(8));
@@ -1312,13 +1383,15 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     }
 
     if (abo.isValid()) mov(1, abo_copy.f(), abo.f());
-    mov(1, alpha_copy.f(), alpha.f());
-    mov(1, beta_copy.f(), beta.f());
+    mov(1, alpha_copy, alpha);
+    mov(1, beta_copy, beta);
 
     sync(SyncFunction::nop, SWSB<AllPipes>(1));
 
     mov(8, base_save, save_copy);
-    mov(2, off_asum_save(1), offset_asum(1));
+    if (cfg.a_bias) mov(1, off_asum_save, offset_asum);
+    if (cfg.b_bias) mov(1, off_bsum_save, offset_bsum);
+    if (cfg.c_bias == bias_t::runtime) mov(1, flags_save, flags);
 
     // Check whether to use remainder path, and save in f0.0/f1.0 for later.
     if (cfg.c_remainder) {
