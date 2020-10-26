@@ -98,6 +98,7 @@ gen12hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
     const int group_mb = get_group_id(2) * MB_GROUP;
     const int group_sp = get_group_id(1) * SP_GROUP;
     const int ocl_local_id = get_local_id(0);
+    const int subg_local_id = get_sub_group_local_id();
 
     const int sub_group_id = get_sub_group_id();
     const int oc = (sub_group_id % OC_GROUP);
@@ -254,43 +255,25 @@ gen12hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
 #define QUANTIZE_ADD_BIAS() tmp *= SCALE;
 #endif
 
+#define APPLY_POST_OPS_COMMON(accumulator, dest, dest_dt, mb_shift) \
+    const int po_mb = (group_mb * MB_BLOCK + mb_shift * 8 + n_i) % MB; \
+    const int po_oc = (group_oc * OC_CALC_BLOCK) % (OC * G); \
+    APPLY_POST_OPS_TRY_BURST(accumulator, float, dest, dest_dt, po_mb, 1, \
+            po_oc, 4 * SUB_GROUP_SIZE, subg_local_id);
+
 #if DT_F16 || DT_BF16
 #define DO_POST_OP(mb_shift, d_pack0, d_pack1) \
     do { \
         float4 tmpsum_val; \
         tmpsum_val.s01 = DST_TO_REF2(AS_DST_DATA2_T(d_pack0)); \
         tmpsum_val.s23 = DST_TO_REF2(AS_DST_DATA2_T(d_pack1)); \
-        for (int didx = 0; didx < 4; ++didx) { \
-            float tmp_i = tmp[didx]; \
-            float d_i = tmpsum_val[didx]; \
-            const int po_mb = (MB_BLOCK * didx * 0 + group_mb * MB_BLOCK \
-                                      + mb_shift * 8 + n_i) \
-                    % MB; \
-            const int po_oc = (group_oc * OC_CALC_BLOCK \
-                                      + ((didx * SUB_GROUP_SIZE) \
-                                              % (OC_NCHUNK * OC_BLOCK)) \
-                                      + ocl_local_id) \
-                    % (OC * G); \
-            APPLY_POST_OPS(tmp_i, float, d_i, float, po_mb, 1, po_oc, 1, 0, 1, \
-                    0, 1, 0, 1, 0, 1); \
-            tmp[didx] = tmp_i; \
-        } \
+        APPLY_POST_OPS_COMMON(tmp, tmpsum_val, float, mb_shift); \
     } while (0)
 #else // DT_F16 || DT_BF16
 #define DO_POST_OP(mb_shift, d_pack0, d_pack1) \
     do { \
-        DST_DATA4_T d = AS_DST_DATA4_T(d_pack0); \
-        for (int didx = 0; didx < 4; ++didx) { \
-            float tmp_i = tmp[didx]; \
-            SUM_DATA_T d_i = AS_SUM_DATA_T(d[didx]); \
-            const int po_mb = (group_mb * MB_BLOCK + mb_shift * 8 + n_i) % MB; \
-            const int po_oc = (group_oc * OC_BLOCK + didx * SUB_GROUP_SIZE \
-                                      + ocl_local_id) \
-                    % (OC * G); \
-            APPLY_POST_OPS(tmp_i, float, d_i, SUM_DATA_T, po_mb, 1, po_oc, 1, \
-                    0, 1, 0, 1, 0, 1, 0, 1); \
-            tmp[didx] = tmp_i; \
-        } \
+        SUM_DATA4_T d = AS_SUM_DATA4_T(d_pack0); \
+        APPLY_POST_OPS_COMMON(tmp, d, SUM_DATA_T, mb_shift); \
     } while (0)
 #endif // DT_F16 || DT_BF16
 

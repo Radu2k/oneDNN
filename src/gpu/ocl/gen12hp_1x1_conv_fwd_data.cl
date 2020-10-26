@@ -487,27 +487,31 @@ gen12hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
         dst_pack4[idx] = CONVERT_DST_DATA4_T(tmp4); \
     } while (0)
 
+#define APPLY_POST_OPS_COMMON( \
+        dcntr, n_i, accumulator, D, oc_stride, mb_stride) \
+    { \
+        int po_mb; \
+        if (MB_BLOCK == 32) \
+            po_mb = (mb_group_id * MB_BLOCK + mb_stride * 8 + n_i) % MB; \
+        else \
+            po_mb = mb_group_id % MB; \
+        const int po_oc \
+                = (oc_group_id * OC_BLOCK * OC_BLOCK_NUMBER + oc_stride) \
+                % (OC * G); \
+        float4 dni; \
+        unroll_for(int didx = 0; didx < dcntr; ++didx) { \
+            dni[didx] = convert_float(SUM_TO_REF(AS_SUM_DATA_T(D[didx]))); \
+        } \
+        APPLY_POST_OPS_TRY_BURST(accumulator, float, dni, float, po_mb, 1, \
+                po_oc, dcntr *SUB_GROUP_SIZE, sg_local_id); \
+    }
+
 #define STORE_DST4(n, C0, C1, C2, C3, D, dst_ptr, mb_stride) \
     do { \
         for (int n_i = 0; n_i < n; n_i++) { \
             PACK4(C0, C1, C2, C3, n_i); \
             QUANTIZE_ADD_BIAS4(); \
-            for (int didx = 0; didx < 4; ++didx) { \
-                float tmp_i = tmp4[didx]; \
-                SUM_DATA_T dni_i = AS_SUM_DATA_T(D[n_i][didx]); \
-                int po_mb; \
-                if (MB_BLOCK == 32) \
-                    po_mb = (mb_group_id * MB_BLOCK + mb_stride * 8 + n_i) \
-                            % MB; \
-                else \
-                    po_mb = mb_group_id % MB; \
-                const int po_oc = (oc_group_id * OC_BLOCK + sg_local_id \
-                                          + didx * SUB_GROUP_SIZE) \
-                        % (OC * G); \
-                APPLY_POST_OPS(tmp_i, float, dni_i, SUM_DATA_T, po_mb, 1, \
-                        po_oc, 1, 0, 1, 0, 1, 0, 1, 0, 1); \
-                tmp4[didx] = tmp_i; \
-            } \
+            APPLY_POST_OPS_COMMON(4, n_i, tmp4, D[n_i], 0, mb_stride); \
             CONVERT_PACK4(n_i); \
         } \
         block_write_dst(n, dst_pack4, dst_ptr); \
@@ -529,22 +533,8 @@ gen12hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
         for (int n_i = 0; n_i < n; n_i++) { \
             PACK2(C0, C1, n_i); \
             QUANTIZE_ADD_BIAS2(id); \
-            for (int didx = 0; didx < 2; ++didx) { \
-                float tmp_i = tmp2[didx]; \
-                float dni_i = DST_TO_REF(D[n_i][didx]); \
-                int po_mb; \
-                if (MB_BLOCK == 32) \
-                    po_mb = (mb_group_id * MB_BLOCK + mb_stride * 8 + n_i) \
-                            % MB; \
-                else \
-                    po_mb = mb_group_id % MB; \
-                const int po_oc = (oc_group_id * OC_BLOCK + sg_local_id \
-                                          + didx * SUB_GROUP_SIZE) \
-                        % (OC * G); \
-                APPLY_POST_OPS(tmp_i, float, dni_i, float, po_mb, 1, po_oc, 1, \
-                        0, 1, 0, 1, 0, 1, 0, 1); \
-                tmp2[didx] = tmp_i; \
-            } \
+            APPLY_POST_OPS_COMMON( \
+                    2, n_i, tmp2, D[n_i], id *OC_BLOCK, mb_stride); \
             CONVERT_PACK2(n_i); \
         } \
         block_write_dst(n, dst_pack2, dst_ptr); \
