@@ -1523,6 +1523,10 @@ struct memory : public handle<dnnl_memory_t> {
 
         // Opaque blocked formats
 
+        AB48a16b = dnnl_AB48a16b,
+        AB48a32b = dnnl_AB48a32b,
+        BA4b8a8b2a = dnnl_BA4b8a8b2a,
+        BA4b8a8b4a = dnnl_BA4b8a8b4a,
         Abc16a = dnnl_Abc16a,
         ABc16a16b = dnnl_ABc16a16b,
         ABc4a2b = dnnl_ABc4a2b,

@@ -88,6 +88,10 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_cdeba) return "cdeba";
     if (v == dnnl_decab) return "decab";
     if (v == dnnl_defcab) return "defcab";
+    if (v == dnnl_AB48a16b) return "AB48a16b";
+    if (v == dnnl_AB48a32b) return "AB48a32b";
+    if (v == dnnl_BA4b8a8b2a) return "BA4b8a8b2a";
+    if (v == dnnl_BA4b8a8b4a) return "BA4b8a8b4a";
     if (v == dnnl_Abc16a) return "Abc16a";
     if (v == dnnl_ABc16a16b) return "ABc16a16b";
     if (v == dnnl_ABc32a16b) return "ABc32a16b";

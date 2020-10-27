@@ -209,6 +209,10 @@ typedef enum {
 
     // Opaque blocked formats
 
+    dnnl_AB48a16b,
+    dnnl_AB48a32b,
+    dnnl_BA4b8a8b2a,
+    dnnl_BA4b8a8b4a,
     dnnl_Abc16a,
     dnnl_ABc16a16b,
     dnnl_ABc32a16b,
