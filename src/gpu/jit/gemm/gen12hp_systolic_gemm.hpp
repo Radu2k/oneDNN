@@ -47,9 +47,37 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
 
         status_t init(engine_t *engine);
 
-        bool set_default_formats() {
+        bool set_default_formats(data_type_t dt) {
+            using namespace format_tag;
+
+            auto sz = types::data_type_size(dt);
+
+            // Packed not implemented for int8 yet.
+            if (sz == 2) {
+                format_tag_t a_packed_tag = (sz == 2) ? BA4b8a8b2a : BA4b8a8b4a;
+                format_tag_t b_packed_tag = (sz == 2) ? AB48a16b : AB48a32b;
+
+                memory_desc_wrapper a_mdw(&desc_.b_desc);
+                memory_desc_wrapper b_mdw(&desc_.a_desc);
+
+                if (a_mdw.format_any())
+                    CHECK(memory_desc_init_by_tag(desc_.b_desc, a_packed_tag));
+                else if (a_mdw.matches_one_of_tag(a_packed_tag, ab, ba)
+                        == undef)
+                    return false;
+                if (b_mdw.format_any())
+                    CHECK(memory_desc_init_by_tag(desc_.a_desc, b_packed_tag));
+                else if (b_mdw.matches_one_of_tag(b_packed_tag, ab, ba)
+                        == undef)
+                    return false;
+
+                packed_a_ = a_mdw.matches_tag(a_packed_tag);
+                packed_b_ = b_mdw.matches_tag(b_packed_tag);
+            }
+
             return gpu_gemm_pd_t::set_default_formats();
         }
+
         dim_t m_aligned() const;
         dim_t n_aligned() const;
         dim_t k_aligned() const;
@@ -77,8 +105,19 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
 
         const attr_info_t *attr_info() const { return &attr_info_; }
 
+        bool packed_a() const { return packed_a_; }
+        bool packed_b() const { return packed_b_; }
+
+        dim_t lda_packed() const {
+            return packed_a() ? desc()->b_desc.padded_dims[0] : 0;
+        }
+        dim_t ldb_packed() const {
+            return packed_b() ? desc()->a_desc.padded_dims[1] : 0;
+        }
+
     private:
         attr_info_t attr_info_ = {};
+        bool packed_a_ = false, packed_b_ = false;
     };
 
     status_t init(engine_t *engine);

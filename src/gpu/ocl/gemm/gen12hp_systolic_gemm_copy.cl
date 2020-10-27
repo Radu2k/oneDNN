@@ -127,11 +127,10 @@ __attribute__((overloadable)) inline int sum(int4 v) {
 
 #define UNROLL_M 32
 #define UNROLL_K (32 / ELEMENT_SIZE)
-#define FULL_UNROLL_K (3 * UNROLL_K)
 
 #if COPY_SUM
 #define GET_A_SUM_ADDRESS \
-    int k_align = ((k + FULL_UNROLL_K - 1) / FULL_UNROLL_K) * FULL_UNROLL_K; \
+    int k_align = (k + UNROLL_K - 1) & ~(UNROLL_K - 1); \
     global int *a_sum = (global int *)(a_packed + offseta_packed \
             + m0 * lda_packed + k_align * UNROLL_M);
 #else
@@ -310,7 +309,6 @@ gen12hp_systolic_gemm_copy(long m, long k, global ELEMENT *a, long offseta,
 #if COPY_B
 
 #define UNROLL_K (32 / ELEMENT_SIZE)
-#define FULL_UNROLL_K (3 * UNROLL_K)
 #define UNROLL_N 48
 
 #if ELEMENT_SIZE == 2
@@ -340,7 +338,7 @@ gen12hp_systolic_gemm_copy(long m, long k, global ELEMENT *a, long offseta,
 
 #if COPY_SUM
 #define GET_B_SUM_ADDRESS \
-    int k_align = ((k + FULL_UNROLL_K - 1) / FULL_UNROLL_K) * FULL_UNROLL_K; \
+    int k_align = (k + UNROLL_K - 1) & ~(UNROLL_K - 1); \
     global int *b_sum = (global int *)(b_packed + offsetb_packed \
             + n0 * ldb_packed + k_align * UNROLL_N);
 #else

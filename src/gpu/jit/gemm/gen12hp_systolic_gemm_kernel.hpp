@@ -85,7 +85,7 @@ public:
 
     static constexpr size_t unroll_m = 32;
     static constexpr size_t unroll_n = 48;
-    static constexpr size_t unroll_k_bytes = 96;
+    static constexpr size_t unroll_k_bytes = 32;
     static constexpr size_t thread_group_m = 4;
     static constexpr size_t thread_group_n = 4;
     static constexpr size_t nominal_subgroup_size = 8;
@@ -109,6 +109,8 @@ public:
         ld += 4;
         return ld;
     }
+
+    int this_unroll_k() const { return unroll_k_bytes / getBytes(cfg.a_type); }
 
 private:
     using injector_t = jit_eltwise_injector_f32<gpu_gen12hp>;
@@ -141,7 +143,7 @@ private:
     ngen::Subregister slm_a_offset_store_init = addr2.uw(6);
     ngen::Subregister slm_b_offset_store_init = addr2.uw(7);
     ngen::Register base_save = acc0.ud();
-    ngen::Subregister k_counter = acc0.ud(0);
+    ngen::Subregister k_counter = acc0.d(0);
     ngen::Subregister ldc_save = acc0.ud(1);
     ngen::Subregister off_co_save = acc0.ud(2);
     ngen::Subregister k_save = acc0.ud(3);

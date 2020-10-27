@@ -699,10 +699,6 @@ void gen12hp_systolic_gemm_kernel_t::update_c(bool remainder) {
 
     // Check whether C pointer has given (power of 2) alignment. Result stored in f1.1.
     auto check_c_align = [&](int align) {
-        // This should work, but doesn't (Fulsim bug?):
-        // auto dummy = utemp[0].ud(0);
-        // bfn(1 | ze | f1[1], getBFNCtrl([](uint8_t a, uint8_t b, uint8_t c) { return (a | b) & c; }),
-        //    dummy, uldc, uc_base.ud(0), uint16_t(align - 1));
         auto uc_align = r18.ud(0);
         or_(1, uc_align, uldc, uc_base.ud(0));
         and_(1 | ze | f1[1], null.ud(), uc_align, uint16_t(align - 1));
@@ -855,7 +851,7 @@ void gen12hp_systolic_gemm_kernel_t::multiply(int buffer, bool last_multiply) {
         add(2 | swsb, slm_a_offset_load(1), slm_a_offset_load(1),
                 uint16_t(slm_buf_size() / 16));
 
-    // Rows 24-32
+    // Rows 24-31
     multiply_chunk(8, 24, false, sb4.dst, sb5);
 
     // Remember dependencies for address registers.
@@ -875,16 +871,14 @@ void gen12hp_systolic_gemm_kernel_t::copy_load(int load_buffer, bool use_c) {
 
     if (use_c) {
         load(16 | SWSB(sb11, 3), c_regs[0], block_hword(8), A64, addr0);
-        load(16 | SWSB(sb12, 2), c_regs[8], block_hword(8), A64,
-                addr1); // Fulsim 39092: @3
-        load(16 | SWSB(sb13, 1), c_regs[16], block_hword(4), A64,
-                addr2); // ditto
+        load(16 | SWSB(sb12, 2), c_regs[8], block_hword(8), A64, addr1);
+        load(16 | SWSB(sb13, 1), c_regs[16], block_hword(4), A64, addr2);
         dep_addr0 = sb11.src;
         dep_addr1 = sb12.src;
         dep_addr2 = sb13.src;
     } else {
-        load(16 | SWSB(sb8, 3), a_copy[0], block_hword(8), A64,
-                addr0); // Stronger than necessary dependencies... can load as soon as prev. store inputs are read.
+        // Stronger than necessary dependencies... can load as soon as prev. store inputs are read.
+        load(16 | SWSB(sb8, 3), a_copy[0], block_hword(8), A64, addr0);
         load(16 | SWSB(sb9, 2), b_copy[0], block_hword(8), A64, addr1);
         load(16 | SWSB(sb10, 1), b_copy[8], block_hword(4), A64, addr2);
         dep_addr0 = sb8.src;
@@ -911,8 +905,7 @@ void gen12hp_systolic_gemm_kernel_t::copy_store(int store_buffer, bool first) {
 
     if (first) {
         store(16 | SWSB(sb11, 3), block_oword(16), SLM, addr0, c_regs[0]);
-        store(16 | SWSB(sb12, 2), block_oword(16), SLM, addr1,
-                c_regs[8]); // Fulsim 39092: @3
+        store(16 | SWSB(sb12, 2), block_oword(16), SLM, addr1, c_regs[8]);
         store(16 | SWSB(sb13, 1), block_oword(8), SLM, addr2, c_regs[16]);
         dep_addr0 = sb11.src;
         dep_addr1 = sb12.src;
@@ -954,16 +947,19 @@ void gen12hp_systolic_gemm_kernel_t::store_signal(bool force_fence) {
 }
 
 void gen12hp_systolic_gemm_kernel_t::body() {
-    Label top, bottom;
+    Label top, bottom, skip_main, rem_top, rem_bottom;
 
-    add(1 | le | f0[1], k_counter, k_counter, int16_t(-1));
+    cmp(1 | lt | f1[1], k_counter, 3);
+    add(1 | le | f0[1], k_counter, k_counter, -5);
+
+    jmpi(1 | f1[1], skip_main);
 
     copy_load(0, true); // L0 -> C
     copy_load(1); // L1
     copy_store(0, true); // S0 <- C
     store_signal(true); // Signal 0 ready
     zero_c();
-    sync(SyncFunction::nop, SWSB<uint32_t>(1));
+    sync.nop(SWSB<uint32_t>(1));
     copy_store(1); // S1
 
     if (!cfg.alt_barriers) {
@@ -974,7 +970,7 @@ void gen12hp_systolic_gemm_kernel_t::body() {
     jmpi(1 | f0[1], bottom); // Zero-trip loop check
 
     mark(top);
-    add(1 | gt | f0[1], k_counter, k_counter, int16_t(-1));
+    add(1 | gt | f0[1], k_counter, k_counter, -3);
 
     copy_load(2); // L2
     multiply(0); // M0
@@ -1008,6 +1004,35 @@ void gen12hp_systolic_gemm_kernel_t::body() {
     if (!cfg.alt_barriers) barrierwait(); // Wait 2 ready
 
     multiply(2, true); // M2
+
+    add(1 | le | f0[1], k_counter, k_counter, 2);
+    jmpi(1 | f0[1], rem_bottom);
+    jmpi(1, rem_top);
+
+    mark(skip_main);
+
+    zero_c();
+    add(1, k_counter, k_counter, 5);
+    mov(2, slm_a_offset_store(1), slm_a_offset_store_init(1));
+    sync.nop(SWSB<uint32_t>(1));
+
+    mark(rem_top);
+
+    cmp(1 | lt | f1[1], k_counter, 2);
+    copy_load(0);
+    copy_store(0);
+    store_signal(true);
+    if (!cfg.alt_barriers) barrierwait();
+    multiply(0, true);
+
+    jmpi(1 | f1[1], rem_bottom);
+    copy_load(1);
+    copy_store(1);
+    store_signal(true);
+    if (!cfg.alt_barriers) barrierwait();
+    multiply(1, true);
+
+    mark(rem_bottom);
 
     sync(SyncFunction::allwr); // Wait for systolic ops to finish
 
@@ -1106,7 +1131,6 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     auto offset_c = r12.uq(2);
     auto offset_asum = r14.ud(0);
     auto offset_bsum = r14.ud(1);
-    auto temp_q = r17.uq(0);
     auto global_n0 = r18.ud(0);
     auto global_m0 = r18.ud(1);
     auto local_n0 = r20.ud(0);
@@ -1154,21 +1178,18 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     uint16_t lg2_a_elem_bytes = ngen::utils::log2(getBytes(cfg.a_type));
     uint16_t lg2_c_elem_bytes = ngen::utils::log2(getBytes(cfg.c_type));
     uint16_t lg2_co_elem_bytes = ngen::utils::log2(getBytes(cfg.co_type));
-    auto this_unroll_k = unroll_k_bytes / getBytes(cfg.a_type);
 
     mov(1, k_copy, k);
-    add(1, k, k, uint16_t(this_unroll_k - 1));
+    add(1, k_counter_copy, k, this_unroll_k() - 1);
     shl(1, ldc_copy, ldc, lg2_c_elem_bytes);
     shl(1, suboffset_a, local_id_y, uint16_t(8));
     mul(1, suboffset_b, local_id_x, uint16_t(12 * 32 / 8));
-    shr(1, k, k, uint16_t(5 - ngen::utils::log2(getBytes(cfg.a_type))));
     assert(ldc_save.getByteOffset() == ldc_copy.getByteOffset());
     mov(1, ldc_save.ud(), ldc_copy.ud());
-    mul(1, temp_q.uq(), k.ud(), uint32_t(0xAAAAAAAB)); // ~ division by 1.5
+    shr(1, k_counter_copy, k_counter_copy, ngen::utils::log2(this_unroll_k()));
     mul(1, offset_c, n0, ldc);
     mul(1, offset_a, m0, lda);
     mul(1, offset_b, n0, ldb);
-    shr(1, k, temp_q.ud(1), uint16_t(1));
     switch (cfg.c_bias) {
         case bias_t::none: break;
         case bias_t::fixed: mov(1, off_co_copy, in_offset_co); break;
@@ -1181,10 +1202,8 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     add(1, offset_c, offset_c, in_offset_c);
     if (getBytes(cfg.a_type) > 1)
         shl(2, offset_a(1), offset_a(1), lg2_a_elem_bytes); // A, B
-    if (cfg.a_bias)
-        mad(1, offset_asum, offset_a.ud(), k, uint16_t(32 * this_unroll_k));
-    if (cfg.b_bias)
-        mad(1, offset_bsum, offset_b.ud(), k, uint16_t(48 * this_unroll_k));
+    if (cfg.a_bias) mad(1, offset_asum, offset_a.ud(), k, 32);
+    if (cfg.b_bias) mad(1, offset_bsum, offset_b.ud(), k, 48);
     add(1, offset_a, offset_a, suboffset_a);
     add(1, offset_b, offset_b, suboffset_b);
     shl(1, offset_c, offset_c, lg2_c_elem_bytes);
@@ -1213,7 +1232,6 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     add(1, slm_a_offset_store_init.uw(), local_m0.uw(), suboffset_a.uw());
     add(1, slm_b_offset_store_init.uw(), local_n0.uw(), suboffset_b.uw());
     mov(2, slm_a_offset_load(1), slm_a_offset_load_init(1));
-    mov(1, k_counter_copy, k);
 
     // Compute m, n remainders and save variables for C update.
     // Also compute threshold for m remainder: 64 for thread 0 of fused pair,
