@@ -36,11 +36,11 @@ status_t ref_zero_pad_t::execute(const exec_ctx_t &ctx) const {
     const auto &pdims = mdw.padded_dims();
     const blocking_desc_t blocking_desc = mdw.blocking_desc();
     const ptrdiff_t nelems = (ptrdiff_t)mdw.nelems(true);
-    const unsigned int hw_threads
+    const compute::device_info_t *device
             = utils::downcast<compute::compute_engine_t *>(
                     ctx.stream()->engine())
-                      ->device_info()
-                      ->hw_threads();
+                      ->device_info();
+    const unsigned int hw_threads = device->hw_threads();
 
     // Setup Initial parameters used in opencl kernel computation
     dims_t blk_size;
@@ -81,10 +81,12 @@ status_t ref_zero_pad_t::execute(const exec_ctx_t &ctx) const {
 
         // Balance work unit size with parallelism
         cl_ulong step_block = 1;
-        while (step_nelems / nelems_block * step_block < 4 * 1024
-                && step_count % (step_block * 2) == 0
-                && npsteps / step_block > 2 * hw_threads) {
-            step_block *= 2;
+        if (device->gpu_arch() != compute::gpu_arch_t::gen12hp) {
+            while (step_nelems / nelems_block * step_block < 4 * 1024
+                    && step_count % (step_block * 2) == 0
+                    && npsteps / step_block > 2 * hw_threads) {
+                step_block *= 2;
+            }
         }
 
         dim_t tail_start = dims[i] % blk_size[i];
@@ -93,15 +95,22 @@ status_t ref_zero_pad_t::execute(const exec_ctx_t &ctx) const {
             pos[j] = 0;
         }
 
-        zero_pad_mask_t bitmask;
+        zero_pad_mask_t bit_mask;
+        zero_pad_mask_t lookup_mask;
         for (unsigned int j = 0; j < ZERO_PAD_MASK_SIZE; j++)
-            bitmask.mask[j] = 0;
+            bit_mask.mask[j] = 0;
 
         bool is_done = false;
+        size_t mask_count = 0;
         while (!is_done) {
             size_t idx = mdw.off_v(pos, true);
-            bitmask.mask[idx / 8]
-                    |= (pos[i] >= tail_start ? (1 << (idx % 8)) : 0);
+            bool is_valid = pos[i] >= tail_start;
+            bit_mask.mask[idx / 8] |= (is_valid ? (1 << (idx % 8)) : 0);
+            if (is_valid) {
+                if (mask_count < ZERO_PAD_MASK_SIZE)
+                    lookup_mask.mask[mask_count] = idx;
+                mask_count++;
+            }
 
             //Increment position in the block
             is_done = true;
@@ -115,13 +124,23 @@ status_t ref_zero_pad_t::execute(const exec_ctx_t &ctx) const {
             }
         }
 
+        size_t mode = ZERO_PAD_BIT_MODE;
+        size_t gws0 = nelems_block;
+        zero_pad_mask_t *mask_in = &bit_mask;
+        if (mask_count < ZERO_PAD_MASK_SIZE) {
+            mode = ZERO_PAD_LOOKUP_MODE;
+            gws0 = mask_count;
+            mask_in = &lookup_mask;
+        }
+
         arg_list.set(4, step_block);
         arg_list.set(5, step_count);
         arg_list.set(6, stride);
-        arg_list.set(7, bitmask);
+        arg_list.set(7, *mask_in);
+        arg_list.set(8, mode);
 
         const size_t gws[3]
-                = {nelems_block, step_count / step_block, npsteps / step_count};
+                = {gws0, step_count / step_block, npsteps / step_count};
         const compute::nd_range_t nd_range = compute::nd_range_t(3, gws);
         status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
         if (status != status::success) return status;
