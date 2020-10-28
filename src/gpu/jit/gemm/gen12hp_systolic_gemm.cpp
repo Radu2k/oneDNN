@@ -241,6 +241,12 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
         }
     }
 
+    // Read device information
+    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+    assert(compute_engine);
+
+    eu_count_ = compute_engine->device_info()->eu_count();
+
     return status::success;
 }
 
@@ -251,16 +257,22 @@ status_t gen12hp_systolic_gemm_t::init_res_storage(
     auto a_type = pd()->desc()->a_type();
     auto b_type = pd()->desc()->b_type();
 
-    int64_t block_m = 0, block_n = 0, block_k = 0;
-    std::tie(block_m, block_n, block_k) = get_blocking();
+    auto m = pd()->desc()->m();
+    auto n = pd()->desc()->n();
+    auto k = pd()->desc()->k();
 
-    auto max_ldab_packed
-            = kernel_t::max_ld_packed(block_k, a_type, ab_zero_points_);
+    int64_t align_m = kernel_t::unroll_m * kernel_t::thread_group_m;
+    int64_t align_n = kernel_t::unroll_n * kernel_t::thread_group_n;
+
+    auto m_aligned = utils::rnd_up(m, align_m);
+    auto n_aligned = utils::rnd_up(n, align_n);
+
+    auto max_ldab_packed = kernel_t::max_ld_packed(k, a_type, ab_zero_points_);
 
     if (!pd()->packed_a()) {
         memory_storage_t *a_packed_ptr;
         engine->create_memory_storage(&a_packed_ptr,
-                block_m * max_ldab_packed * types::data_type_size(a_type));
+                m_aligned * max_ldab_packed * types::data_type_size(a_type));
         if (!a_packed_ptr) return status::runtime_error;
 
         std::unique_ptr<memory_storage_t> a_packed(a_packed_ptr);
@@ -270,7 +282,7 @@ status_t gen12hp_systolic_gemm_t::init_res_storage(
     if (!pd()->packed_b()) {
         memory_storage_t *b_packed_ptr;
         engine->create_memory_storage(&b_packed_ptr,
-                block_n * max_ldab_packed * types::data_type_size(b_type));
+                n_aligned * max_ldab_packed * types::data_type_size(b_type));
         if (!b_packed_ptr) return status::runtime_error;
 
         std::unique_ptr<memory_storage_t> b_packed(b_packed_ptr);
@@ -280,8 +292,22 @@ status_t gen12hp_systolic_gemm_t::init_res_storage(
     return status::success;
 }
 
+bool gen12hp_systolic_gemm_t::enable_mn_blocking() const {
+    return (pd()->desc()->m() >= 4096) && (pd()->desc()->n() >= 192)
+            && (eu_count_ < 512);
+}
+
+int64_t gen12hp_systolic_gemm_t::default_block_m() const {
+    return 1024; // 8 thread groups in m dimension
+}
+
+int64_t gen12hp_systolic_gemm_t::default_block_n() const {
+    return eu_count_
+            * 6; // Up to 16 thread groups in n dimension, enough to fill GPU.
+}
+
 int64_t gen12hp_systolic_gemm_t::default_block_k(data_type_t dt) const {
-    return 4608 / types::data_type_size(dt);
+    return 8192 / types::data_type_size(dt);
 }
 
 std::tuple<int64_t, int64_t, int64_t>
@@ -303,26 +329,31 @@ gen12hp_systolic_gemm_t::get_blocking() const {
     m = utils::rnd_up(m, align_m);
     n = utils::rnd_up(n, align_n);
 
-    // Decide on m/n blocking. Assume 512 EU config for now.
-    int64_t block_m = 1024; // Default blocking: 16 * 64
-    int64_t block_n = 3072; // Default blocking: 96 * 32
-    int64_t max_block_m = nstl::min(m, block_m * 4);
-    int64_t max_block_n = nstl::min(n, block_n * 4);
+    // Decide on m/n blocking.
+    int64_t block_m = default_block_m();
+    int64_t block_n = default_block_n();
+    int64_t max_block_m = utils::rnd_up(m, align_m);
+    int64_t max_block_n = utils::rnd_up(n, align_n);
 
-    if (n <= block_n)
-        block_m = (block_m * block_n) / n;
-    else if (m <= block_m)
-        block_n = (block_m * block_n) / m;
-    else if (n < 2 * block_n) {
-        block_n = utils::rnd_up(n / 2, align_n);
-        block_m = (2 * block_m * block_n) / n;
-    } else if (m < 2 * block_m) {
-        block_m = utils::rnd_up(m / 2, align_m);
-        block_n = (2 * block_m * block_n) / m;
+    if (enable_mn_blocking()) {
+        if (n <= block_n)
+            block_m = (block_m * block_n) / n;
+        else if (m <= block_m)
+            block_n = (block_m * block_n) / m;
+        else if (n < 2 * block_n) {
+            block_n = utils::rnd_up(n / 2, align_n);
+            block_m = (2 * block_m * block_n) / n;
+        } else if (m < 2 * block_m) {
+            block_m = utils::rnd_up(m / 2, align_m);
+            block_n = (2 * block_m * block_n) / m;
+        }
+
+        block_m = utils::rnd_dn(nstl::min(block_m, max_block_m), align_m);
+        block_n = utils::rnd_dn(nstl::min(block_n, max_block_n), align_n);
+    } else {
+        block_m = m;
+        block_n = n;
     }
-
-    block_m = utils::rnd_dn(nstl::min(block_m, max_block_m), align_m);
-    block_n = utils::rnd_dn(nstl::min(block_n, max_block_n), align_n);
 
     // Decide on k blocking.
     int64_t block_k = default_block_k(dt);
@@ -506,8 +537,6 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     bool packed_a = pd()->packed_a();
     bool packed_b = pd()->packed_b();
     bool packed_c = pd()->packed_c();
-    bool transa = (pd()->desc()->transa() == dnnl_trans);
-    bool transb = (pd()->desc()->transb() == dnnl_trans);
 
     auto lda = packed_a ? 0 : pd()->desc()->lda();
     auto ldb = packed_b ? 0 : pd()->desc()->ldb();
@@ -554,11 +583,23 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     std::tie(block_m, block_n, block_k) = get_blocking();
 
     auto ld_packed
-            = compute_kernel_t::get_ld_packed(block_k, a_type, ab_zero_points_);
+            = compute_kernel_t::get_ld_packed(k, a_type, ab_zero_points_);
     auto lda_packed = packed_a ? pd()->lda_packed() : ld_packed;
     auto ldb_packed = packed_b ? pd()->ldb_packed() : ld_packed;
 
     status_t status;
+
+    if (!packed_a) {
+        status = launch_copy(
+                ctx, m, k, a, off_a0, lda, a_packed, 0, lda_packed, false);
+        if (status) return status;
+    }
+
+    if (!packed_b) {
+        status = launch_copy(
+                ctx, k, n, b, off_b0, ldb, b_packed, 0, ldb_packed, true);
+        if (status) return status;
+    }
 
     for (int64_t Bk = 0; Bk < k; Bk += block_k) {
         int64_t size_k = k - Bk;
@@ -570,35 +611,17 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
             int64_t size_m = m - Bm;
             if (size_m > block_m) size_m = block_m;
 
-            auto off_a = off_a0 + (!transa ? (Bm + Bk * lda) : (Bk + Bm * lda));
-            size_t off_a_packed = 0;
-
-            if (!packed_a) {
-                status = launch_copy(ctx, size_m, size_k, a, off_a, lda,
-                        a_packed, int32_t(off_a_packed), lda_packed, false);
-                if (status) return status;
-            } else
-                off_a_packed = off_a0 + Bm * lda_packed
-                        + Bk * compute_kernel_t::unroll_m;
+            auto off_a_packed
+                    = Bm * lda_packed + Bk * compute_kernel_t::unroll_m;
+            if (packed_a) off_a_packed += off_a0;
 
             for (int64_t Bn = 0; Bn < n; Bn += block_n) {
                 int64_t size_n = n - Bn;
                 if (size_n > block_n) size_n = block_n;
 
-                auto off_b = off_b0
-                        + (!transb ? (Bk + Bn * ldb) : (Bn + Bk * ldb));
-                size_t off_b_packed = 0;
-
-                if (!packed_b) {
-                    if ((Bm == 0) || (n > block_n)) {
-                        status = launch_copy(ctx, size_k, size_n, b, off_b, ldb,
-                                b_packed, int32_t(off_b_packed), ldb_packed,
-                                true);
-                        if (status) return status;
-                    }
-                } else
-                    off_b_packed = off_b0 + Bn * ldb_packed
-                            + Bk * compute_kernel_t::unroll_n;
+                auto off_b_packed
+                        = Bn * ldb_packed + Bk * compute_kernel_t::unroll_n;
+                if (packed_b) off_b_packed += off_b0;
 
                 auto off_c = off_c0 + Bm + Bn * ldc;
                 auto off_co = int32_t(off_co0);

@@ -140,6 +140,9 @@ public:
     virtual status_t execute(const gemm_exec_ctx_t &ctx) const;
 
 private:
+    bool enable_mn_blocking() const;
+    int64_t default_block_m() const;
+    int64_t default_block_n() const;
     int64_t default_block_k(data_type_t dt) const;
     std::tuple<int64_t, int64_t, int64_t> get_blocking() const;
 
@@ -166,6 +169,7 @@ private:
 
     char co_kind_;
     bool ab_zero_points_;
+    int eu_count_;
 
     const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 };
