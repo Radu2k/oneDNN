@@ -198,7 +198,7 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_conf(
     if (!set_default_formats_common(conf.src_tag, conf.wei_tag, conf.dst_tag)) {
         return status::unimplemented;
     }
-
+    if (conf.ic_without_padding == 3) return status::unimplemented;
     set_offsets(src_md(), off.src_off);
     set_offsets(diff_weights_md(), off.wei_off);
     set_offsets(diff_dst_md(), off.dst_off);

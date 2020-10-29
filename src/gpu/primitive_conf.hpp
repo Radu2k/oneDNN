@@ -302,6 +302,8 @@ struct conv_conf_t {
 
     bool is_depthwise;
     bool is_nhwc, use_dpasw;
+    bool reorder_wei = false;
+    bool reorder_bias = false;
     int ver;
     format_tag_t src_tag, dst_tag, wei_tag;
     bool is_nchw;
