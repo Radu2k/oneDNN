@@ -61,17 +61,25 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
                 memory_desc_wrapper b_mdw(&desc_.a_desc);
                 memory_desc_wrapper c_mdw(&desc_.c_desc);
 
-                if (a_mdw.format_any())
+                bool a_any = a_mdw.format_any();
+                bool b_any = b_mdw.format_any();
+                bool c_any = c_mdw.format_any();
+
+                // No batch packed support.
+                if ((a_any || b_any || c_any) && desc()->is_batched())
+                    return false;
+
+                if (a_any)
                     CHECK(memory_desc_init_by_tag(desc_.b_desc, a_packed_tag));
                 else if (a_mdw.matches_one_of_tag(a_packed_tag, ab, ba)
                         == undef)
                     return false;
-                if (b_mdw.format_any())
+                if (b_any)
                     CHECK(memory_desc_init_by_tag(desc_.a_desc, b_packed_tag));
                 else if (b_mdw.matches_one_of_tag(b_packed_tag, ab, ba)
                         == undef)
                     return false;
-                if (c_mdw.format_any())
+                if (c_any)
                     CHECK(memory_desc_init_by_tag(desc_.c_desc, b_packed_tag));
                 else if (c_mdw.matches_one_of_tag(b_packed_tag, ab) == undef)
                     return false;
