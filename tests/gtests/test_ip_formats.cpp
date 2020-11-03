@@ -22,8 +22,8 @@
 #include "dnnl_test_common.hpp"
 #include "gtest/gtest.h"
 
-#include "dnnl.hpp"
-#include "dnnl_debug.h"
+#include "oneapi/dnnl/dnnl.hpp"
+#include "oneapi/dnnl/dnnl_debug.h"
 
 namespace dnnl {
 
@@ -43,7 +43,7 @@ protected:
     virtual void SetUp() { e = get_test_engine(); }
 };
 
-TEST_F(ip_formats_test, TestChecksAllFormats) {
+HANDLE_EXCEPTIONS_FOR_TEST_F(ip_formats_test, TestChecksAllFormats) {
     SKIP_IF(get_test_engine_kind() == engine::kind::gpu,
             "GPU takes a lot of time to complete this test.");
     static auto isa = get_effective_cpu_isa();
@@ -57,8 +57,16 @@ TEST_F(ip_formats_test, TestChecksAllFormats) {
     memory::dims SP4D = {2, 2, 2, 2};
     memory::dims SP5D = {2, 2, 2, 2, 2};
     memory::dims SP6D = {2, 2, 2, 2, 2, 2};
-    std::vector<memory::dims> v_dims = {SP2D, SP3D, SP4D, SP5D};
-    std::vector<memory::dims> unsup_dims = {SP1D, SP6D};
+    memory::dims SP7D = {2, 2, 2, 2, 2, 2, 2};
+    memory::dims SP8D = {2, 2, 2, 2, 2, 2, 2, 2};
+    memory::dims SP9D = {2, 2, 2, 2, 2, 2, 2, 2, 2};
+    memory::dims SP10D = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2};
+    memory::dims SP11D = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2};
+    memory::dims SP12D = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2};
+    std::vector<memory::dims> v_dims = {SP1D, SP2D, SP3D, SP4D, SP5D, SP6D,
+            SP7D, SP8D, SP9D, SP10D, SP11D, SP12D};
+    std::vector<memory::dims> unsup_dims
+            = {SP1D, SP6D, SP7D, SP8D, SP9D, SP10D, SP11D, SP12D};
 
     unsigned start_tag = static_cast<unsigned>(tag::any);
     unsigned end_tag = static_cast<unsigned>(tag::format_tag_last);
@@ -81,7 +89,7 @@ TEST_F(ip_formats_test, TestChecksAllFormats) {
         for (unsigned stag = start_tag; stag < end_tag; stag++) {
             src_tag = static_cast<tag>(stag);
 
-            // ip does not support 1D and 6D cases
+            // ip does not support 1D and 6D-12D cases
             bool skip_tag = false;
             for (const auto &i_dims : unsup_dims) {
                 src_md = md(i_dims, i_cfg[0], src_tag, true);
@@ -116,9 +124,9 @@ TEST_F(ip_formats_test, TestChecksAllFormats) {
                 if (ip_fwd_pd) {
                     auto ip_fwd_prim = ip_fwd(ip_fwd_pd);
                     auto strm = make_stream(ip_fwd_pd.get_engine());
-                    auto src = memory(ip_fwd_pd.src_desc(), e);
-                    auto wei = memory(ip_fwd_pd.weights_desc(), e);
-                    auto dst = memory(ip_fwd_pd.dst_desc(), e);
+                    auto src = test::make_memory(ip_fwd_pd.src_desc(), e);
+                    auto wei = test::make_memory(ip_fwd_pd.weights_desc(), e);
+                    auto dst = test::make_memory(ip_fwd_pd.dst_desc(), e);
                     ip_fwd_prim.execute(strm,
                             {{DNNL_ARG_SRC, src}, {DNNL_ARG_WEIGHTS, wei},
                                     {DNNL_ARG_DST, dst}});
@@ -136,9 +144,12 @@ TEST_F(ip_formats_test, TestChecksAllFormats) {
                 if (ip_bwd_d_pd) {
                     auto ip_bwd_d_prim = ip_bwd_d(ip_bwd_d_pd);
                     auto strm = make_stream(ip_bwd_d_pd.get_engine());
-                    auto d_src = memory(ip_bwd_d_pd.diff_src_desc(), e);
-                    auto d_wei = memory(ip_bwd_d_pd.weights_desc(), e);
-                    auto d_dst = memory(ip_bwd_d_pd.diff_dst_desc(), e);
+                    auto d_src
+                            = test::make_memory(ip_bwd_d_pd.diff_src_desc(), e);
+                    auto d_wei
+                            = test::make_memory(ip_bwd_d_pd.weights_desc(), e);
+                    auto d_dst
+                            = test::make_memory(ip_bwd_d_pd.diff_dst_desc(), e);
                     ip_bwd_d_prim.execute(strm,
                             {{DNNL_ARG_DIFF_SRC, d_src},
                                     {DNNL_ARG_WEIGHTS, d_wei},
@@ -152,9 +163,11 @@ TEST_F(ip_formats_test, TestChecksAllFormats) {
                 if (ip_bwd_w_pd) {
                     auto ip_bwd_w_prim = ip_bwd_w(ip_bwd_w_pd);
                     auto strm = make_stream(ip_bwd_w_pd.get_engine());
-                    auto src = memory(ip_bwd_w_pd.src_desc(), e);
-                    auto d_wei = memory(ip_bwd_w_pd.diff_weights_desc(), e);
-                    auto d_dst = memory(ip_bwd_w_pd.diff_dst_desc(), e);
+                    auto src = test::make_memory(ip_bwd_w_pd.src_desc(), e);
+                    auto d_wei = test::make_memory(
+                            ip_bwd_w_pd.diff_weights_desc(), e);
+                    auto d_dst
+                            = test::make_memory(ip_bwd_w_pd.diff_dst_desc(), e);
                     ip_bwd_w_prim.execute(strm,
                             {{DNNL_ARG_SRC, src},
                                     {DNNL_ARG_DIFF_WEIGHTS, d_wei},

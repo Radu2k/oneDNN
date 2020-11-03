@@ -17,7 +17,7 @@
 #include "dnnl_test_common.hpp"
 #include "gtest/gtest.h"
 
-#include "dnnl.hpp"
+#include "oneapi/dnnl/dnnl.hpp"
 
 namespace dnnl {
 
@@ -134,10 +134,20 @@ protected:
 
             const auto test_engine = pd.get_engine();
 
-            auto mem_A = memory(src0_desc, test_engine);
-            auto mem_B = memory(src1_desc, test_engine);
-            auto mem_C = memory(dst_desc, test_engine);
-            auto mem_ws = memory(workspace_desc, test_engine);
+            auto mem_A = test::make_memory(src0_desc, test_engine);
+            auto mem_B = test::make_memory(src1_desc, test_engine);
+            auto mem_C = test::make_memory(dst_desc, test_engine);
+            auto mem_ws = test::make_memory(workspace_desc, test_engine);
+
+            fill_data<src0_data_t>(
+                    src0_desc.get_size() / sizeof(src0_data_t), mem_A);
+            fill_data<src1_data_t>(
+                    src1_desc.get_size() / sizeof(src1_data_t), mem_B);
+
+            fill_data<src0_data_t>(
+                    src0_desc.get_size() / sizeof(src0_data_t), mem_A);
+            fill_data<src1_data_t>(
+                    src1_desc.get_size() / sizeof(src1_data_t), mem_B);
 
             prim.execute(strm,
                     {{DNNL_ARG_SRC_0, mem_A}, {DNNL_ARG_SRC_1, mem_B},
@@ -160,7 +170,7 @@ static auto expected_failures = []() {
                     dnnl_invalid_arguments},
             // negative dim
             binary_test_params_t {{tag::nchw, tag::nchw}, tag::nchw,
-                    algorithm::binary_add, {-1, 8, 4, 4}, true,
+                    algorithm::binary_div, {-1, 8, 4, 4}, true,
                     dnnl_invalid_arguments});
 };
 
@@ -171,9 +181,11 @@ static auto zero_dim = []() {
             binary_test_params_t {{tag::nChw8c, tag::nhwc}, tag::nChw8c,
                     algorithm::binary_mul, {5, 0, 7, 6}},
             binary_test_params_t {{tag::nChw16c, tag::nchw}, tag::nChw16c,
-                    algorithm::binary_add, {8, 15, 0, 5}},
+                    algorithm::binary_div, {8, 15, 0, 5}},
             binary_test_params_t {{tag::nhwc, tag::nChw16c}, tag::nhwc,
-                    algorithm::binary_mul, {5, 16, 7, 0}});
+                    algorithm::binary_mul, {5, 16, 7, 0}},
+            binary_test_params_t {{tag::nhwc, tag::nChw16c}, tag::nhwc,
+                    algorithm::binary_sub, {4, 0, 7, 5}});
 };
 
 static auto simple_cases = []() {
@@ -185,7 +197,11 @@ static auto simple_cases = []() {
             binary_test_params_t {{tag::nChw8c, tag::nchw}, tag::nChw8c,
                     algorithm::binary_max, {8, 15, 6, 5}},
             binary_test_params_t {{tag::nhwc, tag::nChw16c}, tag::any,
-                    algorithm::binary_min, {5, 16, 7, 6}});
+                    algorithm::binary_min, {5, 16, 7, 6}},
+            binary_test_params_t {{tag::nchw, tag::nChw16c}, tag::any,
+                    algorithm::binary_div, {5, 16, 8, 7}},
+            binary_test_params_t {{tag::nchw, tag::nChw16c}, tag::any,
+                    algorithm::binary_sub, {5, 16, 8, 7}});
 };
 
 #define INST_TEST_CASE(test) \

@@ -45,16 +45,12 @@ namespace sycl {
 
 struct sycl_stream_t : public gpu::compute::compute_stream_t {
     static status_t create_stream(
-            stream_t **stream, engine_t *engine, unsigned generic_flags) {
-        unsigned flags;
-        status_t status = sycl_stream_t::init_flags(&flags, generic_flags);
-        if (status != status::success) return status;
-
+            stream_t **stream, engine_t *engine, unsigned flags) {
         std::unique_ptr<sycl_stream_t> sycl_stream(
                 new sycl_stream_t(engine, flags));
         if (!sycl_stream) return status::out_of_memory;
 
-        status = sycl_stream->init();
+        status_t status = sycl_stream->init();
         if (status != status::success) return status;
         *stream = sycl_stream.release();
         return status::success;
@@ -109,8 +105,10 @@ struct sycl_stream_t : public gpu::compute::compute_stream_t {
             return status;
         };
         status_t status = execute_func();
+#ifndef DNNL_SYCL_DPCPP
         // Emulate in-order behavior
         if (flags() & stream_flags::in_order) wait();
+#endif
         return status;
     }
 
@@ -123,12 +121,12 @@ struct sycl_stream_t : public gpu::compute::compute_stream_t {
                 = utils::downcast<const sycl_memory_storage_base_t *>(&src);
         auto *sycl_dst
                 = utils::downcast<const sycl_memory_storage_base_t *>(&dst);
-        bool usm = utils::everyone_is(memory_api_kind_t::usm,
-                sycl_src->memory_api_kind(), sycl_dst->memory_api_kind());
+        bool usm_src = sycl_src->memory_kind() == memory_kind::usm;
+        bool usm_dst = sycl_dst->memory_kind() == memory_kind::usm;
         cl::sycl::event e;
 
 #ifdef DNNL_SYCL_DPCPP
-        if (usm) {
+        if (usm_src && usm_dst) {
             auto *usm_src
                     = utils::downcast<const sycl_usm_memory_storage_t *>(&src);
             auto *usm_dst
@@ -137,9 +135,36 @@ struct sycl_stream_t : public gpu::compute::compute_stream_t {
                 register_deps(cgh);
                 cgh.memcpy(usm_dst->usm_ptr(), usm_src->usm_ptr(), size);
             });
-        } else
+        } else if (usm_src && !usm_dst) {
+            auto *usm_src
+                    = utils::downcast<const sycl_usm_memory_storage_t *>(&src);
+            auto *buffer_dst
+                    = utils::downcast<const sycl_buffer_memory_storage_t *>(
+                            &dst);
+            auto &b_dst = buffer_dst->buffer();
+            e = queue_->submit([&](cl::sycl::handler &cgh) {
+                register_deps(cgh);
+                auto acc_dst
+                        = b_dst.get_access<cl::sycl::access::mode::write>(cgh);
+                cgh.copy(usm_src->usm_ptr(), acc_dst);
+            });
+        } else if (!usm_src && usm_dst) {
+            auto *buffer_src
+                    = utils::downcast<const sycl_buffer_memory_storage_t *>(
+                            &src);
+            auto &b_src = buffer_src->buffer();
+            auto *usm_dst
+                    = utils::downcast<const sycl_usm_memory_storage_t *>(&dst);
+            e = queue_->submit([&](cl::sycl::handler &cgh) {
+                register_deps(cgh);
+                auto acc_src
+                        = b_src.get_access<cl::sycl::access::mode::read>(cgh);
+                cgh.copy(acc_src, usm_dst->usm_ptr());
+            });
+        } else // if (!usm_src && !usm_dst)
 #endif
         {
+            assert(!usm_src && !usm_dst && "USM is not supported yet");
             auto *buffer_src
                     = utils::downcast<const sycl_buffer_memory_storage_t *>(
                             &src);
@@ -166,7 +191,7 @@ struct sycl_stream_t : public gpu::compute::compute_stream_t {
             size_t size) override {
         auto *sycl_dst
                 = utils::downcast<const sycl_memory_storage_base_t *>(&dst);
-        bool usm = sycl_dst->memory_api_kind() == memory_api_kind_t::usm;
+        bool usm = sycl_dst->memory_kind() == memory_kind::usm;
 
         cl::sycl::event out_event;
         std::vector<cl::sycl::event> in_deps = get_deps();
@@ -246,21 +271,12 @@ struct sycl_stream_t : public gpu::compute::compute_stream_t {
 
 private:
     sycl_stream_t(engine_t *engine, unsigned flags)
-        : gpu::compute::compute_stream_t(engine, flags, nullptr) {}
+        : gpu::compute::compute_stream_t(engine, flags) {}
     sycl_stream_t(engine_t *engine, unsigned flags, cl::sycl::queue &queue)
-        : gpu::compute::compute_stream_t(engine, flags, nullptr)
+        : gpu::compute::compute_stream_t(engine, flags)
         , queue_(new cl::sycl::queue(queue)) {}
 
     status_t init();
-
-    static status_t init_flags(unsigned *flags, unsigned generic_flags) {
-        *flags = 0;
-        if (generic_flags & stream_flags::default_order)
-            *flags |= stream_flags::out_of_order;
-        else
-            *flags |= generic_flags;
-        return status::success;
-    }
 
     static status_t init_flags(unsigned *flags, cl::sycl::queue &queue) {
         // SYCL queue is always out-of-order

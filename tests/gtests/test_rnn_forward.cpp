@@ -21,7 +21,7 @@
 #include "dnnl_test_common.hpp"
 #include "gtest/gtest.h"
 
-#include "dnnl.hpp"
+#include "oneapi/dnnl/dnnl.hpp"
 
 namespace dnnl {
 
@@ -229,6 +229,9 @@ protected:
                 ? memory::desc({dst_iter_c_dims}, prec, p.fmts.dst_iter_fmt)
                 : memory::desc();
 
+        auto weights_projection_md_ldio = memory::desc(
+                {weights_projection_dims}, prec, memory::format_tag::ldio);
+
         // Create the reference primitive descriptor
         auto ref_d = setDesc(p.aprop, p.extra.activation, p.direction,
                 src_layer_md_any, src_iter_md_any, src_iter_c_md_any,
@@ -266,29 +269,35 @@ protected:
             return;
 
         /* initialize data */
-        auto weights_layer_ref = memory(weights_layer_md_ref, eng);
-        auto weights_iter_ref = memory(weights_iter_md_ref, eng);
-        auto weights_peephole_ref = memory(weights_peephole_md_ref, eng);
-        auto weights_projection_ref = memory(weights_projection_md_ref, eng);
-        auto bias_ref = memory(bias_md_ref, eng);
-        auto src_layer_ref = memory(src_layer_md_ref, eng);
-        auto src_iter_ref = memory(src_iter_md_ref, eng);
-        auto src_iter_c_ref = memory(src_iter_c_md_ref, eng);
-        auto dst_layer_ref = memory(dst_layer_md_ref, eng);
-        auto dst_iter_ref = memory(dst_iter_md_ref, eng);
-        auto dst_iter_c_ref = memory(dst_iter_c_md_ref, eng);
+        auto weights_layer_ref = test::make_memory(weights_layer_md_ref, eng);
+        auto weights_iter_ref = test::make_memory(weights_iter_md_ref, eng);
+        auto weights_peephole_ref
+                = test::make_memory(weights_peephole_md_ref, eng);
+        auto weights_projection_ref
+                = test::make_memory(weights_projection_md_ref, eng);
+        auto bias_ref = test::make_memory(bias_md_ref, eng);
+        auto src_layer_ref = test::make_memory(src_layer_md_ref, eng);
+        auto src_iter_ref = test::make_memory(src_iter_md_ref, eng);
+        auto src_iter_c_ref = test::make_memory(src_iter_c_md_ref, eng);
+        auto dst_layer_ref = test::make_memory(dst_layer_md_ref, eng);
+        auto dst_iter_ref = test::make_memory(dst_iter_md_ref, eng);
+        auto dst_iter_c_ref = test::make_memory(dst_iter_c_md_ref, eng);
 
-        auto weights_layer_tgt = memory(weights_layer_md_tgt, eng);
-        auto weights_iter_tgt = memory(weights_iter_md_tgt, eng);
-        auto weights_peephole_tgt = memory(weights_peephole_md_tgt, eng);
-        auto weights_projection_tgt = memory(weights_projection_md_tgt, eng);
-        auto bias_tgt = memory(bias_md_tgt, eng);
-        auto src_layer_tgt = memory(src_layer_md_tgt, eng);
-        auto src_iter_tgt = memory(src_iter_md_tgt, eng);
-        auto src_iter_c_tgt = memory(src_iter_c_md_tgt, eng);
-        auto dst_layer_tgt = memory(dst_layer_md_tgt, eng);
-        auto dst_iter_tgt = memory(dst_iter_md_tgt, eng);
-        auto dst_iter_c_tgt = memory(dst_iter_c_md_tgt, eng);
+        auto weights_layer_tgt = test::make_memory(weights_layer_md_tgt, eng);
+        auto weights_iter_tgt = test::make_memory(weights_iter_md_tgt, eng);
+        auto weights_peephole_tgt
+                = test::make_memory(weights_peephole_md_tgt, eng);
+        auto weights_projection_tgt
+                = test::make_memory(weights_projection_md_tgt, eng);
+        auto bias_tgt = test::make_memory(bias_md_tgt, eng);
+        auto src_layer_tgt = test::make_memory(src_layer_md_tgt, eng);
+        auto src_iter_tgt = test::make_memory(src_iter_md_tgt, eng);
+        auto src_iter_c_tgt = test::make_memory(src_iter_c_md_tgt, eng);
+        auto dst_layer_tgt = test::make_memory(dst_layer_md_tgt, eng);
+        auto dst_iter_tgt = test::make_memory(dst_iter_md_tgt, eng);
+        auto dst_iter_c_tgt = test::make_memory(dst_iter_c_md_tgt, eng);
+
+        auto weights_projection_ldio = memory(weights_projection_md_ldio, eng);
 
         // Assumption: b is a plain layout
         auto init_tensor = [&](memory a, memory b, int scale = 1) {
@@ -309,22 +318,22 @@ protected:
         auto init_zero_tensor = [&](const memory &a, memory::format_tag fmt) {
             auto desc = a.get_desc();
             memory::desc tmp_md(desc.dims(), desc.data_type(), fmt);
-            memory tmp(tmp_md, eng);
+            auto tmp = test::make_memory(tmp_md, eng);
             // Zero fill the tmp tensor
             init_tensor(a, tmp, 0);
         };
-        auto init_id_wights_projection = [&](const memory &w) {
-            {
-                auto w_ptr = map_memory<float>(w);
-                for_(memory::dim l = 0; l < dims.l; ++l)
-                for_(memory::dim d = 0; d < dims.d; ++d)
-                for_(memory::dim i = 0; i < dims.dhc; ++i)
-                for (memory::dim o = 0; o < dims.dic; ++o) {
-                    auto off = (((l * dims.d) + d) * dims.dhc + i) * dims.dic
-                            + o;
-                    w_ptr[off] = (i == o) ? 1.f : 0.f;
-                }
+        auto init_id_wights_projection = [&](memory &w_plain, memory &w_rnn) {
+            auto w_plain_ptr = map_memory<float>(w_plain);
+            for_(memory::dim l = 0; l < dims.l; ++l)
+            for_(memory::dim d = 0; d < dims.d; ++d)
+            for_(memory::dim i = 0; i < dims.dhc; ++i)
+            for (memory::dim o = 0; o < dims.dic; ++o) {
+                auto off = (((l * dims.d) + d) * dims.dhc + i) * dims.dic + o;
+                w_plain_ptr[off] = (i == o) ? 1.f : 0.f;
             }
+
+            reorder(w_plain, w_rnn).execute(strm, w_plain, w_rnn);
+            strm.wait();
         };
 
         init_tensor(weights_layer_ref, weights_layer_tgt);
@@ -336,7 +345,8 @@ protected:
         if (is_lstm_projection)
             init_tensor(weights_projection_ref, weights_projection_tgt);
         else if (std::is_same<T, lstm_forward>::value)
-            init_id_wights_projection(weights_projection_ref);
+            init_id_wights_projection(
+                    weights_projection_ldio, weights_projection_ref);
         init_tensor(bias_ref, bias_tgt);
         init_tensor(src_layer_ref, src_layer_tgt);
         if (p.fmts.src_iter_fmt != memory::format_tag::undef) {

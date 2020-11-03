@@ -52,13 +52,13 @@
 --mb=1,16
 --batch=set_all_small
 
-# post op tests
+# basic post op tests
 --reset
---cfg=u8,bf16,f32
---alg=MAX,AVG_NP,AVG_P
 --dir=FWD_I
---attr-post-ops='add:f32;min:u8:per_dim_01;linear:0.5:1.5;mul:f32:per_dim_0;add:f32:per_dim_01;max:f16;mul:s8;add:f32:per_oc'
---mb=1,2
+--cfg=f32,s32,f16,bf16,u8,s8
+--alg=MAX,AVG_NP,AVG_P
+--attr-post-ops='add:s32:per_oc','add:f32;linear:-0.5:1.5'
+--mb=2
 --tag=abx,aBx16b
 --batch=shapes_3d_small
 

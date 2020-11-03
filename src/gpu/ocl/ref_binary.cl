@@ -49,6 +49,10 @@ __kernel void ref_binary(__global DATA_T *src0, __global DATA_T *src1,
     d = max(tmp_src0, tmp_src1);
 #elif IS_MIN
     d = min(tmp_src0, tmp_src1);
+#elif IS_DIV
+    d = tmp_src0 / tmp_src1;
+#elif IS_SUB
+    d = tmp_src0 - tmp_src1;
 #endif
 
     POST_OP_DATA_T dst_data;
@@ -126,18 +130,23 @@ __kernel void ref_binary(__global SRC0_DATA_T *src0, __global SRC1_DATA_T *src1,
         d = max(tmp_src0, tmp_src1);
 #elif IS_MIN
         d = min(tmp_src0, tmp_src1);
+#elif IS_DIV
+        d = tmp_src0 / tmp_src1;
+#elif IS_SUB
+        d = tmp_src0 - tmp_src1;
 #endif
 
         POST_OP_DATA_T dst_data;
+        if (DST_D1 == DST_PD1 || d1_init + ic < DST_D1) {
 #if WITH_SUM
-        dst_data = DATA_TO_REF(dst[dst_off]);
+            dst_data = DATA_TO_REF(dst[dst_off]);
 #endif
-        APPLY_POST_OPS(d, POST_OP_DATA_T, dst_data, POST_OP_DATA_T, dims0_po[0],
-                1, dims0_po[1], 1, dims0_po[2], 1, dims0_po[3], 1, dims0_po[4],
-                1, dims0_po[5], 1);
+            APPLY_POST_OPS(d, POST_OP_DATA_T, dst_data, POST_OP_DATA_T,
+                    dims0_po[0], 1, dims0_po[1], 1, dims0_po[2], 1, dims0_po[3],
+                    1, dims0_po[4], 1, dims0_po[5], 1);
 
-        if (DST_D1 == DST_PD1 || d1_init + ic < DST_D1)
             dst[dst_off] = TO_DST(d);
+        }
 
 #if USE_UNROLL_16B || SRC0_UNROLL_16B
         src0_off++;

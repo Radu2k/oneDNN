@@ -20,10 +20,10 @@
 #include "common/c_types_map.hpp"
 #include "common/memory_tracking.hpp"
 
+#include "cpu/x64/injectors/jit_uni_eltwise_injector.hpp"
 #include "cpu/x64/jit_avx512_core_bf16cvt.hpp"
 #include "cpu/x64/jit_generator.hpp"
 #include "cpu/x64/jit_primitive_conf.hpp"
-#include "cpu/x64/jit_uni_eltwise_injector.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -94,7 +94,7 @@ private:
     reg64_t reg_dst_long_offt = r14;
 
     Vmm vmm_dst(int i_ur, int i_oc) {
-        int idx = i_ur + i_oc * jcp.ur_w;
+        int idx = i_ur * jcp.nb_oc_blocking + i_oc;
         assert(idx < ker_reg_base_idx);
         return Vmm(idx);
     }
@@ -161,13 +161,13 @@ private:
 
     inline dim_t filter_w_to_src(int kw, int ow = 0, int pad_l = 0) {
         return kw * (jcp.dilate_w + 1) + ow * jcp.stride_w - pad_l;
-    };
+    }
     inline dim_t filter_h_to_src(int kh) {
         return kh * (jcp.dilate_h + 1) * jcp.iw;
-    };
+    }
     inline dim_t filter_d_to_src(int kd) {
         return kd * (jcp.dilate_d + 1) * jcp.iw * jcp.ih;
-    };
+    }
 
     inline dim_t get_src_offset(dim_t ic_idx, dim_t isp) {
         int icb = ic_idx / jcp.ic_block;
@@ -385,10 +385,10 @@ private:
 
     inline int filter_h_to_dst(int kh) {
         return kh * (jcp.dilate_h + 1) * jcp.ow;
-    };
+    }
     inline int filter_d_to_dst(int kd) {
         return kd * (jcp.dilate_d + 1) * jcp.ow * jcp.oh;
-    };
+    }
 
     inline size_t get_diff_src_offset(int iw_idx, int n_ic_block) {
         const bool is_nxc_layout = is_dsrc_layout_nxc();
@@ -622,13 +622,13 @@ private:
         };
         iw_0 = get_w_position(0);
         iw_1 = get_w_position(1);
-    };
+    }
     bool check_borders(int ur_w, int pad_l, int pad_r, int i_ur, int i_kw) {
         int iw_1, iw_2;
         get_w_positions(ur_w, pad_l, pad_r, i_ur, i_kw, iw_1, iw_2);
 
         return (iw_1 == -1 && iw_2 == -1) ? false : true;
-    };
+    }
     bool get_load_mask(int ur_w, int pad_l, int pad_r, int i_ur, int i_kw,
             Xbyak::Opmask &load_mask) {
         int iw_1, iw_2;
@@ -645,16 +645,16 @@ private:
             rt = false;
 
         return rt;
-    };
+    }
 
     inline dim_t filter_w_to_src(int kw, int ow = 0, int pad_l = 0) {
         int stride_w = jcp.transpose_src ? 1 : jcp.stride_w;
         return kw * (jcp.dilate_w + 1) + ow * stride_w - pad_l;
-    };
-    inline dim_t filter_h_to_src(int kh) { return kh * (jcp.dilate_h + 1); };
+    }
+    inline dim_t filter_h_to_src(int kh) { return kh * (jcp.dilate_h + 1); }
     inline dim_t filter_d_to_src(int kd) {
         return kd * (jcp.dilate_d + 1) * jcp.ih;
-    };
+    }
 
     inline dim_t get_src_offset(dim_t ic_idx, dim_t w_idx, dim_t hd_idx = 0) {
         // For is_src_layout_nxc() the ic_idx index inside the block
@@ -678,7 +678,7 @@ private:
         dim_t icb_str
                 = jcp.ic_block * (is_src_layout_nxc() ? 1 : full_spatial_size);
         return jcp.typesize_in * (isp_off + icb_str * icb + ic_str * ic);
-    };
+    }
 
     inline dim_t get_ddst_offset(dim_t w_idx, dim_t hd_idx = 0) {
         int ow_per_oc = jcp.transpose_dst ? 2 : 1;
@@ -718,17 +718,17 @@ private:
 
     inline void setup_stack_space();
     static const int extern_ic_block_step_stack_size = 0;
-    int ic_block_step_stack_size;
-    int stack_space_needed;
-    int permw_buffer_start;
-    int kd_count_offset;
-    int src_d_offset;
-    int ddst_d_offset;
-    int d_index_offset;
-    int trans_tmp_offset;
-    int ih_dilate_shift;
-    int icb_loop_ker_ptr;
-    int icb_loop_src_ptr;
+    int ic_block_step_stack_size = 0;
+    int stack_space_needed = 0;
+    int permw_buffer_start = 0;
+    int kd_count_offset = 0;
+    int src_d_offset = 0;
+    int ddst_d_offset = 0;
+    int d_index_offset = 0;
+    int trans_tmp_offset = 0;
+    int ih_dilate_shift = 0;
+    int icb_loop_ker_ptr = 0;
+    int icb_loop_src_ptr = 0;
 };
 } // namespace x64
 } // namespace cpu

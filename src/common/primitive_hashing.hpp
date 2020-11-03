@@ -21,7 +21,7 @@
 #include <type_traits>
 
 #include "c_types_map.hpp"
-#include "dnnl.h"
+#include "oneapi/dnnl/dnnl.h"
 #include "primitive_attr.hpp"
 #include "type_helpers.hpp"
 
@@ -53,6 +53,7 @@ struct cached_op_desc_t {
             CASE(matmul)
             case primitive_kind::pooling_v2:
             CASE(pooling)
+            CASE(reduction)
             CASE(reorder)
             CASE(resampling)
             CASE(rnn)
@@ -94,6 +95,7 @@ struct cached_op_desc_t {
             CASE(matmul)
             case primitive_kind::pooling_v2:
             CASE(pooling)
+            CASE(reduction)
             CASE(reorder)
             CASE(resampling)
             CASE(rnn)
@@ -127,6 +129,7 @@ struct cached_op_desc_t {
     DECLARE_CONVERSION_OPERATOR(matmul)
     DECLARE_CONVERSION_OPERATOR(pooling)
     DECLARE_CONVERSION_OPERATOR(pooling_v2)
+    DECLARE_CONVERSION_OPERATOR(reduction)
     DECLARE_CONVERSION_OPERATOR(reorder)
     DECLARE_CONVERSION_OPERATOR(resampling)
     DECLARE_CONVERSION_OPERATOR(rnn)
@@ -157,6 +160,7 @@ struct cached_op_desc_t {
             CASE(matmul)
             case primitive_kind::pooling_v2:
             CASE(pooling)
+            CASE(reduction)
             CASE(reorder)
             CASE(resampling)
             CASE(rnn)
@@ -230,6 +234,7 @@ size_t get_desc_hash(const lrn_desc_t &desc);
 size_t get_desc_hash(const matmul_desc_t &desc);
 size_t get_desc_hash(const pooling_desc_t &desc);
 size_t get_desc_hash(const pooling_v2_desc_t &desc);
+size_t get_desc_hash(const reduction_desc_t &desc);
 size_t get_desc_hash(const reorder_desc_t &desc);
 size_t get_desc_hash(const resampling_desc_t &desc);
 size_t get_desc_hash(const rnn_desc_t &desc);
@@ -305,6 +310,7 @@ struct hash<dnnl::impl::primitive_hashing::key_t> {
             CASE(matmul)
             case primitive_kind::pooling_v2:
             CASE(pooling)
+            CASE(reduction)
             CASE(reorder)
             CASE(resampling)
             CASE(rnn)

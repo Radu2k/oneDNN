@@ -106,10 +106,13 @@ struct jit_conv_conf_t {
     bool with_bias;
     bool with_sum;
     bool with_eltwise;
+    bool with_binary;
+
     bool is_fused_conv;
     int dw_conv_buffer_oc;
 
     post_ops_t::entry_t::eltwise_t eltwise;
+    post_ops_t post_ops;
 
     int nthr, nthr_mb, nthr_g, nthr_oc_b, nthr_ic_b;
 
@@ -179,6 +182,10 @@ struct jit_conv_conf_t {
     bool signed_input;
     bool need_saturation;
     float wei_adj_scale;
+    // zero-point compensation
+    bool src_zero_point;
+    bool dst_zero_point;
+    bool zp_src_is_common; // common, otherwise (TODO) per-channel
 
     bool uses_permw_transposition;
     bool transpose_src;
@@ -189,6 +196,9 @@ struct jit_conv_conf_t {
     // bf16 bwdw conv
     int tr_ow;
     bool is_hw_transp; // spatial dim height-width transposed
+    int spatial_blk_size; // Height/depth block size inside the driver
+    bool global_transpose; // diff_dst & src tensors are transposed in one go
+    bool use_nt_stores_ddst; // Use non temporal stores in diff_dst transform
 
     // Needed for Intel(R) Advanced Matrix Extensions (Intel(R) AMX) kernels
     bool is_nspc; // activations in nwc, nhwc, or ndhwc layout
@@ -384,6 +394,9 @@ struct jit_conv_call_s {
     const void *scales;
     const void *acc_s32;
     const void *compensation;
+    const int32_t *zp_compensation;
+    const int32_t *src_zero_point;
+    const int32_t *dst_zero_point;
     const void *tile_cfg;
     const void *tile_cfg_tail;
     size_t kd_offset;
@@ -434,6 +447,16 @@ struct jit_deconv_call_s {
     const void *bias; /* hack, non-const for backward_bias */
     const void *scales;
     const void *compensation;
+    /*
+     * ptr to table of void * elements that are pointers to post_op binary
+     * src1 tensors
+     */
+    const void *post_ops_binary_rhs_arg_vec;
+    /*
+     * logical (# of elems) offset to the processed output channel
+     * (for broadcasting [1,OC,1,1])
+     */
+    size_t oc_l_off;
     size_t t_overflow;
     size_t b_overflow;
     size_t f_overflow;
@@ -526,6 +549,10 @@ struct jit_1x1_conv_conf_t {
     data_type_t dst_dt;
     bool signed_input;
     float wei_adj_scale;
+    // zero-point compensation
+    bool src_zero_point;
+    bool dst_zero_point;
+    bool zp_src_is_common; // common, otherwise (TODO) per-channel
 
     cpu_isa_t isa;
     bool uses_permw_transposition;
@@ -540,6 +567,9 @@ struct jit_1x1_conv_call_s {
     const void *scales;
     const void *compensation;
     const void *store_buffer;
+    const int32_t *zp_compensation;
+    const int32_t *src_zero_point;
+    const int32_t *dst_zero_point;
 
     size_t load_dim;
     size_t bcast_dim;
@@ -582,6 +612,10 @@ struct jit_pool_conf_t {
     }
 
     cpu_isa_t isa;
+    post_ops_t post_ops;
+    bool with_postops;
+    bool with_eltwise;
+    bool with_binary;
 };
 
 struct jit_pool_call_s {
@@ -591,6 +625,8 @@ struct jit_pool_call_s {
     const void *src_prf;
     const void *dst_prf;
     const void *indices_prf;
+    const void *post_ops_binary_rhs_arg_vec;
+    size_t c_elem_off;
     size_t zero_ih;
     size_t zero_id;
     const void *zero_ptr;

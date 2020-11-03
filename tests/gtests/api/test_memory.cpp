@@ -17,13 +17,14 @@
 #include "dnnl_test_common.hpp"
 #include "gtest/gtest.h"
 
-#include "dnnl.h"
-#include "dnnl.hpp"
+#include "oneapi/dnnl/dnnl.h"
+#include "oneapi/dnnl/dnnl.hpp"
 
 #include <limits>
 #include <new>
 
 #if DNNL_WITH_SYCL
+#include "oneapi/dnnl/dnnl_sycl.hpp"
 #include <CL/sycl.hpp>
 #endif
 
@@ -87,7 +88,7 @@ TEST_P(memory_test_cpp, OutOfMemory) {
     auto sz = std::numeric_limits<memory::dim>::max();
 #if DNNL_WITH_SYCL
     if (is_sycl) {
-        auto dev = eng.get_sycl_device();
+        auto dev = sycl_interop::get_device(eng);
         auto max_alloc_size
                 = dev.get_info<cl::sycl::info::device::max_mem_alloc_size>();
         sz = (max_alloc_size < sz) ? max_alloc_size + 1 : sz;
@@ -98,7 +99,7 @@ TEST_P(memory_test_cpp, OutOfMemory) {
     auto tag = memory::format_tag::x;
     memory::desc md({sz}, dt, tag);
     try {
-        memory mem(md, eng);
+        auto mem = test::make_memory(md, eng);
         ASSERT_NE(mem.get_data_handle(), nullptr);
     } catch (const dnnl::error &e) {
         ASSERT_EQ(e.status, dnnl_out_of_memory);

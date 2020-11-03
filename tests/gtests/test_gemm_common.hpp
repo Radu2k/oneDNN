@@ -21,13 +21,22 @@
 #include "dnnl_thread.hpp"
 #include "gtest/gtest.h"
 
-#include "dnnl.h"
-#include "dnnl_types.h"
+#include "oneapi/dnnl/dnnl.h"
+#include "oneapi/dnnl/dnnl_types.h"
+
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+#include "oneapi/dnnl/dnnl_ocl.hpp"
+#endif
+
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
+#include "oneapi/dnnl/dnnl_sycl.hpp"
+#endif
 
 #if DNNL_X64
 #include "src/cpu/x64/cpu_isa_traits.hpp"
 #endif
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 #include <type_traits>
@@ -132,36 +141,12 @@ inline test_params make_test_params_pack(
     return params;
 }
 
-/* FIXME: remove this when possible.
- * Currently, USM suffers from two issues:
- * 1. Accessing it from multiple threads might lead to old (not updated results)
- * 2. USM pointers accessed on host only from TBB parallel region could also
- *    be updated at random point in time.
- * Accessing the data (traversing all pages) from the main thread seems to fix
- * both issues for now.
- */
-template <typename c_dt>
-void maybe_sync_mem(const test_memory &c_mem, int64_t size) {
-#if defined(DNNL_SYCL_DPCPP) && defined(DNNL_USE_DPCPP_USM)
-    size *= sizeof(c_dt);
-
-    auto c = map_memory<char>(c_mem);
-
-    const size_t step = 4096;
-    char *c_begin = c, *c_end = c_begin + size;
-
-    for (volatile char *c_ptr = c_begin; c_ptr < c_end; c_ptr += step)
-        *c_ptr ^= 0x3c;
-    *(c_end - 1) ^= 0x3c;
-
-    for (volatile char *c_ptr = c_begin; c_ptr < c_end; c_ptr += step)
-        *c_ptr ^= 0x3c;
-    *(c_end - 1) ^= 0x3c;
-#else
-    UNUSED(c_mem);
-    UNUSED(size);
-#endif
+#if defined(DNNL_SYCL_DPCPP)
+bool is_memory_kind_buffer(const test_memory &mem) {
+    return sycl_interop::get_memory_kind(mem.get())
+            == sycl_interop::memory_kind::buffer;
 }
+#endif
 
 /* Test implementation description.
  *
@@ -279,6 +264,13 @@ void prepare_matrix(const test_memory &M_mem, int64_t off_beg, layout_t layout,
             });
         }
     }
+
+    // To test if igemm row/col sum are correct when performing sign/zero
+    // extensions.
+    if (dt == memory::data_type::u8)
+        M[off_beg] = data_t(UINT8_MAX);
+    else if (dt == memory::data_type::s8)
+        M[off_beg] = data_t(-64);
 }
 
 /** Extends columns of the matrix M according to the mapper_c */
@@ -329,8 +321,6 @@ struct ref_gemm {
     static void call(const test_params &p, int64_t M, int64_t N,
             const test_memory &a_mem, const test_memory &b_mem,
             const test_memory &c_mem, const test_memory &) {
-        maybe_sync_mem<c_dt>(c_mem, p.off.c + p.M * p.ldc);
-
         auto a = map_memory<a_dt>(a_mem);
         auto b = map_memory<b_dt>(b_mem);
         auto c = map_memory<c_dt>(c_mem);
@@ -411,8 +401,6 @@ struct ref_gemm<a_dt, b_dt, int32_t> {
 template <typename a_dt, typename c_dt>
 void compare(const test_params &p, const test_memory &c_mem,
         const test_memory &c_ref_mem) {
-    maybe_sync_mem<c_dt>(c_mem, p.off.c + p.M * p.ldc);
-
     using data_type = memory::data_type;
     auto c = map_memory<c_dt>(c_mem);
     auto c_ref = map_memory<c_dt>(c_ref_mem);
@@ -462,16 +450,7 @@ inline test_memory get_matrix_memory(
         memory::dim n, memory::dim off, engine &eng) {
     auto d = create_md(
             {n + off}, data_traits<T>::data_type, memory::format_tag::x);
-#if defined(DNNL_SYCL_DPCPP) && defined(DNNL_USE_DPCPP_USM)
-    auto dev = eng.get_sycl_device();
-    auto ctx = eng.get_sycl_context();
-    auto f_malloc
-            = [=](size_t sz) { return cl::sycl::malloc_shared(sz, dev, ctx); };
-    auto f_free = [=](void *ptr) { return cl::sycl::free(ptr, ctx); };
-    return test_memory(d, eng, f_malloc, f_free);
-#else
     return test_memory(d, eng);
-#endif
 }
 
 template <typename a_dt, typename b_dt, typename c_dt>

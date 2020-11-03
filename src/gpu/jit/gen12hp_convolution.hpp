@@ -54,7 +54,6 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
                     && is_fwd() && data_types_ok()
                     && attr()->has_default_values(
                             attr_skip_mask, desc()->dst_desc.data_type)
-                    && post_ops_ok(attr())
                     && IMPLICATION(!attr()->output_scales_.has_default_values(),
                             utils::one_of(src_md_.data_type, s8, u8)
                                     && utils::one_of(
@@ -99,24 +98,6 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
 
             // Not supported.
             return false;
-        }
-
-        bool post_ops_ok(const primitive_attr_t *attr) const override {
-            if (!gpu_convolution_fwd_pd_t::post_ops_ok(attr)) return false;
-
-            auto &po = attr->post_ops_;
-
-            // Binary is not supported.
-            if (po.find(primitive_kind::binary) != -1) return false;
-
-            for (int i = 0; i < po.len(); i++) {
-                if (po.entry_[i].is_eltwise()) {
-                    if (!jit_eltwise_injector_f32<ngen::HW::Gen12HP>::
-                                    is_supported(po.entry_[i].eltwise.alg))
-                        return false;
-                }
-            }
-            return true;
         }
 
         status_t init_conf(engine_t *engine);

@@ -280,6 +280,10 @@ status_t gen12lp_x8s8s32x_1x1_convolution_fwd_t::execute_forward(
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
     status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
+    if (!post_ops_preserves_zeroes(ctx, conf.attr_info.all_post_ops)) {
+        ctx.memory(DNNL_ARG_DST)->zero_pad(ctx.stream());
+    }
+
     return status;
 }
 

@@ -59,7 +59,11 @@ struct gemm_inner_product_fwd_t : public gpu_primitive_t {
             attr_info_ = attr_info_t::create(attr());
 
             bool ok = is_fwd() && set_default_params() == status::success
-                    && !has_zero_dim_memory() && attr()->post_ops_.len() <= 2
+                    && !has_zero_dim_memory()
+                    && utils::one_of(true,
+                            expect_data_types(f16, f16, f16, f16, f16),
+                            expect_data_types(f32, f32, f32, f32, f32))
+                    && attr()->post_ops_.len() <= 2
                     && IMPLICATION(attr()->post_ops_.len() == 2,
                             attr()->post_ops_.find(dnnl_sum) == 0)
 

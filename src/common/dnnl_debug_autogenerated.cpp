@@ -20,8 +20,8 @@
 
 #include <assert.h>
 
-#include "dnnl_debug.h"
-#include "dnnl_types.h"
+#include "oneapi/dnnl/dnnl_debug.h"
+#include "oneapi/dnnl/dnnl_types.h"
 
 const char *dnnl_status2str(dnnl_status_t v) {
     if (v == dnnl_success) return "success";
@@ -67,6 +67,12 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_acbd) return "acbd";
     if (v == dnnl_abcde) return "abcde";
     if (v == dnnl_abcdef) return "abcdef";
+    if (v == dnnl_abcdefg) return "abcdefg";
+    if (v == dnnl_abcdefgh) return "abcdefgh";
+    if (v == dnnl_abcdefghi) return "abcdefghi";
+    if (v == dnnl_abcdefghij) return "abcdefghij";
+    if (v == dnnl_abcdefghijk) return "abcdefghijk";
+    if (v == dnnl_abcdefghijkl) return "abcdefghijkl";
     if (v == dnnl_abdc) return "abdc";
     if (v == dnnl_abdec) return "abdec";
     if (v == dnnl_abdfce) return "abdfce";
@@ -92,6 +98,14 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_AB48a32b) return "AB48a32b";
     if (v == dnnl_BA4b8a8b2a) return "BA4b8a8b2a";
     if (v == dnnl_BA4b8a8b4a) return "BA4b8a8b4a";
+    if (v == dnnl_abced) return "abced";
+    if (v == dnnl_abcdfe) return "abcdfe";
+    if (v == dnnl_abcdegf) return "abcdegf";
+    if (v == dnnl_abcdefhg) return "abcdefhg";
+    if (v == dnnl_abcdefgih) return "abcdefgih";
+    if (v == dnnl_abcdefghji) return "abcdefghji";
+    if (v == dnnl_abcdefghikj) return "abcdefghikj";
+    if (v == dnnl_abcdefghijlk) return "abcdefghijlk";
     if (v == dnnl_Abc16a) return "Abc16a";
     if (v == dnnl_ABc16a16b) return "ABc16a16b";
     if (v == dnnl_ABc32a16b) return "ABc32a16b";
@@ -114,6 +128,15 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_ABc8a8b) return "ABc8a8b";
     if (v == dnnl_ABc8a2b) return "ABc8a2b";
     if (v == dnnl_ABc8a4b) return "ABc8a4b";
+    if (v == dnnl_AB16b16a) return "AB16b16a";
+    if (v == dnnl_AB16b32a) return "AB16b32a";
+    if (v == dnnl_AB16b64a) return "AB16b64a";
+    if (v == dnnl_AB8b16a2b) return "AB8b16a2b";
+    if (v == dnnl_AB8b32a2b) return "AB8b32a2b";
+    if (v == dnnl_AB8b64a2b) return "AB8b64a2b";
+    if (v == dnnl_AB4b16a4b) return "AB4b16a4b";
+    if (v == dnnl_AB4b32a4b) return "AB4b32a4b";
+    if (v == dnnl_AB4b64a4b) return "AB4b64a4b";
     if (v == dnnl_aBc8b) return "aBc8b";
     if (v == dnnl_ABc8b16a2b) return "ABc8b16a2b";
     if (v == dnnl_BAc8a16b2a) return "BAc8a16b2a";
@@ -301,6 +324,10 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_aCBdef4c8b8c4b) return "aCBdef4c8b8c4b";
     if (v == dnnl_BAcde16a16b) return "BAcde16a16b";
     if (v == dnnl_aCBdef16b16c) return "aCBdef16b16c";
+    if (v == dnnl_AB32a32b8a4b) return "AB32a32b8a4b";
+    if (v == dnnl_AB8a4b) return "AB8a4b";
+    if (v == dnnl_AB32a32b8a2b) return "AB32a32b8a2b";
+    if (v == dnnl_AB8a2b) return "AB8a2b";
     if (v == dnnl_format_tag_last) return "format_tag_last";
     if (v == dnnl_x) return "x";
     if (v == dnnl_nc) return "nc";
@@ -373,6 +400,15 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_NCw40n32c) return "NCw40n32c";
     if (v == dnnl_NChw40n32c) return "NChw40n32c";
     if (v == dnnl_NCdhw40n32c) return "NCdhw40n32c";
+    if (v == dnnl_OI16i16o) return "OI16i16o";
+    if (v == dnnl_OI16i32o) return "OI16i32o";
+    if (v == dnnl_OI16i64o) return "OI16i64o";
+    if (v == dnnl_OI8i16o2i) return "OI8i16o2i";
+    if (v == dnnl_OI8i32o2i) return "OI8i32o2i";
+    if (v == dnnl_OI8i64o2i) return "OI8i64o2i";
+    if (v == dnnl_OI4i16o4i) return "OI4i16o4i";
+    if (v == dnnl_OI4i32o4i) return "OI4i32o4i";
+    if (v == dnnl_OI4i64o4i) return "OI4i64o4i";
     if (v == dnnl_IOw16o16i) return "IOw16o16i";
     if (v == dnnl_IOw16i16o) return "IOw16i16o";
     if (v == dnnl_OIw16i16o) return "OIw16i16o";
@@ -444,6 +480,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_IOdhw16o16i) return "IOdhw16o16i";
     if (v == dnnl_Goiw16g) return "Goiw16g";
     if (v == dnnl_Goiw8g) return "Goiw8g";
+    if (v == dnnl_Goiw4g) return "Goiw4g";
     if (v == dnnl_gIOw16o16i) return "gIOw16o16i";
     if (v == dnnl_gIOw16i16o) return "gIOw16i16o";
     if (v == dnnl_gOIw16i16o) return "gOIw16i16o";
@@ -492,6 +529,7 @@ const char *dnnl_fmt_tag2str(dnnl_format_tag_t v) {
     if (v == dnnl_gOIhw4o4i) return "gOIhw4o4i";
     if (v == dnnl_gOihw4o) return "gOihw4o";
     if (v == dnnl_Goihw8g) return "Goihw8g";
+    if (v == dnnl_Goihw4g) return "Goihw4g";
     if (v == dnnl_gOIhw8i16o2i) return "gOIhw8i16o2i";
     if (v == dnnl_gOIhw8i8o) return "gOIhw8i8o";
     if (v == dnnl_gOIhw8o16i2o) return "gOIhw8o16i2o";
@@ -595,6 +633,7 @@ const char *dnnl_prim_kind2str(dnnl_primitive_kind_t v) {
     if (v == dnnl_matmul) return "matmul";
     if (v == dnnl_resampling) return "resampling";
     if (v == dnnl_pooling_v2) return "pooling_v2";
+    if (v == dnnl_reduction) return "reduction";
     if (v == dnnl_primitive_kind_max) return "primitive_kind_max";
     assert(!"unknown prim_kind");
     return "unknown prim_kind";
@@ -646,8 +685,19 @@ const char *dnnl_alg_kind2str(dnnl_alg_kind_t v) {
     if (v == dnnl_binary_mul) return "binary_mul";
     if (v == dnnl_binary_max) return "binary_max";
     if (v == dnnl_binary_min) return "binary_min";
+    if (v == dnnl_binary_div) return "binary_div";
+    if (v == dnnl_binary_sub) return "binary_sub";
     if (v == dnnl_resampling_nearest) return "resampling_nearest";
     if (v == dnnl_resampling_linear) return "resampling_linear";
+    if (v == dnnl_reduction_max) return "reduction_max";
+    if (v == dnnl_reduction_min) return "reduction_min";
+    if (v == dnnl_reduction_sum) return "reduction_sum";
+    if (v == dnnl_reduction_mul) return "reduction_mul";
+    if (v == dnnl_reduction_mean) return "reduction_mean";
+    if (v == dnnl_reduction_norm_lp_max) return "reduction_norm_lp_max";
+    if (v == dnnl_reduction_norm_lp_sum) return "reduction_norm_lp_sum";
+    if (v == dnnl_reduction_norm_lp_power_p_max) return "reduction_norm_lp_power_p_max";
+    if (v == dnnl_reduction_norm_lp_power_p_sum) return "reduction_norm_lp_power_p_sum";
     assert(!"unknown alg_kind");
     return "unknown alg_kind";
 }

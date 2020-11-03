@@ -150,14 +150,7 @@ void _jit_avx512_core_bf16_fwd_kernel<Vmm>::store_dst(int ur_w) {
     }
 
     if (jcp.with_eltwise) {
-        if (ur_w == jcp.ur_w) {
-            eltwise_injector_->compute_vector_range(
-                    0, jcp.nb_oc_blocking * jcp.ur_w);
-        } else {
-            for (int k = 0; k < jcp.nb_oc_blocking; k++)
-                eltwise_injector_->compute_vector_range(
-                        k * jcp.ur_w, k * jcp.ur_w + ur_w);
-        }
+        eltwise_injector_->compute_vector_range(0, jcp.nb_oc_blocking * ur_w);
     }
 
     L(store_label);
@@ -1702,12 +1695,8 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::
     auto src_addr = [=](int i_iw, int i_ic, ptrdiff_t extra_offset = 0,
                             bool vnni_bcast = false) {
         auto local_offset = get_src_offset(i_ic, i_iw);
-        if (vnni_bcast)
-            return EVEX_compress_addr(
-                    reg_src, local_offset + src_offset + extra_offset, true);
-        else
-            return EVEX_compress_addr(
-                    reg_src, local_offset + src_offset + extra_offset);
+        return EVEX_compress_addr(
+                reg_src, local_offset + src_offset + extra_offset, vnni_bcast);
     };
     auto ddst_addr = [=](int i_ur) {
         auto ow_scale = 2;
@@ -1843,11 +1832,7 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::
     auto src_addr = [=](int i_iw, int i_ic, ptrdiff_t extra_offset = 0,
                             bool vnni_bcast = false) {
         int local_offset = i_ic * reorder_bytes + 2 * jcp.typesize_in * i_iw;
-
-        if (vnni_bcast)
-            return EVEX_compress_addr(rsp, local_offset, true);
-        else
-            return EVEX_compress_addr(rsp, local_offset);
+        return EVEX_compress_addr(rsp, local_offset, vnni_bcast);
     };
     auto ddst_addr = [=](int i_ur) {
         auto ow_scale = 2;
@@ -2010,12 +1995,17 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::
                 auto acc = zmm_ker(i_kw, i_ic);
                 auto ddst = zmm_ddst(i_ur);
 
-                if (!isa_has_bf16(jcp.isa)) {
+                const bool isa_supports_bf16 = isa_has_bf16(jcp.isa);
+                auto src_stack_addr
+                        = src_addr(i_iw, i_ic, 0, isa_supports_bf16);
+
+                if (isa_supports_bf16)
+                    vdpbf16ps(acc, ddst, src_stack_addr);
+                else {
                     auto src = Zmm(zmm_src_reg);
-                    vpbroadcastd(src, src_addr(i_iw, i_ic, 0));
+                    vpbroadcastd(src, src_stack_addr);
                     bf16_emu_->vdpbf16ps(acc, ddst, src);
-                } else
-                    vdpbf16ps(acc, ddst, src_addr(i_iw, i_ic, 0, true));
+                }
             }
         }
     }
@@ -2717,7 +2707,7 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32 ::
             add(reg_src, get_src_offset(0, 0, filter_h_to_src(1)));
             add(reg_kernel, get_kernel_offset(0, jcp.kw));
         } else if (jcp.is_1stconv && !jcp.transpose_src) {
-            // Fixup reg_src to to point to the correct location
+            // Fixup reg_src to point to the correct location
             safe_add(reg_src,
                     get_src_offset(0, 0, filter_h_to_src(1))
                             - src_offset * (jcp.ic_block / ic_block_step),
@@ -4097,8 +4087,9 @@ status_t jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_conf(
                     jcp.l_pad < max_ur_w && ext_kw <= jcp.ow);
     if (!boundaries_ok) return status::unimplemented;
 
+    const int max_kw = jcp.is_1stconv ? 24 : 14;
     /* yet another common check */
-    if (jcp.kw > 14) return status::unimplemented;
+    if (jcp.kw > max_kw) return status::unimplemented;
 
     jcp.wei_dt = diff_weights_d.data_type();
 
@@ -4127,7 +4118,7 @@ status_t jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_conf(
     // jcp.uses_permw_transposition = false shows better performance for
     // resnet50 v1.5 problems
     // jcp.uses_permw_transposition = true works better for 3d 1x1x1 problems
-    const bool is_permw_appicable
+    const bool is_permw_applicable
             = !jcp.is_1stconv && jcp.stride_w == 1 && jcp.dilate_w == 0;
     const bool apply_permw_blocked = !is_data_layout_nxc && ndims == 5
             && jcp.kw == 1 && jcp.ic_block_step > 4;
@@ -4135,7 +4126,7 @@ status_t jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_conf(
     const bool apply_permw_nxc = is_data_layout_nxc && ndims == 3
             && nstl::max(jcp.ic, jcp.oc) <= 32;
     jcp.uses_permw_transposition
-            = is_permw_appicable && (apply_permw_blocked || apply_permw_nxc);
+            = is_permw_applicable && (apply_permw_blocked || apply_permw_nxc);
 
     jcp.kernel_kind = embd_bcast;
     if (jcp.uses_permw_transposition && jcp.kw <= 3)
@@ -4146,13 +4137,87 @@ status_t jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_conf(
     if (jcp.uses_permw_transposition) {
         jcp.transpose_src = false;
         jcp.transpose_dst = false;
-    } else if (jcp.is_1stconv && !is_data_layout_nxc) {
+    } else if (jcp.is_1stconv && IMPLICATION(is_data_layout_nxc, jcp.ic == 1)) {
         jcp.transpose_src = false;
         jcp.transpose_dst = true;
     } else {
         jcp.transpose_src = true;
         jcp.transpose_dst = true;
     }
+
+    const bool is_2d = (ndims == 4);
+    const bool is_3d = (ndims == 5);
+    jcp.typesize_in = sizeof(bfloat16_t);
+    jcp.typesize_out = sizeof(float);
+    const dim_t cache_l2
+            = platform::get_per_core_cache_size(2) / jcp.typesize_out;
+
+    // Observation: Given large 3D shapes with large filter size, 1st nspc
+    // bwd_w convolution benefits from non-temporal stores in diff_dst
+    // transformation but not so much from blocking w.r.t. depth dimension
+    // In particular, it's optimized for i3D 1st convolution
+    const bool nt_stores_ok = is_data_layout_nxc
+            && dim_t(jcp.oc) * jcp.od * jcp.oh * jcp.ow >= 2 * cache_l2
+            && jcp.kd >= 6 && jcp.kh >= 6 && jcp.kw >= 6;
+
+    // Performancewise transposition of diff_dst tensor is one of the major
+    // bottleneck in 1st convolution. Thus for large diff_dst size we can
+    // potentially further split up transposition in smaller chunks to achieve
+    // better cache reuse
+    const bool large_diff_dst_size
+            = dim_t(jcp.oc) * jcp.od * jcp.oh * jcp.ow >= cache_l2;
+
+    // For two dimensional diff_dst tensor blocking along height demands
+    // non-trivial work along width dimension. Similarly, for three dimensional
+    // diff_dst tensor enough work must be present in the joint width-height
+    // dimension. Finally, there is no blocking along the width dimension
+    const bool blocking_ok = large_diff_dst_size
+            && IMPLICATION(is_2d, jcp.ow >= 124 && jcp.oh > 1)
+            && IMPLICATION(is_3d, jcp.ow * jcp.oh >= 64 * 124 && jcp.od > 1)
+            && (is_2d || is_3d);
+
+    // TODO: Find more shapes (especially 3D with large spatials) for which
+    // local transposition will be beneficial. Furthermore, for TBB threads
+    // more shapes can potentially benefit from spatial blocking
+    bool use_spatial_blocking = jcp.is_1stconv && !nt_stores_ok && blocking_ok;
+    int optimal_blk_size = is_3d ? jcp.od : is_2d ? jcp.oh : jcp.ow;
+    if (use_spatial_blocking) {
+        // Default value, works best most of the times
+        // TODO: For 3D shapes with intermediate sizes especially the ones not
+        // belonging to the 1st convolution, we potentially have more scope
+        // for optimization
+        optimal_blk_size = 1;
+
+        // Diff_weights computation can be roughly broken down into
+        // the following three steps
+        // = [Src transform*] + [Diff_dst transform] + [Weights computation]
+        //
+        // where the bottleneck lies with diff_dst transform that spatial
+        // blocking tries to mitigate by avoiding cache thrashing.
+        // *note: Src transform may not always be needed.
+        //
+        // In an idealistic scenario, optimal_blk_size will be an explicit
+        // function of the following form
+        // optimal_blk_size = f(od, oh, ow, oc)
+        //
+        // though owing to lack of data points w.r.t. 1st convolution shapes it
+        // is approximated by one with few exceptional cases [found by manual
+        // optimization] as written below
+
+        if (is_2d && utils::one_of(jcp.oh, 149, 300, 224, 512, 608)) {
+            switch (jcp.oh) {
+                case 149: optimal_blk_size = 10; break;
+                case 224: optimal_blk_size = 56; break;
+                case 300: optimal_blk_size = 30; break;
+                case 512: optimal_blk_size = 8; break;
+                case 608: optimal_blk_size = 10; break;
+            }
+        }
+    }
+
+    jcp.global_transpose = dnnl_thr_syncable() && !use_spatial_blocking;
+    jcp.use_nt_stores_ddst = jcp.global_transpose && nt_stores_ok;
+    jcp.spatial_blk_size = optimal_blk_size;
 
     const bool padding_ok = IMPLICATION(!jcp.transpose_src,
             jcp.l_pad < max_ur_w && jcp.r_pad < max_ur_w
@@ -4176,9 +4241,6 @@ status_t jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_conf(
 
     jcp.tr_src_num_guard_elems = tr_pad; // upper bound
     jcp.tr_ow = jcp.transpose_dst ? rnd_up(jcp.ow, 2) : jcp.ow;
-
-    jcp.typesize_in = sizeof(bfloat16_t);
-    jcp.typesize_out = sizeof(float);
 
     bool args_ok = true
             && IMPLICATION(!is_data_layout_nxc,
@@ -4230,14 +4292,14 @@ status_t jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_conf(
         // TODO: Optimize memory allocation when threaded on height and depth
         if (jcp.transpose_src) {
             jcp.tr_src_buf_size = jcp.tr_iw * jcp.ic_block * jcp.ih * jcp.id;
-            jcp.tr_src_buf_count = dnnl_thr_syncable()
+            jcp.tr_src_buf_count = jcp.global_transpose
                     ? jcp.nthr_mb * jcp.nb_ic * jcp.ngroups
                     : jcp.nthr;
         }
         if (jcp.transpose_dst) {
             jcp.tr_diff_dst_buf_size
                     = jcp.tr_ow * jcp.oc_block * jcp.oh * jcp.od;
-            jcp.tr_diff_dst_buf_count = dnnl_thr_syncable()
+            jcp.tr_diff_dst_buf_count = jcp.global_transpose
                     ? jcp.nthr_mb * jcp.nb_oc * jcp.ngroups
                     : jcp.nthr;
         }
@@ -4261,7 +4323,7 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_scratchpad(
         scratchpad.book(key_conv_tr_src, tr_src_size, jcp.typesize_in);
 
         /* prepare synchronization contexts */
-        if (dnnl_thr_syncable() && jcp.nthr_oc_b > 1) {
+        if (jcp.global_transpose && jcp.nthr_oc_b > 1) {
             const int tr_src_bctx_size = jcp.nthr / jcp.nthr_oc_b;
             scratchpad.book<simple_barrier::ctx_t>(
                     key_conv_tr_src_bctx, tr_src_bctx_size);
@@ -4270,11 +4332,12 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_scratchpad(
         const size_t tr_diff_dst_size
                 = jcp.tr_diff_dst_buf_count * jcp.tr_diff_dst_buf_size;
 
-        scratchpad.book(
-                key_conv_tr_diff_dst, tr_diff_dst_size, jcp.typesize_in);
+        const size_t min_align = jcp.use_nt_stores_ddst ? 64 : jcp.typesize_in;
+        scratchpad.book(key_conv_tr_diff_dst, tr_diff_dst_size, jcp.typesize_in,
+                min_align);
 
         /* prepare synchronization contexts */
-        if (dnnl_thr_syncable() && jcp.nthr_ic_b > 1) {
+        if (jcp.global_transpose && jcp.nthr_ic_b > 1) {
             const size_t tr_diff_dst_bctx_size = jcp.nthr / jcp.nthr_ic_b;
             scratchpad.book<simple_barrier::ctx_t>(
                     key_conv_tr_diff_dst_bctx, tr_diff_dst_bctx_size);
@@ -4302,7 +4365,7 @@ void jit_avx512_core_bf16_conv_bwd_weights_kernel_f32::init_scratchpad(
         scratchpad.book<float>(
                 key_conv_wei_bia_reduction, wei_bia_reduction_size);
 
-        if (dnnl_thr_syncable())
+        if (jcp.global_transpose)
             scratchpad.book<simple_barrier::ctx_t>(
                     key_conv_wei_bia_reduction_bctx, 1);
     }

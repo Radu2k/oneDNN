@@ -21,6 +21,7 @@
 #include "gpu/ocl/ocl_utils.hpp"
 #include "gpu/zero_pad_struct.h"
 #include "sycl/level_zero_utils.hpp"
+#include "sycl/sycl_c_types_map.hpp"
 #include "sycl/sycl_interop_gpu_kernel.hpp"
 #include "sycl/sycl_stream.hpp"
 #include "sycl/sycl_utils.hpp"
@@ -196,8 +197,8 @@ status_t sycl_interop_gpu_kernel_t::parallel_for(stream_t &stream,
                 if (*mem_storage) {
                     auto *sycl_mem_storage = utils::downcast<
                             const sycl_memory_storage_base_t *>(mem_storage);
-                    switch (sycl_mem_storage->memory_api_kind()) {
-                        case memory_api_kind_t::buffer: {
+                    switch (sycl_mem_storage->memory_kind()) {
+                        case memory_kind::buffer: {
                             auto *m = utils::downcast<
                                     const sycl_buffer_memory_storage_t *>(
                                     mem_storage);
@@ -209,7 +210,7 @@ status_t sycl_interop_gpu_kernel_t::parallel_for(stream_t &stream,
                             break;
                         }
 #ifdef DNNL_SYCL_DPCPP
-                        case memory_api_kind_t::usm: {
+                        case memory_kind::usm: {
                             auto *m = utils::downcast<
                                     const sycl_usm_memory_storage_t *>(
                                     mem_storage);

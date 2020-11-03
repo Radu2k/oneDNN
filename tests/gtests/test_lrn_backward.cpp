@@ -19,7 +19,7 @@
 #include "dnnl_test_common.hpp"
 #include "gtest/gtest.h"
 
-#include "dnnl.hpp"
+#include "oneapi/dnnl/dnnl.hpp"
 
 namespace dnnl {
 
@@ -267,7 +267,7 @@ protected:
         std::unordered_map<int, memory> args
                 = {{DNNL_ARG_SRC, src->get()}, {DNNL_ARG_DST, dst->get()}};
         auto workspace_md = lrn_fwd_prim_desc.workspace_desc();
-        workspace = memory(workspace_md, eng);
+        workspace = test::make_memory(workspace_md, eng);
         args.insert({DNNL_ARG_WORKSPACE, workspace});
         l.execute(strm, args);
         strm.wait();

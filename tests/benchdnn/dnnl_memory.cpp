@@ -23,7 +23,12 @@
 #include <CL/sycl.hpp>
 #endif
 
-#include "dnnl.hpp"
+#include "oneapi/dnnl/dnnl.hpp"
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+#include "oneapi/dnnl/dnnl_ocl.hpp"
+#elif DNNL_GPU_RUNTIME == DNNL_RUNTIME_DPCPP
+#include "oneapi/dnnl/dnnl_sycl.hpp"
+#endif
 
 #include "dnn_types.hpp"
 #include "dnnl_common.hpp"
@@ -66,6 +71,7 @@ int init_md(dnnl_memory_desc_t *md, int ndims, const dnnl_dims_t dims,
             pos--;
 
         int dim_idx = std::tolower(tag[pos0]) - 'a';
+        if (dim_idx >= ndims) return FAIL;
         int block_str_len = pos0 - pos - 1;
         int block = (block_str_len == 0)
                 ? 1
@@ -121,17 +127,8 @@ dnn_mem_t dnn_mem_t::create_from_host_ptr(
     assert(eng_kind == dnnl_cpu);
     (void)eng_kind;
 
-    std::shared_ptr<void> handle;
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_SYCL
-    using buf_type = cl::sycl::buffer<uint8_t, 1>;
-    size_t sz = dnnl_memory_desc_get_size(&md);
-    handle.reset(new buf_type((uint8_t *)host_ptr, cl::sycl::range<1>(sz)),
-            [](void *ptr) { delete (buf_type *)ptr; });
-
-#else
-    handle.reset(host_ptr, [](void *) {});
-#endif
-    return dnn_mem_t(md, engine, handle.get());
+    // XXX: assumption that SYCL works fine with native host pointers
+    return dnn_mem_t(md, engine, host_ptr);
 }
 
 #if defined(_WIN32) && !defined(__GNUC__)
@@ -182,14 +179,14 @@ static size_t get_gpu_ram_size() {
     cl_int status = CL_SUCCESS;
     // Get single device attached to the engine.
     engine_t engine_tgt(engine_tgt_kind);
-    cl_device_id ocl_device = eng.get_ocl_device();
+    cl_device_id ocl_device = dnnl::ocl_interop::get_device(eng);
 
     cl_ulong ram_size = 0;
     status = clGetDeviceInfo(ocl_device, CL_DEVICE_GLOBAL_MEM_SIZE,
             sizeof(cl_ulong), &ram_size, nullptr);
     if (status == CL_SUCCESS) return (size_t)ram_size;
 #elif DNNL_GPU_RUNTIME == DNNL_RUNTIME_DPCPP
-    auto sycl_dev = eng.get_sycl_device();
+    auto sycl_dev = dnnl::sycl_interop::get_device(eng);
     return (size_t)sycl_dev.get_info<cl::sycl::info::device::global_mem_size>();
 #endif
     return 0;
@@ -262,8 +259,8 @@ int dnn_mem_t::check_mem_size(const_dnnl_primitive_desc_t const_pd) {
 // Returns physical offset by logical one. Logical offset is represented by an
 // array pos. If is_pos_padded is true pos represents the position in already
 // padded area.
-static dnnl_dim_t md_off_v(const dnnl_memory_desc_t &md, const dnnl_dims_t pos,
-        bool is_pos_padded = false) {
+dnnl_dim_t md_off_v(const dnnl_memory_desc_t &md, const dnnl_dims_t pos,
+        bool is_pos_padded) {
     assert(md.format_kind == dnnl_blocked);
     const auto &blk = md.format_desc.blocking;
 

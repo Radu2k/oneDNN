@@ -48,9 +48,9 @@ private:
     using opmask_t = const Xbyak::Opmask;
 
     enum { typesize = sizeof(float), transpose_size = 16, small_spatial = 14 };
-    int src_stride, tr_src_stride;
-    int tail;
-    bool enable_prefetch;
+    int src_stride = 0, tr_src_stride = 0;
+    int tail = 0;
+    bool enable_prefetch = false;
 
     opmask_t k3333 = k1;
     opmask_t k5555 = k2;
@@ -356,9 +356,9 @@ private:
         transpose_size = 16,
         small_spatial = 14
     };
-    size_t src_stride, tr_src_stride;
-    int tail;
-    bool enable_prefetch;
+    size_t src_stride = 0, tr_src_stride = 0;
+    int tail = 0;
+    bool enable_prefetch = false;
 
     opmask_t kFFFF = k1;
     opmask_t k5555 = k2;
@@ -794,9 +794,9 @@ private:
         transpose_size = 16,
         small_spatial = 14
     };
-    size_t src_stride, tr_src_stride;
-    int tail;
-    bool enable_prefetch;
+    size_t src_stride = 0, tr_src_stride = 0;
+    int tail = 0;
+    bool enable_prefetch = false;
 
     opmask_t kFF = k1;
     opmask_t mask_lo = k2;
@@ -933,8 +933,8 @@ void jit_trans_ow_oc_t::generate() {
     src_stride = src_mult * typesize;
     tr_src_stride = oc_block * typesize;
 
-    bool nontemporal_stores = false;
-    enable_prefetch = ow > small_spatial ? true : false;
+    bool nontemporal_stores = conf_->use_nt_stores_ddst;
+    enable_prefetch = ow > small_spatial;
 
     const size_t src_step = src_mult * transpose_size * typesize;
     const size_t tr_src_step = (size_t)oc_block * transpose_size * typesize;

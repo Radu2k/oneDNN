@@ -18,8 +18,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "dnnl.h"
-#include "dnnl.hpp"
+#include "oneapi/dnnl/dnnl.h"
+#include "oneapi/dnnl/dnnl.hpp"
+
+#if DNNL_WITH_SYCL
+#include "oneapi/dnnl/dnnl_sycl.h"
+#endif
 
 #include "c_types_map.hpp"
 #include "engine.hpp"
@@ -84,17 +88,7 @@ dnnl_memory::dnnl_memory(dnnl::impl::engine_t *engine,
         std::unique_ptr<dnnl::impl::memory_storage_t> &&memory_storage,
         bool do_zero_pad)
     : engine_(engine), md_(*md) {
-    if (memory_storage) {
-        memory_storage_ = std::move(memory_storage);
-        if (do_zero_pad) zero_pad(nullptr);
-    } else {
-        memory_storage_t *memory_storage_ptr;
-        status_t status = engine->create_memory_storage(
-                &memory_storage_ptr, use_runtime_ptr, 0, nullptr);
-        if (status != status::success) return;
-
-        memory_storage_.reset(memory_storage_ptr);
-    }
+    this->reset_memory_storage(std::move(memory_storage), do_zero_pad);
 }
 
 status_t dnnl_memory::set_data_handle(void *handle, stream_t *stream) {
@@ -107,6 +101,24 @@ status_t dnnl_memory::set_data_handle(void *handle, stream_t *stream) {
         CHECK(memory_storage()->set_data_handle(handle));
     }
     return zero_pad(stream);
+}
+
+status_t dnnl_memory::reset_memory_storage(
+        std::unique_ptr<dnnl::impl::memory_storage_t> &&memory_storage,
+        bool do_zero_pad) {
+    if (memory_storage) {
+        memory_storage_ = std::move(memory_storage);
+        if (do_zero_pad) zero_pad(nullptr);
+    } else {
+        memory_storage_t *memory_storage_ptr;
+        status_t status = engine_->create_memory_storage(
+                &memory_storage_ptr, use_runtime_ptr, 0, nullptr);
+        if (status != status::success) return status;
+
+        memory_storage_.reset(memory_storage_ptr);
+    }
+
+    return status::success;
 }
 
 status_t dnnl_memory_desc_init_by_tag(memory_desc_t *memory_desc, int ndims,
@@ -489,6 +501,10 @@ size_t dnnl_memory_desc_get_size(const memory_desc_t *md) {
 
 status_t dnnl_memory_create(memory_t **memory, const memory_desc_t *md,
         engine_t *engine, void *handle) {
+#if DNNL_WITH_SYCL
+    return dnnl_sycl_interop_memory_create(
+            memory, md, engine, dnnl_sycl_interop_usm, handle);
+#else
     if (any_null(memory, engine)) return invalid_arguments;
 
     memory_desc_t z_md = types::zero_md();
@@ -510,6 +526,7 @@ status_t dnnl_memory_create(memory_t **memory, const memory_desc_t *md,
     }
     *memory = _memory;
     return success;
+#endif
 }
 
 status_t dnnl_memory_get_memory_desc(

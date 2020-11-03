@@ -26,6 +26,7 @@
 #include "common/utils.hpp"
 
 #include "cpu/x64/jit_generator.hpp"
+#include "cpu/x64/jit_primitive_conf.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -53,7 +54,8 @@ inline void rtus_prepare(conv_pd_t *self, const convolution_desc_t *&conv_d,
     const bool with_groups
             = memory_desc_wrapper(weights_d).ndims() == ndims + 1;
 
-    bool rtus_applicable = utils::one_of(ndims, 3, 4) && !with_groups;
+    bool rtus_applicable = utils::one_of(ndims, 3, 4)
+            && IMPLICATION(with_groups, weights_d->dims[0] == 1);
     if (ndims == 3)
         rtus_applicable = rtus_applicable && conv_d->strides[0] != 1
                 && conv_d->src_desc.data_type != data_type::s32;
@@ -76,7 +78,7 @@ inline void rtus_prepare(conv_pd_t *self, const convolution_desc_t *&conv_d,
 
     const bool is_nspc
             = utils::one_of(dat_tag, format_tag::nwc, format_tag::nhwc);
-    if (is_nspc && !mayiuse(avx2)) return;
+    if (is_nspc && !mayiuse(sse41)) return;
 
     // rtus is applicable, configure it.
     self->rtus_.reduce_src_ = true;
@@ -190,6 +192,7 @@ struct rtus_driver_t : public jit_generator {
             Xmm res;
             if (is_nspc_) {
                 switch (isa) {
+                    case sse41: res = Xmm(idx); break;
                     case avx2: res = Ymm(idx); break;
                     case avx512_common:
                     case avx512_core:
@@ -199,6 +202,12 @@ struct rtus_driver_t : public jit_generator {
                 return res;
             }
             switch (isa) {
+                case sse41:
+                    switch (typesize) {
+                        case 2: res = Xmm(idx); break;
+                        default: assert(!"Not supported typesize");
+                    }
+                    break;
                 case avx2:
                     switch (typesize) {
                         case 4: res = Ymm(idx); break;
@@ -336,9 +345,10 @@ struct rtus_driver_t : public jit_generator {
                 // of xmm/ymm registers
                 const bool is_ymm = load_size > 16;
                 if (is_ymm)
-                    load_bytes(Ymm(vreg.getIdx()), reg, offset, load_size);
+                    load_bytes(Ymm(vreg.getIdx()), reg, offset, load_size,
+                            isa == sse41);
                 else
-                    load_bytes(vreg, reg, offset, load_size);
+                    load_bytes(vreg, reg, offset, load_size, isa == sse41);
             }
         };
 
@@ -357,9 +367,10 @@ struct rtus_driver_t : public jit_generator {
                 // of xmm/ymm registers
                 const bool is_ymm = store_size > 16;
                 if (is_ymm)
-                    store_bytes(Ymm(vreg.getIdx()), reg, offset, store_size);
+                    store_bytes(Ymm(vreg.getIdx()), reg, offset, store_size,
+                            isa == sse41);
                 else
-                    store_bytes(vreg, reg, offset, store_size);
+                    store_bytes(vreg, reg, offset, store_size, isa == sse41);
             }
         };
 
@@ -367,7 +378,9 @@ struct rtus_driver_t : public jit_generator {
         shl(reg_icb, vlen_shift_);
 
         const size_t w_step_factor = ic_ * typesize_;
-        const size_t max_load_store_bytes = typesize_ == 4 ? 32 : 16;
+        const size_t max_load_store_bytes = isa == sse41
+                ? typesize_ == 4 ? 16 : 8
+                : typesize_ == 4 ? 32 : 16;
         const size_t load_store_size
                 = isa == avx512_common ? vlen_ : max_load_store_bytes;
         size_t load_store_tail_size = (typesize_ == 1 ? max_load_store_bytes
@@ -483,8 +496,8 @@ struct rtus_driver_t : public jit_generator {
 
     void generate() override {
         using namespace Xbyak;
-        assert(isa == avx2 || isa == avx512_common || isa == avx512_core
-                || isa == avx512_mic);
+        assert(utils::one_of(
+                isa, sse41, avx2, avx512_common, avx512_core, avx512_mic));
 
         preamble();
 #define READ_PARAM(what) \

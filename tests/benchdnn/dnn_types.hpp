@@ -27,7 +27,7 @@
 #include <vector>
 
 #include "common.hpp"
-#include "dnnl_types.h"
+#include "oneapi/dnnl/dnnl_types.h"
 
 namespace tag {
 extern const char *x;
@@ -37,7 +37,16 @@ extern const char *any;
 extern const char *undef;
 } // namespace tag
 
-struct dims_t : public std::vector<int64_t> {};
+struct dims_t : public std::vector<int64_t> {
+    //  using vector<int64_t>::vector;
+    //  There is a bug in Intel compiler 19.0 on MacOS which prevents
+    //  using-declaration from being used here. The workaround is to introduce
+    //  constructors explicitly.
+    dims_t() = default;
+    dims_t(size_t size) : vector(size) {}
+    dims_t(size_t size, int64_t value) : vector(size, value) {}
+};
+
 enum dir_t {
     DIR_UNDEF = 0,
     FLAG_DAT = 1,
@@ -215,9 +224,11 @@ struct attr_t {
             // binary
             BINARY_START, // a guard to check kind is binary
             ADD,
+            DIV,
             MAX,
             MIN,
             MUL,
+            SUB,
             BINARY_END, // a guard to check kind is binary
             // guard entry
             KIND_TOTAL
