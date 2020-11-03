@@ -162,13 +162,15 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
     bool is_invalid = false;
     switch (prb->alg) {
         case alg_t::MEAN:
-            is_invalid = prb->sdt != dnnl_f32 && prb->sdt != dnnl_bf16;
+            is_invalid = prb->sdt != dnnl_f32 && prb->sdt != dnnl_bf16
+                    && prb->sdt != dnnl_f16;
             break;
         case alg_t::NORM_LP_MAX:
         case alg_t::NORM_LP_SUM:
         case alg_t::NORM_LP_POWER_P_MAX:
         case alg_t::NORM_LP_POWER_P_SUM:
-            is_invalid = (prb->sdt != dnnl_f32 && prb->sdt != dnnl_bf16)
+            is_invalid = (prb->sdt != dnnl_f32 && prb->sdt != dnnl_bf16
+                                 && prb->sdt != dnnl_f16)
                     || prb->p < 1.f;
             break;
         default: break;
