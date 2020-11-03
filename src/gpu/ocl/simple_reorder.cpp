@@ -231,10 +231,10 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
             = !has_padding_or_scale_quant && padded_dims[last] % 16 == 0;
     conf.transpose16x16 = (int)tr16x16 * matches_16x16_layout(src_mdw, dst_mdw);
 
-    conf.nchw = !conf.transpose16x16 && padded_dims[conf.ndims - 1] % 16 == 0
-            && dim_is_div_by_16_or_less_than_16(dst_mdw, 1)
-            && src_mdw.matches_one_of_tag(nhwc)
-            && dst_mdw.matches_one_of_tag(nchw);
+    conf.nchw = src_mdw.matches_one_of_tag(nhwc)
+            && dst_mdw.matches_one_of_tag(nchw) && !conf.transpose16x16
+            && padded_dims[last] % 16 == 0
+            && dim_is_div_by_16_or_less_than_16(dst_mdw, 1);
 
     conf.nchw = src_mdw.matches_one_of_tag(nhwc)
             && dst_mdw.matches_one_of_tag(nchw) && !conf.transpose16x16
