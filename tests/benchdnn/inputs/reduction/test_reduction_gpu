@@ -3,3 +3,26 @@
 --batch=harness_reduction_bf16
 --batch=harness_reduction_f16
 --batch=harness_reduction_i8
+
+# gen12hp reduction kernel
+--reset 
+
+--sdt=f16,bf16,f32
+--ddt=f16,bf16,f32
+--stag=aBx16b
+--dtag=aBx16b
+--p= --eps=
+--alg=SUM,MUL,MAX,MIN,MEAN
+
+1x64x2048:1x64x1
+1x64x640x360:1x64x1x1
+16x32x128x128:16x32x1x1
+2x32x32x64x64:2x32x1x1x1
+
+--p=1,2 --eps=0.5
+--alg=NORM_LP_MAX,NORM_LP_SUM,NORM_LP_POWER_P_MAX,NORM_LP_POWER_P_SUM
+
+1x64x2048:1x64x1
+1x64x640x360:1x64x1x1
+16x32x128x128:16x32x1x1
+2x32x32x64x64:2x32x1x1x1

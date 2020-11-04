@@ -140,7 +140,12 @@ int compare(const prb_t *prb, const dnn_mem_t &fp_mem, const dnn_mem_t &dt_mem,
 
         const float diff = fabsf(fp - dt);
         const float rel_diff = diff / (fabsf(fp) > FLT_MIN ? fabsf(fp) : 1);
-        bool ok = (fabsf(fp) > 1e-5 ? rel_diff : diff) <= trh;
+
+        bool ok = false;
+        if (std::isinf(fp))
+            ok = std::isinf(dt) && std::signbit(fp) == std::signbit(dt);
+        else
+            ok = (fabsf(fp) > 1e-5 ? rel_diff : diff) <= trh;
 
         res->errors += !ok;
 
