@@ -38,11 +38,10 @@ namespace compute {
 
 class compute_engine_t : public engine_t {
 public:
-    compute_engine_t(engine_kind_t kind, runtime_kind_t runtime_kind,
-            device_info_t *device_info)
-        : engine_t(kind, runtime_kind), device_info_(device_info) {}
+    compute_engine_t(engine_kind_t kind, runtime_kind_t runtime_kind)
+        : engine_t(kind, runtime_kind) {}
 
-    status_t init() { return device_info_->init(); }
+    virtual status_t init();
 
     const device_info_t *device_info() const { return device_info_.get(); }
 
@@ -100,21 +99,15 @@ public:
     bool is_jit_gen12hp() const {
         return device_info_->gpu_arch() == gpu_arch_t::gen12hp;
     }
-    virtual bool mayiuse_non_uniform_work_groups() const { return false; }
+    bool mayiuse_ngen_kernels() {
+        return device_info_->mayiuse_ngen_kernels(this);
+    }
+    bool mayiuse_non_uniform_work_groups() const {
+        return device_info_->mayiuse_non_uniform_work_groups();
+    }
 
     dispatch_t create_dispatch(const memory_desc_t *md = nullptr) const {
         return dispatch_t(this, md);
-    }
-
-    bool mayiuse_ngen_kernels() {
-        if (!checked_ngen_kernels_) {
-            enable_ngen_kernels_ = check_mayiuse_ngen_kernels();
-            checked_ngen_kernels_ = true;
-            if (get_verbose())
-                printf("dnnl_verbose,info,gpu,binary_kernels:%s\n",
-                        enable_ngen_kernels_ ? "enabled" : "disabled");
-        }
-        return enable_ngen_kernels_;
     }
 
     status_t get_service_stream(stream_t *&stream) override {
@@ -137,13 +130,11 @@ public:
     bool is_service_stream_created() const { return (bool)service_stream_; }
 
 protected:
-    virtual bool check_mayiuse_ngen_kernels() = 0;
+    virtual status_t init_device_info() = 0;
+
+    std::shared_ptr<device_info_t> device_info_;
 
 private:
-    bool checked_ngen_kernels_ = false;
-    bool enable_ngen_kernels_ = false;
-
-    std::unique_ptr<device_info_t> device_info_;
     std::shared_ptr<primitive_t> zero_pad_primitive_;
     std::unique_ptr<stream_t> service_stream_;
     std::mutex service_stream_mutex_;

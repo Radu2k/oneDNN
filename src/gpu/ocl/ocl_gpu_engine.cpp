@@ -20,11 +20,9 @@
 
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
-
 #include "gpu/compute/kernel_list.hpp"
-
-#include "gpu/jit/binary_format.hpp"
 #include "gpu/ocl/kernel_utils.hpp"
+#include "gpu/ocl/ocl_gpu_device_info.hpp"
 #include "gpu/ocl/ocl_gpu_engine.hpp"
 #include "gpu/ocl/ocl_memory_storage.hpp"
 #include "gpu/ocl/ocl_stream.hpp"
@@ -56,7 +54,7 @@ status_t ocl_gpu_engine_t::init() {
     OCL_CHECK(err);
 
     CHECK(check_device(engine_kind::gpu, device_, context_));
-    CHECK(compute_engine_t::init());
+    compute::compute_engine_t::init();
 
     return status::success;
 }
@@ -190,11 +188,10 @@ status_t ocl_gpu_engine_t::create_kernels_from_ocl_source(
     return status::success;
 }
 
-bool ocl_gpu_engine_t::check_mayiuse_ngen_kernels() {
-    bool result = false;
-    auto status = jit::gpu_supports_binary_format(&result, this);
-    if (status != status::success) return false;
-    return result;
+status_t ocl_gpu_engine_t::init_device_info() {
+    device_info_.reset(new ocl_gpu_device_info_t());
+    CHECK(device_info_->init(this));
+    return status::success;
 }
 
 } // namespace ocl

@@ -31,44 +31,14 @@ namespace ocl {
 
 class ocl_gpu_device_info_t : public compute::device_info_t {
 public:
-    ocl_gpu_device_info_t(cl_device_id device) : device_(device) {}
-
-    bool has(compute::device_ext_t ext) const override {
-        return this->extensions_ & (uint64_t)ext;
-    }
-
-    compute::gpu_arch_t gpu_arch() const override { return gpu_arch_; }
-
-    int eu_count() const override { return eu_count_; }
-    int hw_threads() const override { return hw_threads_[0]; }
-    int hw_threads(bool large_grf_mode) const override {
-        return hw_threads_[!!large_grf_mode];
-    }
-    size_t llc_cache_size() const override { return llc_cache_size_; }
-
     std::string get_cl_ext_options() const;
 
-private:
-    status_t init_arch() override;
-    status_t init_device_name() override;
-    status_t init_runtime_version() override;
-    status_t init_extensions() override;
-    status_t init_attributes() override;
-
-    size_t get_llc_cache_size() const;
-
-    cl_device_id device_ = nullptr;
-
-    // total number of hardware threads:
-    // [0] - default mode
-    // [1] - large GRF mode
-    int32_t hw_threads_[2] = {0, 0};
-    int32_t eu_count_ = 0;
-    size_t llc_cache_size_ = 0;
-
-    // extensions_ and gpu_arch_ describe effective extensions and GPU architecture.
-    uint64_t extensions_ = 0;
-    compute::gpu_arch_t gpu_arch_ = compute::gpu_arch_t::unknown;
+protected:
+    status_t init_device_name(engine_t *engine);
+    status_t init_arch(engine_t *engine);
+    status_t init_runtime_version(engine_t *engine);
+    status_t init_extensions(engine_t *engine);
+    status_t init_attributes(engine_t *engine);
 };
 
 } // namespace ocl

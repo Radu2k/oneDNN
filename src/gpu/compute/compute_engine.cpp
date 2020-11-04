@@ -14,9 +14,71 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <mutex>
+#include <unordered_map>
+
 #include "gpu/compute/compute_engine.hpp"
 
 #include "common/utils.hpp"
+
+namespace dnnl {
+namespace impl {
+namespace gpu {
+namespace compute {
+
+// Cache for device_info_t objects. Reuse the already initialized
+// device_info_t objects to save time on HW detection and nGEN binary
+// check.
+using device_info_cache_t = std::unordered_map<device_id_t,
+        std::shared_ptr<device_info_t>, device_id_hash_t>;
+
+utils::rw_mutex_t &device_info_cache_mutex() {
+    static utils::rw_mutex_t m;
+    return m;
+}
+
+device_info_cache_t &device_info_cache() {
+    static device_info_cache_t cache;
+    return cache;
+}
+
+// Returns true if found, false otherwise.
+bool device_info_cache_get(
+        std::shared_ptr<device_info_t> *result, engine_t *engine) {
+    utils::lock_read_t lock(device_info_cache_mutex());
+
+    auto it = device_info_cache().find(engine->device_id());
+    if (it == device_info_cache().end()) return false;
+    if (result) *result = it->second;
+    return true;
+}
+
+void device_info_cache_set(
+        engine_t *engine, const std::shared_ptr<device_info_t> &device_info) {
+    utils::lock_write_t lock(device_info_cache_mutex());
+
+    // Clear the cache to avoid hypothetically large growth.
+    const int cache_size_threshold = 1024;
+    if (device_info_cache().size() > cache_size_threshold)
+        device_info_cache().clear();
+
+    device_info_cache().insert({engine->device_id(), device_info});
+}
+
+status_t compute_engine_t::init() {
+    if (device_info_cache_get(&device_info_, this)) return status::success;
+
+    CHECK(init_device_info());
+
+    device_info_cache_set(this, device_info_);
+
+    return status::success;
+}
+
+} // namespace compute
+} // namespace gpu
+} // namespace impl
+} // namespace dnnl
 
 bool dnnl_impl_gpu_mayiuse_ngen_kernels(dnnl::impl::engine_t *engine) {
     using namespace dnnl::impl;
