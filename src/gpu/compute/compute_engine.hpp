@@ -154,4 +154,8 @@ private:
 } // namespace impl
 } // namespace dnnl
 
+// Exported for testing purposes only.
+extern "C" bool DNNL_API dnnl_impl_gpu_mayiuse_ngen_kernels(
+        dnnl::impl::engine_t *engine);
+
 #endif
