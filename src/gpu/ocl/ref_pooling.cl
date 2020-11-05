@@ -133,7 +133,7 @@ __kernel void ref_pooling_fwd(__global DATA_T *src, __global int *ws,
                         1, oc, 1, od, 1, oh, 1, ow, 1, 0, 1);
 
                 // store result
-                dst[dst_off] = TO_DST(RINT(tmp));
+                dst[dst_off] = TO_DST(tmp);
             }
 }
 #endif
