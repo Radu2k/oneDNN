@@ -108,7 +108,7 @@ status_t ref_zero_pad_t::execute(const exec_ctx_t &ctx) const {
             bit_mask.mask[idx / 8] |= (is_valid ? (1 << (idx % 8)) : 0);
             if (is_valid) {
                 if (mask_count < ZERO_PAD_MASK_SIZE)
-                    lookup_mask.mask[mask_count] = idx;
+                    lookup_mask.mask[mask_count] = (ZERO_PAD_MASK_DATA_TYPE)idx;
                 mask_count++;
             }
 

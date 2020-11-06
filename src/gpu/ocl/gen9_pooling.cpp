@@ -80,7 +80,6 @@ static status_t init_conf_common(pool_conf_t &conf, offsets_t &off,
                 = conf.vect_dt_n * conf.nvect / conf.chunks_per_c_block;
     } else if (c_block_size == 16 && n_block_size == 1) {
         conf.use_only_c_block = true;
-        const size_t num_c_blocks = c_padded / conf.sub_group_size;
         conf.vect_dt_n = 1;
         conf.nvect = 1;
         conf.chunks_per_c_block = conf.nvect * conf.vect_dt_n;

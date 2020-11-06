@@ -149,7 +149,6 @@ struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
 
             CHECK(init_conf(engine));
             // We support only unit stride for now
-            bool has_w = conf.ow > 1 || conf.iw > 1 || conf.kw > 1;
             bool has_h = conf.oh > 1 || conf.ih > 1 || conf.kh > 1;
             bool has_d = conf.od > 1 || conf.id > 1 || conf.kd > 1;
             ok = conf.stride_w == 1 && IMPLICATION(has_h, conf.stride_h == 1)

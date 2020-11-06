@@ -339,8 +339,6 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
     if (conf.transpose16x16) {
         conf.use_ref_impl = false;
         conf.sub_group_size = 16;
-        auto dm = innermost_dim_idx(
-                (conf.transpose16x16 == 1) ? dst_mdw : src_mdw);
     }
     if (conf.plain_to_ABxx8ayb) {
         conf.use_ref_impl = false;
@@ -390,8 +388,6 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
         std::string vector_dim = "D" + std::to_string(conf.ndims - 1);
         conf.dispatch.vectorize_dim(vector_dim, vectorization_range);
     } else if (conf.transpose16x16) {
-        auto dm = innermost_dim_idx(
-                (conf.transpose16x16 == 1) ? src_mdw : dst_mdw);
     } else if (conf.plain_to_ABxx8ayb) {
         auto dim_str = utils::format("D%d", last);
         conf.dispatch.vectorize_dim(dim_str, 16);
