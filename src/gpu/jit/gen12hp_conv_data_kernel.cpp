@@ -22,6 +22,7 @@
 #include <initializer_list>
 
 #include "common/eltwise_pd.hpp"
+#include "common/math_utils.hpp"
 #include "common/utils.hpp"
 #include "gpu/jit/jit_eltwise_injector.hpp"
 #include "gpu/jit/jit_generator.hpp"
@@ -65,12 +66,6 @@ public:
         , from_bytes_(getBytes(from_type))
         , to_bytes_(getBytes(to_type)) {
         assert(width % 8 == 0);
-    }
-
-    int min_scratch_regs() const {
-        if (from_bytes_ == 4 && to_bytes_ == 1) return 1;
-        if (from_bytes_ == 1 && to_bytes_ == 4) return 1;
-        return 0;
     }
 
     int preferred_scratch_regs() const {
@@ -169,6 +164,161 @@ public:
     Label label;
 };
 
+// Helper class to implement reduction across (IC * KD * KH * KW) and SLM
+// buffering.
+class loop_iterator_t {
+public:
+    loop_iterator_t(const conv_conf_t &conf, int unroll, int slm_nbuf,
+            int ab_slm_size, bool check_src_load)
+        : conf(conf)
+        , unroll(unroll)
+        , slm_nbuf(slm_nbuf)
+        , ab_slm_size(ab_slm_size)
+        , check_src_load(check_src_load) {
+
+        assert(unroll % (conf.kd * conf.kh * conf.kw) == 0);
+        assert(slm_nbuf == 2 || slm_nbuf == 3);
+
+        int ic_iters = utils::div_up(conf.ic, conf.ic_block);
+
+        iters = ic_iters * conf.kd * conf.kh * conf.kw + (slm_nbuf - 1);
+        assert(iters >= slm_nbuf);
+
+        ramp_up_iters = slm_nbuf;
+        ramp_down_iters = std::min(slm_nbuf - 1, iters - ramp_up_iters);
+        body_iters = iters - ramp_up_iters - ramp_down_iters;
+
+        body_iters = utils::rnd_dn(body_iters, unroll);
+        ramp_down_iters = iters - ramp_up_iters - body_iters;
+
+        assert(ramp_up_iters + body_iters + ramp_down_iters == iters);
+
+        iter = 0;
+        riter = iters - 1;
+    }
+
+    loop_iterator_t &operator++() {
+        ++iter;
+        --riter;
+
+        if (!do_gmem2reg()) return *this;
+
+        if (++kd < conf.kd) return *this;
+        kd = 0;
+
+        if (++kw < conf.kw) return *this;
+        kw = 0;
+
+        if (++kh < conf.kh) return *this;
+        kh = 0;
+
+        ic += conf.ic_block;
+        return *this;
+    }
+
+    void advance(int n) {
+        assert(n % unroll == 0);
+
+        iter += n;
+        riter -= n;
+    }
+
+    bool do_multiply() const { return iter >= slm_nbuf - 1; }
+    bool is_first_multiply() const { return iter == slm_nbuf - 1; }
+    bool is_last_multiply() const { return riter == 0; }
+
+    bool do_gmem2reg() const { return riter >= slm_nbuf - 1; }
+
+    int gmem_read_src_off_update() const;
+
+    int smem_read_off_update() const {
+        assert(do_multiply());
+
+        int cur_slm_idx = (iter + 1) % slm_nbuf;
+        int next_slm_idx = (iter + 2) % slm_nbuf;
+        return next_slm_idx * ab_slm_size - cur_slm_idx * ab_slm_size;
+    }
+
+    int smem_write_off_update() const {
+        assert(do_gmem2reg());
+
+        int cur_slm_idx = iter % slm_nbuf;
+        int next_slm_idx = (iter + 1) % slm_nbuf;
+        return next_slm_idx * ab_slm_size - cur_slm_idx * ab_slm_size;
+    }
+
+    // NCdhw32n32c layout.
+    int src_off_impl() const {
+        int off = 0;
+        off += (ic / conf.ic_block) * conf.id * conf.ih * conf.iw
+                * conf.mb_block * 32;
+        off += kd * (1 + conf.dilate_d) * conf.ih * conf.iw * conf.mb_block
+                * 32;
+        off += kh * (1 + conf.dilate_h) * conf.iw * conf.mb_block * 32;
+        off += kw * (1 + conf.dilate_w) * conf.mb_block * 32;
+        return off;
+    }
+
+    int iw_update() const;
+    int ih_update() const;
+    int id_update() const;
+
+    const conv_conf_t &conf;
+    int unroll;
+    int slm_nbuf;
+    int ab_slm_size;
+    bool check_src_load;
+
+    int iters;
+    int ramp_up_iters;
+    int body_iters;
+    int ramp_down_iters;
+
+    // iter + riter = iters - 1
+    int iter;
+    int riter;
+
+    int ic = 0;
+    int kd = 0;
+    int kh = 0;
+    int kw = 0;
+};
+
+loop_iterator_t operator+(const loop_iterator_t &a, int b) {
+    assert(b >= 0);
+    loop_iterator_t ret = a;
+    for (int i = 0; i < b; i++)
+        ++ret;
+    return ret;
+}
+
+int loop_iterator_t::gmem_read_src_off_update() const {
+    assert(do_gmem2reg());
+
+    int cur_off = src_off_impl();
+    int next_off = (*this + 1).src_off_impl();
+
+    return next_off - cur_off;
+}
+
+int loop_iterator_t::iw_update() const {
+    int cur_iw = kw * (1 + conf.dilate_w);
+    int next_iw = (*this + 1).kw * (1 + conf.dilate_w);
+    return next_iw - cur_iw;
+}
+
+int loop_iterator_t::ih_update() const {
+    int cur_ih = kh * (1 + conf.dilate_h);
+    int next_ih = (*this + 1).kh * (1 + conf.dilate_h);
+    return next_ih - cur_ih;
+}
+
+int loop_iterator_t::id_update() const {
+    int cur_id = kd * (1 + conf.dilate_d);
+    int next_id = (*this + 1).kd * (1 + conf.dilate_d);
+    return next_id - cur_id;
+}
+
 class gen12hp_conv_data_kernel_t : public jit_generator<HW::Gen12HP> {
 public:
     friend class convertor_t;
@@ -190,18 +340,22 @@ public:
         bia_size = (int)types::data_type_size(conf.bias_data_type);
         dst_size = (int)types::data_type_size(conf.dst_data_type);
 
+        is_4x2_tg = (conf.sp_group == 4) && (conf.oc_group == 2);
+
+        kdhw = conf.kd * conf.kh * conf.kw;
+        idhw = conf.id * conf.ih * conf.iw;
+        odhw = conf.od * conf.oh * conf.ow;
+
         mb_padded = utils::rnd_up(conf.mb, conf.mb_block);
         oc_padded = utils::rnd_up(conf.oc, conf.oc_block);
         ic_padded = utils::rnd_up(conf.ic, conf.ic_block);
-        ow_padded = utils::rnd_up(conf.ow, conf.ow_group);
+        ow_padded = utils::rnd_up(conf.ow, conf.sp_group);
 
         oc_tg_padded = utils::rnd_up(conf.oc, conf.oc_group * conf.oc_block);
         ic_bytes_padded = ic_padded * src_size;
 
-        int64_t src_bytes = (int64_t)mb_padded * ic_padded * conf.id * conf.ih
-                * conf.iw * src_size;
-        int64_t wei_bytes
-                = (int64_t)oc_padded * ic_padded * conf.kd * conf.kh * conf.kw;
+        int64_t src_bytes = (int64_t)mb_padded * ic_padded * idhw * src_size;
+        int64_t wei_bytes = (int64_t)oc_padded * ic_padded * kdhw * wei_size;
 
         is_src_off_64_bit = (src_bytes > std::numeric_limits<int32_t>::max());
         is_wei_off_64_bit = (wei_bytes > std::numeric_limits<int32_t>::max());
@@ -223,8 +377,7 @@ public:
         // - <mb_block>n32c for s8/u8/s32
         dst_oc_block = (acc_type == DataType::f) ? 16 : 32;
 
-        if (ic_bytes_padded * conf.kd * conf.kh * conf.kw >= 128
-                && conf.oc_group == 4) {
+        if (ic_bytes_padded * kdhw >= 128 && conf.oc_group == 4) {
             slm_nbuf = 3;
         } else {
             slm_nbuf = 2;
@@ -240,12 +393,20 @@ public:
                 conf.stride_h, conf.dilate_h);
         has_pad_w = has_padding(conf.ow, conf.iw, conf.kw, conf.l_pad,
                 conf.stride_w, conf.dilate_w);
-        check_src_load_w = (has_pad_w || conf.ow != ow_padded);
-        do_kw_loop = (conf.kw > 1 || check_src_load_w) && !is_1st;
-        do_ic_loop = (conf.ic > conf.ic_block);
-
         has_h = (conf.ih > 1 || conf.oh > 1 || conf.kh > 1);
         has_d = (conf.id > 1 || conf.od > 1 || conf.kd > 1);
+
+        if (conf.ver == ver_v1) {
+            check_src_load = (has_pad_w || conf.ow != ow_padded);
+            do_ic_loop = (conf.ic > conf.ic_block);
+            do_kw_loop = (conf.kw > 1 || check_src_load) && !is_1st;
+        } else {
+            // conf.ver == ver_v2.
+            check_src_load = (has_pad_w || has_pad_h || has_pad_d
+                    || (odhw % conf.sp_group != 0));
+            do_ic_loop = false;
+            do_kw_loop = false;
+        }
 
         // Kernel interface.
         newArgument("src", ExternalArgumentType::GlobalPtr);
@@ -287,7 +448,7 @@ public:
         b_slm_block_size = 1104;
         b_slm_blocks = 4;
 
-        a_slm_size = conf.ow_group * a_slm_block_size;
+        a_slm_size = conf.sp_group * a_slm_block_size;
         b_slm_size = conf.oc_group * b_slm_block_size;
         ab_slm_size = a_slm_size + b_slm_size;
         requireSLM(slm_nbuf * ab_slm_size);
@@ -372,10 +533,10 @@ public:
         // Start kernel body.
 
         // Header for signal.
-        and_(8 | SWSB(1), signal_header.ud(), r0.ud(2), uint32_t(0x7F000000));
+        and_(8, signal_header.ud(), r0.ud(2), uint32_t(0x7F000000));
 
         // ithr0 = get_local_id(0) / 8    [0, oc_group - 1]
-        // ithr1 = get_local_id(1)        [0, ow_group - 1]
+        // ithr1 = get_local_id(1)        [0, sp_group - 1]
         shr<uint32_t>(1, ithr0, local_id_0.uw(0), 3);
         mov(1, ithr1, local_id_1.uw(0));
 
@@ -407,60 +568,114 @@ public:
         and_<uint32_t>(1, oc_fused, oc, ~(1 << 5));
         mul(1, mb, group_id_2, uint16_t(mb_block));
 
-        auto odh = tmp0.d(0);
-
-        // od = get_group_id(1) / (OW_PADDED / ow_group) / OH
-        // oh = get_group_id(1) / (OW_PADDED / ow_group) % OH
-        // ow = get_group_id(1) % (OW_PADDED / ow_group) * ow_group +
-        //      get_local_id(1)
-        e_idiv(odh, ow_tg, group_id_1.d(0), ow_padded / conf.ow_group,
-                tmp0.d(1));
-        mul<int32_t>(1, ow_tg, ow_tg, uint16_t(conf.ow_group));
-        add<int32_t>(1, ow, ow_tg, ithr1);
-
-        if (has_d && has_h) {
-            e_idiv(od, oh, odh, conf.oh, tmp0.d(1));
-        } else if (has_d) {
-            mov(1, od, odh);
-        } else if (has_h) {
-            mov(1, oh, odh);
-        }
-
         pad_sign = (conf.prop_kind == backward_data) ? 1 : -1;
-        if (has_d) {
-            if (conf.prop_kind == backward_data)
-                mov(1, id_init, od);
-            else
-                mul(1, id_init, od, uint16_t(conf.stride_d));
-            if (conf.f_pad > 0) add(1, id_init, id_init, pad_sign * conf.f_pad);
-        }
-
-        if (has_h) {
-            if (conf.prop_kind == backward_data)
-                mov(1, ih_init, oh);
-            else
-                mul(1, ih_init, oh, uint16_t(conf.stride_h));
-            if (conf.t_pad > 0) add(1, ih_init, ih_init, pad_sign * conf.t_pad);
-        }
-
-        if (conf.prop_kind == backward_data)
-            mov(1, iw_tg, ow_tg);
-        else
-            mul(1, iw_tg, ow_tg, uint16_t(conf.stride_w));
-        if (conf.l_pad > 0) add(1, iw_tg, iw_tg, pad_sign * conf.l_pad);
-
-        if (conf.prop_kind == backward_data) {
-            // No need to take is_1st in consideration since there is
-            // no such case on bwd.
-            add(1, iw_init, iw_tg, ithr0);
+        if (conf.ver == ver_v1) {
+            // od = get_group_id(1) / (OW_PADDED / sp_group) / OH
+            // oh = get_group_id(1) / (OW_PADDED / sp_group) % OH
+            // ow = get_group_id(1) % (OW_PADDED / sp_group) * sp_group +
+            //      get_local_id(1)
+            unpack_1d_to_3d(group_id_1.d(0), ow_tg, ow_padded / conf.sp_group,
+                    oh, conf.oh, od, conf.od);
+            mul<int32_t>(1, ow_tg, ow_tg, uint16_t(conf.sp_group));
+            add<int32_t>(1, ow, ow_tg, ithr1);
         } else {
-            // iw to start reading from global memory.
-            if (is_1st) {
-                mad(1, iw_init, iw_tg, ithr1, uint16_t(conf.stride_w));
-            } else {
-                mad(1, iw_init, iw_tg, ithr0, uint16_t(conf.stride_w));
+            // conf.ver == ver_v2.
+            // Boundary conditions: sp[idx] <= sp_bound[idx]:
+            //   [0]   iw_load <= IW - 1
+            //   [1]  -iw_load <= 0
+            //   [2]   ih_load <= IH - 1
+            //   [3]  -ih_load <= 0
+            //   [4]   id_load <= ID - 1
+            //   [5]  -id_load <= 0
+            if (check_src_load) {
+                mov(8, sp[0], 0);
+                if (is_4x2_tg) mov(8, sp[1], 0);
+                mov(8, sp_bound, 0);
+                mov(1, sp_bound[0], conf.iw - 1);
+                mov(1, sp_bound[2], conf.ih - 1);
+                mov(1, sp_bound[4], conf.id - 1);
+            }
+
+            auto odhw = tmp0.d(0);
+            Subregister odhw_load[2] = {tmp0.d(1), tmp0.d(2)};
+
+            mul(1, odhw, group_id_1.d(0), conf.sp_group);
+            add(1, odhw_load[0], odhw, ithr0);
+            if (is_4x2_tg) add(1, odhw_load[1], odhw_load[0], 2);
+
+            add(1, odhw, odhw, ithr1);
+
+            unpack_1d_to_3d(odhw, ow, conf.ow, oh, conf.oh, od, conf.od);
+
+            for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+                unpack_1d_to_3d(odhw_load[i], iw_load[i], conf.ow, ih_load[i],
+                        conf.oh, id_load[i], conf.od);
+
+                if (has_d) {
+                    mul(1, id_load[i], id_load[i], uint16_t(conf.stride_d));
+                    if (conf.f_pad > 0)
+                        add(1, id_load[i], id_load[i], pad_sign * conf.f_pad);
+                }
+
+                if (has_h) {
+                    mul(1, ih_load[i], ih_load[i], uint16_t(conf.stride_h));
+                    if (conf.t_pad > 0)
+                        add(1, ih_load[i], ih_load[i], pad_sign * conf.t_pad);
+                }
+
+                mul(1, iw_load[i], iw_load[i], uint16_t(conf.stride_w));
+                if (conf.l_pad > 0)
+                    add(1, iw_load[i], iw_load[i], pad_sign * conf.l_pad);
+            }
+
+            if (check_src_load) {
+                for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+                    mov(1, sp[i][1], -iw_load[i]);
+                    if (has_h) mov(1, sp[i][3], -ih_load[i]);
+                    if (has_d) mov(1, sp[i][5], -id_load[i]);
+                }
             }
         }
+
+        if (conf.ver == ver_v1) {
+            if (has_d) {
+                if (conf.prop_kind == backward_data)
+                    mov(1, id_load0, od);
+                else
+                    mul(1, id_load0, od, uint16_t(conf.stride_d));
+                if (conf.f_pad > 0)
+                    add(1, id_load0, id_load0, pad_sign * conf.f_pad);
+            }
+
+            if (has_h) {
+                if (conf.prop_kind == backward_data)
+                    mov(1, ih_load0, oh);
+                else
+                    mul(1, ih_load0, oh, uint16_t(conf.stride_h));
+                if (conf.t_pad > 0)
+                    add(1, ih_load0, ih_load0, pad_sign * conf.t_pad);
+            }
+
+            if (conf.prop_kind == backward_data)
+                mov(1, iw_tg, ow_tg);
+            else
+                mul(1, iw_tg, ow_tg, uint16_t(conf.stride_w));
+            if (conf.l_pad > 0) add(1, iw_tg, iw_tg, pad_sign * conf.l_pad);
+
+            if (conf.prop_kind == backward_data) {
+                // No need to take is_1st in consideration since there is
+                // no such case on bwd.
+                add(1, iw_load0, iw_tg, ithr0);
+            } else {
+                // iw to start reading from global memory.
+                if (is_1st) {
+                    mad(1, iw_load0, iw_tg, ithr1, uint16_t(conf.stride_w));
+                } else {
+                    mad(1, iw_load0, iw_tg, ithr0, uint16_t(conf.stride_w));
+                }
+            }
+        }
+
         // Initialize SLM write offsets for A and B in owords.
         if (is_1st) {
             mul(1, a_slm_off_wr_init, ithr1, uint16_t(a_slm_block_size / 16));
@@ -484,32 +699,14 @@ public:
                 uint16_t(32 * 32 / 4 / 16));
         add(1, b_slm_off_wr_init, b_slm_off_wr_init, a_slm_size / 16);
 
-        // Set C to zero.
-        for (int i = 0; i < C.getLen(); i += 2)
-            mov<float>(16, C[i], 0.0f);
-
         init_src_off();
         init_wei_off();
 
-        if (slm_nbuf == 3) {
-            // Triple SLM buffering.
-            // SLM buffer indices (reverse order):
-            // Load:     2 -> 1 -> 0 -> 2 -> ...
-            // Compute:  1 -> 0 -> 2 -> 1 -> ...
-            // Counter:  0 -> 1 -> 2 -> 3 -> ...
-            // Reverse order allows to save one cmp call by using conditional
-            // modifier.
-            mov(4, slm_idx, Immediate::uv(2, 1, 0, 0, 0, 0, 0, 0));
-        } else {
-            // Double SLM buffering.
-            // SLM buffer indices (reverse order):
-            // Load:     1 -> 0 -> 1 -> ...
-            // Compute:  0 -> 1 -> 0 -> 1 -> ...
-            // Counter:  0 -> 1 -> 2 -> 3 -> ...
-            mov(4, slm_idx, Immediate::uv(1, 0, 0, 0, 0, 0, 0, 0));
+        switch (conf.ver) {
+            case ver_v1: loop_v1(); break;
+            case ver_v2: loop_v2(false); break;
+            default: assert(!"not expected");
         }
-
-        main_loop();
 
         // Release registers to make them available for destination update.
         ra.safeRelease(A);
@@ -559,13 +756,18 @@ public:
         a_slm_off_wr_init = ra.alloc_sub<int32_t>();
         b_slm_off_wr_init = ra.alloc_sub<int32_t>();
 
-        a_slm_wr = ra.alloc_range(2);
-        b_slm_wr = ra.alloc();
-
         off_tmp = ra.alloc_sub<int32_t>();
 
-        src_off_init
+        src_off_init0
                 = ra.alloc_sub(is_src_off_64_bit ? DataType::q : DataType::d);
+        src_off_init[0] = src_off_init0;
+
+        if (conf.ver == ver_v2 && is_4x2_tg) {
+            src_off_init1 = ra.alloc_sub(
+                    is_src_off_64_bit ? DataType::q : DataType::d);
+            src_off_init[1] = src_off_init1;
+        }
+
         wei_off_init
                 = ra.alloc_sub(is_wei_off_64_bit ? DataType::q : DataType::d);
 
@@ -578,51 +780,57 @@ public:
         if (has_d) {
             od = ra.alloc_sub<int32_t>();
             id = ra.alloc_sub<int32_t>();
-            kd = ra.alloc_sub<int32_t>();
-            src_off_kd = ra.alloc_sub(
-                    is_src_off_64_bit ? DataType::q : DataType::d);
         }
-
         if (has_h) {
             oh = ra.alloc_sub<int32_t>();
             ih = ra.alloc_sub<int32_t>();
-            kh = ra.alloc_sub<int32_t>();
-            src_off_kh = ra.alloc_sub(
-                    is_src_off_64_bit ? DataType::q : DataType::d);
         }
-
         ow = ra.alloc_sub<int32_t>();
-        // TODO: if (!is_1st)
         iw = ra.alloc_sub<int32_t>();
-        if (!is_1st) { kw = ra.alloc_sub<int32_t>(); }
-
-        src_off_kw
-                = ra.alloc_sub(is_src_off_64_bit ? DataType::q : DataType::d);
-
-        id_init = ra.alloc_sub<int32_t>();
-        ih_init = ra.alloc_sub<int32_t>();
-        iw_init = ra.alloc_sub<int32_t>();
 
         oc_tg = ra.alloc_sub<int32_t>();
-        ow_tg = ra.alloc_sub<int32_t>();
-        iw_tg = ra.alloc_sub<int32_t>();
 
-        slm_idx = ra.alloc().w(0);
-        slm_buf_load = slm_idx.w(0);
-        slm_buf_compute = slm_idx.w(1);
-        slm_counter = slm_idx.d(1);
+        if (conf.ver == ver_v1) {
+            ow_tg = ra.alloc_sub<int32_t>();
+            iw_tg = ra.alloc_sub<int32_t>();
 
-        int src_header_regs = 1;
-        if (is_1st) {
-            src_header_regs = 3;
-        } else if (mb_block > 32) {
-            src_header_regs = 2;
+            slm_idx = ra.alloc().w(0);
+            slm_buf_load = slm_idx.w(0);
+            slm_buf_compute = slm_idx.w(1);
+            slm_counter = slm_idx.d(1);
+
+            src_off_ic = ra.alloc_sub(
+                    is_src_off_64_bit ? DataType::q : DataType::d);
+            if (has_d) {
+                kd = ra.alloc_sub<int32_t>();
+                src_off_kd = ra.alloc_sub(
+                        is_src_off_64_bit ? DataType::q : DataType::d);
+            }
+            if (has_h) {
+                kh = ra.alloc_sub<int32_t>();
+                src_off_kh = ra.alloc_sub(
+                        is_src_off_64_bit ? DataType::q : DataType::d);
+            }
+            if (!is_1st) kw = ra.alloc_sub<int32_t>();
+            src_off_kw = ra.alloc_sub(
+                    is_src_off_64_bit ? DataType::q : DataType::d);
+
+            if (has_d) id_load0 = id_load[0] = ra.alloc_sub<int32_t>();
+            if (has_h) ih_load0 = ih_load[0] = ra.alloc_sub<int32_t>();
+            iw_load0 = iw_load[0] = ra.alloc_sub<int32_t>();
+        } else {
+            // conf.ver == ver_v2.
+            _sp = ra.alloc_range(2);
+            sp[0] = _sp[0].w();
+            sp[1] = _sp[1].w();
+            sp_bound = ra.alloc().w();
+
+            for (int i = 0; i < 2; i++) {
+                if (has_d) id_load[i] = sp[i][4];
+                if (has_h) ih_load[i] = sp[i][2];
+                iw_load[i] = sp[i][0];
+            }
         }
-        src_header = ra.alloc_range(src_header_regs);
-        wei_header = ra.alloc_range(1);
-
-        src_off_ic
-                = ra.alloc_sub(is_src_off_64_bit ? DataType::q : DataType::d);
 
         int A_tmp_regs = (is_1st ? mb_read01 : conf.mb_block / 4);
         int B_tmp_regs = 8;
@@ -638,9 +846,70 @@ public:
         }
     }
 
-    void main_loop() {
+    // i0 = x % n0
+    // i1 = (x / n0) % n1
+    // i2 = (x / n0) / n1
+    void unpack_1d_to_3d(const Subregister &x, const Subregister &i0, int n0,
+            const Subregister &i1, int n1, const Subregister &i2, int n2) {
+
+        // 1D
+        if (n1 == 1 && n2 == 1) {
+            mov(1, i0, x);
+            return;
+        }
+
+        // 2D
+        if (n2 == 1) {
+            e_idiv(i1, i0, x, n0);
+            return;
+        }
+
+        auto i12 = ra.alloc_sub<int32_t>();
+
+        e_idiv(i12, i0, x, n0);
+        e_idiv(i2, i1, i12, n1);
+
+        ra.safeRelease(i12);
+    }
+
+    void loop_v1() {
+        if (slm_nbuf == 3) {
+            // Triple SLM buffering.
+            // SLM buffer indices (reverse order):
+            // Load:     2 -> 1 -> 0 -> 2 -> ...
+            // Compute:  1 -> 0 -> 2 -> 1 -> ...
+            // Counter:  0 -> 1 -> 2 -> 3 -> ...
+            // Reverse order allows to save one cmp call by using conditional
+            // modifier.
+            mov(4, slm_idx, Immediate::uv(2, 1, 0, 0, 0, 0, 0, 0));
+        } else {
+            // Double SLM buffering.
+            // SLM buffer indices (reverse order):
+            // Load:     1 -> 0 -> 1 -> ...
+            // Compute:  0 -> 1 -> 0 -> 1 -> ...
+            // Counter:  0 -> 1 -> 2 -> 3 -> ...
+            mov(4, slm_idx, Immediate::uv(1, 0, 0, 0, 0, 0, 0, 0));
+        }
+
+        int src_header_regs = 1;
+        if (is_1st) {
+            src_header_regs = 3;
+        } else if (mb_block > 32) {
+            src_header_regs = 2;
+        }
+
+        src_header = ra.alloc_range(src_header_regs);
+        wei_header = ra.alloc_range(1);
+
+        a_slm_wr = ra.alloc_range(src_header_regs);
+        b_slm_wr = ra.alloc_range(1);
+
+        // Set C to zero.
+        for (int i = 0; i < C.getLen(); i += 2)
+            mov<float>(16, C[i], 0.0f);
+
         mov(1, src_off_ic,
-                is_src_off_64_bit ? src_off_init : src_off_init.d(0));
+                is_src_off_64_bit ? src_off_init0 : src_off_init0.d(0));
         add(1, wei_header[0].uq(0), wei_off_init, wei_ptr);
 
         // To complete all OOO writes.
@@ -668,7 +937,7 @@ public:
         if (has_d) {
             mov(1 | src_off_dep, src_off_kd, src_off_ic);
             mov(1, kd, 0);
-            mov(1, id, id_init);
+            mov(1, id, id_load0);
 
             mark(kd_loop);
 
@@ -694,7 +963,7 @@ public:
         if (has_h) {
             mov(1 | src_off_dep, src_off_kh, has_d ? src_off_kd : src_off_ic);
             mov(1, kh, 0);
-            mov(1, ih, ih_init);
+            mov(1, ih, ih_load0);
 
             mark(kh_loop);
 
@@ -721,7 +990,7 @@ public:
         Label kw_loop;
         if (do_kw_loop) {
             mov(1, kw, 0);
-            mov(1, iw, iw_init);
+            mov(1, iw, iw_load0);
 
             mark(kw_loop);
         }
@@ -823,6 +1092,171 @@ public:
 
         // To ensure all DPASW calls updated their results.
         sync(SyncFunction::allwr);
+
+        ra.safeRelease(src_header);
+        ra.safeRelease(wei_header);
+
+        ra.safeRelease(a_slm_wr);
+        ra.safeRelease(b_slm_wr);
+    }
+
+    void loop_v2(bool skip_check) {
+        int regs_per_read = 8;
+
+        int src_regs_per_thr = mb_block / conf.sp_group;
+        int wei_regs_per_thr = 32 / conf.sp_group;
+
+        int src_blocks = utils::div_up(src_regs_per_thr, regs_per_read);
+        if (is_4x2_tg) src_blocks *= 2;
+
+        int wei_blocks = utils::div_up(wei_regs_per_thr, regs_per_read);
+
+        src_header = ra.alloc_range(src_blocks);
+        wei_header = ra.alloc_range(wei_blocks);
+
+        a_slm_wr = ra.alloc_range(src_blocks);
+        b_slm_wr = ra.alloc_range(wei_blocks);
+
+        for (int i = 0, idx = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+            for (int j = 0; j < src_regs_per_thr; j += regs_per_read) {
+                add(1, src_header[idx].uq(0), src_ptr, src_off_init[i]);
+                idx++;
+            }
+        }
+        for (int i = 0; i < wei_header.getLen(); i++)
+            add(1, wei_header[i].uq(0), wei_ptr, wei_off_init);
+
+        // Set up source offsets for global reads and SLM writes.
+        {
+            int idx = 0;
+            for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+                for (int j = 0; j < src_regs_per_thr; j += regs_per_read) {
+                    int off = j * 32;
+                    add(1, src_header[idx].uq(0), src_header[idx].uq(0), off);
+
+                    int slm_off = j * 32;
+                    if (i == 1) slm_off += 2 * a_slm_block_size;
+                    add(1, a_slm_wr[idx].ud(2), a_slm_off_wr_init,
+                            slm_off / 16);
+
+                    idx++;
+                }
+            }
+        }
+
+        // Set up weights offsets for global reads and SLM writes.
+        {
+            int idx = 0;
+            for (int j = 0; j < wei_regs_per_thr; j += regs_per_read) {
+                int off = j * 32;
+                add(1, wei_header[idx].uq(0), wei_header[idx].uq(0), off);
+                int slm_off = off;
+                add(1, b_slm_wr[idx].ud(2), b_slm_off_wr_init, slm_off / 16);
+                idx++;
+            }
+        }
+
+        // Set up offsets for SLM reads.
+        for (int i = 0; i < a_slm_blocks; i++)
+            mov(1, a_slm_rd[i].ud(2), a_slm_off_rd_init[i]);
+
+        for (int i = 0; i < b_slm_blocks; i++)
+            mov(1, b_slm_rd[i].ud(2), b_slm_off_rd_init[i]);
+
+        if (check_src_load) {
+            for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+                sp_check_flags[i] = f1[i];
+                mov(1, sp_check_flags[i], uint16_t(0xFFFF));
+            }
+        }
+
+        // To complete all OOO writes.
+        sync(SyncFunction::allwr);
+
+        sync(SyncFunction::nop, SWSB<AllPipes>(1));
+
+        // Disable auto-SWSB for the inner loop for better control over SBID-s.
+        disable_auto_swsb();
+
+        // Fully unroll (kd * kh * kw) and also ensure we can hard-code SLM
+        // offsets.
+        int unroll = slm_nbuf * kdhw / math::gcd(slm_nbuf, kdhw);
+        loop_iterator_t it(conf, unroll, slm_nbuf, ab_slm_size, check_src_load);
+
+        // Ramp-up.
+        for (int i = 0; i < it.ramp_up_iters; i++) {
+            loop_iterate_v2(it);
+            ++it;
+        }
+
+        auto iter = ra.alloc_sub<int32_t>();
+
+        // Body.
+        if (it.body_iters > 0) {
+            mov(1, iter, it.body_iters);
+
+            Label ic_loop;
+            mark(ic_loop);
+
+            for (int i = 0; i < it.unroll; i++) {
+                loop_iterate_v2(it);
+                ++it;
+            }
+
+            add(1 | gt | f0[0], iter, iter, -it.unroll);
+            jmpi(1 | f0[0], ic_loop);
+
+            it.advance(it.body_iters - it.unroll);
+        }
+
+        ra.safeRelease(iter);
+
+        // Ramp-down.
+        for (int i = 0; i < it.ramp_down_iters; i++) {
+            loop_iterate_v2(it);
+            ++it;
+        }
+
+        // Re-enable auto-SWSB back.
+        enable_auto_swsb();
+
+        // To ensure all DPASW calls updated their results.
+        sync(SyncFunction::allwr);
+
+        ra.safeRelease(src_header);
+        ra.safeRelease(wei_header);
+
+        ra.safeRelease(a_slm_wr);
+        ra.safeRelease(b_slm_wr);
+    }
+
+    void loop_iterate_v2(const loop_iterator_t &it) {
+        bool do_gmem2reg = it.do_gmem2reg();
+        bool do_multiply = it.do_multiply();
+
+        if (slm_nbuf == 3 && do_multiply) wait();
+        if (do_gmem2reg) gmem2reg_v2(it);
+
+        if (slm_nbuf == 3 && it.iter == 1) fence_and_signal();
+
+        if (do_multiply) {
+
+            // Wait on DPASW read to be able to write to A and B.
+            auto sync_mask = to_sbid_mask({dpasw_sbid(0), dpasw_sbid(1),
+                    dpasw_sbid(2), dpasw_sbid(3)});
+            sync(SyncFunction::allrd, sync_mask);
+
+            smem2reg_v2(it);
+            multiply_v2(it);
+        }
+
+        if (do_gmem2reg) {
+            reg2smem_v2(it);
+            if (slm_nbuf == 2) {
+                fence_and_signal();
+                wait();
+            }
+        }
     }
 
     // SBID usage:
@@ -871,13 +1305,23 @@ public:
     //     rem = x % y
     // For now implementing very naive version, using a loop.
     void e_idiv(const Subregister &qot, const Subregister &rem,
-            const Subregister &x, int y, const Subregister &tmp_d) {
+            const Subregister &x, int y) {
+
         assert(is_auto_swsb);
         assert(x.getType() == DataType::d);
-        assert(qot.getType() == DataType::d);
-        assert(rem.getType() == DataType::d);
+        assert(utils::one_of(qot.getType(), DataType::d, DataType::w));
+        assert(utils::one_of(rem.getType(), DataType::d, DataType::w));
+        assert(y >= 1);
 
-        auto qot_by_y = tmp_d;
+        if (y == 1) {
+            mov(1, qot, x);
+            mov(1, rem, 0);
+            return;
+        }
+
+        auto tmp = ra.alloc_sub<int32_t>();
+
+        auto qot_by_y = tmp;
         mov(1, qot_by_y, 0);
         mov(1, qot, 0);
 
@@ -893,6 +1337,33 @@ public:
         add(1, qot_by_y, qot_by_y, -y);
         add(1, qot, qot, -1);
         add(1, rem, x, -qot_by_y);
+
+        ra.safeRelease(tmp);
+    }
+
+    void e_mul(const Subregister &dst, const Subregister &src1, int src2) {
+        auto tmp = ra.alloc_sub<int64_t>();
+
+        assert(is_auto_swsb);
+
+        bool dst_is_64_bit
+                = utils::one_of(dst.getType(), DataType::q, DataType::uq);
+
+        if (dst_is_64_bit) {
+            mul(1, dst, src1, src2);
+            return;
+        }
+
+        if (src2 >= std::numeric_limits<int16_t>::min()
+                && src2 <= std::numeric_limits<uint16_t>::max()) {
+            mul(1, dst, src1, src2);
+            return;
+        }
+
+        mul(1, tmp.q(0), src1, src2);
+        add(1, dst, dst, tmp.reinterpret(0, dst.getType()));
+
+        ra.safeRelease(tmp);
     }
 
     void e_mad(const Subregister &dst, const Subregister &src1, int src2) {
@@ -900,14 +1371,6 @@ public:
 
         bool dst_is_32_bit
                 = utils::one_of(dst.getType(), DataType::d, DataType::ud);
-        bool dst_is_64_bit
-                = utils::one_of(dst.getType(), DataType::q, DataType::uq);
-        bool src1_is_32_bit
-                = utils::one_of(src1.getType(), DataType::d, DataType::ud);
-
-        assert(src1_is_32_bit);
-        assert(dst_is_32_bit || dst_is_64_bit);
-
         if (dst_is_32_bit) {
             if (src2 >= std::numeric_limits<int16_t>::min()
                     && src2 <= std::numeric_limits<uint16_t>::max()) {
@@ -939,47 +1402,54 @@ public:
 
     // Initializes src offset in bytes for TG for 4n4c (4n2c) layout.
     void init_src_off_tg_4n4c() {
+        assert(conf.ver == ver_v1);
+
         // (mb / 4) * (IC / 4) * ID * IH * IW * 4 * 4
-        mul(1, src_off_init, mb, conf.id * conf.ih * conf.iw * ic_bytes_padded);
+        e_mul(src_off_init0, mb, conf.id * conf.ih * conf.iw * ic_bytes_padded);
 
         if (has_d) {
             // id * IH * IW * 4 * 4
-            e_mad(src_off_init, id_init, conf.ih * conf.iw * 4 * 4);
+            e_mad(src_off_init0, id_load0, conf.ih * conf.iw * 4 * 4);
         }
 
         if (has_h) {
             // ih * IW * 4 * 4
-            e_mad(src_off_init, ih_init, conf.iw * 4 * 4);
+            e_mad(src_off_init0, ih_load0, conf.iw * 4 * 4);
         }
 
         // iw * 4 * 4
-        e_mad(src_off_init, iw_tg, 4 * 4);
+        e_mad(src_off_init0, iw_load0, 4 * 4);
     }
 
     // Initializes src offset in bytes for TG for Xn32c (Xn16c) layout.
     void init_src_off_tg_Xn32c() {
         // (mb / MB_BLOCK) * (IC / 32) * ID * IH * IW * MB_BLOCK * 32
-        mul(1, src_off_init, mb, conf.id * conf.ih * conf.iw * ic_bytes_padded);
+        e_mul(src_off_init0, mb, conf.id * conf.ih * conf.iw * ic_bytes_padded);
 
-        if (has_d) {
-            // id * IH * IW * MB_BLOCK * 32
-            e_mad(src_off_init, id_init, conf.ih * conf.iw * mb_block * 32);
+        if (conf.ver == ver_v2 && is_4x2_tg)
+            mov(1, src_off_init1, src_off_init0);
+
+        for (int i = 0; i < (conf.ver == ver_v2 && is_4x2_tg ? 2 : 1); i++) {
+            if (has_d) {
+                // id * IH * IW * MB_BLOCK * 32
+                e_mad(src_off_init[i], id_load[i],
+                        conf.ih * conf.iw * mb_block * 32);
+            }
+
+            if (has_h) {
+                // ih * IW * MB_BLOCK * 32
+                e_mad(src_off_init[i], ih_load[i], conf.iw * mb_block * 32);
+            }
+
+            // iw * MB_BLOCK * 32
+            e_mad(src_off_init[i], iw_load[i], mb_block * 32);
         }
-
-        if (has_h) {
-            // ih * IW * MB_BLOCK * 32
-            e_mad(src_off_init, ih_init, conf.iw * mb_block * 32);
-        }
-
-        // iw * MB_BLOCK * 32
-        e_mad(src_off_init, iw_tg, mb_block * 32);
     }
 
     void init_src_off_thr() {
         // Initialize thread read offsets for source.
         if (is_1st) {
-            e_mad(src_off_init, ithr1, conf.stride_w * 4 * 4);
-
+            assert(conf.ver == ver_v1);
             mul(1, tmp0.uq(0), ithr0,
                     mb_read01 * conf.id * conf.ih * conf.iw * 4 * src_size);
             if (conf.oc_group == 4) {
@@ -989,17 +1459,19 @@ public:
                                 * 4 * src_size);
             }
 
-            add(1, src_off_init, src_off_init, tmp0.d(0));
+            add(1, src_off_init0, src_off_init0, tmp0.d(0));
         } else {
-            e_mad(src_off_init, ithr0, conf.stride_w * mb_block * 32);
-            e_mad(src_off_init, ithr1, mb_block * 32 / 4);
+            for (int i = 0; i < (conf.ver == ver_v2 && is_4x2_tg ? 2 : 1);
+                    i++) {
+                e_mad(src_off_init[i], ithr1, mb_block * 32 / 4);
+            }
         }
     }
 
     void init_wei_off_tg() {
         // OIx4o8i8o4i: (oc / 32) * (IC / 32) * KH * KW * 32 * 32
         // OIx8o4i:     (oc / 8) * (IC / 4) * KH * KW * 8 * 4
-        mul(1, wei_off_init, oc_tg,
+        e_mul(wei_off_init, oc_tg,
                 ic_bytes_padded * conf.kd * conf.kh * conf.kw);
     }
 
@@ -1063,7 +1535,7 @@ public:
             Label src_skip, src_end;
             // TODO: No padding and non-multiple OW case does not require >= 0
             // check.
-            if (check_src_load_w) {
+            if (check_src_load) {
                 // FWD:
                 // - iw + ithr * SW < IW
                 // - iw + ithr * SW >= 0
@@ -1086,7 +1558,7 @@ public:
                         A_tmp[iter * A_block_regs + 8],
                         block_hword(A_block_regs - 8), A64, src_header[1]);
             }
-            if (check_src_load_w) {
+            if (check_src_load) {
                 else_(8, src_end, src_end);
                 mark(src_skip);
                 for (int i = 0; i < A_block_regs; i += 2) {
@@ -1140,7 +1612,7 @@ public:
                     no_w_pad = &r;
                     continue;
                 }
-                cmp(1 | eq | f0[0], iw_init, r.w_val);
+                cmp(1 | eq | f0[0], iw_load0, r.w_val);
                 jmpi(1 | f0[0], r.label);
             }
 
@@ -1190,6 +1662,198 @@ public:
         }
     }
 
+    void gmem2reg_v2(const loop_iterator_t &it) {
+        if (!enable_gmem_read) return;
+
+        int src_update = it.gmem_read_src_off_update();
+        int wei_update = 32 * 32;
+
+        int idx;
+        int reg_off;
+
+        int regs_per_read = 8;
+
+        // Load source.
+        int src_regs_per_thr = mb_block / conf.sp_group;
+
+        if (it.check_src_load) {
+            for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+                cmp(8 | le | sp_check_flags[i], sp[i], sp_bound);
+            }
+        }
+
+        idx = 0;
+        reg_off = 0;
+        for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+            auto sp_flag = sp_check_flags[i];
+            for (int j = 0; j < src_regs_per_thr; j += regs_per_read) {
+                int hwords = std::min(8, src_regs_per_thr - j);
+
+                assert(reg_off + hwords <= A_tmp.getLen());
+
+                auto sbid = gmem_a_sbid(idx);
+                InstructionModifier mod = SWSB(sbid, 2);
+                if (it.check_src_load) {
+                    mod |= sp_flag;
+                    mod |= all16h;
+                }
+                load(16 | mod, A_tmp[reg_off], block_hword(hwords), A64,
+                        src_header[idx]);
+                if (it.check_src_load) {
+                    for (int k = 0; k < hwords; k += 2) {
+                        mov(16 | ~sp_flag | all16h, A_tmp[reg_off + k].f(),
+                                0.0f);
+                    }
+                }
+                add(1 | sbid.src, src_header[idx].uq(0), src_header[idx].uq(0),
+                        src_update);
+
+                idx++;
+                reg_off += hwords;
+            }
+        }
+
+        if (it.check_src_load) {
+            int iw_upd = it.iw_update();
+            int ih_upd = it.ih_update();
+            int id_upd = it.id_update();
+            for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+                add(8 | SWSB(1), sp[i], sp[i],
+                        Immediate::v(iw_upd, -iw_upd, ih_upd, -ih_upd, id_upd,
+                                -id_upd, 0, 0));
+            }
+        }
+
+        // Load weights.
+        int wei_regs_per_thr = 32 / conf.sp_group;
+
+        idx = 0;
+        reg_off = 0;
+        for (int j = 0; j < wei_regs_per_thr; j += regs_per_read) {
+            auto sbid = gmem_b_sbid();
+            load(16 | SWSB(sbid, 2), B_tmp[reg_off], block_hword(8), A64,
+                    wei_header[idx]);
+            add(1 | sbid.src, wei_header[idx].uq(0), wei_header[idx].uq(0),
+                    wei_update);
+
+            idx++;
+            reg_off += 8;
+        }
+    }
+
+    void reg2smem_v2(const loop_iterator_t &it) {
+        if (!enable_smem_write) return;
+
+        int upd = it.smem_write_off_update();
+
+        int idx;
+        int reg_off;
+
+        int regs_per_read = 8;
+
+        // Store source.
+        int src_regs_per_thr = mb_block / conf.sp_group;
+
+        idx = 0;
+        reg_off = 0;
+        for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+            for (int j = 0; j < src_regs_per_thr; j += regs_per_read) {
+                int owords = std::min(8, src_regs_per_thr - j) * 2;
+
+                assert(reg_off + owords / 2 <= A_tmp.getLen());
+
+                auto sbid = gmem_a_sbid(idx);
+                auto mod = it.check_src_load ? SWSB(sbid, 1) : SWSB(sbid);
+                store(16 | mod, block_oword(owords), SLM, a_slm_wr[idx],
+                        A_tmp[reg_off]);
+                add(1 | sbid.src, a_slm_wr[idx].ud(2), a_slm_wr[idx].ud(2),
+                        upd / 16);
+
+                idx++;
+                reg_off += owords / 2;
+            }
+        }
+
+        // Store weights.
+        int wei_regs_per_thr = 32 / conf.sp_group;
+
+        idx = 0;
+        reg_off = 0;
+        for (int j = 0; j < wei_regs_per_thr; j += regs_per_read) {
+            auto sbid = gmem_b_sbid();
+            store(16 | SWSB(sbid), block_oword(16), SLM, b_slm_wr[idx],
+                    B_tmp[reg_off]);
+            add(1 | sbid.src, b_slm_wr[idx].ud(2), b_slm_wr[idx].ud(2),
+                    upd / 16);
+
+            idx++;
+            reg_off += 8;
+        }
+    }
+
+    void smem2reg_v2(const loop_iterator_t &it) {
+        bool is_last = it.is_last_multiply();
+        int upd = it.smem_read_off_update();
+        int dist = a_slm_blocks + b_slm_blocks;
+
+        // Load A.
+        for (int i = 0; i < mb_block / 2; i += 8) {
+            int idx = i / 8;
+            int owords = std::min(8, mb_block / 2 - i) * 2;
+            auto sbid = smem_a_sbid(idx);
+            auto mod = it.do_gmem2reg() ? SWSB(sbid)
+                                        : SWSB(sbid, std::min(7, dist--));
+            load(16 | mod, A[i], block_oword(owords), SLM, a_slm_rd[idx]);
+            if (!is_last)
+                add(1 | sbid.src, a_slm_rd[idx].ud(2), a_slm_rd[idx].ud(2),
+                        upd / 16);
+        }
+
+        // Load B.
+        for (int i = 0; i < B.getLen(); i += 8) {
+            int idx = i / 8;
+            auto sbid = dpasw_sbid(idx);
+            auto mod = it.do_gmem2reg() ? SWSB(sbid)
+                                        : SWSB(sbid, std::min(7, dist--));
+            load(16 | mod, B[i], block_oword(16), SLM, b_slm_rd[idx]);
+            if (!is_last)
+                add(1 | sbid.src, b_slm_rd[idx].ud(2), b_slm_rd[idx].ud(2),
+                        upd / 16);
+        }
+    }
+
+    void multiply_v2(const loop_iterator_t &it) {
+        bool is_first = it.is_first_multiply();
+        bool is_last = it.is_last_multiply();
+
+        // Multiply C = A * B.
+        for (int oc = 0, idx = 0; oc < 32; oc += 8, idx++) {
+            if (oc == 0) {
+                // Wait A.
+                uint32_t sync_mask = to_sbid_mask(
+                        {smem_a_sbid(0), smem_a_sbid(1), smem_a_sbid(2)});
+                sync(SyncFunction::allwr, sync_mask);
+            }
+            // Compute [0:mb_block, oc:oc + 8] block of C.
+            multiply_chunk(idx, B[oc % B.getLen()], C[idx * mb_block],
+                    /*wait_a=*/false, is_first);
+
+            // Reuse B[oc] for later multiplies (case of oc_group == 2).
+            if (reuse_b_regs && oc < B.getLen()) {
+                auto sbid = dpasw_sbid(idx);
+                int upd = it.smem_read_off_update();
+                load(16 | SWSB(sbid), B[oc], block_oword(16), SLM,
+                        b_slm_rd[idx + 2]);
+                if (!is_last) {
+                    add(1 | sbid.src, b_slm_rd[idx + 2].ud(2),
+                            b_slm_rd[idx + 2].ud(2), upd / 16);
+                }
+            }
+        }
+
+        if (slm_nbuf == 3 && !is_last) fence_and_signal(/*skip_fence=*/true);
+    }
+
     void reg2smem_A() {
         int A_block_regs = mb_block / 4;
         int src_load_iters = (conf.oc_group == 4 ? 1 : 2);
@@ -1199,7 +1863,6 @@ public:
         if (A_block_regs > 8) {
             mad(1, a_slm_wr[1].d(2), a_slm_off_wr_init, slm_buf_load,
                     uint16_t(ab_slm_size / 16));
-            // TODO: Add a_slm_off_wr_init1 to avoid dependency.
             add(1 | SWSB(1), a_slm_wr[1].d(2), a_slm_wr[1].d(2), uint16_t(16));
         }
 
@@ -1227,13 +1890,12 @@ public:
     void reg2smem_A_1st() {
         int A_block_regs = mb_read01;
 
-        assert(a_slm_wr.getLen() == 2);
+        assert(a_slm_wr.getLen() >= 2);
         mad(1, a_slm_wr[0].d(2), a_slm_off_wr_init, slm_buf_load,
                 uint16_t(ab_slm_size / 16));
         if (A_block_regs > 8) {
             mad(1, a_slm_wr[1].d(2), a_slm_off_wr_init, slm_buf_load,
                     uint16_t(ab_slm_size / 16));
-            // TODO: Add a_slm_off_wr_init1 to avoid dependency.
             add(1 | SWSB(1), a_slm_wr[1].d(2), a_slm_wr[1].d(2), uint16_t(16));
         }
 
@@ -1272,7 +1934,7 @@ public:
         if (!enable_smem_write) return;
         assert(!is_auto_swsb);
 
-        mad(1, b_slm_wr.d(2), b_slm_off_wr_init, slm_buf_load,
+        mad(1, b_slm_wr[0].d(2), b_slm_off_wr_init, slm_buf_load,
                 uint16_t(ab_slm_size / 16));
 
         if (is_1st) {
@@ -1286,7 +1948,7 @@ public:
             reg2smem_A();
         }
 
-        store(16 | SWSB(gmem_b_sbid(), 1), block_oword(16), SLM, b_slm_wr,
+        store(16 | SWSB(gmem_b_sbid(), 1), block_oword(16), SLM, b_slm_wr[0],
                 B_tmp[0]);
     }
 
@@ -1307,17 +1969,16 @@ public:
     }
 
     void dpasw_typed(const InstructionModifier &mod, uint8_t sdepth,
-            uint8_t rcount, const GRF &c_reg, const GRF &a_reg,
-            const GRF &b_reg) {
+            uint8_t rcount, const GRF &dst, const Register &src0,
+            const GRF &src1, const GRF &src2) {
         if (!enable_dpasw) return;
 
-        dpasw(mod, sdepth, rcount, c_reg.retype(acc_type),
-                c_reg.retype(acc_type), a_reg.retype(wei_type),
-                b_reg.retype(src_type));
+        dpasw(mod, sdepth, rcount, dst.retype(acc_type), src0.retype(acc_type),
+                src1.retype(wei_type), src2.retype(src_type));
     }
 
-    void multiply_chunk(
-            int idx, const GRF &B_reg, const GRF &C_reg, bool wait_a) {
+    void multiply_chunk(int idx, const GRF &B_reg, const GRF &C_reg,
+            bool wait_a, bool is_first = false) {
         if (wait_a) {
             uint32_t sync_mask = to_sbid_mask(
                     {smem_a_sbid(0), smem_a_sbid(1), smem_a_sbid(2)});
@@ -1339,7 +2000,15 @@ public:
             } else {
                 mod |= sb;
             }
-            dpasw_typed(mod, 8, 8, GRF(C_reg.getBase() + i), B_reg, A[i / 2]);
+            auto dst = GRF(C_reg.getBase() + i);
+            auto src1 = B_reg;
+            auto src2 = A[i / 2];
+            if (is_first) {
+                // dst is not initialized, use null as src0.
+                dpasw_typed(mod, 8, 8, dst, null, src1, src2);
+            } else {
+                dpasw_typed(mod, 8, 8, dst, dst, src1, src2);
+            }
         }
     }
 
@@ -1653,9 +2322,21 @@ public:
 
         Label skip;
 
-        if (conf.ow != ow_padded || oc_padded != oc_tg_padded) {
-            cmp(8 | lt | f0[0], ow, conf.ow);
-            cmp(8 | f0[0] | lt, oc, oc_padded);
+        bool do_if = (oc_padded != oc_tg_padded);
+        if (conf.ver == ver_v1) {
+            if (conf.ow != ow_padded) do_if = true;
+        } else {
+            // conf.ver == ver_v2.
+            if (odhw % conf.sp_group != 0) do_if = true;
+        }
+
+        if (do_if) {
+            cmp(8 | lt | f0[0], oc, oc_padded);
+            cmp(8 | f0[0] | lt, ow, conf.ow);
+            if (conf.ver == ver_v2) {
+                if (has_h) cmp(8 | f0[0] | lt, oh, conf.oh);
+                if (has_d) cmp(8 | f0[0] | lt, od, conf.od);
+            }
             if_(8 | f0[0], skip, skip);
         }
 
@@ -1753,7 +2434,7 @@ public:
             }
         }
 
-        if (conf.ow != ow_padded || oc_padded != oc_tg_padded) {
+        if (do_if) {
             mark(skip);
             endif(8);
         }
@@ -1761,6 +2442,8 @@ public:
 
     const conv_conf_t &conf;
     const attr_info_t &attr_info;
+
+    bool is_4x2_tg;
 
     int mb_padded;
     int ic_padded;
@@ -1771,6 +2454,10 @@ public:
 
     bool is_src_off_64_bit;
     bool is_wei_off_64_bit;
+
+    int kdhw;
+    int idhw;
+    int odhw;
 
     int mb_read01 = 0;
     int mb_read23 = 0;
@@ -1789,7 +2476,7 @@ public:
     bool has_h;
     bool has_d;
 
-    bool check_src_load_w;
+    bool check_src_load;
     bool do_kw_loop;
     bool do_ic_loop;
     bool reuse_b_regs;
@@ -1853,11 +2540,13 @@ public:
     Subregister b_slm_off_wr_init;
 
     GRFRange a_slm_wr;
-    GRF b_slm_wr;
+    GRFRange b_slm_wr;
 
     Subregister off_tmp;
 
-    Subregister src_off_init;
+    Subregister src_off_init0;
+    Subregister src_off_init1;
+    Subregister src_off_init[2];
     Subregister wei_off_init;
 
     Subregister mb;
@@ -1870,9 +2559,18 @@ public:
     Subregister id, ih, iw;
     Subregister kd, kh, kw;
 
-    Subregister iw_init;
-    Subregister ih_init;
-    Subregister id_init;
+    // For loop_v2.
+    GRFRange _sp;
+    GRF sp[2];
+    GRF sp_bound;
+    FlagRegister sp_check_flags[2];
+
+    Subregister iw_load0;
+    Subregister ih_load0;
+    Subregister id_load0;
+    Subregister iw_load[2];
+    Subregister ih_load[2];
+    Subregister id_load[2];
 
     Subregister iw_tg;
     Subregister ow_tg;

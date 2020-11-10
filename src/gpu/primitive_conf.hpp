@@ -249,7 +249,11 @@ enum conv_version_t {
     ver_8ow16c,
     ver_nhwc,
     ver_mb_block,
-    ver_ow_block
+    ver_ow_block,
+
+    // Gen12HP-specific versions.
+    ver_v1,
+    ver_v2
 };
 
 struct conv_conf_t {
@@ -288,6 +292,7 @@ struct conv_conf_t {
 
     int oc_group;
     int ow_group;
+    int sp_group;
 
     size_t gws_d[3], lws_d[3];
     // Original global work sizes, before applying rounding in case when

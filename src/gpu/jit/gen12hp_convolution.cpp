@@ -15,6 +15,7 @@
 *******************************************************************************/
 
 #include "gpu/jit/gen12hp_convolution.hpp"
+
 #include "gpu/jit/gen12hp_conv_data_kernel.hpp"
 #include "gpu/ocl/ocl_gpu_engine.hpp"
 
@@ -69,15 +70,50 @@ status_t gen12hp_convolution_data_common_init_conf(engine_t *engine,
     conf.mb_block = (enable_40n ? 40 : 32);
 
     conf.oc_group = (conf.oc <= 64 ? 2 : 4);
-    conf.ow_group = 4;
+    conf.sp_group = 4;
+
+    auto can_use_v2_with_spatial
+            = [&](int o, int i, int k, int p, int s, int d) {
+                  o = utils::rnd_up(o, conf.sp_group);
+                  int bound = std::numeric_limits<int16_t>::max();
+                  int i_max = (o - 1) * s - p + (k - 1) * (1 + d);
+                  return i_max <= bound;
+              };
+
+    // Dispatch between ver_v1 and ver_v2:
+    // - v2 does not support 1st convolution
+    // - v2 does not support backward
+    // - v2 does not support non-multiple OC
+    // - v2 does full unrolling for (KD * KH * KW), hence (KDHW <= 9) limitation
+    // - v2 uses 4 bits for (1 + dilation)
+    // - v2 uses 16-bit integers for spatial
+    conf.ver = ver_v2;
+    int oc_padded = utils::rnd_up(conf.oc, conf.oc_block);
+    if (is_1st || (conf.prop_kind == prop_kind::backward_data)
+            || (oc_padded % (conf.oc_block * conf.oc_group) != 0)
+            || (conf.kd * conf.kh * conf.kw > 9) || (conf.dilate_d >= 7)
+            || (conf.dilate_h >= 7) || (conf.dilate_w >= 7)
+            || !can_use_v2_with_spatial(conf.od, conf.id, conf.kd, conf.f_pad,
+                    conf.stride_d, conf.dilate_d)
+            || !can_use_v2_with_spatial(conf.oh, conf.ih, conf.kh, conf.t_pad,
+                    conf.stride_h, conf.dilate_h)
+            || !can_use_v2_with_spatial(conf.ow, conf.iw, conf.kw, conf.l_pad,
+                    conf.stride_w, conf.dilate_w))
+        conf.ver = ver_v1;
 
     conf.sub_group_size = 8;
     conf.gws_d[0] = utils::rnd_up(conf.oc, conf.oc_group * conf.oc_block)
             / conf.oc_block * 8;
-    conf.gws_d[1] = conf.od * conf.oh * utils::rnd_up(conf.ow, conf.ow_group);
+    if (conf.ver == ver_v1) {
+        conf.gws_d[1]
+                = conf.od * conf.oh * utils::rnd_up(conf.ow, conf.sp_group);
+    } else {
+        conf.gws_d[1]
+                = utils::rnd_up(conf.od * conf.oh * conf.ow, conf.sp_group);
+    }
     conf.gws_d[2] = utils::div_up(conf.mb, conf.mb_block);
     conf.lws_d[0] = 8 * conf.oc_group;
-    conf.lws_d[1] = conf.ow_group;
+    conf.lws_d[1] = conf.sp_group;
     conf.lws_d[2] = 1;
 
     format_tag_t src_tag;
