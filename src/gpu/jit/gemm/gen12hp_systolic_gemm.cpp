@@ -156,6 +156,8 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     }
     cfg.a_bias = cfg.b_bias = ab_zero_points_;
     cfg.c_packed = pd()->packed_c();
+    walk_n_first_ = cfg.walk_n_first
+            = (pd()->desc()->m() >= 2 * pd()->desc()->n());
 
     int cmask = -1;
 
@@ -293,8 +295,7 @@ status_t gen12hp_systolic_gemm_t::init_res_storage(
 }
 
 bool gen12hp_systolic_gemm_t::enable_mn_blocking() const {
-    return (pd()->desc()->m() >= 4096) && (pd()->desc()->n() >= 192)
-            && (eu_count_ < 512);
+    return (pd()->desc()->m() >= 8192) && (pd()->desc()->n() >= 8192);
 }
 
 int64_t gen12hp_systolic_gemm_t::default_block_m() const {
@@ -511,6 +512,8 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
 
     auto thread_m = utils::div_up(m, unroll_m * tg_m) * tg_m;
     auto thread_n = utils::div_up(n, unroll_n * tg_n) * tg_n;
+
+    if (walk_n_first_) std::swap(thread_m, thread_n);
 
     size_t gws[3] = {size_t(sg * thread_m), size_t(thread_n), 1};
     size_t lws[3] = {size_t(sg * tg_m), size_t(tg_n), 1};

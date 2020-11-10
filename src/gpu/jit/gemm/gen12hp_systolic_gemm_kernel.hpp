@@ -46,6 +46,7 @@ public:
         bool early_c_bias = false;
         bool c_packed = false;
 
+        bool walk_n_first = false;
         bool alt_barriers = false;
         bool use_slm_fence = true;
         bool c_remainder = true;

@@ -178,6 +178,7 @@ private:
     char co_kind_;
     bool ab_zero_points_;
     int eu_count_;
+    bool walk_n_first_;
 
     const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 };

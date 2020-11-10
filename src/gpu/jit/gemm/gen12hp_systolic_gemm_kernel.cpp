@@ -1280,6 +1280,7 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     or_(1, cr0, cr0, uint16_t(0x1480));
 
     // Find our threadgroup's position within the matrix.
+    if (cfg.walk_n_first) std::swap(global_id_x, global_id_y);
     shl(1, global_m0, global_id_x, uint16_t(7));
     mul(1, global_n0, global_id_y, uint16_t(192));
 
