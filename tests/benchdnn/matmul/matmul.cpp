@@ -139,8 +139,11 @@ int compare_dat(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
 
         const float diff = fabsf(fp - dt);
         const float rel_diff = diff / (fabsf(fp) > FLT_MIN ? fabsf(fp) : 1);
-        const bool ok
-                = (fabs(fp) > 1e-5 ? rel_diff : diff) <= prb->cfg[kind].eps;
+        bool ok = (fabs(fp) > 1e-5 ? rel_diff : diff) <= prb->cfg[kind].eps;
+
+        // XXX: if reference fp0 value is nan, allow to return anything from the
+        // library for integral target data types.
+        if (!ok) ok = std::isnan(fp0) && is_integral_dt(prb->cfg[kind].dt);
 
         res->errors += !ok;
 
@@ -271,6 +274,31 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
         dst_rt_mask &= batch_rt_mask;
         if (src_rt_mask != wei_rt_mask || src_rt_mask != dst_rt_mask) {
             res->state = SKIPPED, res->reason = INVALID_CASE;
+            return;
+        }
+    }
+
+    if (is_nvidia_gpu()) {
+        const auto &po = prb->attr.post_ops;
+        bool post_ops_ok = true;
+        for (int i = 0; i < po.len(); ++i) {
+            const auto &e = po.entry[i];
+            if (e.is_sum_kind())
+                continue;
+            else if (e.is_eltwise_kind())
+                post_ops_ok = post_ops_ok && is_nvidia_eltwise_ok(FLAG_FWD, e);
+            else if (e.is_binary_kind() || e.is_convolution_kind())
+                post_ops_ok = false;
+            else
+                assert(!"unknown post-op type");
+        }
+
+        const bool oscale_ok = prb->attr.oscale.policy == policy_t::COMMON;
+
+        const bool zp_ok = prb->attr.zero_points.is_def();
+
+        if (!post_ops_ok || !oscale_ok || !zp_ok) {
+            res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
             return;
         }
     }

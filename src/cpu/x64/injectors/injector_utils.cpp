@@ -98,27 +98,13 @@ register_preserve_guard_t::~register_preserve_guard_t() {
     }
 }
 
-output_dims_t make_output_dims(const memory_desc_wrapper &dst_d) {
+size_t register_preserve_guard_t::stack_space_occupied() const {
+    constexpr static size_t reg64_size = 8;
+    const size_t stack_space_occupied
+            = vmm_to_preserve_size_bytes_ + reg64_stack_.size() * reg64_size;
 
-    const dim_t n_dims = dst_d.ndims();
-    const auto dims = dst_d.dims();
-    const dim_t &mb = dims[0];
-    const dim_t &oc = n_dims >= 2 ? dims[1] : 1;
-    const dim_t &ow = n_dims >= 3 ? dims[n_dims - 1] : 1;
-    const dim_t &oh = n_dims >= 4 ? dims[n_dims - 2] : 1;
-    const dim_t &od = n_dims >= 5 ? dims[n_dims - 3] : 1;
-
-    switch (n_dims) {
-        case 1: return output_dims_t {{mb, 0, 0, 0, 0}};
-        case 2: return output_dims_t {{mb, 0, 0, 0, 0}};
-        case 3: return output_dims_t {{mb, oc, ow, 0, 0}};
-        case 4: return output_dims_t {{mb, oc, oh, ow, 0}};
-        case 5: return output_dims_t {{mb, oc, od, oh, ow}};
-        default: assert(!"dimension count error"); break;
-    }
-
-    return output_dims_t();
-}
+    return stack_space_occupied;
+};
 
 } // namespace injector_utils
 } // namespace x64

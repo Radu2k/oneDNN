@@ -46,13 +46,24 @@ inline int compare_dat(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
 
         const float diff = fabsf(fp - dt);
         const float rel_diff = diff / (fabsf(fp) > FLT_MIN ? fabsf(fp) : 1);
+
         bool ok = false;
-        if (std::isinf(fp))
+        if (std::isnan(fp0) && is_integral_dt(prb->cfg[kind].dt))
+            // XXX: if reference fp0 value is nan, allow to return anything from
+            // the library for integral target data types.
+            ok = true;
+        else if (std::isinf(fp))
             ok = std::isinf(dt) && std::signbit(fp) == std::signbit(dt);
         else if (fp < prb->cfg[kind].min)
             ok = dt == prb->cfg[kind].min;
         else
             ok = (fabs(fp) > 1e-5 ? rel_diff : diff) <= prb->cfg[kind].eps;
+
+        // XXX: bug in cuDNN: it spits fp16 min value as -inf, not -65504
+        if (!ok && is_nvidia_gpu() && prb->cfg[kind].dt == dnnl_f16) {
+            ok = fp == lowest_dt(prb->cfg[kind].dt) && std::isinf(dt)
+                    && std::signbit(dt);
+        }
 
         res->errors += !ok;
 
@@ -252,6 +263,23 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
     if (engine_tgt_kind == dnnl_cpu && prb->cfg[SRC].dt != prb->cfg[DST].dt) {
         res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
         return;
+    }
+
+    if (is_nvidia_gpu()) {
+        const int64_t PD = prb->pd, PH = prb->ph, PW = prb->pw;
+        const int64_t PD_R = prb->pd_r, PH_R = prb->ph_r, PW_R = prb->pw_r;
+        const bool pad_ok
+                = !(prb->alg == AVG_P && (PD < PD_R || PH < PH_R || PW < PW_R));
+
+        const int64_t DD = prb->dd, DH = prb->dh, DW = prb->dw;
+        const bool dilation_ok = DD == 0 && DH == 0 && DW == 0;
+
+        const bool post_ops_ok = prb->attr.post_ops.is_def();
+
+        if (!pad_ok || !dilation_ok || !post_ops_ok) {
+            res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
+            return;
+        }
     }
 }
 

@@ -584,19 +584,12 @@ struct dnnl_gemm<float, float, float> {
         if (p.pack_params.pack_a || p.pack_params.pack_b)
             return call_packed(p, a_mem, b_mem, c_mem);
 
-        engine eng = a_mem.get().get_engine();
-        stream s(eng);
+        auto A = map_memory<float>(a_mem);
+        auto B = map_memory<float>(b_mem);
+        auto C = map_memory<float>(c_mem);
 
-        if (get_test_engine_kind() == engine::kind::cpu) {
-            auto A = map_memory<float>(a_mem);
-            auto B = map_memory<float>(b_mem);
-            auto C = map_memory<float>(c_mem);
-
-            return dnnl_sgemm(p.transA, p.transB, p.M, p.N, p.K, p.alpha, A,
-                    p.lda, B, p.ldb, p.beta, C, p.ldc);
-        }
-
-        throw error(dnnl_runtime_error, "unknown gemm");
+        return dnnl_sgemm(p.transA, p.transB, p.M, p.N, p.K, p.alpha, A, p.lda,
+                B, p.ldb, p.beta, C, p.ldc);
     }
 };
 
@@ -911,8 +904,6 @@ struct dnnl_gemm<bfloat16_t, bfloat16_t, float> {
     static dnnl_status_t call(const test_params &p, const test_memory &a_mem,
             const test_memory &b_mem, const test_memory &c_mem,
             const test_memory &) {
-        engine eng = a_mem.get().get_engine();
-        stream s(eng);
         if (p.pack_params.pack_a || p.pack_params.pack_b)
             return call_packed(p, a_mem, b_mem, c_mem);
 
@@ -1004,6 +995,20 @@ protected:
         bool is_f16 = (data_traits<a_dt>::data_type == memory::data_type::f16);
         SKIP_IF(is_f16 && get_test_engine_kind() == engine::kind::cpu,
                 "CPU does not support f16 data type.");
+
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_SYCL
+        SKIP_IF(get_test_engine_kind() == engine::kind::cpu,
+                "SYCL CPU GEMM not implemented.");
+#endif
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
+        SKIP_IF(get_test_engine_kind() == engine::kind::gpu
+                        && (data_traits<a_dt>::data_type
+                                        == memory::data_type::u8
+                                || data_traits<a_dt>::data_type
+                                        == memory::data_type::s8),
+                "SYCL GPU int GEMM not implemented.");
+        SKIP_IF_CUDA(true, "Test not supported in CUDA backend");
+#endif
 
         bool is_bf16bf16f32 = true
                 && data_traits<a_dt>::data_type == memory::data_type::bf16

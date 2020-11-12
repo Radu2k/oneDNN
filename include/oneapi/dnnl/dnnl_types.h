@@ -196,6 +196,7 @@ typedef enum {
     dnnl_acb, ///< permuted 3D tensor
     dnnl_acbde, ///< permuted 5D tensor
     dnnl_acbdef, ///< permuted 6D tensor
+    dnnl_abdefc, ///< permuted 6D tensor
     dnnl_acdb, ///< permuted 4D tensor
     dnnl_acdeb, ///< permuted 5D tensor
     dnnl_ba, ///< permuted 2D tensor
@@ -469,6 +470,11 @@ typedef enum {
     dnnl_AB8a4b,
     dnnl_AB32a32b8a2b,
     dnnl_AB8a2b,
+    dnnl_abDc32d,
+    dnnl_abDC32d4c,
+    dnnl_abdEc32e,
+    dnnl_abdEC32e2c,
+    dnnl_abdEC32e4c,
 
     /// Just a sentinel, not real memory format tag. Must be changed after new
     /// format tag is added.
@@ -536,16 +542,22 @@ typedef enum {
 
     /// 4D CNN weights tensor (incl. groups), an alias to #dnnl_abcd
     dnnl_goiw = dnnl_abcd,
+    /// 4D CNN weights tensor (incl. groups), an alias to #dnnl_abdc
+    dnnl_gowi = dnnl_abdc,
     /// 4D CNN weights tensor (incl. groups), an alias to #dnnl_dcab
     dnnl_wigo = dnnl_dcab,
     /// 5D CNN weights tensor (incl. groups), an alias to #dnnl_abcde
     dnnl_goihw = dnnl_abcde,
+    /// 5D CNN weights tensor (incl. groups), an alias to #dnnl_abdec
+    dnnl_gohwi = dnnl_abdec,
     /// 5D CNN weights tensor (incl. groups), an alias to #dnnl_decab
     dnnl_hwigo = dnnl_decab,
     /// 5D CNN weights tensor (incl. groups), an alias to #dnnl_acbde
     dnnl_giohw = dnnl_acbde,
     /// 6D CNN weights tensor (incl. groups), an alias to #dnnl_abcdef
     dnnl_goidhw = dnnl_abcdef,
+    /// 6D CNN weights tensor (incl. groups), an alias to #dnnl_abdefc
+    dnnl_godhwi = dnnl_abdefc,
     /// 6D CNN weights tensor (incl. groups), an alias to #dnnl_acbdef
     dnnl_giodhw = dnnl_acbdef,
     /// 6D CNN weights tensor (incl. groups), an alias to #dnnl_defcab
@@ -585,6 +597,13 @@ typedef enum {
     ///    and output gate.
     ///  - For GRU cells, the gates order is update, reset and output gate.
     dnnl_ldgo = dnnl_abcd,
+    /// 5D LSTM projection tensor
+    dnnl_ldOi32o = dnnl_abDc32d,
+    dnnl_ldOI32o4i = dnnl_abDC32d4c,
+    /// 6D RNN weights tensor
+    dnnl_ldgOi32o = dnnl_abdEc32e,
+    dnnl_ldgOI32o2i = dnnl_abdEC32e2c,
+    dnnl_ldgOI32o4i = dnnl_abdEC32e4c,
 
     // Opaque data types, are not to be used explicitly
 
@@ -929,6 +948,8 @@ typedef enum {
     dnnl_pooling_v2,
     /// A reduction primitive.
     dnnl_reduction,
+    /// A PReLU primitive.
+    dnnl_prelu,
 
     /// Parameter to allow internal only primitives without undefined behavior.
     /// This parameter is chosen to be valid for so long as sizeof(int) >= 2.
@@ -1243,7 +1264,9 @@ typedef enum {
     ///  -128 * SUM(ic : 0,IC; kh : 0,KH; kw : 0,KW){ weights(oc, ic, kh, kw) }
     dnnl_memory_extra_flag_compensation_conv_s8s8 = 0x1U,
     dnnl_memory_extra_flag_scale_adjust = 0x2U,
-    dnnl_memory_extra_flag_gpu_rnn_u8s8_compensation = 0x4U,
+    dnnl_memory_extra_flag_rnn_u8s8_compensation = 0x4U,
+    dnnl_memory_extra_flag_gpu_rnn_u8s8_compensation
+    = dnnl_memory_extra_flag_rnn_u8s8_compensation,
     dnnl_memory_extra_flag_compensation_conv_asymmetric_src = 0x8U,
 } dnnl_memory_extra_flags_t;
 
@@ -1545,7 +1568,12 @@ typedef struct {
     dnnl_data_type_t accum_data_type;
 } dnnl_pooling_desc_t;
 
-/// A descriptor of a pooling (version 2) operation.
+/// @} dnnl_api_pooling
+
+/// @addtogroup dnnl_api_pooling_v2
+/// @{
+
+/// A descriptor of a pooling operation.
 typedef struct {
     /// The kind of primitive. Used for self-identifying the primitive
     /// descriptor. Must be #dnnl_pooling_v2.
@@ -1580,7 +1608,29 @@ typedef struct {
     dnnl_dims_t dilation;
 } dnnl_pooling_v2_desc_t;
 
-/// @} dnnl_api_pooling
+/// @} dnnl_api_pooling_v2
+
+/// @addtogroup dnnl_api_prelu
+/// @{
+typedef struct {
+    /// The kind of primitive. Used for self-identifying the primitive
+    /// descriptor. Must be #dnnl_prelu.
+    dnnl_primitive_kind_t primitive_kind;
+    /// The kind of propagation. Possible values: #dnnl_forward_training,
+    /// #dnnl_forward_inference, #dnnl_backward
+    dnnl_prop_kind_t prop_kind;
+    /// Source and destination memory descriptor.
+    dnnl_memory_desc_t data_desc;
+    /// Learnable parameter alpha memory descriptor.
+    /// Alpha describes negative slope.
+    dnnl_memory_desc_t weights_desc;
+    /// Source and destination gradient memory descriptor.
+    dnnl_memory_desc_t diff_data_desc;
+    /// Learnable parameter alpha gradient memory descriptor.
+    dnnl_memory_desc_t diff_weights_desc;
+} dnnl_prelu_desc_t;
+
+/// @} dnnl_api_prelu
 
 /// @addtogroup dnnl_api_lrn
 /// @{
@@ -2341,6 +2391,7 @@ typedef enum {
     dnnl_query_eltwise_d, ///< eltwise descriptor
     dnnl_query_softmax_d, ///< softmax descriptor
     dnnl_query_pooling_d, ///< pooling descriptor
+    dnnl_query_prelu_d, ///< prelu descriptor
     dnnl_query_lrn_d, ///< lrn descriptor
     dnnl_query_batch_normalization_d, ///< batch normalization descriptor
     dnnl_query_layer_normalization_d, ///< layer normalization descriptor
@@ -2379,7 +2430,7 @@ typedef enum {
 
 /// @brief Stream flags.
 typedef enum {
-    /// In-order execution.
+    // In-order execution.
     dnnl_stream_in_order = 0x1U,
     /// Out-of-order execution.
     dnnl_stream_out_of_order = 0x2U,
@@ -2394,6 +2445,13 @@ struct dnnl_stream;
 typedef struct dnnl_stream *dnnl_stream_t;
 /// A constant execution stream handle.
 typedef const struct dnnl_stream *const_dnnl_stream_t;
+
+/// An opaque structure to describe execution stream attrbutes.
+struct dnnl_stream_attr;
+/// An execution stream attributes handle.
+typedef struct dnnl_stream_attr *dnnl_stream_attr_t;
+/// A constant execution stream attributes handle.
+typedef const struct dnnl_stream_attr *const_dnnl_stream_attr_t;
 
 /// @} dnnl_api_stream
 
@@ -2495,6 +2553,10 @@ typedef enum {
     /// Intel AMX with 8-bit integer and bfloat16 support
     /// (initial support)
     dnnl_cpu_isa_avx512_core_amx = 0x3e7,
+
+    /// Intel AVX2 and Intel Deep Learning Boost (Intel DL Boost) support
+    dnnl_cpu_isa_avx2_vnni = 0x407,
+
 } dnnl_cpu_isa_t;
 
 /// @} dnnl_api_service
@@ -2505,4 +2567,4 @@ typedef enum {
 }
 #endif
 
-#endif
+#endif /* ONEAPI_DNNL_TYPES_H */

@@ -236,6 +236,11 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
             && src_mdw.matches_one_of_tag(nhwc)
             && dst_mdw.matches_one_of_tag(nchw);
 
+    conf.nchw = src_mdw.matches_one_of_tag(nhwc)
+            && dst_mdw.matches_one_of_tag(nchw) && !conf.transpose16x16
+            && padded_dims[last] % 16 == 0
+            && dim_is_div_by_16_or_less_than_16(dst_mdw, 1);
+
     const bool allow_unroll = !has_padding_or_scale_quant && !type_s8_u8
             && !conf.transpose16x16 && !conf.nchw;
 
@@ -265,7 +270,6 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
             && dst_mdw.matches_one_of_tag(abcdef)
             && ((padded_dims[conf.ndims - 2] % 16) == 0)
             && dim_is_div_by_16_or_less_than_16(dst_mdw, last);
-
     conf.plain_to_ABcd4axb = !conf.scale_quant
             && (src_mdw.matches_one_of_tag(abcd)
                     || src_mdw.matches_one_of_tag(acdb))
@@ -292,8 +296,8 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
     // This kernel supports 2D reorders into blocked formats that
     // end in 8a4b or 8a2b, no matter how many block layers, but no padding.
     conf.plain_to_ABxx8ayb = !conf.transpose16x16 && !conf.use_dense_vect
-            && !has_padding_or_scale_quant && !conf.vectorize_last_dim
-            && src_mdw.matches_one_of_tag(ab)
+            && !conf.nchw && !has_padding_or_scale_quant
+            && !conf.vectorize_last_dim && src_mdw.matches_one_of_tag(ab)
             && matches_ABxxxx8ayb_layout(
                     dst_mdw.md_->format_desc.blocking, conf.ndims)
             && padded_dims[last] % 16 == 0;

@@ -178,21 +178,24 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
 
     bool is_invalid = false;
     switch (prb->alg) {
-        case alg_t::MEAN:
-            is_invalid = prb->sdt != dnnl_f32 && prb->sdt != dnnl_bf16
-                    && prb->sdt != dnnl_f16;
-            break;
+        case alg_t::MEAN: is_invalid = is_integral_dt(prb->sdt); break;
         case alg_t::NORM_LP_MAX:
         case alg_t::NORM_LP_SUM:
         case alg_t::NORM_LP_POWER_P_MAX:
         case alg_t::NORM_LP_POWER_P_SUM:
-            is_invalid = (prb->sdt != dnnl_f32 && prb->sdt != dnnl_bf16
-                                 && prb->sdt != dnnl_f16)
-                    || prb->p < 1.f;
+            is_invalid = is_integral_dt(prb->sdt) || prb->p < 1.f;
             break;
         default: break;
     }
-    if (is_invalid) res->state = SKIPPED, res->reason = INVALID_CASE;
+    if (is_invalid) {
+        res->state = SKIPPED, res->reason = INVALID_CASE;
+        return;
+    }
+
+    if (is_nvidia_gpu()) {
+        res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
+        return;
+    }
 }
 
 int doit(const prb_t *prb, res_t *res) {

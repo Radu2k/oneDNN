@@ -18,10 +18,12 @@ oneAPI Deep Neural Network Library (oneDNN)
 oneAPI Deep Neural Network Library (oneDNN) is an open-source cross-platform
 performance library of basic building blocks for deep learning applications.
 The library is optimized for Intel Architecture Processors, Intel Processor
-Graphics and Xe architecture-based Graphics. Support for other architectures
-such as Arm\* 64-bit Architecture (AArch64), OpenPOWER\* Power ISA (PPC64),
-and IBMz\* (s390x) is experimental.
-See the [System Requirements](#system-requirements) section below.
+Graphics and Xe architecture-based Graphics. oneDNN has experimental support
+for the following architectures:
+* Arm\* 64-bit Architecture (AArch64)
+* NVIDIA\* GPU
+* OpenPOWER\* Power ISA (PPC64)
+* IBMz\* (s390x)
 
 This is a development branch for oneDNN v2.0 Beta. This is pre-production software
 and functionality may change without prior notice. You can find production
@@ -30,23 +32,19 @@ version of the library in [master](https://github.com/oneapi-src/oneDNN).
 oneDNN is intended for deep learning applications and framework
 developers interested in improving application performance
 on Intel CPUs and GPUs. Deep learning practitioners should use one of the
-applications enabled with oneDNN:
-* [Apache\* MXNet](https://mxnet.apache.org)
-* [Apache\* SINGA](https://singa.apache.org)
-* [BigDL](https://github.com/intel-analytics/BigDL)
-* [Caffe\* Optimized for Intel Architecture](https://github.com/intel/caffe)
-* [Chainer\*](https://chainer.org)
-* [DeepLearning4J\*](https://deeplearning4j.org)
-* [Korali](https://github.com/cselab/korali)
-* [MATLAB\* Deep Learning Toolbox](https://www.mathworks.com/help/deeplearning/)
-* [Menoh\*](https://github.com/pfnet-research/menoh)
-* [Microsoft\* Cognitive Toolkit (CNTK)](https://docs.microsoft.com/en-us/cognitive-toolkit)
-* [nGraph](https://ngraph.ai)
-* [ONNX Runtime](https://github.com/microsoft/onnxruntime)
-* [OpenVINO(TM) toolkit](https://01.org/openvinotoolkit)
-* [PaddlePaddle\*](http://www.paddlepaddle.org)
-* [PyTorch\*](https://pytorch.org/)
-* [Tensorflow\*](https://www.tensorflow.org)
+[applications enabled with oneDNN](#applications-enabled-with-onednn).
+
+# Table of Contents
+
+- [Documentation](#documentation)
+- [Installation](#installation)
+- [System Requirements](#system-requirements)
+- [Applications Enabled with oneDNN](#applications-enabled-with-onednn)
+- [Support](#support)
+- [Contributing](#contributing)
+- [License](#license)
+- [Security](#security)
+- [Trademark Information](#trademark-information)
 
 # Documentation
 
@@ -195,8 +193,20 @@ is enabled:
       with Intel subgroups extension support
 * DPCPP runtime requires
     * [Intel oneAPI DPC++ Compiler](https://software.intel.com/en-us/oneapi/dpc-compiler) Beta
-    * OpenCL\* runtime library (OpenCL version 1.2 or later)
+    * OpenCL runtime library (OpenCL version 1.2 or later)
     * [oneAPI Level Zero](https://github.com/oneapi-src/level-zero)
+* DPCPP runtime with NVIDIA GPU support requires
+    * [oneAPI DPC++ Compiler](https://github.com/intel/llvm)
+    * OpenCL runtime library (OpenCL version 1.2 or later)
+    * NVIDIA CUDA\* driver
+    * cuBLAS 10.1 or later
+    * cuDNN 7.6 or later
+
+> **WARNING**
+>
+> NVIDIA GPU support is experimental. General information, build instructions
+> and implementation limitations is available in
+> [NVIDIA backend readme](https://github.com/oneapi-src/oneDNN/blob/master/src/gpu/NVIDIA/README.md).
 
 ### Runtime Dependencies
 
@@ -207,7 +217,7 @@ and specific versions are defined by the build environment.
 
 Common dependencies:
 * GNU C Library (`libc.so`)
-* GNU Standard C++ Library v3 (`libstd++.so`)
+* GNU Standard C++ Library v3 (`libstdc++.so`)
 * Dynamic Linking Library (`libdl.so`)
 * C Math Library (`libm.so`)
 * POSIX Threads Library (`libpthread.so`)
@@ -295,7 +305,26 @@ on Windows Server 2019 with
 
 ## Requirements for Pre-built Binaries
 
-See README included into corresponding binary package.
+See the README included in the corresponding binary package.
+
+# Applications Enabled with oneDNN
+
+* [Apache\* MXNet](https://mxnet.apache.org)
+* [Apache\* SINGA](https://singa.apache.org)
+* [BigDL](https://github.com/intel-analytics/BigDL)
+* [Caffe\* Optimized for Intel Architecture](https://github.com/intel/caffe)
+* [Chainer\*](https://chainer.org)
+* [DeepLearning4J\*](https://deeplearning4j.org)
+* [Korali](https://github.com/cselab/korali)
+* [MATLAB\* Deep Learning Toolbox](https://www.mathworks.com/help/deeplearning/)
+* [Menoh\*](https://github.com/pfnet-research/menoh)
+* [Microsoft\* Cognitive Toolkit (CNTK)](https://docs.microsoft.com/en-us/cognitive-toolkit)
+* [nGraph](https://ngraph.ai)
+* [ONNX Runtime](https://github.com/microsoft/onnxruntime)
+* [OpenVINO(TM) toolkit](https://01.org/openvinotoolkit)
+* [PaddlePaddle\*](http://www.paddlepaddle.org)
+* [PyTorch\*](https://pytorch.org/)
+* [Tensorflow\*](https://www.tensorflow.org)
 
 # Support
 
@@ -349,6 +378,7 @@ Apache License Version 2.0:
 * [Font Roboto](https://fonts.google.com/specimen/Roboto)
 * [MathJax](https://github.com/mathjax/MathJax)
 * [ComputeCPP SDK](https://github.com/codeplaysoftware/computecpp-sdk)
+* [Xbyak_aarch64](https://github.com/fujitsu/xbyak_aarch64)
 
 Boost Software License, Version 1.0:
 * [Boost C++ Libraries](https://www.boost.org/)
@@ -367,6 +397,13 @@ without limitation, third party license terms, other Intel software license
 terms, and open source software license terms. These separate license terms
 govern your use of the third party programs as set forth in the
 "[THIRD-PARTY-PROGRAMS](THIRD-PARTY-PROGRAMS)" file.
+
+# Security
+
+See Intel's [Security Center](https://www.intel.com/content/www/us/en/security-center/default.html)
+for information on how to report a potential security issue or vulnerability.
+
+See also: [Security Policy](SECURITY.md)
 
 # Trademark Information
 

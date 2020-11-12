@@ -258,10 +258,9 @@ gen9_conv_bwd_weights(__global float *src,
             + kd * KH * KW * IC_BLOCK * OC_BLOCK + kh * KW * IC_BLOCK * OC_BLOCK
             + kw * IC_BLOCK * OC_BLOCK + g * OC * IC * KD * KH * KW;
 #if NCHUNK == 1
+    intel_sub_group_block_write8((__global uint *)diff_wei, as_uint8(blockC00));
     intel_sub_group_block_write8(
-            (__global uint8 *)diff_wei, as_uint8(blockC00));
-    intel_sub_group_block_write8(
-            (__global uint8 *)(diff_wei + 8 * OC_BLOCK), as_uint8(blockC01));
+            (__global uint *)(diff_wei + 8 * OC_BLOCK), as_uint8(blockC01));
 #else
     for (int i = 0; i < 8; i++)
         atomic_add_global(diff_wei + i * OC_BLOCK + sglid, blockC00[i]);
@@ -427,11 +426,11 @@ gen9_conv_bwd_weights(__global float *src,
 #if IC == 3
                     for (int i = 0; i < 3; i++) {
                         if (HAS_PAD_W
-                                && (iw + (local_x)*SW < 0
-                                        || iw + (local_x)*SW >= IW))
+                                && (iw + (sglid)*SW < 0
+                                        || iw + (sglid)*SW >= IW))
                             blockA[i] = 0;
                         else
-                            blockA[i] = src1[i * ID * IH * IW + (local_x)*SW];
+                            blockA[i] = src1[i * ID * IH * IW + (sglid)*SW];
                     }
 #else
                     for (int i = 0; i < OW_BLOCK; i++) {
@@ -493,7 +492,7 @@ gen9_conv_bwd_weights(__global float *src,
                     src1 = src + id * IH * IW * IC_BLOCK + ih * IW * IC_BLOCK
                             + iw * IC_BLOCK;
 #if IC == 3
-                    if (local_x < IC) {
+                    if (sglid < IC) {
                         for (int i = 0; i < min(OW_LOOP_BLOCK, OW - ow); i++) {
                             if (HAS_PAD_W
                                     && (iw + i * SW < 0 || iw + i * SW >= IW))
@@ -572,10 +571,9 @@ gen9_conv_bwd_weights(__global float *src,
             + kd * KH * KW * IC_BLOCK * OC_BLOCK + kh * KW * IC_BLOCK * OC_BLOCK
             + kw * IC_BLOCK * OC_BLOCK + g * OC * IC * KD * KH * KW;
 #if NCHUNK == 1
+    intel_sub_group_block_write8((__global uint *)diff_wei, as_uint8(blockC00));
     intel_sub_group_block_write8(
-            (__global uint8 *)diff_wei, as_uint8(blockC00));
-    intel_sub_group_block_write8(
-            (__global uint8 *)(diff_wei + 8 * OC_BLOCK), as_uint8(blockC01));
+            (__global uint *)(diff_wei + 8 * OC_BLOCK), as_uint8(blockC01));
 #else
     for (int i = 0; i < 8; i++)
         atomic_add_global(diff_wei + i * OC_BLOCK + sglid, blockC00[i]);

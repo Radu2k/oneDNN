@@ -23,6 +23,11 @@
 
 #include "tests/test_thread.hpp"
 
+// For is_nvidia_gpu(...)
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_DPCPP
+#include "oneapi/dnnl/dnnl_sycl.hpp"
+#endif
+
 #include "dnnl_common.hpp"
 #include "dnnl_memory.hpp"
 
@@ -433,53 +438,45 @@ void check_known_skipped_case_common(
             r->state = SKIPPED, r->reason = DATA_TYPE_NOT_SUPPORTED;
             break;
         }
+        // cuda supports only f32, f16 and s8 data types
+        if (is_nvidia_gpu()
+                && (i_dt == dnnl_bf16 || i_dt == dnnl_u8 || i_dt == dnnl_s32)) {
+            r->state = SKIPPED, r->reason = DATA_TYPE_NOT_SUPPORTED;
+            break;
+        }
     }
 }
 
-int setup_binary(const_dnnl_primitive_desc_t pd, std::vector<int> &args,
-        std::vector<dnn_mem_t> &mem, std::vector<dnn_mem_t> &mem_ref) {
-    auto fill_src = [](int input_idx, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp) {
-        const auto nelems = mem_fp.nelems();
-        if (nelems == 0) return OK;
+bool is_nvidia_gpu(const engine_t &engine) {
+    dnnl_engine_kind_t engine_kind = dnnl_any_engine;
+    DNN_SAFE_V(dnnl_engine_get_kind(engine, &engine_kind));
 
-        const auto dt = mem_dt.dt();
-        const int range = 16;
-        const int f_min = dt == dnnl_u8 ? 0 : -range / 2;
+    if (engine_kind != dnnl_gpu) return false;
+#if DNNL_WITH_SYCL
+    constexpr int nvidia_vendor_id = 0x10DE;
+    auto eng = dnnl::engine(engine, true);
+    auto device = dnnl::sycl_interop::get_device(eng);
+    const auto eng_vendor_id
+            = device.get_info<cl::sycl::info::device::vendor_id>();
+    return eng_vendor_id == nvidia_vendor_id;
+#endif
+    return false;
+}
 
-        dnnl::impl::parallel_nd(nelems, [&](int64_t i) {
-            const float gen = ((101 * i) + 7 * input_idx - 97) % (range + 1);
-            const float value = (dt == dnnl_bf16 || dt == dnnl_f16)
-                    ? (f_min + gen) / range
-                    : (f_min + gen) * (1.0f + 4.0f / range);
-            mem_fp.set_elem(i, round_to_nearest_representable(dt, value));
-        });
-
-        SAFE(mem_dt.reorder(mem_fp), WARN);
-        return OK;
+bool is_nvidia_eltwise_ok(
+        dir_t dir, attr_t::post_ops_t::kind_t alg, float alpha) {
+    using pk_t = attr_t::post_ops_t::kind_t;
+    switch (alg) {
+        case pk_t::BRELU: return true;
+        case pk_t::ELU: return (dir & FLAG_FWD);
+        case pk_t::LOGISTIC: return (dir & FLAG_FWD);
+        case pk_t::TANH: return (dir & FLAG_FWD);
+        case pk_t::RELU: return alpha == 0.f;
+        // TODO: can be easily supported by Nvidia backend
+        // case pk_t::ELU_DST: return true;
+        // case pk_t::LOGISTIC_DST: return true;
+        // case pk_t::TANH_DST: return true;
+        // case pk_t::RELU_DST: return alpha == 0.f;
+        default: return false;
     };
-
-    const_dnnl_primitive_attr_t const_attr;
-    DNN_SAFE(dnnl_primitive_desc_get_attr(pd, &const_attr), WARN);
-
-    const_dnnl_post_ops_t const_attr_po;
-    DNN_SAFE(
-            dnnl_primitive_attr_get_post_ops(const_attr, &const_attr_po), WARN);
-
-    auto po_len = dnnl_post_ops_len(const_attr_po);
-    for (int idx = 0; idx < po_len; ++idx) {
-        auto kind = dnnl_post_ops_get_kind(const_attr_po, idx);
-        if (kind != dnnl_binary) continue;
-
-        const dnnl_memory_desc_t *po_md;
-        DNN_SAFE(dnnl_post_ops_get_params_binary(
-                         const_attr_po, idx, NULL, &po_md),
-                WARN);
-
-        mem_ref.emplace_back(*po_md, dnnl_f32, tag::abx, get_test_engine());
-        mem.emplace_back(*po_md, get_test_engine());
-        args.push_back(DNNL_ARG_ATTR_MULTIPLE_POST_OP(idx) | DNNL_ARG_SRC_1);
-
-        fill_src(idx, mem.back(), mem_ref.back());
-    }
-    return OK;
 }

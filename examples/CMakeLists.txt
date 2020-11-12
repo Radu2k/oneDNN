@@ -61,6 +61,14 @@ if(DNNL_CPU_SYCL)
     endforeach()
 endif()
 
+# Skip examples for CUDA since USM is a default model for the library which is
+# not yet supported for Nvidia backend.
+if(DNNL_SYCL_CUDA)
+    foreach(f ${sources})
+        list(REMOVE_ITEM sources "${f}")
+    endforeach()
+endif()
+
 foreach(src ${sources})
     file(RELATIVE_PATH src_rel_path ${CMAKE_CURRENT_SOURCE_DIR} ${src})
     string(REGEX REPLACE "[/_\\.]" "-" example_name ${src_rel_path})
@@ -86,12 +94,12 @@ foreach(src ${sources})
         endif()
         if(DNNL_CPU_RUNTIME MATCHES ${cpu_rt_pattern})
             # Adding test for CPU
-            add_test("cpu-${example_name}" "${example_name}" cpu)
+            add_dnnl_test("cpu-${example_name}" "${example_name}" cpu)
             maybe_configure_windows_test("cpu-${example_name}" TEST)
         endif()
         if(DNNL_GPU_RUNTIME MATCHES ${gpu_rt_pattern})
             # Adding test for GPU
-            add_test("gpu-${example_name}" "${example_name}" gpu)
+            add_dnnl_test("gpu-${example_name}" "${example_name}" gpu)
             maybe_configure_windows_test("gpu-${example_name}" TEST)
         endif()
         register_exe(${example_name} ${src} "" ${LIBM})

@@ -65,7 +65,7 @@ status_t gen_gemm_t::launch_nocopy(const gemm_exec_ctx_t &ctx,
         uint32_t abo = uint16_t(-ao) | (uint16_t(-bo) << 16);
         arg_list.set(argn++, abo);
     }
-    if (with_offset || pd()->with_bias()) {
+    if (pd()->with_c_offset() || pd()->with_bias()) {
         arg_list.set(argn++, co);
         arg_list.set(argn++, offset_co);
     }
@@ -163,7 +163,6 @@ status_t gen_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
         pd()->attr()->zero_points_.get(DNNL_ARG_SRC, nullptr, nullptr, &ao_i32);
         pd()->attr()->zero_points_.get(
                 DNNL_ARG_WEIGHTS, nullptr, nullptr, &bo_i32);
-        pd()->attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
         ao = *ao_i32;
         bo = *bo_i32;
         off_co0 = co->offset() / types::data_type_size(c_type)
@@ -174,6 +173,9 @@ status_t gen_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
         cmask = pd()->bias_cmask();
         off_co0 = bias.offset() / types::data_type_size(c_type);
     }
+
+    if (pd()->with_c_offset())
+        pd()->attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
 
     status_t status;
 

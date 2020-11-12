@@ -89,12 +89,7 @@ struct gen_gemm_t : public gpu_gemm_t {
             ok = ok
                     && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m(), d->n(),
                             d->k(), d->lda(), d->ldb(), d->ldc(), d->batch())
-                    && IMPLICATION(d->c_type() != f32,
-                            d->bias_type() == data_type::undef)
-                    && IMPLICATION(with_bias(),
-                            (d->bias_type() == d->c_type())
-                                    && utils::one_of(
-                                            bias_cmask(), 0, 1 << 0, 1 << 1))
+                    && d->bias_type() == data_type::undef
                     && compute_engine->mayiuse_ngen_kernels()
                     && attr()->has_default_values(attr_skip_mask)
                     && attr()->output_scales_.mask_ == 0
@@ -127,6 +122,10 @@ struct gen_gemm_t : public gpu_gemm_t {
 
         bool set_default_formats() {
             return gpu_gemm_pd_t::set_default_formats();
+        }
+
+        bool with_c_offset() const {
+            return !attr()->zero_points_.has_default_values(DNNL_ARG_DST);
         }
 
         bool with_eltwise() const { return false; }
@@ -188,7 +187,8 @@ struct gen_gemm_t : public gpu_gemm_t {
         kernel_t kernel;
 
         auto status = kernel.init(pd()->arch_, batched, transa, transb,
-                pd()->with_bias(), a_type, b_type, c_type, unroll_m, unroll_n);
+                pd()->with_c_offset(), pd()->with_bias(), a_type, b_type,
+                c_type, unroll_m, unroll_n);
         if (status != status::success) return status;
 
         create_kernel(engine, &nocopy_kernel_, kernel);

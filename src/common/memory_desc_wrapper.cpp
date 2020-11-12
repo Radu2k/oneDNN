@@ -160,6 +160,7 @@ status_t memory_desc_wrapper::compute_blocking(
         C(acb, {0, 2, 1}, {}, {});
         C(acbde, {0, 2, 1, 3, 4}, {}, {});
         C(acbdef, {0, 2, 1, 3, 4, 5}, {}, {});
+        C(abdefc, {0, 1, 3, 4, 5, 2}, {}, {});
         C(acdb, {0, 2, 3, 1}, {}, {});
         C(acdeb, {0, 2, 3, 4, 1}, {}, {});
         C(ba, {1, 0}, {}, {});
@@ -403,6 +404,11 @@ status_t memory_desc_wrapper::compute_blocking(
         C(AB8a4b, {0, 1}, {8, 4}, {0, 1});
         C(AB32a32b8a2b, {0, 1}, {32, 32, 8, 2}, {0, 1, 0, 1});
         C(AB8a2b, {0, 1}, {8, 2}, {0, 1});
+        C(abDc32d, {0, 1, 3, 2}, {32}, {3});
+        C(abDC32d4c, {0, 1, 3, 2}, {32, 4}, {3, 2});
+        C(abdEc32e, {0, 1, 3, 4, 2}, {32}, {4});
+        C(abdEC32e2c, {0, 1, 3, 4, 2}, {32, 2}, {4, 2});
+        C(abdEC32e4c, {0, 1, 3, 4, 2}, {32, 4}, {4, 2});
         default: break;
     }
 

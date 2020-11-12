@@ -49,6 +49,7 @@ endif()
 
 # TODO: enable me!
 file(GLOB PRIM_TEST_CASES_SRC
+                              test_primitive_cache_mt.cpp
                               test_iface_primitive_cache.cpp
                               test_iface_pd.cpp
                               test_iface_pd_iter.cpp
@@ -163,13 +164,13 @@ function(register_gtest exe src)
     endif()
 
     if(NOT DNNL_GPU_RUNTIME STREQUAL "NONE" AND NOT no_engine_param)
-        add_test(${exe}_cpu ${exe} COMMAND ${exe} --engine=cpu)
+        add_dnnl_test(${exe}_cpu ${exe} COMMAND ${exe} --engine=cpu)
         maybe_configure_windows_test(${exe}_cpu TEST)
 
-        add_test(${exe}_gpu ${exe} COMMAND ${exe} --engine=gpu)
+        add_dnnl_test(${exe}_gpu ${exe} COMMAND ${exe} --engine=gpu)
         maybe_configure_windows_test(${exe}_gpu TEST)
     else()
-        add_test(${exe} ${exe})
+        add_dnnl_test(${exe} ${exe})
         maybe_configure_windows_test(${exe} TEST)
     endif()
 endfunction()
@@ -184,7 +185,7 @@ endif()
 
 foreach(TEST_FILE ${PRIM_TEST_CASES_SRC})
     get_filename_component(exe ${TEST_FILE} NAME_WE)
-    if(NOT ${exe} MATCHES "${skip_usm_pattern}")
+    if(NOT ${exe} MATCHES "${skip_usm_pattern}" AND NOT DNNL_SYCL_CUDA)
         register_gtest(${exe} ${TEST_FILE})
     endif()
 

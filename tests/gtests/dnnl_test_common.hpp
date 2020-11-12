@@ -32,7 +32,6 @@
 #define collapse(x)
 #endif
 
-#include "dnnl_test_macros.hpp"
 #include "oneapi/dnnl/dnnl.hpp"
 #include "oneapi/dnnl/dnnl_debug.h"
 
@@ -47,6 +46,9 @@
 #if DNNL_WITH_SYCL
 #include "oneapi/dnnl/dnnl_sycl.hpp"
 #endif
+
+// Don't move it higher than library public headers
+#include "dnnl_test_macros.hpp"
 
 #include "src/common/bfloat16.hpp"
 #include "src/common/float16.hpp"
@@ -85,6 +87,27 @@ dnnl::engine::kind get_test_engine_kind();
 dnnl::engine get_test_engine();
 #endif
 
+inline int get_vendor_id(const std::string &vendor) {
+    if (vendor == "nvidia") {
+        return 0x10DE;
+    } else if (vendor == "intel") {
+        return 0x8086;
+    } else {
+        return -1;
+    }
+}
+
+inline bool is_nvidia_gpu(const dnnl::engine &eng) {
+#if DNNL_WITH_SYCL
+    const int nvidia_vendor_id = get_vendor_id("nvidia");
+    const auto device = dnnl::sycl_interop::get_device(eng);
+    const auto eng_vendor_id
+            = device.get_info<cl::sycl::info::device::vendor_id>();
+    return eng_vendor_id == nvidia_vendor_id;
+#endif
+    return false;
+}
+
 inline bool unsupported_data_type(memory::data_type dt, dnnl::engine eng) {
     dnnl::engine::kind kind = eng.get_kind();
 
@@ -92,7 +115,16 @@ inline bool unsupported_data_type(memory::data_type dt, dnnl::engine eng) {
     if (kind == dnnl::engine::kind::cpu)
         supported = dnnl::impl::cpu::platform::has_data_type_support(
                 memory::convert_to_c(dt));
-
+#ifdef DNNL_SYCL_CUDA
+    if (is_nvidia_gpu(eng)) {
+        switch (dt) {
+            case memory::data_type::f32: return false;
+            case memory::data_type::f16: return false;
+            case memory::data_type::s8: return false;
+            default: return true;
+        }
+    }
+#endif
     return !supported;
 }
 
@@ -521,7 +553,7 @@ bool catch_expected_failures(const F &f, bool expect_to_fail,
                 // Print unimplemented but do not treat as error
                 std::cout << "[  UNIMPL  ] "
                           << "Implementation not found" << std::endl;
-                reset_malloc_counter();
+                reset_failed_malloc_counter();
                 return true;
             } else if (test_out_of_memory()
                     && (e.status == dnnl_out_of_memory
@@ -533,7 +565,7 @@ bool catch_expected_failures(const F &f, bool expect_to_fail,
                 // gemm_pack_storage_shell_t ctor makes it unable to use the
                 // reference RNN impl, and the iterator produces an
                 // `dnnl_unimplemented` error.
-                increment_malloc_counter();
+                increment_failed_malloc_counter();
                 return catch_expected_failures(f, expect_to_fail,
                         expected_status, ignore_unimplemented);
             } else {
@@ -548,7 +580,7 @@ bool catch_expected_failures(const F &f, bool expect_to_fail,
         // Return normally if the failure is expected. Reset failed malloc
         // counter to zero before performing a new test.
         if (expect_to_fail) {
-            reset_malloc_counter();
+            reset_failed_malloc_counter();
             return true;
         }
     }
@@ -562,7 +594,7 @@ bool catch_expected_failures(const F &f, bool expect_to_fail,
     }
 
     // Reset failed malloc counter to zero before performing a new test.
-    reset_malloc_counter();
+    reset_failed_malloc_counter();
     return false;
 }
 
@@ -773,7 +805,7 @@ void test_fwd_pd_attr_scales(
     attr_scales.set_scales(DNNL_ARG_SRC, 0, {2.f});
 
     pd_t new_pd(op_desc, eng);
-    const auto dt = new_pd.src_desc().data.data_type;
+    const auto dt = new_pd.dst_desc().data.data_type;
     const bool dt_is_integral
             = dt == dt_t::s32 || dt == dt_t::s8 || dt == dt_t::u8;
 

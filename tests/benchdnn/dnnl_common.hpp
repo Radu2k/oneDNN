@@ -27,7 +27,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <cmath>
 #include <vector>
 
 #include "oneapi/dnnl/dnnl.h"
@@ -196,26 +195,27 @@ inline float saturate_and_round(float val) {
     const float dt_min = (float)dnnl::impl::nstl::numeric_limits<
             typename prec_traits<dt>::type>::lowest();
     if (val > dt_max) val = dt_max;
-    if (val < dt_min || (std::isnan(val) && std::signbit(val))) val = dt_min;
+    if (val < dt_min) val = dt_min;
     return mxcsr_cvt(val);
 }
 
+inline bool is_integral_dt(dnnl_data_type_t dt) {
+    return dt == dnnl_s32 || dt == dnnl_s8 || dt == dnnl_u8;
+}
+
 inline float maybe_saturate(dnnl_data_type_t dt, float value) {
-    if (dt == dnnl_s32 || dt == dnnl_s8 || dt == dnnl_u8) {
-        switch (dt) {
+    if (!is_integral_dt(dt)) return value;
+
+    switch (dt) {
 #define CASE(dt) \
-    case dt: { \
-        return saturate_and_round<dt>(value); \
-    }
-            CASE(dnnl_s32);
-            CASE(dnnl_s8);
-            CASE(dnnl_u8);
+    case dt: return saturate_and_round<dt>(value);
+        CASE(dnnl_s32);
+        CASE(dnnl_s8);
+        CASE(dnnl_u8);
 #undef CASE
-            default: assert(!"bad data_type");
-        }
-        return 0;
+        default: assert(!"bad data_type");
     }
-    return value;
+    return 0;
 }
 
 float round_to_nearest_representable(dnnl_data_type_t dt, float value);
@@ -410,7 +410,12 @@ bool check_md_consistency_with_tag(
 void check_known_skipped_case_common(
         const std::vector<dnnl_data_type_t> &v_dt, dir_t dir, res_t *r);
 
-int setup_binary(const_dnnl_primitive_desc_t pd, std::vector<int> &args,
-        std::vector<dnn_mem_t> &mem, std::vector<dnn_mem_t> &mem_ref);
+bool is_nvidia_gpu(const engine_t &engine = get_test_engine());
+bool is_nvidia_eltwise_ok(
+        dir_t dir, attr_t::post_ops_t::kind_t alg, float alpha);
+inline bool is_nvidia_eltwise_ok(
+        dir_t dir, const attr_t::post_ops_t::entry_t &e) {
+    return is_nvidia_eltwise_ok(dir, e.kind, e.eltwise.alpha);
+}
 
 #endif

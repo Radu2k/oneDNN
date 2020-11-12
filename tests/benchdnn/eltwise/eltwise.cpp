@@ -222,6 +222,9 @@ static int compare(const prb_t *prb, const dnn_mem_t &mem_arg_fp,
 
         bool ok = (fabsf(fp) > 1e-5 ? rel_diff : diff) <= trh;
 
+        // XXX: if reference fp0 value is nan, allow to return anything from the
+        // library for integral target data types.
+        if (!ok) ok = std::isnan(fp0) && is_integral_dt(prb->dt);
         if (!ok) ok = check_extreme_values(fp, dt, prb->alg);
 
         if (!ok && check_abs_err(prb, src, trh)) ok = diff <= trh;
@@ -281,8 +284,9 @@ int fill_data(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
         std::uniform_real_distribution<> fgen(0.f, 0.09f);
 
         for (int64_t idx = idx_start; idx < idx_end; ++idx) {
+            static constexpr int64_t num_of_generation_variants = 10;
             float value = FLT_MAX;
-            switch (idx % 8) {
+            switch (idx % num_of_generation_variants) {
                 case 0: value = (float)igen(msr); break; // [0-10] pos
                 case 1: value = -(float)igen(msr); break; // [0-10] neg
                 case 2: value = fgen(msr); break; // [0.-0.1) pos
@@ -291,6 +295,10 @@ int fill_data(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
                 case 5: value = -10 * (float)igen(msr); break; // [0-100] neg
                 case 6: value = 10.f * fgen(msr); break; // [0.-1.) pos
                 case 7: value = -10.f * fgen(msr); break; // [0.-1.) neg
+                case 8:
+                    value = 88.f + 10.f * fgen(msr);
+                    break; // values close to logf(FLT_MAX) for exp alg testing
+                case 9: value = prb->alpha; break; // `x = alpha` corner cases
             }
             value = round_to_nearest_representable(prb->dt, value);
 
@@ -325,6 +333,14 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
     if (is_invalid) {
         res->state = SKIPPED, res->reason = INVALID_CASE;
         return;
+    }
+
+    if (is_nvidia_gpu()) {
+        if (!is_nvidia_eltwise_ok(prb->dir, prb->alg, prb->alpha)
+                || !prb->attr.post_ops.is_def()) {
+            res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
+            return;
+        }
     }
 }
 

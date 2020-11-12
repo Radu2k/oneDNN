@@ -40,6 +40,7 @@
 #include "lrn_pd.hpp"
 #include "matmul_pd.hpp"
 #include "pooling_pd.hpp"
+#include "prelu_pd.hpp"
 #include "reduction_pd.hpp"
 #include "reorder_pd.hpp"
 #include "resampling_pd.hpp"
@@ -261,6 +262,20 @@ void attr2str(char *str, int len, int written, const primitive_attr_t *attr) {
                         DPRINT(str, len, written, "sum;");
                     else
                         DPRINT(str, len, written, "sum:%g;", e.sum.scale);
+                } break;
+                case primitive_kind::convolution: {
+                    using namespace data_type;
+                    const auto &c = e.depthwise_conv;
+                    DPRINT(str, len, written, "dw_k3s%dp1", c.stride);
+                    if (c.wei_dt == s8) {
+                        DPRINT(str, len, written, ":%s:%d",
+                                dnnl_dt2str(c.dst_dt), c.mask);
+                        if (c.mask == 0)
+                            DPRINT(str, len, written, ":%g", c.scales[0]);
+                    } else if (c.dst_dt != f32) {
+                        DPRINT(str, len, written, ":%s", dnnl_dt2str(c.dst_dt));
+                    }
+                    DPRINT(str, len, written, ";");
                 } break;
                 case primitive_kind::eltwise: {
                     const post_ops_t::entry_t::eltwise_t &ew = e.eltwise;
@@ -806,6 +821,43 @@ static void init_info_pooling(engine_t *e, pd_t *s, char *buffer) {
 }
 
 template <typename pd_t>
+static void init_info_prelu(const engine_t *e, pd_t *s, char *buffer) {
+    DECL_DAT_AUX_PRB_STRS();
+    { // data
+        const auto md = s->src_md(0);
+        DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, "data_");
+        MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
+    }
+    { // weights
+        const auto md = s->weights_md(0);
+        DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " weights_");
+        MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
+    }
+    { // diff data
+        const auto md = s->diff_src_md(0);
+        if (md) {
+            DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, " diff_");
+            MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
+        }
+    }
+    { // diff weights
+        const auto md = s->diff_weights_md(0);
+        if (md) {
+            DPRINT(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written,
+                    " diff_weights_");
+            MD2STR(dat_str, DNNL_VERBOSE_DAT_LEN, dat_written, md);
+        }
+    }
+
+    attr2str(attr_str, DNNL_VERBOSE_ATTR_LEN, attr_written, s->attr());
+
+    dnnl_md2dim_str(prb_str, DNNL_VERBOSE_PRB_LEN, s->src_md(0));
+
+    verbose_templ(buffer, e, s->kind(), s->name(), s->desc()->prop_kind,
+            dat_str, attr_str, aux_str, prb_str);
+}
+
+template <typename pd_t>
 static void init_info_softmax(const engine_t *e, pd_t *s, char *buffer) {
     DECL_DAT_AUX_PRB_STRS();
 
@@ -1094,6 +1146,7 @@ void pd_info_t::init(engine_t *engine, const primitive_desc_t *pd) {
             CASE(matmul);
             case primitive_kind::pooling_v2:
             CASE(pooling);
+            CASE(prelu);
             CASE(reduction);
             CASE(reorder);
             CASE(resampling);
