@@ -1778,7 +1778,7 @@ public:
 protected:
     static inline uint32_t toV(int8_t i) {
 #ifdef NGEN_SAFE
-        if (i & 0x78) throw invalid_immediate_exception();
+        if (i < -8 || i > 7) throw invalid_immediate_exception();
 #endif
         return (i & 0x7) | ((i >> 4) & 0x8);
     }
