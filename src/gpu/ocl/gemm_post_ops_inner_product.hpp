@@ -81,10 +81,6 @@ struct gemm_post_ops_inner_product_fwd_t : public gpu_primitive_t {
                     = primitive_attr_t::skip_mask_t::oscale
                     | primitive_attr_t::skip_mask_t::post_ops;
             bool ok = is_fwd() && set_default_params() == success
-                    && IMPLICATION(utils::one_of(bf16, src_md()->data_type,
-                                           weights_md()->data_type,
-                                           dst_md()->data_type),
-                            expect_data_types(bf16, bf16, undef, bf16, f32))
                     && dense_consistency_check(src_md(), weights_md(), dst_md())
                     && dense_gemm_consistency_check(
                             src_md(), weights_md(), dst_md())
@@ -96,7 +92,7 @@ struct gemm_post_ops_inner_product_fwd_t : public gpu_primitive_t {
                                             1 << 1));
 
             if (!ok) return unimplemented;
-
+            primitive_attr_t gemm_attr;
             is_int8_ = weights_md()->data_type == s8;
 
             memory_desc_t a_md, b_md, c_md;
@@ -106,7 +102,7 @@ struct gemm_post_ops_inner_product_fwd_t : public gpu_primitive_t {
             c_md.data_type = desc()->accum_data_type;
             bool gemm_ok = status::success
                     == create_gemm_pd(gemm_pd_, engine, &a_md, &b_md, &c_md,
-                            &glob_zero_md, desc()->accum_data_type, attr(),
+                            &glob_zero_md, desc()->accum_data_type, &gemm_attr,
                             true);
             if (!gemm_ok) return status::unimplemented;
 
