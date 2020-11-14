@@ -17,7 +17,6 @@
 #include <assert.h>
 #include <string>
 #include <CL/cl.h>
-#include <unordered_map>
 
 #include "gpu/ocl/ocl_gpu_kernel.hpp"
 
@@ -25,47 +24,6 @@
 #include "gpu/ocl/ocl_memory_storage.hpp"
 #include "gpu/ocl/ocl_stream.hpp"
 #include "gpu/ocl/ocl_utils.hpp"
-
-// "Simulation" IDs for OpenCL memory objects
-//
-// Assign a number to every OpenCL memory object according to the first time
-// when the memory object was set as a kernel argument using clSetKernelArg.
-static std::unordered_map<cl_mem, int> sim_mem_ids;
-
-extern "C" int DNNL_API dnnl_memory_get_sim_id(
-        const dnnl::impl::memory_t *mem) {
-    using namespace dnnl::impl;
-
-    auto *ocl_mem_storage = utils::downcast<gpu::ocl::ocl_memory_storage_t *>(
-            mem->memory_storage());
-    cl_mem ocl_mem = ocl_mem_storage->mem_object();
-    assert(sim_mem_ids.count(ocl_mem) > 0);
-    return sim_mem_ids[ocl_mem];
-}
-
-static cl_mem get_parent_mem_object(cl_mem ocl_mem) {
-    cl_mem parent;
-    cl_int err = clGetMemObjectInfo(ocl_mem, CL_MEM_ASSOCIATED_MEMOBJECT,
-            sizeof(cl_mem), &parent, nullptr);
-    [&]() { OCL_CHECK_V(err); }();
-    return parent;
-}
-
-static void sim_register_ocl_mem_object(cl_mem ocl_mem) {
-    if (!ocl_mem) return;
-
-    // Do not track simulation IDs unless running GPU simulation
-    static bool is_gpu_sim = (bool)dnnl::impl::getenv_int("DNNL_GPU_SIM", 0);
-    if (!is_gpu_sim) return;
-
-    cl_mem parent = get_parent_mem_object(ocl_mem);
-    if (parent) ocl_mem = parent;
-
-    if (sim_mem_ids.count(ocl_mem) != 0) return;
-
-    static int sim_mem_counter = 0;
-    sim_mem_ids[ocl_mem] = sim_mem_counter++;
-}
 
 namespace dnnl {
 namespace impl {
@@ -116,7 +74,6 @@ status_t ocl_gpu_kernel_t::parallel_for(stream_t &stream,
                 ocl_mem = ocl_mem_storage->mem_object();
             }
             set_err = clSetKernelArg(ocl_kernel_, i, sizeof(cl_mem), &ocl_mem);
-            sim_register_ocl_mem_object(ocl_mem);
         } else if (arg.is_local()) {
             set_err = clSetKernelArg(ocl_kernel_, i, arg.size(), arg.value());
         } else if (arg.is_svm_pointer()) {

@@ -17,15 +17,8 @@
 #ifndef DNNL_COMMON_HPP
 #define DNNL_COMMON_HPP
 
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <set>
-#include <sstream>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include <vector>
 
@@ -223,34 +216,6 @@ float round_to_nearest_representable(dnnl_data_type_t dt, float value);
 /* simplification */
 extern dnnl_engine_kind_t engine_tgt_kind;
 
-extern dnnl_engine_t engine_tgt;
-extern dnnl_stream_t stream_tgt;
-struct dnn_mem_t;
-/* for fast-ref-gpu support */
-extern dnnl_engine_t engine_cpu;
-extern dnnl_stream_t stream_cpu;
-
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-extern "C" int dnnl_memory_get_sim_id(dnnl_memory_t mem);
-#endif
-
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-bool is_gpu_sim();
-bool is_gpu_perf_sim();
-
-void register_dnn_mem_object(dnn_mem_t *mem);
-void unregister_dnn_mem_object(dnn_mem_t *mem);
-#else
-inline bool is_gpu_sim() {
-    return false;
-}
-inline bool is_gpu_perf_sim() {
-    return false;
-}
-
-inline void register_dnn_mem_object(dnn_mem_t *mem) {}
-inline void unregister_dnn_mem_object(dnn_mem_t *mem) {}
-#endif
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
 #include "dnnl_threadpool_iface.hpp"
 // XXX: cannot include dnnl_thread.hpp because of conflicting macro
@@ -278,37 +243,6 @@ inline int create_dnnl_stream(
 #endif
 
     DNN_SAFE(dnnl_stream_create(stream, engine, flags), CRIT);
-    return OK;
-}
-
-inline int init() {
-    if (!engine_tgt) {
-        DNN_SAFE(dnnl_engine_create(&engine_tgt, engine_tgt_kind, 0), CRIT);
-        SAFE(create_dnnl_stream(
-                     &stream_tgt, engine_tgt, dnnl_stream_default_flags),
-                CRIT);
-    }
-    if (!engine_cpu) {
-        DNN_SAFE(dnnl_engine_create(&engine_cpu, dnnl_cpu, 0), CRIT);
-        SAFE(create_dnnl_stream(
-                     &stream_cpu, engine_cpu, dnnl_stream_default_flags),
-                CRIT);
-    }
-    if (!engine_cpu) {
-        DNN_SAFE(dnnl_engine_create(&engine_cpu, dnnl_cpu, 0), CRIT);
-        DNN_SAFE(dnnl_stream_create(
-                         &stream_cpu, engine_cpu, dnnl_stream_default_flags),
-                CRIT);
-    }
-
-    return OK;
-}
-
-inline int finalize() {
-    DNN_SAFE(dnnl_stream_destroy(stream_tgt), CRIT);
-    DNN_SAFE(dnnl_engine_destroy(engine_tgt), CRIT);
-    DNN_SAFE(dnnl_engine_destroy(engine_cpu), CRIT);
-    DNN_SAFE(dnnl_stream_destroy(stream_cpu), CRIT);
     return OK;
 }
 

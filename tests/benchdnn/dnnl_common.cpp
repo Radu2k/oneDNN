@@ -19,7 +19,6 @@
 
 #include <cassert>
 #include <cstdlib>
-#include <unordered_set>
 
 #include "tests/test_thread.hpp"
 
@@ -46,12 +45,6 @@ float round_to_nearest_representable(dnnl_data_type_t dt, float value) {
 
     return value;
 }
-
-// Engine used to run oneDNN primitives for simulation
-dnnl_engine_t engine_tgt;
-
-// Stream for target engine during simulation
-dnnl_stream_t stream_tgt;
 
 // Engine kind used to run oneDNN primitives for testing
 dnnl_engine_kind_t engine_tgt_kind = dnnl_cpu;
@@ -87,43 +80,6 @@ void execute_map_args(const args_t &args) {
         if (!args.dnn_mem(i).is_mapped()) args.dnn_mem(i).map();
 }
 
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-bool is_gpu_sim() {
-    return getenv_int("DNNL_GPU_SIM", 0) != 0;
-}
-
-bool is_gpu_perf_sim() {
-    return getenv_int("DNNL_GPU_PERF_SIM", 0) != 0;
-}
-
-static std::unordered_set<dnn_mem_t *> dnn_mem_objects;
-
-void register_dnn_mem_object(dnn_mem_t *mem) {
-    dnn_mem_objects.insert(mem);
-}
-
-void unregister_dnn_mem_object(dnn_mem_t *mem) {
-    dnn_mem_objects.erase(mem);
-}
-
-static void destroy_dnn_mem_objects() {
-    std::vector<dnn_mem_t *> to_destroy;
-    for (auto *mem : dnn_mem_objects)
-        to_destroy.push_back(mem);
-
-    for (auto *mem : to_destroy)
-        mem->~dnn_mem_t();
-}
-
-static bool is_null_memory(dnnl_memory_t mem) {
-    if (!mem) return true;
-
-    void *handle;
-    DNN_SAFE_V(dnnl_memory_get_data_handle(mem, &handle));
-    return !handle;
-}
-#endif
-
 int execute_and_wait(dnnl_primitive_t prim, const args_t &args) {
     const_dnnl_primitive_desc_t pd;
     dnnl_engine_t engine;
@@ -139,146 +95,11 @@ int execute_and_wait(dnnl_primitive_t prim, const args_t &args) {
     std::vector<dnnl_exec_arg_t> dnnl_args;
     execute_unmap_args(args, dnnl_args);
 
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-    dnnl_primitive_kind_t prim_kind = dnnl_undefined_primitive;
-
-    if (is_gpu_sim()) {
-        const_dnnl_primitive_desc_t pd;
-        DNN_SAFE_V(dnnl_primitive_get_primitive_desc(prim, &pd));
-
-        DNN_SAFE_V(dnnl_primitive_desc_query(
-                pd, dnnl_query_primitive_kind, 0, &prim_kind));
-
-        // Skip reorders during performance simulation
-        if (prim_kind == dnnl_reorder && is_gpu_perf_sim()) return dnnl_success;
-    }
-#endif
-
     status = dnnl_primitive_execute(
             prim, stream, (int)dnnl_args.size(), dnnl_args.data());
     if (status != dnnl_success) return status;
     status = dnnl_stream_wait(stream);
     if (status != dnnl_success) return status;
-
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
-    if (!is_gpu_sim()) {
-        execute_map_args(args);
-        return dnnl_success;
-    }
-
-    // Handle simulation for GPU
-    bool is_gpu_prim = false;
-    dnnl_engine_kind_t eng_kind;
-    DNN_SAFE_V(dnnl_engine_get_kind(engine, &eng_kind));
-    is_gpu_prim = (eng_kind == dnnl_gpu);
-
-    if (is_gpu_prim) {
-        int nargs = (int)dnnl_args.size();
-
-        // Stop execution on the first non-reorder primitive.
-        // Assume that simulation should be done for this primitive.
-        if (prim_kind != dnnl_reorder) {
-            // Query the run number and verbosity level
-            const int sim_run = getenv_int("DNNL_GPU_SIM_RUN", -1);
-            const int sim_verbose = getenv_int("DNNL_GPU_SIM_VERBOSE", 0);
-
-            // Destroy library objects and exit from benchdnn for the following cases:
-            // - Performance simulation
-            // - First run of functional simulation
-            if (sim_run != 1) {
-                if (sim_verbose > 0)
-                    printf("== benchdnn_sim: Destroying objects...\n");
-
-                DNN_SAFE_V(dnnl_primitive_destroy(prim));
-
-                destroy_dnn_mem_objects();
-
-                // Store arg -> sim_id mapping.
-                int nargs_not_null = 0;
-                for (int i = 0; i < nargs; ++i) {
-                    if (!is_null_memory(dnnl_args[i].memory)) nargs_not_null++;
-                }
-
-                std::ofstream out("arg2sim_id.txt");
-                out << nargs_not_null << std::endl;
-                for (int i = 0; i < nargs; ++i) {
-                    if (!is_null_memory(dnnl_args[i].memory)) {
-                        int arg = dnnl_args[i].arg;
-                        int sim_id
-                                = dnnl_memory_get_sim_id(dnnl_args[i].memory);
-                        out << arg << " " << sim_id << std::endl;
-                    }
-                }
-
-                DNN_SAFE_V(dnnl_engine_destroy(engine_tgt));
-                DNN_SAFE_V(dnnl_stream_destroy(stream_tgt));
-
-                exit(0);
-            } else {
-                // Handle second run of functional simulation
-
-                // Fill "simulation" IDs for memory objects
-                std::map<int, int> arg2sim_id;
-                {
-                    std::ifstream in("arg2sim_id.txt");
-                    assert(in.good());
-
-                    int nargs_not_null;
-                    in >> nargs_not_null;
-                    for (int i = 0; i < nargs_not_null; i++) {
-                        int arg;
-                        int sim_id;
-                        in >> arg >> sim_id;
-                        arg2sim_id[arg] = sim_id;
-                    }
-                }
-                std::map<dnnl_memory_t, int> mem_ids;
-                for (int i = 0; i < nargs; ++i) {
-                    int arg = dnnl_args[i].arg;
-                    dnnl_memory_t mem = dnnl_args[i].memory;
-                    if (!is_null_memory(mem)) {
-                        assert(arg2sim_id.count(arg) != 0);
-                        mem_ids[mem] = arg2sim_id[arg];
-                    }
-                }
-
-                // Load memory contents from binaries
-                std::string aub_file = getenv_str(
-                        "DNNL_GPU_SIM_AUB_FILE", std::string("out.aub"));
-                aub_file.resize(aub_file.length() - strlen(".aub"));
-                for (auto &kv : mem_ids) {
-                    dnnl_memory_t mem = kv.first;
-                    std::ostringstream fname;
-                    fname << aub_file << std::setfill('0') << std::setw(3)
-                          << kv.second << ".bin";
-                    std::ifstream in(fname.str(), std::ios::binary);
-                    if (!in.good()) {
-                        fprintf(stderr,
-                                "Error: cannot load binary file for "
-                                "simulation.\n");
-                        abort();
-                    }
-                    {
-                        const dnnl_memory_desc_t *md;
-                        DNN_SAFE_V(dnnl_memory_get_memory_desc(mem, &md));
-                        size_t sz = dnnl_memory_desc_get_size(md);
-
-                        if (sim_verbose > 0)
-                            printf("== benchdnn_sim: Load memory object from "
-                                   "%s, "
-                                   "size: %lld\n",
-                                    fname.str().c_str(), (long long)sz);
-
-                        void *ptr;
-                        dnnl_memory_map_data(mem, &ptr);
-                        in.read((char *)ptr, sz);
-                        dnnl_memory_unmap_data(mem, ptr);
-                    }
-                }
-            }
-        }
-    }
-#endif
 
     execute_map_args(args);
 
