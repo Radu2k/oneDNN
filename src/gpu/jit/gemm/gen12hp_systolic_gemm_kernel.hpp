@@ -45,6 +45,7 @@ public:
         bias_t c_bias = bias_t::none;
         bool early_c_bias = false;
         bool c_packed = false;
+        bool batch = false;
 
         bool walk_n_first = false;
         bool alt_barriers = false;

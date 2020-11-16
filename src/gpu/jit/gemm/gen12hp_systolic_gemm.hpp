@@ -54,9 +54,6 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
 
             // Packed not implemented for int8 yet.
             if (sz == 2) {
-                format_tag_t a_packed_tag = (sz == 2) ? BA4b8a8b2a : BA4b8a8b4a;
-                format_tag_t b_packed_tag = (sz == 2) ? AB48a16b : AB48a32b;
-
                 memory_desc_wrapper a_mdw(&desc_.b_desc);
                 memory_desc_wrapper b_mdw(&desc_.a_desc);
                 memory_desc_wrapper c_mdw(&desc_.c_desc);
@@ -64,24 +61,31 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
                 bool a_any = a_mdw.format_any();
                 bool b_any = b_mdw.format_any();
                 bool c_any = c_mdw.format_any();
+                bool batch = desc()->is_batched();
 
-                // No batch packed support.
-                if ((a_any || b_any || c_any) && desc()->is_batched())
-                    return false;
+                format_tag_t a_packed_tag = batch
+                        ? ((sz == 2) ? aCB4c8b8c2b : aCB4c8b8c4b)
+                        : ((sz == 2) ? BA4b8a8b2a : BA4b8a8b4a);
+                format_tag_t b_packed_tag = batch
+                        ? ((sz == 2) ? aBC48b16c : aBC48b32c)
+                        : ((sz == 2) ? AB48a16b : AB48a32b);
 
                 if (a_any)
                     CHECK(memory_desc_init_by_tag(desc_.b_desc, a_packed_tag));
-                else if (a_mdw.matches_one_of_tag(a_packed_tag, ab, ba)
+                else if (a_mdw.matches_one_of_tag(
+                                 a_packed_tag, ab, ba, abc, acb)
                         == undef)
                     return false;
                 if (b_any)
                     CHECK(memory_desc_init_by_tag(desc_.a_desc, b_packed_tag));
-                else if (b_mdw.matches_one_of_tag(b_packed_tag, ab, ba)
+                else if (b_mdw.matches_one_of_tag(
+                                 b_packed_tag, ab, ba, abc, acb)
                         == undef)
                     return false;
                 if (c_any)
                     CHECK(memory_desc_init_by_tag(desc_.c_desc, b_packed_tag));
-                else if (c_mdw.matches_one_of_tag(b_packed_tag, ab) == undef)
+                else if (c_mdw.matches_one_of_tag(b_packed_tag, ab, abc)
+                        == undef)
                     return false;
 
                 packed_a_ = a_mdw.matches_tag(a_packed_tag);
@@ -124,28 +128,33 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
         bool packed_c() const { return packed_c_; }
 
         dim_t lda_packed() const {
-            return packed_a() ? desc()->b_desc.padded_dims[0] : 0;
+            return packed_a() ? desc()->b_desc.padded_dims[with_batch() ? 1 : 0]
+                              : 0;
         }
         dim_t ldb_packed() const {
-            return packed_b() ? desc()->a_desc.padded_dims[1] : 0;
+            return packed_b() ? desc()->a_desc.padded_dims[with_batch() ? 2 : 1]
+                              : 0;
         }
         dim_t ldc_packed() const {
-            return packed_c() ? desc()->c_desc.padded_dims[1] : 0;
+            return packed_c() ? desc()->c_desc.padded_dims[with_batch() ? 2 : 1]
+                              : 0;
         }
+
+        bool with_batch() const { return desc()->is_batched(); }
 
     private:
         attr_info_t attr_info_ = {};
         bool packed_a_ = false, packed_b_ = false, packed_c_ = false;
     };
 
-    status_t init(engine_t *engine);
+    status_t init(engine_t *engine) override;
     status_t init_res_storage(
             engine_t *engine, gpu_resource_t *r) const override;
 
 public:
     gen12hp_systolic_gemm_t(const pd_t *apd) : gpu_gemm_t(apd) {}
 
-    virtual status_t execute(const gemm_exec_ctx_t &ctx) const;
+    virtual status_t execute(const gemm_exec_ctx_t &ctx) const override;
 
 private:
     bool enable_mn_blocking() const;
@@ -167,7 +176,8 @@ private:
             int32_t ldb, const memory_storage_t &c, int64_t offset_c,
             int32_t ldc, float alpha, float beta, int16_t ao, int16_t bo,
             const memory_storage_t &co, int32_t offset_co, bool first_k_block,
-            bool last_k_block) const;
+            bool last_k_block, int32_t batch, int32_t stride_a,
+            int32_t stride_b, int32_t stride_c) const;
 
     static const int A_PACKED_ = 0;
     static const int B_PACKED_ = 1;

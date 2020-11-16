@@ -46,14 +46,16 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     if (!ok) return status::unimplemented;
 
     // LIMITATIONS:
-    // - batch is not supported
+    // - batch is not supported for unpacked inputs.
     // - runtime dims are not supported
-    bool limits_ok = d->batch() == 1
-            && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m(), d->n(), d->k());
+    bool limits_ok
+            = !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m(), d->n(), d->k());
     if (!packed_a())
-        limits_ok = limits_ok && (d->lda() != DNNL_RUNTIME_DIM_VAL);
+        limits_ok = limits_ok && (d->lda() != DNNL_RUNTIME_DIM_VAL)
+                && (d->batch() == 1);
     if (!packed_b())
-        limits_ok = limits_ok && (d->ldb() != DNNL_RUNTIME_DIM_VAL);
+        limits_ok = limits_ok && (d->ldb() != DNNL_RUNTIME_DIM_VAL)
+                && (d->batch() == 1);
     if (!packed_c())
         limits_ok = limits_ok && (d->ldc() != DNNL_RUNTIME_DIM_VAL);
 
@@ -156,6 +158,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     }
     cfg.a_bias = cfg.b_bias = ab_zero_points_;
     cfg.c_packed = pd()->packed_c();
+    cfg.batch = pd()->with_batch();
     walk_n_first_ = cfg.walk_n_first
             = (pd()->desc()->m() >= 2 * pd()->desc()->n());
 
@@ -463,7 +466,8 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
         int64_t offset_b, int32_t ldb, const memory_storage_t &c,
         int64_t offset_c, int32_t ldc, float alpha, float beta, int16_t ao,
         int16_t bo, const memory_storage_t &co, int32_t offset_co,
-        bool first_k_block, bool last_k_block) const {
+        bool first_k_block, bool last_k_block, int32_t batch, int32_t stride_a,
+        int32_t stride_b, int32_t stride_c) const {
 
     using kernel_t = gen12hp_systolic_gemm_kernel_t;
     auto unroll_m = kernel_t::unroll_m;
@@ -509,6 +513,11 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
         arg_list.set(argn++, co);
         arg_list.set(argn++, offset_co);
     }
+    if (pd()->with_batch()) {
+        arg_list.set(argn++, stride_a);
+        arg_list.set(argn++, stride_b);
+        arg_list.set(argn++, stride_c);
+    }
 
     auto thread_m = utils::div_up(m, unroll_m * tg_m) * tg_m;
     auto thread_n = utils::div_up(n, unroll_n * tg_n) * tg_n;
@@ -517,6 +526,7 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
 
     size_t gws[3] = {size_t(sg * thread_m), size_t(thread_n), 1};
     size_t lws[3] = {size_t(sg * tg_m), size_t(tg_n), 1};
+    if (pd()->with_batch()) gws[2] = batch;
 
     auto nd_range = compute::nd_range_t(gws, lws);
 
@@ -536,6 +546,7 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     auto m = pd()->desc()->m();
     auto n = pd()->desc()->n();
     auto k = pd()->desc()->k();
+    auto batch = pd()->desc()->batch();
 
     bool packed_a = pd()->packed_a();
     bool packed_b = pd()->packed_b();
@@ -544,6 +555,10 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     auto lda = packed_a ? 0 : pd()->desc()->lda();
     auto ldb = packed_b ? 0 : pd()->desc()->ldb();
     auto ldc = packed_c ? pd()->ldc_packed() : pd()->desc()->ldc();
+
+    auto stride_a = pd()->desc()->stride_a();
+    auto stride_b = pd()->desc()->stride_b();
+    auto stride_c = pd()->desc()->stride_c();
 
     auto alpha = pd()->alpha();
     auto beta = pd()->beta();
@@ -593,12 +608,14 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     status_t status;
 
     if (!packed_a) {
+        assert(batch == 1);
         status = launch_copy(
                 ctx, m, k, a, off_a0, lda, a_packed, 0, lda_packed, false);
         if (status) return status;
     }
 
     if (!packed_b) {
+        assert(batch == 1);
         status = launch_copy(
                 ctx, k, n, b, off_b0, ldb, b_packed, 0, ldb_packed, true);
         if (status) return status;
@@ -638,7 +655,8 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
                 status = launch_compute(ctx, size_m, size_n, size_k, a_packed,
                         off_a_packed, lda_packed, b_packed, off_b_packed,
                         ldb_packed, c, off_c, ldc, alpha, this_beta, ao, bo,
-                        *co, off_co, first_k_block, last_k_block);
+                        *co, off_co, first_k_block, last_k_block, batch,
+                        stride_a, stride_b, stride_c);
                 if (status) return status;
             }
         }

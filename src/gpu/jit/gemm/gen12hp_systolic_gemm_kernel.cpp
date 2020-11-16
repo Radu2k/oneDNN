@@ -1187,7 +1187,8 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     //                           int m, int n,
     //                           float alpha, float beta,
     //                           int lda, int ldb [, uint abo]
-    //                           [, int [*] co, int offset_co]);
+    //                           [, int *co, int offset_co [, uint flags]]
+    //                           [, int stride_a, int stride_b, int stride_c]);
 
     externalName("gen12hp_systolic_gemm_kernel");
     newArgument("ap", ExternalArgumentType::GlobalPtr);
@@ -1210,6 +1211,11 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
         newArgument("offset_co", DataType::d);
         if (cfg.c_bias == bias_t::runtime) newArgument("flags", DataType::ud);
     }
+    if (cfg.batch) {
+        newArgument("stride_a", DataType::d);
+        newArgument("stride_b", DataType::d);
+        newArgument("stride_c", DataType::d);
+    }
     requireBarrier();
     requireDPAS();
     requireGRF(256);
@@ -1221,6 +1227,7 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     // Inputs.
     auto global_id_x = r0.ud(1);
     auto global_id_y = r0.ud(6);
+    auto global_id_z = r0.ud(7);
     auto local_id_x = r1.uw(0);
     auto local_id_y = r2.uw(0);
     auto ap = getArgument("ap");
@@ -1239,6 +1246,9 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     auto ldb = getArgument("ldb");
     auto abo = getArgumentIfExists("abo");
     auto in_offset_co = getArgumentIfExists("offset_co");
+    auto stride_a = getArgumentIfExists("stride_a");
+    auto stride_b = getArgumentIfExists("stride_b");
+    auto stride_c = getArgumentIfExists("stride_c");
 
     ap_surface = getArgumentSurface("ap");
     bp_surface = getArgumentSurface("bp");
@@ -1251,6 +1261,10 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     auto offset_a = r12.uq(0);
     auto offset_b = r12.uq(1);
     auto offset_c = r12.uq(2);
+    // reserved: r12.uq(3)
+    auto boffset_a = r13.q(0);
+    auto boffset_b = r13.q(1);
+    auto boffset_c = r13.q(2);
     auto offset_asum = r14.ud(0);
     auto offset_bsum = r14.ud(2);
     auto global_n0 = r18.ud(0);
@@ -1288,6 +1302,16 @@ gen12hp_systolic_gemm_kernel_t::gen12hp_systolic_gemm_kernel_t(config_t cfg_)
     shl(1, local_m0, local_id_x, uint16_t(2));
     mul(1, local_n0, local_id_y, uint16_t(48));
     add(2, n0(1), local_n0(1), global_n0(1));
+
+    // Batch handling.
+    if (cfg.batch) {
+        mul(1, boffset_a, stride_a, global_id_z);
+        mul(1, boffset_b, stride_b, global_id_z);
+        mul(1, boffset_c, stride_c, global_id_z);
+        add(1, in_offset_a, in_offset_a, boffset_a);
+        add(1, in_offset_b, in_offset_b, boffset_b);
+        add(1, in_offset_c, in_offset_c, boffset_c);
+    }
 
     // Compute starting addresses:
     //   - suboffset_a = local_id_Y * 8 * 32

@@ -223,10 +223,6 @@ typedef enum {
 
     // Opaque blocked formats
 
-    dnnl_AB48a16b,
-    dnnl_AB48a32b,
-    dnnl_BA4b8a8b2a,
-    dnnl_BA4b8a8b4a,
     dnnl_Abc16a,
     dnnl_ABc16a16b,
     dnnl_ABc32a16b,
@@ -261,6 +257,14 @@ typedef enum {
     dnnl_AB4b16a4b,
     dnnl_AB4b32a4b,
     dnnl_AB4b64a4b,
+    dnnl_AB48a16b,
+    dnnl_AB48a32b,
+    dnnl_BA4b8a8b2a,
+    dnnl_BA4b8a8b4a,
+    dnnl_aBC48b16c,
+    dnnl_aBC48b32c,
+    dnnl_aCB4c8b8c2b,
+    dnnl_aCB4c8b8c4b,
     /// 3D tensor blocked by 2nd dimension with block size 8
     dnnl_aBc8b,
     dnnl_ABc8b16a2b,
