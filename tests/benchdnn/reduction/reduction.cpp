@@ -78,38 +78,48 @@ int fill_src(const prb_t *prb, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp) {
         }
     }
 
+    // It should work if float is used as an accumulator for f16 and bf16
+    const int safe_to_reduce_elems
+            = (dt == dnnl_f32 || dt == dnnl_f16 || dt == dnnl_bf16)
+            ? 1e5
+            : nelems_to_reduce;
+    const int64_t non_neutral_elems
+            = nelems / nelems_to_reduce * safe_to_reduce_elems;
+    // No special meaning; just to increase the precision of neutral_gen
+    const int prob_range = 50;
+    const float non_neutral_prob = non_neutral_elems / nelems;
+
     dnnl::impl::parallel_nd(nelems, [&](int64_t i) {
         const float gen = ((97 * i) + 101) % (range + 1);
-        float value = 0.0f;
-        if (prb->alg == alg_t::MUL) {
-            if (dt == dnnl_s8 || dt == dnnl_u8) {
-                // generate {1, 2}, but probability of 2 is 1/range
-                value = gen == range ? 2.0f : 1.0f;
-            } else {
-                // generate {-2, -0.5, 1, 0.5, 2} to avoid underflow/overflow
-                value = powf(f_min + gen, 2.0f) / 2;
-                if (f_min + gen != 0.0f) {
-                    const float sign = fabs(f_min + gen) / (f_min + gen);
-                    value *= sign;
+        const float neutral_value = prb->alg == alg_t::MUL ? 1.0f : 0.0f;
+        float value = neutral_value;
+
+        const float neutral_gen = ((89 * i) + 73) % prob_range;
+        if (neutral_gen <= non_neutral_prob * prob_range) {
+            if (prb->alg == alg_t::MUL) {
+                if (dt == dnnl_s8 || dt == dnnl_u8) {
+                    // generate {1, 2}, but probability of 2 is 1/range
+                    value = gen == range ? 2.0f : 1.0f;
                 } else {
-                    value = 1.0f;
+                    // generate {-2, -0.5, 1, 0.5, 2} to avoid underflow/overflow
+                    value = powf(f_min + gen, 2.0f) / 2;
+                    if (f_min + gen != 0.0f) {
+                        const float sign = fabs(f_min + gen) / (f_min + gen);
+                        value *= sign;
+                    } else {
+                        value = 1.0f;
+                    }
                 }
+            } else if (prb->alg == alg_t::MEAN && prb->ddt == dnnl_f16) {
+                // Shift the mean to value different than 0 as results equal
+                // to 0 may be treated as mistrusted.
+                float mean_shift = 0.5;
+                value = (f_min + gen) / range + mean_shift;
+            } else {
+                value = (dt == dnnl_bf16 || dt == dnnl_f16)
+                        ? (f_min + gen) / range
+                        : (f_min + gen) * (1.0f + 4.0f / range);
             }
-        } else if (prb->alg == alg_t::MEAN && dt == dnnl_f16
-                && nelems_to_reduce <= 2e6) {
-            // Shift the mean to value different than 0 as results equal
-            // to 0 may be treated as mistrusted.
-            // This shift is done only up to some numbers of reduced
-            // elements, so nelems_to_reduce * mean_shift (expected
-            // value of linear sum) has to have sufficient precision on
-            // float (used in ref calculation) to represent the sum
-            // without precision issues.
-            float mean_shift = 0.5;
-            value = (f_min + gen) / range + mean_shift;
-        } else {
-            value = (dt == dnnl_bf16 || dt == dnnl_f16)
-                    ? (f_min + gen) / range
-                    : (f_min + gen) * (1.0f + 4.0f / range);
         }
         mem_fp.set_elem(i, round_to_nearest_representable(dt, value));
     });
