@@ -85,33 +85,6 @@ bool device_info_t::mayiuse_ngen_kernels(engine_t *engine) {
     return mayiuse_ngen_kernels_;
 }
 
-status_t device_info_t::init_arch_env() {
-    gpu_arch_t gpu_arch_env = gpu_arch_t::unknown;
-    gpu_arch_t gpu_arch_hw = gpu_arch();
-
-    // Check enviroment if we want kernels to be emulated on older hardware
-    char gpu_arch_str[32];
-    if (getenv("DNNL_GPU_ARCH", gpu_arch_str, sizeof(gpu_arch_str)) > 0) {
-        gpu_arch_env = str2gpu_arch(gpu_arch_str);
-    }
-
-    // GPU architecture is not overriden, return
-    if (gpu_arch_env == gpu_arch_t::unknown) return status::success;
-
-    // GPU architecture is the same as detected, return
-    if (gpu_arch_env == gpu_arch_hw) return status::success;
-
-    // Do not allow emulating older architectures
-    if ((int)gpu_arch_env < (int)gpu_arch_hw) {
-        assert(!"not expected");
-        return status::runtime_error;
-    }
-
-    gpu_arch_env_ = gpu_arch_env;
-
-    return status::success;
-}
-
 status_t device_info_t::init_attributes_common(engine_t *engine) {
     // TODO: Fix for discrete GPUs. The code below is written for
     // integrated GPUs assuming that last-level cache for GPU is shared

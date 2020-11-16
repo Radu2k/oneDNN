@@ -181,7 +181,6 @@ public:
         CHECK(init_extensions(engine));
         CHECK(init_attributes(engine));
 
-        CHECK(init_arch_env());
         CHECK(init_attributes_common(engine));
         return status::success;
     }
@@ -199,11 +198,6 @@ public:
         return runtime_version_;
     }
     const std::string &name() const { return name_; }
-
-    gpu_arch_t gpu_arch_env() const {
-        if (gpu_arch_env_ != gpu_arch_t::unknown) return gpu_arch_env_;
-        return gpu_arch();
-    }
 
     bool mayiuse_ngen_kernels(engine_t *engine);
 
@@ -234,12 +228,7 @@ protected:
     uint64_t extensions_ = 0;
 
 private:
-    status_t init_arch_env();
     status_t init_attributes_common(engine_t *engine);
-
-    // XXX: GPU architecture value from enviroment
-    // This is needed to test kernels with emulation support on older hardware
-    gpu_arch_t gpu_arch_env_ = gpu_arch_t::unknown;
 
     bool mayiuse_ngen_kernels_ = false;
     bool checked_ngen_kernels_ = false;

@@ -70,9 +70,6 @@ status_t gen12hp_convolution_data_common_init_conf(engine_t *engine,
         conf.ic_block = is_int8 ? 32 : 16;
     }
 
-    bool enable_40n = (getenv_int("DNNL_ENABLE_CONV_40N", 0) != 0);
-    conf.mb_block = (enable_40n ? 40 : 32);
-
     conf.oc_group = (conf.oc <= 64 ? 2 : 4);
     conf.sp_group = 4;
 
