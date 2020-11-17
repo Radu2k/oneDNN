@@ -288,9 +288,12 @@ TEST_P(ocl_engine_test, BinaryKernels) {
 
     ASSERT_EQ(s, p.expected_status);
 
+//DNNL_ENABLE_MEM_DEBUG forces allocation fail, causing mayiuse to fail
+#ifndef DNNL_ENABLE_MEM_DEBUG
     if (s == dnnl_success) {
         ASSERT_EQ(dnnl_impl_gpu_mayiuse_ngen_kernels(eng), true);
     }
+#endif
 }
 
 INSTANTIATE_TEST_SUITE_P(Simple, ocl_engine_test,
