@@ -75,49 +75,6 @@ int innermost_block(dnnl_blocking_desc_t blk) {
     return blk.inner_blks[last];
 }
 
-int get_stride(const memory_desc_wrapper &md, int dim) {
-    return md.md_->format_desc.blocking.strides[dim];
-}
-
-int find_stride_1(const memory_desc_wrapper &md) {
-    for (int i = 0; i < md.ndims(); i++) {
-        if (get_stride(md, i) == 1) { return i; }
-    }
-    return -1;
-}
-
-int innermost_dim_idx(const memory_desc_wrapper &md) {
-    int nblks = md.md_->format_desc.blocking.inner_nblks;
-    if (nblks != 0) {
-        return md.md_->format_desc.blocking.inner_idxs[nblks - 1];
-    } else {
-        return find_stride_1(md);
-    }
-}
-
-int innermost_dim_size(const memory_desc_wrapper &md) {
-    int nblks = md.md_->format_desc.blocking.inner_nblks;
-    if (nblks != 0) {
-        return md.md_->format_desc.blocking.inner_blks[nblks - 1];
-    } else {
-        return md.padded_dims()[md.md_->ndims - 1];
-    }
-}
-
-bool try_16x16(const memory_desc_wrapper &one, const memory_desc_wrapper &two) {
-    using namespace format_tag;
-    // TODO: don't rely on tags and make it more generic
-    // The real limitations are:
-    // dst's last dimension or block == 16
-    // dst's penultimate dimension or block % 16 == 0
-    // src's last dimension is dst's penultimate dimension
-    // the dimension that's last in dst: in src it must be not blocked
-    // or blocked with block size % 16 == 0
-    if (innermost_dim_size(one) % 16 != 0) { return false; }
-    if (innermost_dim_size(two) != 16) { return false; }
-    return one.matches_one_of_tag(abcd) && two.matches_one_of_tag(aBcd16b);
-}
-
 bool matches_one_16x16_layout(
         const memory_desc_wrapper &src, const memory_desc_wrapper &dst) {
     if (dst.ndims() < 2) { return false; }
@@ -150,13 +107,6 @@ int matches_16x16_layout(
     }
 }
 
-bool dim_is_div_by_16_or_less_than_16(
-        const memory_desc_wrapper &src, int dim_index) {
-    const auto &padded_dims = src.padded_dims();
-    assert(dim_index < src.ndims());
-    return (padded_dims[dim_index] % 16 == 0 || padded_dims[dim_index] < 16);
-}
-
 bool matches_ABxxxx8ayb_layout(dnnl_blocking_desc_t blk, int ndims) {
     if (ndims > 2) { return false; }
     int last = blk.inner_nblks - 1;
@@ -177,6 +127,13 @@ bool matches_ABxxxx8ayb_layout(dnnl_blocking_desc_t blk, int ndims) {
             && blk.inner_idxs[last] == ndims - 1
             && blk.inner_blks[last - 1] == 8
             && blk.inner_idxs[last - 1] == ndims - 2);
+}
+
+bool dim_is_div_by_16_or_less_than_16(
+        const memory_desc_wrapper &src, int dim_index) {
+    const auto &padded_dims = src.padded_dims();
+    assert(dim_index < src.ndims());
+    return (padded_dims[dim_index] % 16 == 0 || padded_dims[dim_index] < 16);
 }
 
 status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
@@ -227,18 +184,18 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
     const bool type_s8_u8 = utils::one_of(src_mdw.data_type(), dnnl_s8, dnnl_u8)
             || utils::one_of(dst_mdw.data_type(), dnnl_s8, dnnl_u8);
 
-    const bool tr16x16
-            = !has_padding_or_scale_quant && padded_dims[last] % 16 == 0;
-    conf.transpose16x16 = (int)tr16x16 * matches_16x16_layout(src_mdw, dst_mdw);
+    conf.transpose16x16 = (!has_padding_or_scale_quant
+                    ? matches_16x16_layout(src_mdw, dst_mdw)
+                    : 0);
 
     conf.nchw = src_mdw.matches_one_of_tag(nhwc)
             && dst_mdw.matches_one_of_tag(nchw) && !conf.transpose16x16
             && padded_dims[last] % 16 == 0
             && dim_is_div_by_16_or_less_than_16(dst_mdw, 1);
 
-    conf.nchw = src_mdw.matches_one_of_tag(nhwc)
-            && dst_mdw.matches_one_of_tag(nchw) && !conf.transpose16x16
-            && padded_dims[last] % 16 == 0
+    conf.unaligned_sizes = !conf.transpose16x16
+            && src_mdw.matches_one_of_tag(nhwc)
+            && dst_mdw.matches_one_of_tag(nchw) && !conf.nchw
             && dim_is_div_by_16_or_less_than_16(dst_mdw, 1);
 
     const bool allow_unroll = !has_padding_or_scale_quant && !type_s8_u8
@@ -287,7 +244,8 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
     // This kernel will be used where last dimension is not reordered.
     // It will vectorize that dimension.
     conf.vectorize_last_dim = !conf.transpose16x16 && !conf.use_dense_vect
-            && !conf.nchw && !has_padding_or_scale_quant && src_mdw.is_dense()
+            && !conf.nchw && !conf.unaligned_sizes
+            && !has_padding_or_scale_quant && src_mdw.is_dense()
             && dst_mdw.is_dense() && last_dim % 8 == 0
             && dst_mdw.md_->format_desc.blocking.strides[last] == 1
             && src_mdw.md_->format_desc.blocking.strides[last] == 1
@@ -296,8 +254,9 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
     // This kernel supports 2D reorders into blocked formats that
     // end in 8a4b or 8a2b, no matter how many block layers, but no padding.
     conf.plain_to_ABxx8ayb = !conf.transpose16x16 && !conf.use_dense_vect
-            && !conf.nchw && !has_padding_or_scale_quant
-            && !conf.vectorize_last_dim && src_mdw.matches_one_of_tag(ab)
+            && !conf.nchw && !conf.unaligned_sizes
+            && !has_padding_or_scale_quant && !conf.vectorize_last_dim
+            && src_mdw.matches_one_of_tag(ab)
             && matches_ABxxxx8ayb_layout(
                     dst_mdw.md_->format_desc.blocking, conf.ndims)
             && padded_dims[last] % 16 == 0;
@@ -314,8 +273,7 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
         blocks[5] = nstl::min(padded_dims[conf.ndims - 1], dnnl_dim_t(16));
     }
 
-    if (conf.use_dense_vect || use_unroll_16a16b || use_unroll_16b
-            || use_unroll_16b16c || conf.plain_xFxE_to_abcdef) {
+    if (conf.use_dense_vect || use_unroll || conf.plain_xFxE_to_abcdef) {
         conf.use_ref_impl = false;
         conf.sub_group_size = 16;
     }
@@ -332,7 +290,7 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
 
     if (conf.vectorize_last_dim) {
         conf.use_ref_impl = false;
-        for (int dim = conf.ndims - 2; dim >= 0; dim--) {
+        for (int dim = last - 1; dim >= 0 && dim < MAX_NDIMS; dim--) {
             if (padded_dims[dim] % 4 == 0) { blocks[dim] = 4; }
             if (padded_dims[dim] % 8 == 0) { blocks[dim] = 8; }
             if (padded_dims[dim] % 16 == 0) { blocks[dim] = 16; }
@@ -340,10 +298,6 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
         }
     }
 
-    if (conf.transpose16x16) {
-        conf.use_ref_impl = false;
-        conf.sub_group_size = 16;
-    }
     if (conf.plain_to_ABxx8ayb) {
         conf.use_ref_impl = false;
         conf.sub_group_size = 16;
@@ -363,6 +317,11 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
         conf.use_ref_impl = false;
         conf.sub_group_size = 16;
         blocks[1] = nstl::min(padded_dims[1], dnnl_dim_t(16));
+    }
+
+    if (conf.unaligned_sizes) {
+        conf.use_ref_impl = false;
+        blocks[1] = padded_dims[1];
     }
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
@@ -391,7 +350,6 @@ status_t simple_reorder_t::pd_t::init_conf(engine_t *engine) {
         int vectorization_range = (last_dim % 16 == 0) ? 16 : 8;
         std::string vector_dim = "D" + std::to_string(conf.ndims - 1);
         conf.dispatch.vectorize_dim(vector_dim, vectorization_range);
-    } else if (conf.transpose16x16) {
     } else if (conf.plain_to_ABxx8ayb) {
         auto dim_str = utils::format("D%d", last);
         conf.dispatch.vectorize_dim(dim_str, 16);
@@ -420,6 +378,7 @@ status_t simple_reorder_t::pd_t::init_kernel_ctx(
     if (conf.nelems == 0) return status::success;
 
     kernel_ctx.define_int("NDIMS", conf.ndims);
+    kernel_ctx.add_option("-cl-std=CL2.0");
 
     if (conf.with_sum_a)
         kernel_ctx.define_int("WITH_SUM_A", 1);
@@ -434,7 +393,10 @@ status_t simple_reorder_t::pd_t::init_kernel_ctx(
 
     def_dispatch(kernel_ctx, conf.dispatch);
 
-    kernel_ctx.define_int("REF_REORDER", conf.use_ref_impl);
+    // the 'unaligned_sizes' kernel uses the same implementation in .cl
+    // the difference is in sizes of blocks[]
+    kernel_ctx.define_int(
+            "REF_REORDER", conf.use_ref_impl || conf.unaligned_sizes);
     kernel_ctx.define_int("SUB_GROUP_SIZE", conf.sub_group_size);
 
     kernel_ctx.define_int("PAD_FILL_ZERO", conf.has_padding);
