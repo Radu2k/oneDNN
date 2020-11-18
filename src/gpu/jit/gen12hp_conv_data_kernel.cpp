@@ -21,6 +21,7 @@
 #include <vector>
 #include <initializer_list>
 
+#include "common/eltwise_pd.hpp"
 #include "common/utils.hpp"
 #include "gpu/jit/jit_eltwise_injector.hpp"
 #include "gpu/jit/jit_generator.hpp"
@@ -1369,6 +1370,23 @@ public:
         endif(8);
     }
 
+    bool need_to_restore_zero_padding() const {
+        bool has_mb_padding = (conf.mb % conf.mb_block != 0);
+        bool has_oc_padding = (conf.oc % 32 != 0);
+
+        if (!has_mb_padding && !has_oc_padding) return false;
+
+        if (conf.with_bias) return true;
+
+        for (int po_idx = 0; po_idx < attr_info.all_post_ops.len(); po_idx++) {
+            auto &e = attr_info.all_post_ops.entry_[po_idx];
+            if (e.kind != primitive_kind::eltwise) continue;
+            if (!eltwise_fwd_pd_t::eltwise_preserves_zero(e.eltwise))
+                return true;
+        }
+        return false;
+    }
+
     // Computes register offset for n-th row (across mb_block block). The rows
     // are interleaved after dpasw.
     int mb_off(int mb_idx) {
@@ -1503,6 +1521,31 @@ public:
         apply_bias(mb_idx, mb_step, oc_idx, oc_step);
         apply_oscales(mb_idx, mb_step, oc_idx, oc_step);
         apply_post_ops();
+
+        // Zero out the padded area if needed.
+        if (need_to_restore_zero_padding()) {
+            auto oc_vec = ra.alloc_range(2);
+            auto oc_tmp = ra.alloc_sub<int32_t>();
+            mov(8, oc_vec[0].uw(0), Immediate::uv(0, 1, 2, 3, 4, 5, 6, 7));
+            add(8, oc_vec[0].uw(8), oc_vec[0].uw(), uint16_t(8));
+            add(1, oc_tmp, -oc, conf.oc);
+            int ireg = 0;
+            for (int mb_inner = 0; mb_inner < mb_step; mb_inner++) {
+                add(16, oc_vec[1].uw(), oc_vec[0].uw(), uint16_t(oc_idx));
+                for (int oc_inner = 0; oc_inner < oc_step; oc_inner += 16) {
+                    // For non-padded area: (mb + mb_idx + mb_inner) < MB.
+                    cmp(16 | lt | f0[0], mb, conf.mb - mb_idx - mb_inner);
+                    // For non-padded area: (oc + oc_idx + oc_inner) < OC.
+                    cmp(16 | f0[0] | gt, oc_tmp, oc_vec[1].uw());
+                    mov(16 | ~f0[0], C_dense[ireg].f(), 0.0f);
+                    if (oc_inner + 16 < oc_step)
+                        add(16, oc_vec[1].uw(), oc_vec[1].uw(), 16);
+                    ireg += 2;
+                }
+            }
+            ra.safeRelease(oc_vec);
+            ra.safeRelease(oc_tmp);
+        }
 
         // Convert to the destination type and write.
         auto C_tmp = ra.alloc_range(4);
