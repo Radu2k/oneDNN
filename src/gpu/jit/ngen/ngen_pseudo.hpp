@@ -333,7 +333,12 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
 
 // Thread spawner messages.
 void threadend(const InstructionModifier &mod, const RegData &r0_info) {
-    send(8 | EOT | mod | NoMask, null, r0_info, 0x27, 0x2000010);
+    uint32_t exdesc = 0x20; // set EOT bit
+    if (hardware <= HW::Gen12HP)
+        exdesc |= static_cast<int>(SharedFunction::ts) & 0xF;
+    else
+        exdesc |= static_cast<int>(SharedFunction::gtwy) & 0xF;
+    send(8 | EOT | mod | NoMask, null, r0_info, exdesc, 0x2000010);
 }
 
 void threadend(const RegData &r0_info) { threadend(InstructionModifier(), r0_info); }
@@ -341,7 +346,8 @@ void threadend(const RegData &r0_info) { threadend(InstructionModifier(), r0_inf
 // Gateway messages.
 void barriermsg(const InstructionModifier &mod, const GRF &header)
 {
-    send(1 | mod | NoMask, null, header, 0x3, 0x2000004);
+    uint32_t exdesc = static_cast<int>(SharedFunction::gtwy) & 0xF;
+    send(1 | mod | NoMask, null, header, exdesc, 0x2000004);
 }
 
 void barriermsg(const GRF &header) { barriermsg(InstructionModifier(), header); }
@@ -412,7 +418,13 @@ void atomic(AtomicOp op, const InstructionModifier &mod, const DataSpec &spec, A
 // Global memory fence.
 void memfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
-    send(8 | mod | NoMask, dst, header, 0xA, 0x219E000);
+    if (hardware <= HW::Gen12HP) {
+        const uint32_t exdesc = static_cast<int>(SharedFunction::dc0) & 0xF;
+        send(8 | mod | NoMask, dst, header, exdesc, 0x219E000);
+    } else {
+        const uint32_t exdesc = static_cast<int>(SharedFunction::ugm) & 0xF;
+        send(1 | mod | NoMask, dst, header, exdesc, 0x214031F);
+    }
 }
 
 void memfence(const RegData &dst, const RegData &header = GRF(0)) { memfence(InstructionModifier(), dst, header); }
@@ -420,7 +432,13 @@ void memfence(const RegData &dst, const RegData &header = GRF(0)) { memfence(Ins
 // SLM-only memory fence.
 void slmfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
-    send(8 | mod | NoMask, dst, header, 0xA, 0x219E0FE);
+    if (hardware <= HW::Gen12HP) {
+        const uint32_t exdesc = static_cast<int>(SharedFunction::dc0) & 0xF;
+        send(8 | mod | NoMask, dst, header, exdesc, 0x219E0FE);
+    } else {
+        const uint32_t exdesc = static_cast<int>(SharedFunction::slm) & 0xF;
+        send(1 | mod | NoMask, dst, header, exdesc, 0x210011F);
+    }
 }
 
 void slmfence(const RegData &dst, const RegData &header = GRF(0)) { slmfence(InstructionModifier(), dst, header); }

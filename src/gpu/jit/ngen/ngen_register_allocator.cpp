@@ -35,6 +35,7 @@ int Bundle::first_reg(HW hw) const
     case HW::Gen12LP:
         return (bundle0 << 1) | bank0;
     case HW::Gen12HP:
+    case HW::Gen12p7:
         return (bundle0 << 2) | (bank0 << 1);
     default:
         return 0;
@@ -48,6 +49,7 @@ int Bundle::group_size(HW hw) const
     else switch (hw) {
     case HW::Gen11:
     case HW::Gen12HP:
+    case HW::Gen12p7:
         return 2;
     default:
         return 1;
@@ -67,6 +69,7 @@ int Bundle::stride(HW hw) const
     case HW::Gen12LP:
         return 16;
     case HW::Gen12HP:
+    case HW::Gen12p7:
         return 64;
     default:
         return 128;
@@ -94,6 +97,7 @@ int64_t Bundle::reg_mask(HW hw, int offset) const
         if (bank_id != any)                             base_mask &= 0x5555555555555555;
         return base_mask << (bank0 + (bundle0 << 1));
     case HW::Gen12HP:
+    case HW::Gen12p7:
         if (bundle_id != any)                           base_mask  = 0x000000000000000F;
         if (bank_id != any)                             base_mask &= 0x3333333333333333;
         return base_mask << ((bank0 << 1) + (bundle0 << 2));
@@ -115,6 +119,7 @@ Bundle Bundle::locate(HW hw, RegData reg)
         case HW::Gen12LP:
             return Bundle(base & 1, (base >> 1) & 7);
         case HW::Gen12HP:
+        case HW::Gen12p7:
             return Bundle((base >> 1) & 1, (base >> 2) & 0xF);
         default:
             return Bundle();

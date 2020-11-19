@@ -201,6 +201,7 @@ enum class HW {
     Gen11,
     Gen12LP,
     Gen12HP,
+    Gen12p7,
 };
 
 // Data types. Bits[0:3] are the ID, bits[4:7] hold the width, in bytes.
@@ -312,29 +313,42 @@ static inline std::ostream &operator<<(std::ostream &str, SyncFunction func)
 
 // Shared function IDs (SFIDs).
 enum class SharedFunction : uint8_t {
-    null = 0,
-    smpl = 2,
-    sampler = 2,
-    gtwy = 3,
-    gateway = 3,
-    dc2 = 4,
-    rc = 5,
-    urb = 6,
-    ts = 7,
-    spawner = 7,
-    vme = 8,
-    dcro = 9,
-    dc0 = 10,
-    pixi = 11,
-    dc1 = 12,
-    cre = 13
+    null = 0x0,
+    smpl = 0x2,
+    gtwy = 0x3,
+    dc2 = 0x4,
+    rc = 0x5,
+    urb = 0x6,
+    ts = 0x7,
+    vme = 0x8,
+    dcro = 0x9,
+    dc0 = 0xA,
+    pixi = 0xB,
+    dc1 = 0xC,
+    cre = 0xD,
+
+    btd = 0x17,
+    rta = 0x18,
+    tgm = 0x1D,
+    slm = 0x1E,
+    ugm = 0x1F,
+
+    // alias
+    sampler = smpl,
+    gateway = gtwy,
+    spawner = ts,
 };
 
 #ifdef NGEN_ASM
 static inline std::ostream &operator<<(std::ostream &str, SharedFunction sfid)
 {
-    static const char *names[16] = {"null", "", "smpl", "gtwy", "dc2", "rc", "urb", "ts", "vme", "dcro", "dc0", "pixi", "dc1", "cre", "", ""};
-    str << names[static_cast<uint8_t>(sfid) & 0xF];
+    static const char *names[32] = {
+        "null", ""    , "smpl", "gtwy", "dc2", "rc" , "urb", "ts" ,
+        "vme" , "dcro", "dc0" , "pixi", "dc1", "cre", ""   , ""   ,
+        ""    , ""    , ""    , ""    , ""   , ""   , ""   , "btd",
+        "rta" , ""    , ""    , ""    , ""   , "tgm", "slm", "ugm",
+    };
+    str << names[static_cast<uint8_t>(sfid) & 0x1F];
     return str;
 }
 #endif
@@ -1943,8 +1957,7 @@ union MessageDescriptor {
 union ExtendedMessageDescriptor {
     uint32_t all;
     struct {
-        unsigned sfid : 4;
-        unsigned : 1;
+        unsigned sfid : 5;
         unsigned eot : 1;
         unsigned extMessageLen : 5;    /* # of GRFs sent in src1: valid range 0-15 (pre-Gen12) */
         unsigned : 1;
@@ -1953,7 +1966,7 @@ union ExtendedMessageDescriptor {
     } parts;
 
     ExtendedMessageDescriptor() : all(0) {}
-    /* implicit */ ExtendedMessageDescriptor(SharedFunction sfid_) : all(0) { parts.sfid = static_cast<int>(sfid_); }
+    ExtendedMessageDescriptor& operator=(SharedFunction sfid_) { parts.sfid = static_cast<int>(sfid_); return *this; }
 };
 
 enum class AtomicOp : uint8_t {

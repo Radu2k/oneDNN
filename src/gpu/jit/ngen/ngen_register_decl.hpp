@@ -428,5 +428,6 @@ template class ngen::BinaryCodeGenerator<ngen::HW::Gen10>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen11>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen12LP>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen12HP>;
+template class ngen::BinaryCodeGenerator<ngen::HW::Gen12p7>;
 
 #endif /* (defined(NGEN_CPP11) || defined(NGEN_CPP14)) && !defined(NGEN_GLOBAL_REGS) */

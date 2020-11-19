@@ -1952,7 +1952,7 @@ BinaryCodeGenerator<hw>::opSend(Opcode op, const InstructionModifier &mod, Share
     i.send.src0RegFile = getRegFile(src0);
     i.send.src1RegFile = getRegFile(src1);
 
-    i.send.sfid = static_cast<int>(sfid);
+    i.send.sfid = static_cast<int>(sfid) & 0xF;
 
     encodeSendDesc(i, desc);
     encodeSendExDesc(i, exdesc);
@@ -2079,7 +2079,7 @@ typename std::enable_if<hwGE(hw_, HW::Gen12LP)>::type
 BinaryCodeGenerator<hw>::opSends(Opcode op, const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, uint32_t exdesc, D desc)
 {
     Opcode mop = static_cast<Opcode>(static_cast<int>(op) & ~2);
-    opSend(mop, mod, static_cast<SharedFunction>(exdesc & 0xF), dst, src0, src1, exdesc, desc);
+    opSend(mop, mod, static_cast<SharedFunction>(exdesc & 0x1F), dst, src0, src1, exdesc, desc);
 }
 
 template <HW hw>

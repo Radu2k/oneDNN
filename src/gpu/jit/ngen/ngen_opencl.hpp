@@ -155,7 +155,7 @@ std::vector<uint8_t> OpenCLCodeGenerator<hw>::getBinary(cl_context context, cl_d
     std::ostringstream dummyCL;
     auto modOptions = options;
 
-    if ((hw == HW::Gen12HP) && (interface_.needGRF > 128))
+    if ((hw >= HW::Gen12HP) && (interface_.needGRF > 128))
         modOptions.append(" -cl-intel-256-GRF-per-thread");
 
     interface_.generateDummyCL(dummyCL);
