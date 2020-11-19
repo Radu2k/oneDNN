@@ -152,9 +152,8 @@ std::string ocl_gpu_device_info_t::get_cl_ext_options() const {
                     device_ext_t::intel_subgroup_matrix_multiply_accumulate,
                     device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate,
-                    device_ext_t::intel_global_float_atomics
-                    // Temporary W/A for bf16 problems in HW and compiler
-                    /* device_ext_t::future_bf16_cvt*/))
+                    device_ext_t::intel_global_float_atomics,
+                    device_ext_t::future_bf16_cvt))
             opts += std::string("-D") + ext2cl_str(ext) + " ";
     }
     if (!opts.empty()) { opts[opts.size() - 1] = '\0'; }
