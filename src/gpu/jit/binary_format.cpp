@@ -159,6 +159,10 @@ public:
                     kernel = binary_format_kernel_t<HW::Gen12HP>::make_kernel(
                             engine);
                     break;
+                case compute::gpu_arch_t::gen12p7:
+                    kernel = binary_format_kernel_t<HW::Gen12p7>::make_kernel(
+                            engine);
+                    break;
                 default: kernel = nullptr; break;
             }
         }

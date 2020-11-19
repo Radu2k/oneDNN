@@ -67,6 +67,7 @@ protected:
             case compute::gpu_arch_t::gen9: return ngen::HW::Gen9;
             case compute::gpu_arch_t::gen12lp: return ngen::HW::Gen12LP;
             case compute::gpu_arch_t::gen12hp: return ngen::HW::Gen12HP;
+            case compute::gpu_arch_t::gen12p7: return ngen::HW::Gen12p7;
             default: return ngen::HW::Unknown;
         }
     }

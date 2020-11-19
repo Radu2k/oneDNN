@@ -37,6 +37,7 @@ uint64_t get_future_extensions(compute::gpu_arch_t gpu_arch) {
     uint64_t extensions = 0;
     switch (gpu_arch) {
         case gpu_arch_t::gen12hp:
+        case gpu_arch_t::gen12p7:
             extensions |= (uint64_t)device_ext_t::intel_global_float_atomics;
             extensions |= (uint64_t)
                     device_ext_t::intel_subgroup_matrix_multiply_accumulate;
@@ -60,6 +61,7 @@ inline gpu_arch_t str2gpu_arch(const char *str) {
     CASE(gen9);
     CASE(gen12lp);
     CASE(gen12hp);
+    CASE(gen12p7);
     return gpu_arch_t::unknown;
 #undef CASE
 }
@@ -127,6 +129,7 @@ status_t device_info_t::init_attributes_common(engine_t *engine) {
             threads_per_eu[1] = 7;
             break;
         case gpu::compute::gpu_arch_t::gen12hp:
+        case gpu::compute::gpu_arch_t::gen12p7:
             threads_per_eu[0] = 8; // 128 regs/thread
             threads_per_eu[1] = 4; // 256 regs/thread
             break;

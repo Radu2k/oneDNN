@@ -84,7 +84,8 @@ struct gen12lp_x8s8s32x_convolution_fwd_t : public gpu_primitive_t {
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
 
-            is_gen12hp = compute_engine->is_gen12hp();
+            is_gen12hp = compute_engine->is_gen12hp()
+                    || compute_engine->is_gen12p7();
 
             return ok ? status::success : status::unimplemented;
         }

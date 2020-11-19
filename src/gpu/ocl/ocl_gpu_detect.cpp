@@ -30,6 +30,7 @@ compute::gpu_arch_t detect_gpu_arch(cl_device_id device, cl_context context) {
         case HW::Gen9: return compute::gpu_arch_t::gen9;
         case HW::Gen12LP: return compute::gpu_arch_t::gen12lp; break;
         case HW::Gen12HP: return compute::gpu_arch_t::gen12hp; break;
+        case HW::Gen12p7: return compute::gpu_arch_t::gen12p7; break;
         default: return compute::gpu_arch_t::unknown; break;
     }
 }

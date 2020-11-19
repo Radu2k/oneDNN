@@ -166,7 +166,8 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     }
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
-    const bool is_gen12hp = compute_engine->is_gen12hp();
+    const bool is_gen12hp
+            = compute_engine->is_gen12hp() || compute_engine->is_gen12p7();
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();
 
@@ -497,7 +498,8 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
         return status::unimplemented;
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
-    const bool is_gen12hp = compute_engine->is_gen12hp();
+    const bool is_gen12hp
+            = compute_engine->is_gen12hp() || compute_engine->is_gen12p7();
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();
 
@@ -953,7 +955,8 @@ status_t gen9_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
     bwd_w_compute_block_sizes(conf, this, engine);
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
-    const bool is_gen12hp = compute_engine->is_gen12hp();
+    const bool is_gen12hp
+            = compute_engine->is_gen12hp() || compute_engine->is_gen12p7();
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();
 

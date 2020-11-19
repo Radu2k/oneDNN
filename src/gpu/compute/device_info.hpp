@@ -36,6 +36,7 @@ enum class gpu_arch_t {
     gen9,
     gen12lp,
     gen12hp,
+    gen12p7,
 };
 
 enum class device_ext_t : uint64_t {

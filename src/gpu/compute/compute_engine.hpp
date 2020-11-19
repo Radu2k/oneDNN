@@ -107,8 +107,14 @@ public:
     bool is_gen12hp() const {
         return device_info_->gpu_arch_env() == gpu_arch_t::gen12hp;
     }
+    bool is_gen12p7() const {
+        return device_info_->gpu_arch_env() == gpu_arch_t::gen12p7;
+    }
     bool is_jit_gen12hp() const {
         return device_info_->gpu_arch() == gpu_arch_t::gen12hp;
+    }
+    bool is_jit_gen12p7() const {
+        return device_info_->gpu_arch() == gpu_arch_t::gen12p7;
     }
     bool mayiuse_ngen_kernels() {
         return device_info_->mayiuse_ngen_kernels(this);

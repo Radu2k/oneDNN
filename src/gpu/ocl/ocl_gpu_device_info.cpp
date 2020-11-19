@@ -37,16 +37,36 @@ status_t ocl_gpu_device_info_t::init_arch(engine_t *engine) {
 
     // try to detect gpu by device name first
     gpu_arch_ = detect_gpu_arch_by_device_name(name());
-    if (gpu_arch_ != compute::gpu_arch_t::unknown) return status::success;
 
     // if failed, use slower method
-    cl_context context
-            = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &err);
-    OCL_CHECK(err);
+    if (gpu_arch_ == compute::gpu_arch_t::unknown) {
+        cl_context context
+                = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &err);
+        OCL_CHECK(err);
 
-    gpu_arch_ = detect_gpu_arch(device, context);
-    err = clReleaseContext(context);
-    OCL_CHECK(err);
+        gpu_arch_ = detect_gpu_arch(device, context);
+
+        err = clReleaseContext(context);
+        OCL_CHECK(err);
+    }
+
+    // XXX: temporary WA for different Gen12HP devices
+    if (gpu_arch_ == compute::gpu_arch_t::gen12hp) {
+        // query extensions
+        size_t param_size = 0;
+        err = clGetDeviceInfo(
+                device, CL_DEVICE_EXTENSIONS, 0, nullptr, &param_size);
+        OCL_CHECK(err);
+
+        std::string extension_string(param_size, '\0');
+        err = clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, param_size,
+                &extension_string[0], &param_size);
+        OCL_CHECK(err);
+
+        if (extension_string.find(ext2cl_str(compute::device_ext_t::khr_fp64))
+                == std::string::npos)
+            gpu_arch_ = compute::gpu_arch_t::gen12p7;
+    }
 
     return status::success;
 }

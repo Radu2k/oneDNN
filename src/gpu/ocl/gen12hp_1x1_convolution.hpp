@@ -46,7 +46,8 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
             assert(engine->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
-            if (!compute_engine->is_gen12hp()) return status::unimplemented;
+            if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+                return status::unimplemented;
 
             const auto attr_skip_mask
                     = primitive_attr_t::skip_mask_t::oscale_runtime
