@@ -1575,8 +1575,10 @@ public:
         }
 
         // Compute destination address.
-        // (mb / MB_BLOCK) * (OC / 32) * OD * OH * OW * MB_BLOCK * 32
-        mul(1, dst_addr_init, mb, conf.od * conf.oh * conf.ow * oc_padded);
+        // (mb / MB_BLOCK) * (OC / dst_oc_block) * OD * OH * OW * MB_BLOCK * dst_oc_block
+        mul(1, dst_addr_init, mb,
+                conf.od * conf.oh * conf.ow
+                        * utils::rnd_up(conf.oc, dst_oc_block));
 
         // (oc / 32) * OD * OH * OW * MB_BLOCK * 32
         mul(1, tmp0.uq(0), oc, conf.od * conf.oh * conf.ow * mb_block);
@@ -1636,7 +1638,16 @@ public:
             mov(1, sum_scale, attr_info.sum_scale);
         }
 
+        int dst_oc_padded = utils::rnd_up(conf.oc, dst_oc_block);
+        bool check_oc = (dst_oc_padded % 32 != 0);
         for (int oc_idx = 0; oc_idx < 32; oc_idx += oc_step) {
+            Label skip_oc;
+            if (check_oc) {
+                // Check oc + oc_idx < dst_oc_padded.
+                cmp(8 | lt | f0[0], oc, dst_oc_padded - oc_idx);
+                if_(8 | f0[0], skip_oc, skip_oc);
+            }
+
             load_bias(oc_idx, oc_step);
             load_per_oc_oscales(oc_idx, oc_step);
 
@@ -1650,6 +1661,10 @@ public:
                 read_update_write_dst_range(mb_idx, mb_step, oc_idx, oc_step);
                 if (mb_idx + mb_step < mb_block)
                     add(1, dst_addr.uq(0), dst_addr.uq(0), 128);
+            }
+            if (check_oc) {
+                mark(skip_oc);
+                endif(8);
             }
         }
 
