@@ -49,14 +49,13 @@ protected:
 
         SKIP_IF(unsupported_data_type(src0_dt),
                 "Engine does not support this data type.");
-
         SKIP_IF(unsupported_data_type(src1_dt),
                 "Engine does not support this data type.");
 
-        for (auto tag : p.srcs_format) {
-            SKIP_IF_CUDA(!cuda_check_format_tag(tag),
-                    "Unsupported source format tag");
-        }
+        SKIP_IF_CUDA(!cuda_check_format_tag(p.srcs_format[0]),
+                "Unsupported source format tag");
+        SKIP_IF_CUDA(!cuda_check_format_tag(p.srcs_format[1]),
+                "Unsupported source format tag");
         SKIP_IF_CUDA(!cuda_check_format_tag(p.dst_format),
                 "Unsupported destination format tag");
 
