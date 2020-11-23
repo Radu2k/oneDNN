@@ -1361,7 +1361,7 @@ public:
         }
 
         mul(1, tmp.q(0), src1, src2);
-        add(1, dst, dst, tmp.reinterpret(0, dst.getType()));
+        mov(1, dst, tmp.reinterpret(0, dst.getType()));
 
         ra.safeRelease(tmp);
     }
