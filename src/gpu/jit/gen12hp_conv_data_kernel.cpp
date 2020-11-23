@@ -168,24 +168,28 @@ public:
 // buffering.
 class loop_iterator_t {
 public:
-    loop_iterator_t(const conv_conf_t &conf, int unroll, int slm_nbuf,
-            int ab_slm_size, bool check_src_load)
+    loop_iterator_t(const conv_conf_t &conf, int unroll, int gmem_nbuf,
+            int slm_nbuf, int ab_slm_size, bool check_src_load)
         : conf(conf)
         , unroll(unroll)
+        , gmem_nbuf(gmem_nbuf)
         , slm_nbuf(slm_nbuf)
         , ab_slm_size(ab_slm_size)
         , check_src_load(check_src_load) {
 
         assert(unroll % (conf.kd * conf.kh * conf.kw) == 0);
+        assert(gmem_nbuf == 1 || gmem_nbuf == 2);
         assert(slm_nbuf == 2 || slm_nbuf == 3);
 
         int ic_iters = utils::div_up(conf.ic, conf.ic_block);
 
-        iters = ic_iters * conf.kd * conf.kh * conf.kw + (slm_nbuf - 1);
+        iters = ic_iters * conf.kd * conf.kh * conf.kw + (slm_nbuf - 1)
+                + (gmem_nbuf - 1);
         assert(iters >= slm_nbuf);
 
-        ramp_up_iters = slm_nbuf;
-        ramp_down_iters = std::min(slm_nbuf - 1, iters - ramp_up_iters);
+        ramp_up_iters = slm_nbuf + (gmem_nbuf - 1);
+        ramp_down_iters = std::min(
+                slm_nbuf - 1 + (gmem_nbuf - 1), iters - ramp_up_iters);
         body_iters = iters - ramp_up_iters - ramp_down_iters;
 
         body_iters = utils::rnd_dn(body_iters, unroll);
@@ -223,28 +227,51 @@ public:
         riter -= n;
     }
 
-    bool do_multiply() const { return iter >= slm_nbuf - 1; }
-    bool is_first_multiply() const { return iter == slm_nbuf - 1; }
+    bool do_multiply() const {
+        return iter >= (slm_nbuf - 1) + (gmem_nbuf - 1);
+    }
+    bool is_first_multiply() const {
+        return iter == (slm_nbuf - 1) + (gmem_nbuf - 1);
+    }
     bool is_last_multiply() const { return riter == 0; }
 
-    bool do_gmem2reg() const { return riter >= slm_nbuf - 1; }
+    bool do_gmem2reg() const {
+        return riter >= (slm_nbuf - 1) + (gmem_nbuf - 1);
+    }
+    bool do_reg2smem() const {
+        return iter >= (gmem_nbuf - 1) && riter >= (slm_nbuf - 1);
+    }
+
+    int gmem_buf_write() const {
+        assert(do_gmem2reg());
+        return iter % gmem_nbuf;
+    }
+
+    int gmem_buf_read() const {
+        assert(do_reg2smem());
+        return (iter - (gmem_nbuf - 1)) % gmem_nbuf;
+    }
 
     int gmem_read_src_off_update() const;
 
     int smem_read_off_update() const {
         assert(do_multiply());
 
-        int cur_slm_idx = (iter + 1) % slm_nbuf;
-        int next_slm_idx = (iter + 2) % slm_nbuf;
-        return next_slm_idx * ab_slm_size - cur_slm_idx * ab_slm_size;
+        int smem_iter = iter - (gmem_nbuf - 1) - (slm_nbuf - 1);
+        int cur_slm_idx = smem_iter % slm_nbuf;
+        int next_slm_idx = (smem_iter + 1) % slm_nbuf;
+        int ret = next_slm_idx * ab_slm_size - cur_slm_idx * ab_slm_size;
+        return ret;
     }
 
     int smem_write_off_update() const {
-        assert(do_gmem2reg());
+        assert(do_reg2smem());
 
-        int cur_slm_idx = iter % slm_nbuf;
-        int next_slm_idx = (iter + 1) % slm_nbuf;
-        return next_slm_idx * ab_slm_size - cur_slm_idx * ab_slm_size;
+        int smem_iter = iter - (gmem_nbuf - 1);
+        int cur_slm_idx = smem_iter % slm_nbuf;
+        int next_slm_idx = (smem_iter + 1) % slm_nbuf;
+        int ret = next_slm_idx * ab_slm_size - cur_slm_idx * ab_slm_size;
+        return ret;
     }
 
     // NCdhw32n32c layout.
@@ -265,6 +292,7 @@ public:
 
     const conv_conf_t &conf;
     int unroll;
+    int gmem_nbuf;
     int slm_nbuf;
     int ab_slm_size;
     bool check_src_load;
@@ -381,6 +409,18 @@ public:
             slm_nbuf = 3;
         } else {
             slm_nbuf = 2;
+        }
+
+        if (conf.ver == ver_v1) {
+            gmem_nbuf = 1;
+        } else {
+            // conf.ver == ver_v2.
+            // Enable double global memory buffering only when:
+            //   1. Triple SLM buffering is enabled.
+            //      This is to avoid pipeline cost (ramp-up, ramp-down) when
+            //      reduction loop is not big enough.
+            //   2. MB block is 32 to fit extra buffer registers into GRF.
+            gmem_nbuf = ((slm_nbuf == 3 && conf.mb_block == 32) ? 2 : 1);
         }
 
         auto has_padding = [](int o, int i, int k, int p, int s, int d) {
@@ -820,12 +860,11 @@ public:
             iw_load0 = iw_load[0] = ra.alloc_sub<int32_t>();
         } else {
             // conf.ver == ver_v2.
-            _sp = ra.alloc_range(2);
-            sp[0] = _sp[0].w();
-            sp[1] = _sp[1].w();
+            _sp = ra.alloc_range(is_4x2_tg ? 2 : 1);
             sp_bound = ra.alloc().w();
 
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+                sp[i] = _sp[i].w();
                 if (has_d) id_load[i] = sp[i][4];
                 if (has_h) ih_load[i] = sp[i][2];
                 iw_load[i] = sp[i][0];
@@ -836,6 +875,9 @@ public:
         int B_tmp_regs = 8;
 
         if (conf.oc_group == 2 && !is_1st) A_tmp_regs *= 2;
+
+        A_tmp_regs *= gmem_nbuf;
+        B_tmp_regs *= gmem_nbuf;
 
         A_tmp = ra.alloc_range(A_tmp_regs);
         B_tmp = ra.alloc_range(B_tmp_regs);
@@ -1180,8 +1222,9 @@ public:
 
         // Fully unroll (kd * kh * kw) and also ensure we can hard-code SLM
         // offsets.
-        int unroll = slm_nbuf * kdhw / math::gcd(slm_nbuf, kdhw);
-        loop_iterator_t it(conf, unroll, slm_nbuf, ab_slm_size, check_src_load);
+        int unroll = math::lcm(gmem_nbuf * slm_nbuf, kdhw);
+        loop_iterator_t it(
+                conf, unroll, gmem_nbuf, slm_nbuf, ab_slm_size, check_src_load);
 
         // Ramp-up.
         for (int i = 0; i < it.ramp_up_iters; i++) {
@@ -1193,7 +1236,7 @@ public:
 
         // Body.
         if (it.body_iters > 0) {
-            mov(1, iter, it.body_iters);
+            if (it.body_iters > it.unroll) mov(1, iter, it.body_iters);
 
             Label ic_loop;
             mark(ic_loop);
@@ -1203,8 +1246,10 @@ public:
                 ++it;
             }
 
-            add(1 | gt | f0[0], iter, iter, -it.unroll);
-            jmpi(1 | f0[0], ic_loop);
+            if (it.body_iters > it.unroll) {
+                add(1 | gt | f0[0], iter, iter, -it.unroll);
+                jmpi(1 | f0[0], ic_loop);
+            }
 
             it.advance(it.body_iters - it.unroll);
         }
@@ -1233,11 +1278,12 @@ public:
     void loop_iterate_v2(const loop_iterator_t &it) {
         bool do_gmem2reg = it.do_gmem2reg();
         bool do_multiply = it.do_multiply();
+        bool do_reg2smem = it.do_reg2smem();
 
         if (slm_nbuf == 3 && do_multiply) wait();
         if (do_gmem2reg) gmem2reg_v2(it);
 
-        if (slm_nbuf == 3 && it.iter == 1) fence_and_signal();
+        if (slm_nbuf == 3 && it.iter == gmem_nbuf) fence_and_signal();
 
         if (do_multiply) {
 
@@ -1250,7 +1296,7 @@ public:
             multiply_v2(it);
         }
 
-        if (do_gmem2reg) {
+        if (do_reg2smem) {
             reg2smem_v2(it);
             if (slm_nbuf == 2) {
                 fence_and_signal();
@@ -1262,6 +1308,7 @@ public:
     // SBID usage:
     //   $0-3       A load from global memory and store to SLM
     //   $4         B load from global memory and store to SLM
+    //   $0-7       A/B load from global memory and store to SLM (v2)
     //   $8-10      A SLM loads
     //   $11-14     DPASW and B SLM loads
     //   $15        Barrier/SLM fence
@@ -1274,6 +1321,11 @@ public:
     SBID gmem_a_sbid(int iter) const { return SBID(iter % 4); }
 
     SBID gmem_b_sbid() const { return sb4; }
+
+    SBID gmem_sbid_v2(int idx) const {
+        assert(idx <= 7);
+        return SBID(idx);
+    }
 
     SBID smem_a_sbid(int idx) const { return SBID(8 + idx); }
 
@@ -1673,17 +1725,23 @@ public:
 
         int regs_per_read = 8;
 
+        int a_reads = src_header.getLen();
+        int b_reads = wei_header.getLen();
+        int ab_reads = a_reads + b_reads;
+
         // Load source.
         int src_regs_per_thr = mb_block / conf.sp_group;
 
         if (it.check_src_load) {
             for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
-                cmp(8 | le | sp_check_flags[i], sp[i], sp_bound);
+                auto dep = SWSB(
+                        it.iter >= gmem_nbuf ? std::min(7, ab_reads + 1) : 1);
+                cmp(8 | le | sp_check_flags[i] | dep, sp[i], sp_bound);
             }
         }
 
         idx = 0;
-        reg_off = 0;
+        reg_off = it.gmem_buf_write() * (A_tmp.getLen() / gmem_nbuf);
         for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
             auto sp_flag = sp_check_flags[i];
             for (int j = 0; j < src_regs_per_thr; j += regs_per_read) {
@@ -1691,7 +1749,7 @@ public:
 
                 assert(reg_off + hwords <= A_tmp.getLen());
 
-                auto sbid = gmem_a_sbid(idx);
+                auto sbid = gmem_sbid_v2(ab_reads * it.gmem_buf_write() + idx);
                 InstructionModifier mod = SWSB(sbid, 2);
                 if (it.check_src_load) {
                     mod |= sp_flag;
@@ -1712,6 +1770,7 @@ public:
                 reg_off += hwords;
             }
         }
+        assert(idx == a_reads);
 
         if (it.check_src_load) {
             int iw_upd = it.iw_update();
@@ -1728,9 +1787,10 @@ public:
         int wei_regs_per_thr = 32 / conf.sp_group;
 
         idx = 0;
-        reg_off = 0;
+        reg_off = it.gmem_buf_write() * (B_tmp.getLen() / gmem_nbuf);
         for (int j = 0; j < wei_regs_per_thr; j += regs_per_read) {
-            auto sbid = gmem_b_sbid();
+            auto sbid = gmem_sbid_v2(
+                    ab_reads * it.gmem_buf_write() + a_reads + idx);
             load(16 | SWSB(sbid, 2), B_tmp[reg_off], block_hword(8), A64,
                     wei_header[idx]);
             add(1 | sbid.src, wei_header[idx].uq(0), wei_header[idx].uq(0),
@@ -1739,6 +1799,7 @@ public:
             idx++;
             reg_off += 8;
         }
+        assert(idx == b_reads);
     }
 
     void reg2smem_v2(const loop_iterator_t &it) {
@@ -1751,20 +1812,25 @@ public:
 
         int regs_per_read = 8;
 
+        int a_reads = src_header.getLen();
+        int b_reads = wei_header.getLen();
+        int ab_reads = a_reads + b_reads;
+
         // Store source.
         int src_regs_per_thr = mb_block / conf.sp_group;
 
+        if (it.check_src_load) sync(SyncFunction::nop, SWSB<float>(1));
+
         idx = 0;
-        reg_off = 0;
+        reg_off = it.gmem_buf_read() * (A_tmp.getLen() / gmem_nbuf);
         for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
             for (int j = 0; j < src_regs_per_thr; j += regs_per_read) {
                 int owords = std::min(8, src_regs_per_thr - j) * 2;
 
                 assert(reg_off + owords / 2 <= A_tmp.getLen());
 
-                auto sbid = gmem_a_sbid(idx);
-                auto mod = it.check_src_load ? SWSB(sbid, 1) : SWSB(sbid);
-                store(16 | mod, block_oword(owords), SLM, a_slm_wr[idx],
+                auto sbid = gmem_sbid_v2(ab_reads * it.gmem_buf_read() + idx);
+                store(16 | SWSB(sbid), block_oword(owords), SLM, a_slm_wr[idx],
                         A_tmp[reg_off]);
                 add(1 | sbid.src, a_slm_wr[idx].ud(2), a_slm_wr[idx].ud(2),
                         upd / 16);
@@ -1773,14 +1839,16 @@ public:
                 reg_off += owords / 2;
             }
         }
+        assert(idx == a_reads);
 
         // Store weights.
         int wei_regs_per_thr = 32 / conf.sp_group;
 
         idx = 0;
-        reg_off = 0;
+        reg_off = it.gmem_buf_read() * (B_tmp.getLen() / gmem_nbuf);
         for (int j = 0; j < wei_regs_per_thr; j += regs_per_read) {
-            auto sbid = gmem_b_sbid();
+            auto sbid = gmem_sbid_v2(
+                    ab_reads * it.gmem_buf_read() + a_reads + idx);
             store(16 | SWSB(sbid), block_oword(16), SLM, b_slm_wr[idx],
                     B_tmp[reg_off]);
             add(1 | sbid.src, b_slm_wr[idx].ud(2), b_slm_wr[idx].ud(2),
@@ -1789,6 +1857,7 @@ public:
             idx++;
             reg_off += 8;
         }
+        assert(idx == b_reads);
     }
 
     void smem2reg_v2(const loop_iterator_t &it) {
@@ -2496,6 +2565,7 @@ public:
     int mb_block;
     int dst_oc_block;
 
+    int gmem_nbuf;
     int slm_nbuf;
     int a_slm_block_size;
     int b_slm_block_size;
