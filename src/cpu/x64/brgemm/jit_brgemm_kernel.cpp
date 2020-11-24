@@ -168,7 +168,7 @@ private:
             int bd_block, int ld_block, bool is_ld_tail);
     void store_accumulators_apply_post_ops(
             int bd_block, int ld_block, bool is_ld_tail);
-    void apply_beta(int bd_block, int ld_block, bool is_ld_tail);
+    void apply_alpha_beta(int bd_block, int ld_block, bool is_ld_tail);
 
     void restore_A_B_matrices();
     void restore_offsets();
@@ -361,16 +361,21 @@ void jit_brgemm_kernel_base_t::load_accumulators(
     }
 }
 
-void jit_brgemm_kernel_base_t::apply_beta(
+void jit_brgemm_kernel_base_t::apply_alpha_beta(
         int bd_block, int ld_block2, bool is_ld_tail) {
     auto k_mask = (!is_ld_tail) ? ld_full_mask : ld_tail_mask;
     auto zmm_beta = zmm_tmp_1();
     auto zmm_alpha = zmm_tmp_2();
     auto zmm_prev_dst = zmm_tmp_3();
 
-    const bool apply_alpha = (brg.alpha != 1.f && brg.alpha != 0.f);
+    const bool apply_alpha = brg.alpha != 1.f;
+    const bool apply_beta = brg.beta != 0.f;
+    if (!apply_beta && !apply_beta) return;
 
-    if (brg.beta != 1.f) {
+    const bool dq2ps_required = brg.is_int8 && (apply_alpha || brg.beta != 1.f);
+    const bool use_vadd_for_beta = brg.beta == 1.f && !dq2ps_required;
+
+    if (apply_beta && !use_vadd_for_beta) {
         mov(reg_tmp_gpr, float2int((float)brg.beta));
         movq(Xmm(zmm_beta.getIdx()), reg_tmp_gpr);
         vbroadcastss(zmm_beta, Xmm(zmm_beta.getIdx()));
@@ -380,25 +385,25 @@ void jit_brgemm_kernel_base_t::apply_beta(
         movq(Xmm(zmm_alpha.getIdx()), reg_tmp_gpr);
         vbroadcastss(zmm_alpha, Xmm(zmm_alpha.getIdx()));
     }
-    for (int bd = 0; bd < bd_block; bd++)
-        for (int ld = 0; ld < ld_block2; ld++) {
-            auto zmm = accm(ld_block2, bd, ld);
-            if (brg.is_int8 && (apply_alpha || brg.beta != 1.f))
-                vcvtdq2ps(zmm, zmm);
-            if (apply_alpha) vmulps(zmm, zmm, zmm_alpha);
-            if (brg.beta != 1.f) {
-                cvt2ps(brg.dt_c, zmm_prev_dst,
-                        ptr[reg_aux_C + C_offset(bd, ld)], true, false, k_mask);
-                vfmadd231ps(zmm, zmm_prev_dst, zmm_beta);
-            } else {
-                if (brg.is_int8)
-                    vpaddd(zmm | k_mask | T_z, zmm,
-                            ptr[reg_aux_C + C_offset(bd, ld)]);
-                else
-                    vaddps(zmm | k_mask | T_z, zmm,
-                            ptr[reg_aux_C + C_offset(bd, ld)]);
-            }
+    for_(int bd = 0; bd < bd_block; bd++)
+    for (int ld = 0; ld < ld_block2; ld++) {
+        auto zmm = accm(ld_block2, bd, ld);
+        if (dq2ps_required) vcvtdq2ps(zmm, zmm);
+        if (apply_alpha) vmulps(zmm, zmm, zmm_alpha);
+        if (!apply_beta) continue;
+        if (use_vadd_for_beta) {
+            auto zmm_masked = zmm | k_mask | T_z;
+            auto ptr_C = ptr[reg_aux_C + C_offset(bd, ld)];
+            if (brg.is_int8)
+                vpaddd(zmm_masked, zmm, ptr_C);
+            else
+                vaddps(zmm_masked, zmm, ptr_C);
+        } else {
+            cvt2ps(brg.dt_c, zmm_prev_dst, ptr[reg_aux_C + C_offset(bd, ld)],
+                    true, false, k_mask);
+            vfmadd231ps(zmm, zmm_prev_dst, zmm_beta);
         }
+    }
 }
 
 void jit_brgemm_kernel_base_t::store_accumulators_apply_post_ops(
@@ -530,6 +535,7 @@ void jit_brgemm_kernel_base_t::store_accumulators_without_post_ops(
 
 void jit_brgemm_kernel_base_t::store_accumulators(
         int bd_block2, bool is_bdb_tail, int ld_block2, bool is_ld_tail) {
+    const bool need_to_apply_alpha_beta = brg.beta != 0.f || brg.alpha != 1.f;
     if (brg.is_int8_amx || brg.is_bf16_amx) {
         mov(ptr[rsp + reg_ldb_loop_offs_], reg_ldb_loop);
         if (brg.beta != 0.f && brg.alpha != 0)
@@ -541,7 +547,7 @@ void jit_brgemm_kernel_base_t::store_accumulators(
         for (int bdb = 0; bdb < bd_block2; bdb++) {
             for (int ldb = 0; ldb < ld_block2; ldb++) {
                 int idx = (is_ld_tail) ? brg.ld_block2 : ldb;
-                if (brg.beta != 0.f && brg.alpha != 0) {
+                if (need_to_apply_alpha_beta) {
                     tilestored(ptr[reg_buf + reg_stride_ld_block],
                             Tmm(brgemm_amx::get_C_tensor(bdb, idx)));
                     for (int bd = 0; bd < brg.bd_block; bd++) {
@@ -553,7 +559,7 @@ void jit_brgemm_kernel_base_t::store_accumulators(
                         else
                             vmovups(accm(1, bd, 0), ptr[reg_buf + buf_offset]);
                     }
-                    apply_beta(brg.bd_block, 1, is_ld_tail);
+                    apply_alpha_beta(brg.bd_block, 1, is_ld_tail);
                     store_accumulators_without_post_ops(
                             brg.bd_block, 1, is_ld_tail);
                 } else {
@@ -569,9 +575,8 @@ void jit_brgemm_kernel_base_t::store_accumulators(
         mov(reg_ldb_loop, ptr[rsp + reg_ldb_loop_offs_]);
     } else {
         int bd_block = (is_bdb_tail) ? brg.bdb_tail : brg.bd_block;
-        if (brg.beta != 0.f && brg.alpha != 0) {
-            apply_beta(bd_block, ld_block2, is_ld_tail);
-        }
+        if (need_to_apply_alpha_beta)
+            apply_alpha_beta(bd_block, ld_block2, is_ld_tail);
 
         if (one_of(true, brg.with_eltwise, brg.with_scales, brg.with_bias,
                     brg.with_sum, brg.dt_d != brg.dt_c,
