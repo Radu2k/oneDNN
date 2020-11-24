@@ -252,13 +252,13 @@ inline void register_dnn_mem_object(dnn_mem_t *mem) {}
 inline void unregister_dnn_mem_object(dnn_mem_t *mem) {}
 #endif
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
-#include "dnnl_threadpool_iface.hpp"
+#include "oneapi/dnnl/dnnl_threadpool.hpp"
 // XXX: cannot include dnnl_thread.hpp because of conflicting macro
 // definitions
 namespace dnnl {
 namespace impl {
 namespace threadpool_utils {
-threadpool_iface *get_active_threadpool();
+dnnl::threadpool_interop::threadpool_iface *get_active_threadpool();
 }
 } // namespace impl
 } // namespace dnnl
