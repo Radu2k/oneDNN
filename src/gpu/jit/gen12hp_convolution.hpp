@@ -148,12 +148,6 @@ struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
             if (!ok) return status::unimplemented;
 
             CHECK(init_conf(engine));
-            // We support only unit stride for now
-            bool has_h = conf.oh > 1 || conf.ih > 1 || conf.kh > 1;
-            bool has_d = conf.od > 1 || conf.id > 1 || conf.kd > 1;
-            ok = conf.stride_w == 1 && IMPLICATION(has_h, conf.stride_h == 1)
-                    && IMPLICATION(has_d, conf.stride_d == 1);
-            if (!ok) return status::unimplemented;
 
             // In conf, we express bwd_data as a fwd convolution
             // So we use the appropriate tags here
@@ -173,15 +167,15 @@ struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
 
             // Ignore accumulator type set to f16 and use f32.
             bool is_f16 = (acc_dt == f16 || acc_dt == f32);
-            is_f16 &= (src_dt == f16);
+            is_f16 &= (dst_dt == f16);
             is_f16 &= (wei_dt == f16);
-            is_f16 &= utils::one_of(dst_dt, f16, f32);
+            is_f16 &= utils::one_of(src_dt, f16, f32);
             if (is_f16) return true;
 
             bool is_bf16 = (acc_dt == f32);
-            is_bf16 &= (src_dt == bf16);
+            is_bf16 &= (dst_dt == bf16);
             is_bf16 &= (wei_dt == bf16);
-            is_bf16 &= utils::one_of(dst_dt, bf16, f32);
+            is_bf16 &= utils::one_of(src_dt, bf16, f32);
             if (is_bf16) return true;
 
             // Not supported.
@@ -202,8 +196,6 @@ private:
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
 
     compute::kernel_t kernel_;
-
-    const int OSCALES_ = 0;
 };
 
 } // namespace jit

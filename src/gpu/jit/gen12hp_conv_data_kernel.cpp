@@ -181,6 +181,8 @@ public:
         assert(gmem_nbuf == 1 || gmem_nbuf == 2);
         assert(slm_nbuf == 2 || slm_nbuf == 3);
 
+        pad_sign = (conf.prop_kind == backward_data) ? 1 : -1;
+
         int ic_iters = utils::div_up(conf.ic, conf.ic_block);
 
         iters = ic_iters * conf.kd * conf.kh * conf.kw + (slm_nbuf - 1)
@@ -252,6 +254,14 @@ public:
         return (iter - (gmem_nbuf - 1)) % gmem_nbuf;
     }
 
+    int kdhw_index() const {
+        int idx = 0;
+        idx += kd * conf.kh * conf.kw;
+        idx += kh * conf.kw;
+        idx += kw;
+        return idx;
+    }
+
     int gmem_read_src_off_update() const;
 
     int smem_read_off_update() const {
@@ -279,10 +289,11 @@ public:
         int off = 0;
         off += (ic / conf.ic_block) * conf.id * conf.ih * conf.iw
                 * conf.mb_block * 32;
-        off += kd * (1 + conf.dilate_d) * conf.ih * conf.iw * conf.mb_block
+        off += -pad_sign * kd * (1 + conf.dilate_d) * conf.ih * conf.iw
+                * conf.mb_block * 32;
+        off += -pad_sign * kh * (1 + conf.dilate_h) * conf.iw * conf.mb_block
                 * 32;
-        off += kh * (1 + conf.dilate_h) * conf.iw * conf.mb_block * 32;
-        off += kw * (1 + conf.dilate_w) * conf.mb_block * 32;
+        off += -pad_sign * kw * (1 + conf.dilate_w) * conf.mb_block * 32;
         return off;
     }
 
@@ -296,6 +307,7 @@ public:
     int slm_nbuf;
     int ab_slm_size;
     bool check_src_load;
+    int pad_sign;
 
     int iters;
     int ramp_up_iters;
@@ -330,20 +342,20 @@ int loop_iterator_t::gmem_read_src_off_update() const {
 }
 
 int loop_iterator_t::iw_update() const {
-    int cur_iw = kw * (1 + conf.dilate_w);
-    int next_iw = (*this + 1).kw * (1 + conf.dilate_w);
+    int cur_iw = -pad_sign * kw * (1 + conf.dilate_w);
+    int next_iw = -pad_sign * (*this + 1).kw * (1 + conf.dilate_w);
     return next_iw - cur_iw;
 }
 
 int loop_iterator_t::ih_update() const {
-    int cur_ih = kh * (1 + conf.dilate_h);
-    int next_ih = (*this + 1).kh * (1 + conf.dilate_h);
+    int cur_ih = -pad_sign * kh * (1 + conf.dilate_h);
+    int next_ih = -pad_sign * (*this + 1).kh * (1 + conf.dilate_h);
     return next_ih - cur_ih;
 }
 
 int loop_iterator_t::id_update() const {
-    int cur_id = kd * (1 + conf.dilate_d);
-    int next_id = (*this + 1).kd * (1 + conf.dilate_d);
+    int cur_id = -pad_sign * kd * (1 + conf.dilate_d);
+    int next_id = -pad_sign * (*this + 1).kd * (1 + conf.dilate_d);
     return next_id - cur_id;
 }
 
@@ -423,27 +435,46 @@ public:
             gmem_nbuf = ((slm_nbuf == 3 && conf.mb_block == 32) ? 2 : 1);
         }
 
-        auto has_padding = [](int o, int i, int k, int p, int s, int d) {
-            return (p > 0) || (o - 1) * s - p + (k - 1) * (1 + d) >= i;
+        is_bwd = (conf.prop_kind == backward_data);
+        is_fwd = !is_bwd;
+        pad_sign = is_bwd ? 1 : -1;
+
+        auto need_to_check_src = [&](int o, int i, int k, int p, int s, int d) {
+            if (is_fwd) {
+                int i_min = -p;
+                int i_max = (o - 1) * s - p + (k - 1) * (1 + d);
+                return (i_min < 0) || (i_max >= i);
+            }
+            // Backward.
+            int os_min = p - (k - 1) * (1 + d);
+            int os_max = (o - 1) + p;
+            return (os_min < 0) || (os_max >= i * s);
         };
 
-        has_pad_d = has_padding(conf.od, conf.id, conf.kd, conf.f_pad,
+        check_src_d = need_to_check_src(conf.od, conf.id, conf.kd, conf.f_pad,
                 conf.stride_d, conf.dilate_d);
-        has_pad_h = has_padding(conf.oh, conf.ih, conf.kh, conf.t_pad,
+        check_src_h = need_to_check_src(conf.oh, conf.ih, conf.kh, conf.t_pad,
                 conf.stride_h, conf.dilate_h);
-        has_pad_w = has_padding(conf.ow, conf.iw, conf.kw, conf.l_pad,
+        check_src_w = need_to_check_src(conf.ow, conf.iw, conf.kw, conf.l_pad,
                 conf.stride_w, conf.dilate_w);
-        has_h = (conf.ih > 1 || conf.oh > 1 || conf.kh > 1);
         has_d = (conf.id > 1 || conf.od > 1 || conf.kd > 1);
+        has_h = (conf.ih > 1 || conf.oh > 1 || conf.kh > 1);
+
+        has_non_unit_stride_d = (conf.stride_d > 1);
+        has_non_unit_stride_h = (conf.stride_h > 1);
+        has_non_unit_stride_w = (conf.stride_w > 1);
+        has_non_unit_stride = (has_non_unit_stride_d || has_non_unit_stride_h
+                || has_non_unit_stride_w);
 
         if (conf.ver == ver_v1) {
-            check_src_load = (has_pad_w || conf.ow != ow_padded);
+            check_src_load = (check_src_w || conf.ow != ow_padded);
             do_ic_loop = (conf.ic > conf.ic_block);
             do_kw_loop = (conf.kw > 1 || check_src_load) && !is_1st;
         } else {
             // conf.ver == ver_v2.
-            check_src_load = (has_pad_w || has_pad_h || has_pad_d
-                    || (odhw % conf.sp_group != 0));
+            check_src_load = (check_src_w || check_src_h || check_src_d
+                    || (odhw % conf.sp_group != 0)
+                    || (is_bwd && has_non_unit_stride));
             do_ic_loop = false;
             do_kw_loop = false;
         }
@@ -608,7 +639,6 @@ public:
         and_<uint32_t>(1, oc_fused, oc, ~(1 << 5));
         mul(1, mb, group_id_2, uint16_t(mb_block));
 
-        pad_sign = (conf.prop_kind == backward_data) ? 1 : -1;
         if (conf.ver == ver_v1) {
             // od = get_group_id(1) / (OW_PADDED / sp_group) / OH
             // oh = get_group_id(1) / (OW_PADDED / sp_group) % OH
@@ -620,7 +650,8 @@ public:
             add<int32_t>(1, ow, ow_tg, ithr1);
         } else {
             // conf.ver == ver_v2.
-            // Boundary conditions: sp[idx] <= sp_bound[idx]:
+            // Boundary conditions: sp[idx] <= sp_bound[idx].
+            // Forward (any stride) and backward (unit stride):
             //   [0]   iw_load <= IW - 1
             //   [1]  -iw_load <= 0
             //   [2]   ih_load <= IH - 1
@@ -628,12 +659,12 @@ public:
             //   [4]   id_load <= ID - 1
             //   [5]  -id_load <= 0
             if (check_src_load) {
-                mov(8, sp[0], 0);
-                if (is_4x2_tg) mov(8, sp[1], 0);
+                for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++)
+                    mov(8, sp[i], 0);
                 mov(8, sp_bound, 0);
                 mov(1, sp_bound[0], conf.iw - 1);
-                mov(1, sp_bound[2], conf.ih - 1);
-                mov(1, sp_bound[4], conf.id - 1);
+                if (has_h) mov(1, sp_bound[2], conf.ih - 1);
+                if (has_d) mov(1, sp_bound[4], conf.id - 1);
             }
 
             auto odhw = tmp0.d(0);
@@ -652,18 +683,21 @@ public:
                         conf.oh, id_load[i], conf.od);
 
                 if (has_d) {
-                    mul(1, id_load[i], id_load[i], uint16_t(conf.stride_d));
+                    if (is_fwd)
+                        mul(1, id_load[i], id_load[i], uint16_t(conf.stride_d));
                     if (conf.f_pad > 0)
                         add(1, id_load[i], id_load[i], pad_sign * conf.f_pad);
                 }
 
                 if (has_h) {
-                    mul(1, ih_load[i], ih_load[i], uint16_t(conf.stride_h));
+                    if (is_fwd)
+                        mul(1, ih_load[i], ih_load[i], uint16_t(conf.stride_h));
                     if (conf.t_pad > 0)
                         add(1, ih_load[i], ih_load[i], pad_sign * conf.t_pad);
                 }
 
-                mul(1, iw_load[i], iw_load[i], uint16_t(conf.stride_w));
+                if (is_fwd)
+                    mul(1, iw_load[i], iw_load[i], uint16_t(conf.stride_w));
                 if (conf.l_pad > 0)
                     add(1, iw_load[i], iw_load[i], pad_sign * conf.l_pad);
             }
@@ -679,7 +713,7 @@ public:
 
         if (conf.ver == ver_v1) {
             if (has_d) {
-                if (conf.prop_kind == backward_data)
+                if (is_bwd)
                     mov(1, id_load0, od);
                 else
                     mul(1, id_load0, od, uint16_t(conf.stride_d));
@@ -688,7 +722,7 @@ public:
             }
 
             if (has_h) {
-                if (conf.prop_kind == backward_data)
+                if (is_bwd)
                     mov(1, ih_load0, oh);
                 else
                     mul(1, ih_load0, oh, uint16_t(conf.stride_h));
@@ -696,13 +730,13 @@ public:
                     add(1, ih_load0, ih_load0, pad_sign * conf.t_pad);
             }
 
-            if (conf.prop_kind == backward_data)
+            if (is_bwd)
                 mov(1, iw_tg, ow_tg);
             else
                 mul(1, iw_tg, ow_tg, uint16_t(conf.stride_w));
             if (conf.l_pad > 0) add(1, iw_tg, iw_tg, pad_sign * conf.l_pad);
 
-            if (conf.prop_kind == backward_data) {
+            if (is_bwd) {
                 // No need to take is_1st in consideration since there is
                 // no such case on bwd.
                 add(1, iw_load0, iw_tg, ithr0);
@@ -738,6 +772,22 @@ public:
         mad(1, b_slm_off_wr_init, b_slm_off_wr_init, ithr1,
                 uint16_t(32 * 32 / 4 / 16));
         add(1, b_slm_off_wr_init, b_slm_off_wr_init, a_slm_size / 16);
+
+        if (is_bwd && has_non_unit_stride && conf.ver == ver_v2) {
+            precompute_src_off_bwd_v2();
+            // Divide i[dhw]_load by stride to compute the initial source offset.
+            for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+                if (has_non_unit_stride_d)
+                    asr(1, id_load[i], id_load[i],
+                            ngen::utils::log2(conf.stride_d));
+                if (has_non_unit_stride_h)
+                    asr(1, ih_load[i], ih_load[i],
+                            ngen::utils::log2(conf.stride_h));
+                if (has_non_unit_stride_w)
+                    asr(1, iw_load[i], iw_load[i],
+                            ngen::utils::log2(conf.stride_w));
+            }
+        }
 
         init_src_off();
         init_wei_off();
@@ -861,13 +911,21 @@ public:
         } else {
             // conf.ver == ver_v2.
             _sp = ra.alloc_range(is_4x2_tg ? 2 : 1);
-            sp_bound = ra.alloc().w();
+            if (check_src_load) sp_bound = ra.alloc().w();
 
             for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
                 sp[i] = _sp[i].w();
                 if (has_d) id_load[i] = sp[i][4];
                 if (has_h) ih_load[i] = sp[i][2];
                 iw_load[i] = sp[i][0];
+            }
+
+            if (is_bwd && has_non_unit_stride) {
+                // 4 bytes per every offset - 8 offsets per GRF.
+                for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+                    src_off_upd[i] = ra.alloc_range(utils::div_up(kdhw, 8));
+                    if (check_src_load) sp_check_precomp[i] = ra.alloc();
+                }
             }
         }
 
@@ -984,7 +1042,7 @@ public:
             mark(kd_loop);
 
             // Check padding for ID.
-            if (has_pad_d) {
+            if (check_src_d) {
                 cmp(1 | lt | f1[0] | SWSB(1), id, conf.id);
                 cmp(1 | f1[0] | ge, id, 0);
                 if (is_1st) {
@@ -1010,7 +1068,7 @@ public:
             mark(kh_loop);
 
             // Check padding for IH.
-            if (has_pad_h) {
+            if (check_src_h) {
                 cmp(1 | lt | f1[0] | SWSB(1), ih, conf.ih);
                 cmp(1 | f1[0] | ge, ih, 0);
                 if (is_1st) {
@@ -1273,6 +1331,142 @@ public:
 
         ra.safeRelease(a_slm_wr);
         ra.safeRelease(b_slm_wr);
+    }
+
+    void precompute_src_off_bwd_v2() {
+        auto prev_off = ra.alloc_sub<int32_t>();
+        auto cur_off = ra.alloc_sub<int32_t>();
+
+        auto od_s_tmp = ra.alloc_sub<int32_t>();
+        auto oh_s_tmp = ra.alloc_sub<int32_t>();
+        auto ow_s_tmp = ra.alloc_sub<int32_t>();
+
+        auto od_tmp = ra.alloc_sub<int32_t>();
+        auto oh_tmp = ra.alloc_sub<int32_t>();
+        auto ow_tmp = ra.alloc_sub<int32_t>();
+
+        auto d_flag = ra.alloc_sub<int16_t>();
+        auto h_flag = ra.alloc_sub<int16_t>();
+        auto w_flag = ra.alloc_sub<int16_t>();
+
+        auto compute_off = [&](Subregister &off) {
+            mov(1, off, 0);
+            if (has_d)
+                e_mad(off, od_tmp, conf.ih * conf.iw * conf.mb_block * 32);
+            if (has_h) e_mad(off, oh_tmp, conf.iw * conf.mb_block * 32);
+            e_mad(off, ow_tmp, conf.mb_block * 32);
+        };
+
+        auto get_src_upd = [&](int i, int idx) {
+            return src_off_upd[i][idx / 8].d(idx % 8);
+        };
+
+        int d_s_shift = ngen::utils::log2(conf.stride_d);
+        int h_s_shift = ngen::utils::log2(conf.stride_h);
+        int w_s_shift = ngen::utils::log2(conf.stride_w);
+
+        for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
+            auto src_off_sub_last = get_src_upd(i, kdhw - 1);
+
+            int idx = 0;
+            if (has_d) {
+                mov(1, od_s_tmp, id_load[i]);
+                asr(1, od_tmp, od_s_tmp, d_s_shift);
+            }
+            for (int i_kd = 0; i_kd < conf.kd; i_kd++) {
+                mov(1, d_flag, 1);
+                if (has_d) {
+                    // od * SD >= 0 and od < OD and (od_s_tmp % SD) == 0.
+                    and_(1, tmp0.d(0), od_s_tmp, conf.stride_d - 1);
+                    cmp(1 | ge | f0[0], od_s_tmp, 0);
+                    cmp(1 | f0[0] | lt, od_tmp, conf.id);
+                    cmp(1 | f0[0] | eq, tmp0.d(0), 0);
+                    mov(1 | ~f0[0], d_flag, 0);
+                }
+
+                if (has_h) {
+                    mov(1, oh_s_tmp, ih_load[i]);
+                    asr(1, oh_tmp, oh_s_tmp, h_s_shift);
+                }
+                for (int i_kh = 0; i_kh < conf.kh; i_kh++) {
+                    mov(1, h_flag, d_flag);
+                    if (has_h) {
+                        // oh * SH >= 0 and oh < OH and (oh_s_tmp % SH) == 0.
+                        and_(1, tmp0.d(0), oh_s_tmp, conf.stride_h - 1);
+                        cmp(1 | ge | f0[0], oh_s_tmp, 0);
+                        cmp(1 | f0[0] | lt, oh_tmp, conf.ih);
+                        cmp(1 | f0[0] | eq, tmp0.d(0), 0);
+                        mov(1 | ~f0[0], h_flag, 0);
+                    }
+
+                    mov(1, ow_s_tmp, iw_load[i]);
+                    asr(1, ow_tmp, ow_s_tmp, w_s_shift);
+                    for (int i_kw = 0; i_kw < conf.kw; i_kw++) {
+                        mov(1, w_flag, h_flag);
+                        // ow * SW >= 0 and ow < OW and (ow_s_tmp % OW) == 0.
+                        and_(1, tmp0.d(0), ow_s_tmp, conf.stride_w - 1);
+                        cmp(1 | ge | f0[0], ow_s_tmp, 0);
+                        cmp(1 | f0[0] | lt, ow_tmp, conf.iw);
+                        cmp(1 | f0[0] | eq, tmp0.d(0), 0);
+                        mov(1 | ~f0[0], w_flag, 0);
+
+                        mov(1, sp_check_precomp[i].w(idx), w_flag);
+
+                        compute_off(cur_off);
+
+                        // Update offset update for the previous iteration.
+                        if (idx > 0) {
+                            auto src_off_sub = get_src_upd(i, idx - 1);
+                            add(1, src_off_sub, cur_off, -prev_off);
+                            if (idx == 1) {
+                                add(1, src_off_sub_last, prev_off,
+                                        conf.id * conf.ih * conf.iw
+                                                * conf.mb_block * 32);
+                            }
+                        }
+
+                        std::swap(prev_off, cur_off);
+                        idx++;
+
+                        if (i_kw + 1 < conf.kw) {
+                            add(1, ow_s_tmp, ow_s_tmp, -(1 + conf.dilate_w));
+                            asr(1, ow_tmp, ow_s_tmp, w_s_shift);
+                        }
+                    }
+                    if (has_h && i_kh + 1 < conf.kh) {
+                        add(1, oh_s_tmp, oh_s_tmp, -(1 + conf.dilate_h));
+                        asr(1, oh_tmp, oh_s_tmp, h_s_shift);
+                    }
+                }
+                if (has_d && i_kd + 1 < conf.kd) {
+                    add(1, od_s_tmp, od_s_tmp, -(1 + conf.dilate_d));
+                    asr(1, od_tmp, od_s_tmp, d_s_shift);
+                }
+            }
+
+            // Update the last source offset update.
+            if (kdhw == 1) {
+                mov(1, src_off_sub_last,
+                        conf.id * conf.ih * conf.iw * conf.mb_block * 32);
+            } else {
+                add(1, src_off_sub_last, src_off_sub_last, -prev_off);
+            }
+        }
+
+        ra.safeRelease(prev_off);
+        ra.safeRelease(cur_off);
+
+        ra.safeRelease(od_s_tmp);
+        ra.safeRelease(oh_s_tmp);
+        ra.safeRelease(ow_s_tmp);
+
+        ra.safeRelease(od_tmp);
+        ra.safeRelease(oh_tmp);
+        ra.safeRelease(ow_tmp);
+
+        ra.safeRelease(d_flag);
+        ra.safeRelease(h_flag);
+        ra.safeRelease(w_flag);
     }
 
     void loop_iterate_v2(const loop_iterator_t &it) {
@@ -1594,7 +1788,7 @@ public:
                 // BWD:
                 // - (iw + ithr) / SW < IW
                 // - (iw + ithr) / SW >= 0
-                if (conf.prop_kind == backward_data) {
+                if (is_bwd) {
                     cmp(8 | lt | f1[0], iw, conf.iw * conf.stride_w - ithr);
                     cmp(8 | f1[0] | ge, iw, -ithr);
                 } else {
@@ -1732,11 +1926,20 @@ public:
         // Load source.
         int src_regs_per_thr = mb_block / conf.sp_group;
 
-        if (it.check_src_load) {
+        bool use_precomp_check
+                = (check_src_load && is_bwd && has_non_unit_stride);
+
+        if (check_src_load) {
             for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
-                auto dep = SWSB(
-                        it.iter >= gmem_nbuf ? std::min(7, ab_reads + 1) : 1);
-                cmp(8 | le | sp_check_flags[i] | dep, sp[i], sp_bound);
+                if (use_precomp_check) {
+                    cmp(8 | eq | sp_check_flags[i],
+                            sp_check_precomp[i].w(it.kdhw_index()), 1);
+                } else {
+                    auto dep = SWSB(it.iter >= gmem_nbuf
+                                    ? std::min(7, ab_reads + 1)
+                                    : 1);
+                    cmp(8 | le | sp_check_flags[i] | dep, sp[i], sp_bound);
+                }
             }
         }
 
@@ -1763,8 +1966,18 @@ public:
                                 0.0f);
                     }
                 }
-                add(1 | sbid.src, src_header[idx].uq(0), src_header[idx].uq(0),
-                        src_update);
+                if (is_bwd && has_non_unit_stride) {
+                    // Use run time offset update.
+                    int kdhw_idx = it.kdhw_index();
+                    auto src_off_upd_reg
+                            = src_off_upd[i][kdhw_idx / 8].d(kdhw_idx % 8);
+                    add(1 | sbid.src, src_header[idx].uq(0),
+                            src_header[idx].uq(0), src_off_upd_reg);
+                } else {
+                    // Use JIT time offset update.
+                    add(1 | sbid.src, src_header[idx].uq(0),
+                            src_header[idx].uq(0), src_update);
+                }
 
                 idx++;
                 reg_off += hwords;
@@ -1772,7 +1985,7 @@ public:
         }
         assert(idx == a_reads);
 
-        if (it.check_src_load) {
+        if (check_src_load && !use_precomp_check) {
             int iw_upd = it.iw_update();
             int ih_upd = it.ih_update();
             int id_upd = it.id_update();
@@ -2531,6 +2744,8 @@ public:
     int mb_read01 = 0;
     int mb_read23 = 0;
 
+    bool is_fwd;
+    bool is_bwd;
     int pad_sign;
 
     bool is_1st;
@@ -2538,12 +2753,17 @@ public:
     // Used for 1st convolution only.
     std::vector<nw_read_region_t> nw_read_regions;
 
-    bool has_pad_d;
-    bool has_pad_h;
-    bool has_pad_w;
+    bool check_src_d;
+    bool check_src_h;
+    bool check_src_w;
 
-    bool has_h;
     bool has_d;
+    bool has_h;
+
+    bool has_non_unit_stride_d;
+    bool has_non_unit_stride_h;
+    bool has_non_unit_stride_w;
+    bool has_non_unit_stride;
 
     bool check_src_load;
     bool do_kw_loop;
@@ -2634,6 +2854,10 @@ public:
     GRF sp[2];
     GRF sp_bound;
     FlagRegister sp_check_flags[2];
+
+    // For loop_v2 with precomputed source offsets and checks.
+    GRFRange src_off_upd[2];
+    GRF sp_check_precomp[2];
 
     Subregister iw_load0;
     Subregister ih_load0;

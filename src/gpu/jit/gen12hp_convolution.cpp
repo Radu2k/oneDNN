@@ -35,14 +35,19 @@ status_t gen12hp_convolution_data_common_init_conf(engine_t *engine,
     const memory_desc_wrapper wei_mdw(wei_md);
     const memory_desc_wrapper dst_mdw(dst_md);
 
+    bool is_bwd = (conf.prop_kind == prop_kind::backward_data);
+    bool is_fwd = !is_bwd;
+
     bool is_1st = utils::one_of(conf.ic, 3, 4) && (conf.kw == 7);
-
-    if (conf.with_groups && conf.ngroups > 1) return status::unimplemented;
-    if (conf.ic < 32 && !is_1st) return status::unimplemented;
-    if (conf.mb < 16) return status::unimplemented;
-
     bool is_int8
             = utils::one_of(conf.src_data_type, data_type::s8, data_type::u8);
+
+    if (conf.with_groups && conf.ngroups > 1) return status::unimplemented;
+    if ((conf.ic < (is_int8 ? 32 : 16)) && !is_1st)
+        return status::unimplemented;
+    if (conf.mb < 16) return status::unimplemented;
+    if (conf.prop_kind == prop_kind::backward_data && is_1st)
+        return status::unimplemented;
 
     // Reduce dimensions for 1x1 kernel.
     bool is_1x1 = (conf.kd * conf.kh * conf.kw == 1);
@@ -72,34 +77,69 @@ status_t gen12hp_convolution_data_common_init_conf(engine_t *engine,
     conf.oc_group = (conf.oc <= 64 ? 2 : 4);
     conf.sp_group = 4;
 
+    // Dispatch between ver_v1 and ver_v2:
+
+    // - v1 does not support non-unit strides with BWD_D
+    auto can_use_v1 = [&]() {
+        if (is_fwd) return true;
+        return (conf.stride_d == 1 && conf.stride_h == 1 && conf.stride_w == 1);
+    };
+
     auto can_use_v2_with_spatial
             = [&](int o, int i, int k, int p, int s, int d) {
+                  if (d >= 7) return false;
+
                   o = utils::rnd_up(o, conf.sp_group);
                   int bound = std::numeric_limits<int16_t>::max();
-                  int i_max = (o - 1) * s - p + (k - 1) * (1 + d);
-                  return i_max <= bound;
+                  if (is_fwd) {
+                      int i_max = (o - 1) * s - p + (k - 1) * (1 + d);
+                      return i_max <= bound;
+                  }
+                  // Backward.
+                  int os_max = (o - 1) + p;
+                  return os_max <= bound;
               };
 
-    // Dispatch between ver_v1 and ver_v2:
     // - v2 does not support 1st convolution
-    // - v2 does not support backward
     // - v2 does not support non-multiple OC
     // - v2 does full unrolling for (KD * KH * KW), hence (KDHW <= 9) limitation
     // - v2 uses 4 bits for (1 + dilation)
     // - v2 uses 16-bit integers for spatial
-    conf.ver = ver_v2;
-    int oc_padded = utils::rnd_up(conf.oc, conf.oc_block);
-    if (is_1st || (conf.prop_kind == prop_kind::backward_data)
-            || (oc_padded % (conf.oc_block * conf.oc_group) != 0)
-            || (conf.kd * conf.kh * conf.kw > 9) || (conf.dilate_d >= 7)
-            || (conf.dilate_h >= 7) || (conf.dilate_w >= 7)
-            || !can_use_v2_with_spatial(conf.od, conf.id, conf.kd, conf.f_pad,
-                    conf.stride_d, conf.dilate_d)
-            || !can_use_v2_with_spatial(conf.oh, conf.ih, conf.kh, conf.t_pad,
-                    conf.stride_h, conf.dilate_h)
-            || !can_use_v2_with_spatial(conf.ow, conf.iw, conf.kw, conf.l_pad,
+    auto can_use_v2 = [&]() {
+        if (is_1st) return false;
+
+        if (conf.kd * conf.kh * conf.kw > 9) return false;
+
+        int oc_padded = utils::rnd_up(conf.oc, conf.oc_block);
+        if ((oc_padded % (conf.oc_block * conf.oc_group) != 0)) return false;
+
+        if (!can_use_v2_with_spatial(conf.od, conf.id, conf.kd, conf.f_pad,
+                    conf.stride_d, conf.dilate_d))
+            return false;
+        if (!can_use_v2_with_spatial(conf.oh, conf.ih, conf.kh, conf.t_pad,
+                    conf.stride_h, conf.dilate_h))
+            return false;
+        if (!can_use_v2_with_spatial(conf.ow, conf.iw, conf.kw, conf.l_pad,
                     conf.stride_w, conf.dilate_w))
+            return false;
+
+        if (is_bwd) {
+            // Powers of 2 are supported only for strides.
+            if ((conf.stride_d & (conf.stride_d - 1)) != 0) return false;
+            if ((conf.stride_h & (conf.stride_h - 1)) != 0) return false;
+            if ((conf.stride_w & (conf.stride_w - 1)) != 0) return false;
+        }
+
+        return true;
+    };
+
+    if (can_use_v2()) {
+        conf.ver = ver_v2;
+    } else if (can_use_v1()) {
         conf.ver = ver_v1;
+    } else {
+        return status::unimplemented;
+    }
 
     conf.sub_group_size = 8;
     conf.gws_d[0] = utils::rnd_up(conf.oc, conf.oc_group * conf.oc_block)
