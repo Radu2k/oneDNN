@@ -88,8 +88,6 @@ struct gen_gemm_nocopy_kernel_t : public gen_gemm_kernel_t {
             data_type_t b_type, data_type_t c_type, int unroll_m,
             int unroll_n) {
 
-        bool with_offset = (c_type == data_type::s32);
-
         problem_.Ta = convert_dnnl_to_kernel_type(a_type);
         problem_.Tb = convert_dnnl_to_kernel_type(b_type);
         problem_.Tc = convert_dnnl_to_kernel_type(c_type);
@@ -111,24 +109,14 @@ struct gen_gemm_nocopy_kernel_t : public gen_gemm_kernel_t {
             problem_.abOffset = ABOffset::Calc;
             problem_.Ts = Type::f32;
         }
-        if (c_offset) {
-            problem_.CO.base = ngen::AddressBase::createBTS(0);
-            problem_.cOffset = COffset::Post;
-            problem_.CO.crosspack = 1;
-            problem_.CO.padded = false;
-            problem_.CO.alignment = problem_.C.alignment;
-        }
-
-        if (with_offset || bias) {
-            assert(!(with_offset && bias));
+        if (c_offset || bias) {
+            assert(!(c_offset && bias));
             problem_.cOffset = bias ? COffset::Pre : COffset::Post;
             problem_.CO.base = ngen::AddressBase::createBTS(0);
             problem_.CO.crosspack = 1;
             problem_.CO.padded = false;
             problem_.CO.alignment = problem_.C.alignment;
         }
-        if (with_offset) problem_.abOffset = ABOffset::Calc;
-        if (c_type == data_type::s32) problem_.Ts = Type::f32;
 
         strategy_.unroll[LoopM] = unroll_m;
         strategy_.unroll[LoopN] = unroll_n;
