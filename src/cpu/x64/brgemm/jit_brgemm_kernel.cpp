@@ -372,7 +372,7 @@ void jit_brgemm_kernel_base_t::apply_alpha_beta(
 
     const bool apply_alpha = brg.alpha != 1.f;
     const bool apply_beta = brg.beta != 0.f;
-    if (!apply_beta && !apply_beta) return;
+    if (!apply_alpha && !apply_beta) return;
 
     const bool dq2ps_required = brg.is_int8 && (apply_alpha || brg.beta != 1.f);
     const bool use_vadd_for_beta = brg.beta == 1.f && !dq2ps_required;
