@@ -6008,7 +6008,11 @@ bool gemm_kernel_generator_t<hw>::gemmApplyCOffset(bool row, bool column,
     setupAddr(Tc, CO_addrs, state.effCO, CO_layout, Subregister(), CO,
             CO_strategy, strategy, state);
 
-    if (!assignMasks(CO_layout, LoopM, LoopN, masks, state)) return false;
+    if (!assignMasks(CO_layout, LoopM, LoopN, masks, state)) {
+        status << "Retrying with virtual flags." << status_stream::endl;
+        allocVFlagStorage(strategy, state);
+        if (!assignMasks(CO_layout, LoopM, LoopN, masks, state)) return false;
+    }
 
     loadMasks(masks, state.remainders, state);
     loadMatrix(CO_regs, CO_layout, CO, CO_strategy, CO_addrs, state);
@@ -7964,7 +7968,7 @@ bool gemm_kernel_generator_t<hw>::gemmUpdateC(
 
     // C early offset.
     if (problem.cOffset == COffset::Pre)
-        gemmApplyCOffsetDispatch(problem, strategy, state);
+        if (!gemmApplyCOffsetDispatch(problem, strategy, state)) return false;
 
     // Claim a flag register for complex swizzles for ATS+.
     if (hw >= HW::Gen12HP) {
