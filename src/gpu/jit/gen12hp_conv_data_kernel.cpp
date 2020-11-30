@@ -951,25 +951,27 @@ public:
     // i2 = (x / n0) / n1
     void unpack_1d_to_3d(const Subregister &x, const Subregister &i0, int n0,
             const Subregister &i1, int n1, const Subregister &i2, int n2) {
+        auto _i0 = i0.isInvalid() ? ra.alloc_sub<int32_t>() : i0;
+        auto _i1 = i1.isInvalid() ? ra.alloc_sub<int32_t>() : i1;
+        auto _i2 = i2.isInvalid() ? ra.alloc_sub<int32_t>() : i2;
 
-        // 1D
         if (n1 == 1 && n2 == 1) {
-            mov(1, i0, x);
-            return;
+            // 1D
+            mov(1, _i0, x);
+        } else if (n2 == 1) {
+            // 2D
+            e_idiv(_i1, _i0, x, n0);
+        } else {
+            // 3D
+            auto i12 = ra.alloc_sub<int32_t>();
+            e_idiv(i12, _i0, x, n0);
+            e_idiv(_i2, _i1, i12, n1);
+            ra.safeRelease(i12);
         }
 
-        // 2D
-        if (n2 == 1) {
-            e_idiv(i1, i0, x, n0);
-            return;
-        }
-
-        auto i12 = ra.alloc_sub<int32_t>();
-
-        e_idiv(i12, i0, x, n0);
-        e_idiv(i2, i1, i12, n1);
-
-        ra.safeRelease(i12);
+        if (_i0 != i0) ra.safeRelease(_i0);
+        if (_i1 != i1) ra.safeRelease(_i1);
+        if (_i2 != i2) ra.safeRelease(_i2);
     }
 
     void loop_v1() {
@@ -1594,22 +1596,33 @@ public:
 
         bool dst_is_64_bit
                 = utils::one_of(dst.getType(), DataType::q, DataType::uq);
+        bool src1_is_16_bit
+                = utils::one_of(src1.getType(), DataType::w, DataType::uw);
+        bool src2_is_16_bit = src2 >= std::numeric_limits<int16_t>::min()
+                && src2 <= std::numeric_limits<uint16_t>::max();
+        bool use_64_bit_mul = (dst_is_64_bit || !src2_is_16_bit);
+
+        // QWord MUL requires DWord operands.
+        auto _src1 = (use_64_bit_mul && src1_is_16_bit)
+                ? ra.alloc_sub<int32_t>()
+                : src1;
+        if (_src1 != src1) mov(1, _src1, src1);
 
         if (dst_is_64_bit) {
-            mul(1, dst, src1, src2);
+            mul(1, dst, _src1, src2);
             return;
         }
 
-        if (src2 >= std::numeric_limits<int16_t>::min()
-                && src2 <= std::numeric_limits<uint16_t>::max()) {
-            mul(1, dst, src1, src2);
+        if (src2_is_16_bit) {
+            mul(1, dst, _src1, src2);
             return;
         }
 
-        mul(1, tmp.q(0), src1, src2);
+        mul(1, tmp.q(0), _src1, src2);
         mov(1, dst, tmp.reinterpret(0, dst.getType()));
 
         ra.safeRelease(tmp);
+        if (src1 != _src1) ra.safeRelease(_src1);
     }
 
     void e_mad(const Subregister &dst, const Subregister &src1, int src2) {
@@ -1624,7 +1637,7 @@ public:
                 return;
             }
         }
-        mul(1, tmp0.q(0), src1, src2);
+        e_mul(tmp0.q(0), src1, src2);
         add(1, dst, dst, tmp0.retype(dst.getType()));
     }
 
