@@ -23,46 +23,41 @@
 #include "common/utils.hpp"
 
 #include "common/bfloat16.hpp"
-#include "cpu/aarch64/acl_gemm_convolution_utils.hpp"
+#include "cpu/aarch64/acl_convolution_utils.hpp"
 
 #include "cpu/platform.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace cpu {
+namespace aarch64 {
 
 using namespace dnnl::impl::status;
 using namespace dnnl::impl::utils;
 using namespace dnnl::impl::alg_kind;
 using namespace prop_kind;
 using namespace data_type;
+using uint = unsigned int;
 
-namespace acl_gemm_convolution_utils {
+namespace acl_convolution_utils {
 
-status_t init_conf(acl_conv_gemm_conf_t &acp, memory_desc_t &src_md,
+status_t acl_init_conf(acl_conv_conf_t &acp, memory_desc_t &src_md,
         memory_desc_t &weights_md, memory_desc_t &dst_md,
         memory_desc_t &bias_md, const convolution_desc_t &cd,
         const primitive_attr_t &attr) {
 
     const memory_desc_wrapper src_d(&src_md);
-    const memory_desc_wrapper weights_d(&weights_md);
+    const memory_desc_wrapper wei_d(&weights_md);
     const memory_desc_wrapper dst_d(&dst_md);
+    const memory_desc_wrapper bia_d(&bias_md);
 
     // Compute Library currently supports forward propagation only
     const prop_kind_t prop_kind = cd.prop_kind;
-    const bool is_bwd_d = prop_kind == backward_data;
-    const bool is_bwd_w = prop_kind == backward_weights;
-    const bool is_fwd = !(is_bwd_d || is_bwd_w);
+    const bool is_fwd = (prop_kind == dnnl_forward_training)
+            || (prop_kind == dnnl_forward_inference);
     if (!is_fwd) return status::unimplemented;
 
-    // Current implementation does not support int8 or bf16
-    bool is_int8_conv = utils::one_of(src_d.data_type(), s8, u8)
-            && weights_d.data_type() == s8;
-    bool is_bf16_conv = utils::everyone_is(
-            bf16, src_d.data_type(), weights_d.data_type());
-    if (is_int8_conv || is_bf16_conv) return status::unimplemented;
-
-    const int with_groups = weights_d.ndims() == src_d.ndims() + 1;
+    const int with_groups = wei_d.ndims() == src_d.ndims() + 1;
     const int ndims = src_d.ndims();
     const bool is_1d = ndims == 3;
     const bool is_3d = ndims == 5;
@@ -87,8 +82,8 @@ status_t init_conf(acl_conv_gemm_conf_t &acp, memory_desc_t &src_md,
     const int ow = dst_d.dims()[ndims - 1];
 
     // weights height and width
-    const int kh = weights_d.dims()[with_groups + ndims - 2];
-    const int kw = weights_d.dims()[with_groups + ndims - 1];
+    const int kh = wei_d.dims()[with_groups + ndims - 2];
+    const int kw = wei_d.dims()[with_groups + ndims - 1];
 
     // left, right, top, bottom padding
     const int l_pad = cd.padding[0][1];
@@ -114,8 +109,7 @@ status_t init_conf(acl_conv_gemm_conf_t &acp, memory_desc_t &src_md,
 
     acp.dilation_info = arm_compute::Size2D(dilate_w, dilate_h);
 
-    acp.with_bias = cd.bias_desc.format_kind != format_kind::undef
-            || cd.diff_bias_desc.format_kind != format_kind::undef;
+    acp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
 
     auto set_or_check_tags = [&](format_tag_t desired_src_tag,
                                      format_tag_t desired_dst_tag) -> status_t {
@@ -126,26 +120,23 @@ status_t init_conf(acl_conv_gemm_conf_t &acp, memory_desc_t &src_md,
             CHECK(memory_desc_init_by_tag(src_md, desired_src_tag));
             src_tag = desired_src_tag;
         } else {
-            src_tag = memory_desc_matches_one_of_tag(
-                    src_md, nwc, nhwc, ncw, nchw);
+            src_tag = memory_desc_matches_one_of_tag(src_md, nhwc, nchw);
         }
 
         if (dst_d.format_kind() == format_kind::any) {
             CHECK(memory_desc_init_by_tag(dst_md, desired_dst_tag));
             dst_tag = desired_dst_tag;
         } else {
-            dst_tag = memory_desc_matches_one_of_tag(
-                    dst_md, nwc, nhwc, ncw, nchw);
+            dst_tag = memory_desc_matches_one_of_tag(dst_md, nhwc, nchw);
         }
 
         if (acp.with_bias && bias_md.format_kind == format_kind::any)
             CHECK(memory_desc_init_by_tag(bias_md, x));
 
-        is_nspc = utils::one_of(src_tag, nwc, nhwc);
+        is_nspc = utils::one_of(src_tag, nhwc);
 
         memory_desc_t want_wei_md = weights_md;
-        auto wei_tag = is_nspc ? utils::pick(ndims - 3, wio, hwio)
-                               : utils::pick(ndims - 3, oiw, oihw);
+        auto wei_tag = is_nspc ? ohwi : oihw;
         CHECK(memory_desc_init_by_tag(want_wei_md, wei_tag));
 
         // Compute Library does not support mismatching layouts
@@ -159,46 +150,157 @@ status_t init_conf(acl_conv_gemm_conf_t &acp, memory_desc_t &src_md,
                                            : status::unimplemented;
     };
 
-    // TODO: look into changing default tag to the Compute Library default NHWC
-    auto default_dat_tag
-            = utils::pick(ndims - 3, format_tag::ncw, format_tag::nchw);
+    auto default_dat_tag = format_tag::nhwc;
     if (set_or_check_tags(default_dat_tag, default_dat_tag) != status::success)
         return status::unimplemented;
 
     const auto acl_layout = is_nspc ? arm_compute::DataLayout::NHWC
                                     : arm_compute::DataLayout::NCHW;
 
+    auto acl_src_data_t
+            = acl_convolution_utils::get_acl_data_t(src_d.data_type());
+    auto acl_wei_data_t
+            = acl_convolution_utils::get_acl_data_t(wei_d.data_type());
+    auto acl_dst_data_t
+            = acl_convolution_utils::get_acl_data_t(dst_d.data_type());
+    auto acl_bia_data_t
+            = acl_convolution_utils::get_acl_data_t(bia_d.data_type());
+
+    if (acl_bia_data_t == arm_compute::DataType::UNKNOWN)
+        acl_bia_data_t = arm_compute::DataType::F32;
+
     // clang-format off
     acp.src_info = arm_compute::TensorInfo(
+            is_nspc ? arm_compute::TensorShape(ic, iw, ih, mb) :
             arm_compute::TensorShape(iw, ih, ic, mb),
             1,
-            arm_compute::DataType::F32,
+            acl_src_data_t,
             acl_layout);
 
     acp.wei_info = arm_compute::TensorInfo(
+            is_nspc ? arm_compute::TensorShape(ic, kw, kh, oc) :
             arm_compute::TensorShape(kw, kh, ic, oc),
             1,
-            arm_compute::DataType::F32,
+            acl_wei_data_t,
             acl_layout);
 
     acp.dst_info = arm_compute::TensorInfo(
+            is_nspc ? arm_compute::TensorShape(oc, ow, oh, mb) :
             arm_compute::TensorShape(ow, oh, oc, mb),
             1,
-            arm_compute::DataType::F32,
+            acl_dst_data_t,
             acl_layout);
 
     acp.bia_info = arm_compute::TensorInfo(
             acp.with_bias ? arm_compute::TensorShape(oc)
                           : arm_compute::TensorShape(),
             1,
-            arm_compute::DataType::F32,
+            acl_bia_data_t,
             acl_layout);
     // clang-format on
 
+    // Add quantization info to tensors
+    acp.is_int8 = utils::one_of(src_d.data_type(), s8, u8)
+            && wei_d.data_type() == s8;
+
+    if (acp.is_int8) {
+        const float *scales = attr.output_scales_.scales_;
+        acp.src_info.set_quantization_info(arm_compute::QuantizationInfo(1, 0));
+        acp.bia_info.set_quantization_info(arm_compute::QuantizationInfo(1, 0));
+        acp.wei_info.set_quantization_info(arm_compute::QuantizationInfo(1, 0));
+        acp.dst_info.set_quantization_info(
+                arm_compute::QuantizationInfo(1.0f / scales[0], 0));
+    }
+
     // Post-op activations
-    acp.act_info = acl_gemm_convolution_utils::get_acl_act(attr);
+    acp.act_info = acl_convolution_utils::get_acl_act(attr);
 
     return status::success;
+}
+
+status_t init_conf_gemm(acl_conv_conf_t &acp, memory_desc_t &src_md,
+        memory_desc_t &weights_md, memory_desc_t &dst_md,
+        memory_desc_t &bias_md, const convolution_desc_t &cd,
+        const primitive_attr_t &attr) {
+
+    // General Compute Library checks, memory tags are also set there
+    CHECK(acl_init_conf(acp, src_md, weights_md, dst_md, bias_md, cd, attr));
+
+    // clang-format off
+    // Validate convolution manually to check for return status
+    arm_compute::NEGEMMConvolutionLayer acl_gemm_conv;
+    auto acl_st = acl_gemm_conv.validate(
+        &acp.src_info,
+        &acp.wei_info,
+        acp.with_bias ? &acp.bia_info : nullptr,
+        &acp.dst_info,
+        acp.padstride_info,
+        acp.weights_info,
+        acp.dilation_info,
+        acp.act_info);
+    // clang-format on
+    if (acl_st.error_code() != arm_compute::ErrorCode::OK) {
+        return status::unimplemented;
+    }
+
+    return status::success;
+}
+
+status_t init_conf_wino(acl_conv_conf_t &acp, memory_desc_t &src_md,
+        memory_desc_t &weights_md, memory_desc_t &dst_md,
+        memory_desc_t &bias_md, const convolution_desc_t &cd,
+        const primitive_attr_t &attr) {
+
+    // Under these conditions, fallback to faster GEMM-based convolution
+    // unless the user explicitly specifies Winograd algorithm
+    // clang-format off
+    if (one_of(true, src_md.dims[2] > 112, // ih
+                src_md.dims[3] > 112, // iw
+                src_md.dims[1] < 64, // ic
+                dst_md.dims[1] < 64, // oc
+                dnnl_get_max_threads() > 28)
+            && cd.alg_kind == alg_kind::convolution_auto) {
+        return status::unimplemented;
+    }
+    // clang-format on
+
+    // General Compute Library checks, memory tags are also set there
+    CHECK(acl_init_conf(acp, src_md, weights_md, dst_md, bias_md, cd, attr));
+
+    const bool wino_shape_ok // unit strides only, no dilations
+            = (acp.padstride_info.stride() == std::pair<uint, uint> {1, 1})
+            && (acp.dilation_info == arm_compute::Size2D(1, 1));
+    if (!wino_shape_ok) return status::unimplemented;
+
+    // clang-format off
+    // Validate convolution manually to check for return status
+    arm_compute::NEWinogradConvolutionLayer acl_wino_conv;
+    auto acl_st = acl_wino_conv.validate(
+        &acp.src_info,
+        &acp.wei_info,
+        acp.with_bias ? &acp.bia_info : nullptr,
+        &acp.dst_info,
+        acp.padstride_info,
+        acp.act_info,
+        true); // enable_fast_math flag in ACL Winograd
+    // clang-format on
+    if (acl_st.error_code() != arm_compute::ErrorCode::OK) {
+        return status::unimplemented;
+    }
+
+    return status::success;
+}
+
+arm_compute::DataType get_acl_data_t(const dnnl_data_type_t dt) {
+    switch (dt) {
+        case bf16: return arm_compute::DataType::BFLOAT16; break;
+        case f32: return arm_compute::DataType::F32; break;
+        case s32: return arm_compute::DataType::S32; break;
+        case f16: return arm_compute::DataType::F16; break;
+        case s8: return arm_compute::DataType::QASYMM8_SIGNED; break;
+        case u8: return arm_compute::DataType::QASYMM8; break;
+        default: return arm_compute::DataType::UNKNOWN;
+    }
 }
 
 arm_compute::ActivationLayerInfo get_acl_act(const primitive_attr_t &attr) {
@@ -252,8 +354,9 @@ bool acl_act_ok(alg_kind_t eltwise_activation) {
             eltwise_logistic);
 }
 
-} // namespace acl_gemm_convolution_utils
+} // namespace acl_convolution_utils
 
+} // namespace aarch64
 } // namespace cpu
 } // namespace impl
 } // namespace dnnl

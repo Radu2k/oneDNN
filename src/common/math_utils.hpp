@@ -253,6 +253,15 @@ inline U soft_relu_bwd(T dd, T s) {
     return (U)(dd * logistic_fwd<float>(s));
 }
 
+template <typename T, typename U = typename utils::remove_reference<T>::type>
+inline U logsigmoid_fwd(T s) {
+    return -soft_relu_fwd(-s);
+}
+template <typename T, typename U = typename utils::remove_reference<T>::type>
+inline U logsigmoid_bwd(T dd, T s) {
+    return soft_relu_bwd(dd, -s);
+}
+
 template <typename T, typename A,
         typename U = typename utils::remove_reference<T>::type>
 inline U swish_fwd(T s, A alpha) {
@@ -318,6 +327,23 @@ inline U clip_bwd(T dd, T s, A alpha, A beta) {
 
 template <typename T, typename A,
         typename U = typename utils::remove_reference<T>::type>
+inline U clip_v2_fwd(T s, A alpha, A beta) {
+    s = s > alpha ? s : (U)alpha;
+    return s < beta ? s : (U)beta;
+}
+template <typename T, typename A,
+        typename U = typename utils::remove_reference<T>::type>
+inline U clip_v2_bwd(T dd, T s, A alpha, A beta) {
+    return dd * (alpha < s && s < beta ? 1 : 0);
+}
+template <typename T, typename A,
+        typename U = typename utils::remove_reference<T>::type>
+inline U clip_v2_bwd_use_dst(T dd, T d, A alpha, A beta) {
+    return clip_v2_bwd(dd, d, alpha, beta);
+}
+
+template <typename T, typename A,
+        typename U = typename utils::remove_reference<T>::type>
 inline U pow_fwd(T s, A alpha, A beta) {
     return (U)(alpha * ::powf((float)s, beta));
 }
@@ -354,12 +380,14 @@ inline bool is_eltwise_ok(
     const bool eltwise_use_src
             = one_of(alg, eltwise_relu, eltwise_tanh, eltwise_elu,
                       eltwise_square, eltwise_abs, eltwise_sqrt, eltwise_linear,
-                      eltwise_bounded_relu, eltwise_soft_relu, eltwise_logistic,
-                      eltwise_exp, eltwise_gelu_tanh, eltwise_swish,
-                      eltwise_log, eltwise_clip, eltwise_pow, eltwise_gelu_erf,
-                      eltwise_round)
+                      eltwise_bounded_relu, eltwise_soft_relu,
+                      eltwise_logsigmoid, eltwise_logistic, eltwise_exp,
+                      eltwise_gelu_tanh, eltwise_swish, eltwise_log,
+                      eltwise_clip, eltwise_clip_v2, eltwise_pow,
+                      eltwise_gelu_erf, eltwise_round)
             && IMPLICATION(alg == eltwise_bounded_relu, alpha >= 0)
-            && IMPLICATION(alg == eltwise_clip, beta >= alpha)
+            && IMPLICATION(
+                    one_of(alg, eltwise_clip, eltwise_clip_v2), beta >= alpha)
             && IMPLICATION(alg == eltwise_round, dt == dnnl_f32)
             && IMPLICATION(one_of(dt, dnnl_s32, dnnl_s8, dnnl_u8),
                     one_of(alg, eltwise_relu, eltwise_linear));
@@ -369,10 +397,13 @@ inline bool is_eltwise_ok(
                       eltwise_tanh_use_dst_for_bwd, eltwise_elu_use_dst_for_bwd,
                       eltwise_sqrt_use_dst_for_bwd,
                       eltwise_logistic_use_dst_for_bwd,
-                      eltwise_exp_use_dst_for_bwd)
+                      eltwise_exp_use_dst_for_bwd,
+                      eltwise_clip_v2_use_dst_for_bwd)
             && IMPLICATION(one_of(alg, eltwise_relu_use_dst_for_bwd,
                                    eltwise_elu_use_dst_for_bwd),
-                    alpha >= 0);
+                    alpha >= 0)
+            && IMPLICATION(
+                    alg == eltwise_clip_v2_use_dst_for_bwd, beta >= alpha);
 
     return eltwise_use_src || eltwise_use_dst;
 }

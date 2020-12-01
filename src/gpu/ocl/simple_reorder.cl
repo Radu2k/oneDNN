@@ -317,7 +317,6 @@ __kernel void simple_reorder(__global SRC_DATA_T *src, __global DST_DATA_T *dst,
             }
         }
     }
-
 #elif PLAIN_xFxE_TO_ABCDEF
     const int d0 = GWS_GET_D0();
     const int d1 = GWS_GET_D1();

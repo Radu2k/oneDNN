@@ -27,6 +27,20 @@
 
 #if BWD_WEIGHTS == 1
 
+inline void atomic_add_global(
+        volatile __global atomic_float *source, float operand) {
+    float old_val = atomic_load_explicit(
+            source, memory_order_relaxed, memory_scope_device);
+    if (isnan(operand)) return;
+    bool success = false;
+    do {
+        float new_val = old_val + operand;
+        success = atomic_compare_exchange_strong_explicit(source, &old_val,
+                new_val, memory_order_acq_rel, memory_order_relaxed,
+                memory_scope_device);
+    } while (!success);
+}
+
 inline float read_ic_block(const __global float *ptr, int off) {
 #if (IS_DW ? G : IC) % IC_BLOCK != 0
     int tail = (IS_DW ? G : IC) - off;
@@ -210,7 +224,7 @@ gen9_conv_nhwc_bwd_weights(__global float *src,
 #else
                     __attribute__((opencl_unroll_hint(8))) // attr:no-format
                     for (int i = 0; i < OW_BLOCK; i++) {
-                        if (iw + i < 0 || iw + i * SW >= IW) {
+                        if (iw + i * SW < 0 || iw + i * SW >= IW) {
                             blockA[i] = 0;
                         } else {
                             blockA[i] = read_ic_block(

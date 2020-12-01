@@ -17,11 +17,6 @@
 #include <assert.h>
 #include "oneapi/dnnl/dnnl.h"
 
-#include <cassert>
-#include <cstdlib>
-
-#include "tests/test_thread.hpp"
-
 // For is_nvidia_gpu(...)
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_DPCPP
 #include "oneapi/dnnl/dnnl_sycl.hpp"

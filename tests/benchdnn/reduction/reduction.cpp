@@ -120,6 +120,21 @@ int fill_src(const prb_t *prb, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp) {
                         ? (f_min + gen) / range
                         : (f_min + gen) * (1.0f + 4.0f / range);
             }
+        } else if (prb->alg == alg_t::MEAN && dt == dnnl_f16
+                && nelems_to_reduce <= 2e6) {
+            // Shift the mean to value different than 0 as results equal
+            // to 0 may be treated as mistrusted.
+            // This shift is done only up to some numbers of reduced
+            // elements, so nelems_to_reduce * mean_shift (expected
+            // value of linear sum) has to have sufficient precision on
+            // float (used in ref calculation) to represent the sum
+            // without precision issues.
+            float mean_shift = 0.5;
+            value = (f_min + gen) / range + mean_shift;
+        } else {
+            value = (dt == dnnl_bf16 || dt == dnnl_f16)
+                    ? (f_min + gen) / range
+                    : (f_min + gen) * (1.0f + 4.0f / range);
         }
         mem_fp.set_elem(i, round_to_nearest_representable(dt, value));
     });

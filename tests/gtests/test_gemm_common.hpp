@@ -1043,6 +1043,24 @@ protected:
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
         testing::scoped_tp_activation_t sta;
 #endif
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
+        if (get_test_engine_kind() == engine::kind::gpu) {
+            const auto &p = ::testing::TestWithParam<test_params>::GetParam();
+
+#if defined(TEST_DNNL_DPCPP_BUFFER)
+            // Test SYCL buffer interfaces
+            run_test_gemm<a_dt, b_dt, c_dt>::call(p);
+#else
+            // Test SYCL USM interfaces
+            bool zero_off = (p.off.a == 0 && p.off.b == 0 && p.off.c == 0);
+            SKIP_IF(!zero_off, "USM interfaces do not support offsets.");
+
+            run_test_gemm<a_dt, b_dt, c_dt>::call(p);
+#endif
+
+            return;
+        }
+#endif
         const auto &p = ::testing::TestWithParam<test_params>::GetParam();
         run_test_gemm<a_dt, b_dt, c_dt>::call(p);
     }

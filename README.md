@@ -25,10 +25,6 @@ for the following architectures:
 * OpenPOWER\* Power ISA (PPC64)
 * IBMz\* (s390x)
 
-This is a development branch for oneDNN v2.0 Beta. This is pre-production software
-and functionality may change without prior notice. You can find production
-version of the library in [master](https://github.com/oneapi-src/oneDNN).
-
 oneDNN is intended for deep learning applications and framework
 developers interested in improving application performance
 on Intel CPUs and GPUs. Deep learning practitioners should use one of the

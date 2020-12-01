@@ -31,12 +31,24 @@ status_t gen9_simple_sum_t::init(engine_t *engine) {
     auto *gpu_engine = utils::downcast<ocl::ocl_gpu_engine_t *>(engine);
     if (!gpu_engine) return status::runtime_error;
 
-    auto kernel = gen9_simple_sum_kernel_f32_t();
-    const auto &ngen_bin
-            = kernel.getBinary(gpu_engine->context(), gpu_engine->device());
-    kernel_ = compute::kernel_t(new ocl::ocl_gpu_kernel_t(
-            ngen_bin, kernel.getExternalName().c_str()));
+    auto jitter = gen9_simple_sum_kernel_f32_t();
+    auto binary
+            = jitter.get_binary(gpu_engine->context(), gpu_engine->device());
+    auto kernel_name = jitter.kernel_name();
+
+    gpu::ocl::ocl_wrapper_t<cl_kernel> ocl_kernel
+            = jitter.get_kernel(gpu_engine->context(), gpu_engine->device());
+
+    std::vector<gpu::compute::scalar_type_t> arg_types;
+    CHECK(get_kernel_arg_types(ocl_kernel, &arg_types));
+
+    auto shared_binary = std::make_shared<gpu::compute::binary_t>(binary);
+
+    kernel_ = compute::kernel_t(
+            new ocl::ocl_gpu_kernel_t(shared_binary, kernel_name, arg_types));
     register_kernels({kernel_});
+    ocl::dump_kernel_binary(engine, kernel_);
+
     return status::success;
 }
 

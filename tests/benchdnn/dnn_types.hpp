@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <vector>
+#include <unordered_map>
 
 #include "common.hpp"
 #include "oneapi/dnnl/dnnl_types.h"
@@ -45,6 +46,10 @@ struct dims_t : public std::vector<int64_t> {
     dims_t() = default;
     dims_t(size_t size) : vector(size) {}
     dims_t(size_t size, int64_t value) : vector(size, value) {}
+    void operator=(const dnnl_dims_t &dims) {
+        for (unsigned int dim = 0; dim < this->size(); dim++)
+            this->at(dim) = dims[dim];
+    }
 };
 
 enum dir_t {
@@ -156,16 +161,15 @@ struct attr_t {
             return it == points.end() ? entry_t() : it->second;
         }
 
-        std::map<int, entry_t>::const_iterator begin() const {
+        std::unordered_map<int, entry_t>::const_iterator begin() const {
             return points.begin();
         }
-        std::map<int, entry_t>::const_iterator end() const {
+        std::unordered_map<int, entry_t>::const_iterator end() const {
             return points.end();
         }
 
         zero_points_t() : points() {} // needed for debug icc190 build;
-
-        std::map<int, entry_t> points;
+        std::unordered_map<int, entry_t> points;
     };
 
     struct arg_scales_t {
@@ -199,6 +203,8 @@ struct attr_t {
             ABS,
             BRELU,
             CLIP,
+            CLIP_V2,
+            CLIP_V2_DST,
             ELU,
             ELU_DST,
             EXP,
@@ -209,6 +215,7 @@ struct attr_t {
             LOG,
             LOGISTIC,
             LOGISTIC_DST,
+            LOGSIGMOID,
             POW,
             RELU,
             RELU_DST,

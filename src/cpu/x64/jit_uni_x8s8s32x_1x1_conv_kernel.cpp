@@ -15,7 +15,6 @@
 *******************************************************************************/
 
 #include <assert.h>
-#include <iterator>
 
 #include "common/c_types_map.hpp"
 #include "common/memory.hpp"
@@ -48,7 +47,7 @@ template <cpu_isa_t isa, typename Vmm>
 _jit_uni_x8s8s32x_1x1_conv_kernel<isa, Vmm>::_jit_uni_x8s8s32x_1x1_conv_kernel(
         const jit_1x1_conv_conf_t &ajcp, const primitive_attr_t &attr,
         const memory_desc_t &dst_md)
-    : jcp(ajcp), attr_(attr) {
+    : jit_generator(nullptr, MAX_CODE_SIZE, true, isa), jcp(ajcp), attr_(attr) {
     if (jcp.with_eltwise || jcp.with_binary || jcp.with_sum) {
         using namespace binary_injector;
         static constexpr bool preserve_gpr = true;
@@ -423,7 +422,7 @@ void _jit_uni_x8s8s32x_1x1_conv_kernel<isa, Vmm>::reduce_loop(
                         && i_reduce == loop_unroll - reduce_step) {
                     load_bytes(vmm_bcast, aux_reg_bcast_data,
                             jcp.ic_without_padding * i_ur + i_reduce,
-                            ic_tail_size, isa == sse41);
+                            ic_tail_size);
                     uni_vpbroadcastd(vmm_bcast, Xmm(vmm_bcast.getIdx()));
                 } else {
                     uni_vpbroadcastd(vmm_bcast, bcast_ptr(i_reduce, i_ur));
@@ -704,10 +703,8 @@ status_t jit_uni_x8s8s32x_1x1_conv_kernel<isa>::init_conf(
 
     if (dw_conv_ind >= 0) {
         // dw_conv and post_ops after it are handled externally, so skip them
-        jcp.post_ops.entry_.reserve(dw_conv_ind);
-        std::copy(post_ops.entry_.cbegin(),
-                post_ops.entry_.cbegin() + dw_conv_ind,
-                std::back_inserter(jcp.post_ops.entry_));
+        jcp.post_ops.entry_.assign(post_ops.entry_.cbegin(),
+                post_ops.entry_.cbegin() + dw_conv_ind);
     } else {
         jcp.post_ops = post_ops;
     }
@@ -719,7 +716,7 @@ status_t jit_uni_x8s8s32x_1x1_conv_kernel<isa>::init_conf(
 
     using namespace injector;
     const bool post_ops_ok_
-            = post_ops_ok<isa>({eltwise, binary}, jcp.post_ops, dst_d);
+            = post_ops_ok({isa, {eltwise, binary, sum}, jcp.post_ops, &dst_d});
     if (!post_ops_ok_) return status::unimplemented;
 
     args_ok = true && jcp.oc % simd_w == 0 && jcp.ic % simd_w == 0

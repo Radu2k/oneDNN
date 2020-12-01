@@ -31,6 +31,7 @@ void check_correctness(const settings_t &s) {
     for_(const auto &i_sdt : s.sdt)
     for_(const auto &i_ddt : s.ddt)
     for_(const auto &i_stag : s.stag)
+    for_(const auto &i_dtag : s.dtag)
     for_(const auto &i_alg : s.alg)
     for_(const auto &i_scales : s.scales)
     for_(const auto &i_post_ops : s.post_ops)
@@ -44,13 +45,22 @@ void check_correctness(const settings_t &s) {
         ok = i_alg > alg_t::BINARY_START && i_alg < alg_t::BINARY_END;
         if (!ok) SAFE_V(FAIL);
 
+        // If src1 was provided shortened, fill the rest dimensions with `1` to
+        // match ndims for source 0 and 1, e.g. 8x3x5:8
+        auto sdims = s.sdims;
+        if (s.sdims[0].size() > s.sdims[1].size()) {
+            for (size_t d = s.sdims[1].size(); d < s.sdims[0].size(); ++d)
+                sdims[1].push_back(1);
+        }
+
         attr_t attr;
         attr.insert(i_scales);
         attr.insert(i_post_ops);
         attr.insert(i_scratchpad_mode);
         handle_legacy_attr(attr, s.attr);
 
-        const prb_t prb(s.sdims, i_sdt, i_ddt, i_stag, i_alg, i_inplace, attr);
+        const prb_t prb(
+                sdims, i_sdt, i_ddt, i_stag, i_dtag, i_alg, i_inplace, attr);
         std::stringstream ss;
         ss << prb;
         const std::string cpp_pstr = ss.str();
@@ -83,6 +93,7 @@ int bench(int argc, char **argv) {
                 || parse_multi_dt(s.sdt, def.sdt, argv[0])
                 || parse_dt(s.ddt, def.ddt, argv[0], "ddt")
                 || parse_multi_tag(s.stag, def.stag, argv[0])
+                || parse_tag(s.dtag, def.dtag, argv[0], "dtag")
                 || parse_alg(
                         s.alg, def.alg, attr_t::post_ops_t::str2kind, argv[0])
                 || parse_inplace(s.inplace, def.inplace, argv[0])

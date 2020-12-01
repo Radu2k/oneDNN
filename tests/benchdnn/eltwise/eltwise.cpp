@@ -168,23 +168,26 @@ static bool check_abs_err(const prb_t *prb, const float &s, const float &trh) {
             // (10.f is magic scale for bf16)
             return (prb->dir & FLAG_FWD) && std::signbit(s)
                     && log1pf(expf(s)) <= 10.f * comp_err;
+        case alg_t::LOGSIGMOID:
+            // same situation like in SRELU
+            // in logsigmoid when s is positive
+            // results -> 0
+            return (prb->dir & FLAG_FWD) && !std::signbit(s)
+                    && log1pf(expf(-s)) <= 10.f * comp_err;
         case alg_t::LOGISTIC:
             // when s >= 4, logistic(s) -> 0 rapidly, which leads to high
             // relative error of logistic(s) * (1 - logistic(s)) due to
             // catastrohic cancellation.
             return (prb->dir & FLAG_BWD) && !std::signbit(s)
                     && (1.f / (1.f + expf(s))) <= comp_err;
-        case alg_t::SWISH:
+        case alg_t::SWISH: {
             // catch cancellation happening when W(s) ~~ -1 in (1 + W(s))
             // formula part on backward.
+            const float alpha_s = prb->alpha * s;
             return (prb->dir & FLAG_BWD)
-                    && (prb->alpha * s
-                                    * (1.f
-                                            - 1.f
-                                                    / (1.f
-                                                            + expf(-prb->alpha
-                                                                    * s)))
+                    && (alpha_s * (1.f - 1.f / (1.f + expf(-alpha_s)))
                             <= comp_err);
+        }
         default: return false;
     }
 }
@@ -193,10 +196,11 @@ float get_eltwise_threshold(dnnl_data_type_t dt, alg_t alg, bool is_fwd) {
     // Tolerate only rounding error (1 ulp) for other than fp32 precisions.
     float trh = dt == dnnl_f32 ? 4e-6 : epsilon_dt(dt);
     // Tolerate bigger compute errors for complex algorithms.
-    bool alg_has_higher_tolerance = alg == alg_t::GELU_TANH || alg == alg_t::ELU
-            || alg == alg_t::SWISH || alg == alg_t::TANH || alg == alg_t::SRELU
-            || alg == alg_t::LOG || IMPLICATION(alg == alg_t::ELU_DST, is_fwd)
-            || IMPLICATION(alg == alg_t::TANH_DST, is_fwd);
+    const bool alg_has_higher_tolerance = alg == alg_t::GELU_TANH
+            || alg == alg_t::ELU || alg == alg_t::SWISH || alg == alg_t::TANH
+            || alg == alg_t::SRELU || alg == alg_t::LOGSIGMOID
+            || alg == alg_t::LOG
+            || ((alg == alg_t::ELU_DST || alg == alg_t::TANH_DST) && is_fwd);
     if (dt == dnnl_f32 && alg_has_higher_tolerance) trh = 4e-5;
     return trh;
 }
@@ -284,7 +288,7 @@ int fill_data(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
         std::uniform_real_distribution<> fgen(0.f, 0.09f);
 
         for (int64_t idx = idx_start; idx < idx_end; ++idx) {
-            static constexpr int64_t num_of_generation_variants = 10;
+            static constexpr int64_t num_of_generation_variants = 11;
             float value = FLT_MAX;
             switch (idx % num_of_generation_variants) {
                 case 0: value = (float)igen(msr); break; // [0-10] pos
@@ -299,6 +303,7 @@ int fill_data(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
                     value = 88.f + 10.f * fgen(msr);
                     break; // values close to logf(FLT_MAX) for exp alg testing
                 case 9: value = prb->alpha; break; // `x = alpha` corner cases
+                case 10: value = prb->beta; break; // `x = beta` corner cases
             }
             value = round_to_nearest_representable(prb->dt, value);
 
@@ -321,7 +326,9 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
 
     bool is_invalid = false;
     switch (prb->alg) {
-        case alg_t::CLIP: is_invalid = prb->beta < prb->alpha; break;
+        case alg_t::CLIP:
+        case alg_t::CLIP_V2:
+        case alg_t::CLIP_V2_DST: is_invalid = prb->beta < prb->alpha; break;
         case alg_t::BRELU:
         case alg_t::ELU_DST:
         case alg_t::RELU_DST: is_invalid = prb->alpha < 0; break;

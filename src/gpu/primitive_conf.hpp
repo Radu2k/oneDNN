@@ -362,6 +362,20 @@ struct pool_conf_t {
     memory_desc_info_t dst_md_info;
 };
 
+// Prelu
+struct prelu_conf_t {
+    bool is_forward;
+    bool reduce_diff_weights;
+    compute::dispatch_t dispatch;
+
+    attr_info_t attr_info;
+    memory_desc_info_t src_md_info;
+    memory_desc_info_t wei_md_info;
+    memory_desc_info_t dst_md_info;
+    memory_desc_info_t diff_src_md_info;
+    memory_desc_info_t diff_wei_md_info;
+};
+
 // Inner Product
 struct inner_product_conf_t {
     int ndims;
@@ -611,6 +625,7 @@ struct concat_conf_t {
 // Elementwise
 struct eltwise_conf_t {
     int ndims;
+    int vector_size;
     bool with_zero_padding;
     data_type_t data_type;
     alg_kind_t alg;
@@ -880,6 +895,7 @@ inline void def_eltwise_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
     kernel_ctx.define_int("LINEAR", alg_kind::eltwise_linear);
     kernel_ctx.define_int("BOUNDED_RELU", alg_kind::eltwise_bounded_relu);
     kernel_ctx.define_int("SOFT_RELU", alg_kind::eltwise_soft_relu);
+    kernel_ctx.define_int("LOGSIGMOID", alg_kind::eltwise_logsigmoid);
     kernel_ctx.define_int("LOGISTIC", alg_kind::eltwise_logistic);
     kernel_ctx.define_int("TANH", alg_kind::eltwise_tanh);
     kernel_ctx.define_int("ELU", alg_kind::eltwise_elu);
@@ -891,6 +907,7 @@ inline void def_eltwise_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
     kernel_ctx.define_int("SWISH", alg_kind::eltwise_swish);
     kernel_ctx.define_int("LOG", alg_kind::eltwise_log);
     kernel_ctx.define_int("CLIP", alg_kind::eltwise_clip);
+    kernel_ctx.define_int("CLIP_V2", alg_kind::eltwise_clip_v2);
     kernel_ctx.define_int("POW", alg_kind::eltwise_pow);
     kernel_ctx.define_int("GELU_ERF", alg_kind::eltwise_gelu_erf);
     kernel_ctx.define_int("ROUND", alg_kind::eltwise_round);
@@ -902,6 +919,8 @@ inline void def_eltwise_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
     kernel_ctx.define_int("ELU_DST", alg_kind::eltwise_elu_use_dst_for_bwd);
     kernel_ctx.define_int("SQRT_DST", alg_kind::eltwise_sqrt_use_dst_for_bwd);
     kernel_ctx.define_int("EXP_DST", alg_kind::eltwise_exp_use_dst_for_bwd);
+    kernel_ctx.define_int(
+            "CLIP_V2_DST", alg_kind::eltwise_clip_v2_use_dst_for_bwd);
 }
 
 inline bool post_ops_with_binary_ok(

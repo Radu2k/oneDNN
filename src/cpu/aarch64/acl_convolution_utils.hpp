@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef CPU_AARCH64_ACL_GEMM_CONVOLUTION_UTILS_HPP
-#define CPU_AARCH64_ACL_GEMM_CONVOLUTION_UTILS_HPP
+#ifndef CPU_AARCH64_ACL_CONVOLUTION_UTILS_HPP
+#define CPU_AARCH64_ACL_CONVOLUTION_UTILS_HPP
 
 #include "common/c_types_map.hpp"
 #include "common/dnnl_thread.hpp"
@@ -29,9 +29,20 @@
 namespace dnnl {
 namespace impl {
 namespace cpu {
+namespace aarch64 {
 
-struct acl_conv_gemm_conf_t {
+template <typename NEConv>
+struct acl_obj_t {
+    NEConv conv;
+    arm_compute::Tensor src_tensor;
+    arm_compute::Tensor wei_tensor;
+    arm_compute::Tensor bia_tensor;
+    arm_compute::Tensor dst_tensor;
+};
+
+struct acl_conv_conf_t {
     bool with_bias;
+    bool is_int8;
     arm_compute::TensorInfo src_info;
     arm_compute::TensorInfo wei_info;
     arm_compute::TensorInfo bia_info;
@@ -42,20 +53,27 @@ struct acl_conv_gemm_conf_t {
     arm_compute::ActivationLayerInfo act_info;
 };
 
-namespace acl_gemm_convolution_utils {
+namespace acl_convolution_utils {
 
-status_t init_conf(acl_conv_gemm_conf_t &acp, memory_desc_t &src_md,
+status_t init_conf_gemm(acl_conv_conf_t &acp, memory_desc_t &src_md,
         memory_desc_t &weights_md, memory_desc_t &dst_md,
         memory_desc_t &bias_md, const convolution_desc_t &cd,
         const primitive_attr_t &attr);
 
-bool acl_act_ok(alg_kind_t eltwise_activation);
+status_t init_conf_wino(acl_conv_conf_t &acp, memory_desc_t &src_md,
+        memory_desc_t &weights_md, memory_desc_t &dst_md,
+        memory_desc_t &bias_md, const convolution_desc_t &cd,
+        const primitive_attr_t &attr);
+
+arm_compute::DataType get_acl_data_t(const dnnl_data_type_t dt);
 arm_compute::ActivationLayerInfo get_acl_act(const primitive_attr_t &attr);
+bool acl_act_ok(alg_kind_t eltwise_activation);
 
-} // namespace acl_gemm_convolution_utils
+} // namespace acl_convolution_utils
 
+} // namespace aarch64
 } // namespace cpu
 } // namespace impl
 } // namespace dnnl
 
-#endif
+#endif // CPU_AARCH64_ACL_CONVOLUTION_UTILS_HPP

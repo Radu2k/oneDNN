@@ -64,7 +64,7 @@ public:
     status_t create_kernel(gpu::compute::kernel_t *kernel,
             gpu::jit::jit_generator_base &jitter) const override {
         if (kind() != engine_kind::gpu) {
-            assert("not expected");
+            assert(!"not expected");
             return status::invalid_arguments;
         }
 
@@ -76,8 +76,15 @@ public:
                 ocl_engine->context(), ocl_engine->device());
         auto kernel_name = jitter.kernel_name();
 
-        *kernel = gpu::compute::kernel_t(
-                new sycl_interop_gpu_kernel_t(binary, kernel_name));
+        gpu::ocl::ocl_wrapper_t<cl_kernel> ocl_kernel = jitter.get_kernel(
+                ocl_engine->context(), ocl_engine->device());
+        std::vector<gpu::compute::scalar_type_t> arg_types;
+        CHECK(get_kernel_arg_types(ocl_kernel, &arg_types));
+
+        auto shared_binary = std::make_shared<gpu::compute::binary_t>(binary);
+
+        *kernel = gpu::compute::kernel_t(new sycl_interop_gpu_kernel_t(
+                shared_binary, kernel_name, arg_types));
         return status::success;
     }
 
@@ -101,8 +108,9 @@ public:
             if (!ocl_kernels[i]) continue;
             auto *k = utils::downcast<gpu::ocl::ocl_gpu_kernel_t *>(
                     ocl_kernels[i].impl());
-            (*kernels)[i] = gpu::compute::kernel_t(
-                    new sycl_interop_gpu_kernel_t(k->binary(), k->name()));
+            (*kernels)[i]
+                    = gpu::compute::kernel_t(new sycl_interop_gpu_kernel_t(
+                            k->binary(), k->name(), k->arg_types()));
         }
         return status::success;
     }
@@ -130,6 +138,8 @@ public:
     }
 
     device_id_t device_id() const override { return sycl_device_id(device_); }
+
+    std::function<void(void *)> get_program_list_deleter() const override;
 
 protected:
     status_t init_device_info() override;

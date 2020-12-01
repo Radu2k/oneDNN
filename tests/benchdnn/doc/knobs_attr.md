@@ -112,6 +112,7 @@ Operations may be called in any order, e.g. apply `SUM` at first and then apply
       - `log`
       - `logistic`
       - `logistic_dst`
+      - `logsigmoid`
       - `round`
       - `sqrt`
       - `sqrt_dst`
@@ -128,6 +129,8 @@ Operations may be called in any order, e.g. apply `SUM` at first and then apply
       - `swish`
   - Eltwise operations that support both alpha and beta:
       - `clip`
+      - `clip_v2`
+      - `clip_v2_dst`
       - `linear`
       - `pow`
 

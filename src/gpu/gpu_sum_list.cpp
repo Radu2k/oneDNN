@@ -19,6 +19,7 @@
 #include "common/utils.hpp"
 #include "gpu/gpu_sum_pd.hpp"
 #include "gpu/jit/gen9_simple_sum.hpp"
+#include "gpu/ocl/gen9_sum.hpp"
 #include "gpu/ocl/ref_sum.hpp"
 #include "gpu/ocl/simple_sum.hpp"
 
@@ -34,6 +35,7 @@ const spd_create_f sum_impl_list[] = {
         // TODO: Re-enable nGEN-based implementation after architecture
         // dispatching is implemented.
         // INSTANCE(jit::gen9_simple_sum_t),
+        INSTANCE(ocl::gen9_sum_t),
         INSTANCE(ocl::simple_sum_t<data_type::f32>),
         INSTANCE(ocl::ref_sum_t),
         nullptr,

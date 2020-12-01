@@ -47,7 +47,7 @@ namespace impl {
 
 namespace {
 inline int adjust_num_threads(int nthr, size_t work_amount) {
-    if (nthr == 0) nthr = dnnl_get_max_threads();
+    if (nthr == 0) nthr = dnnl_get_current_num_threads();
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_OMP
     return (work_amount == 1 || omp_in_parallel()) ? 1 : nthr;
 #else
@@ -391,7 +391,7 @@ void parallel_nd_ext(int nthr, const T0 &D0, const T1 &D1, const T2 &D2,
 template <typename T0, typename F>
 void parallel_nd(const T0 &D0, F f) {
     const size_t work_amount = (size_t)D0;
-    int nthr = adjust_num_threads(dnnl_get_max_threads(), work_amount);
+    int nthr = adjust_num_threads(dnnl_get_current_num_threads(), work_amount);
     if (nthr)
         parallel(nthr, [&](int ithr, int nthr) { for_nd(ithr, nthr, D0, f); });
 }
@@ -399,7 +399,7 @@ void parallel_nd(const T0 &D0, F f) {
 template <typename T0, typename T1, typename F>
 void parallel_nd(const T0 &D0, const T1 &D1, F f) {
     const size_t work_amount = (size_t)D0 * D1;
-    int nthr = adjust_num_threads(dnnl_get_max_threads(), work_amount);
+    int nthr = adjust_num_threads(dnnl_get_current_num_threads(), work_amount);
     if (nthr)
         parallel(nthr,
                 [&](int ithr, int nthr) { for_nd(ithr, nthr, D0, D1, f); });
@@ -408,7 +408,7 @@ void parallel_nd(const T0 &D0, const T1 &D1, F f) {
 template <typename T0, typename T1, typename T2, typename F>
 void parallel_nd(const T0 &D0, const T1 &D1, const T2 &D2, F f) {
     const size_t work_amount = (size_t)D0 * D1 * D2;
-    int nthr = adjust_num_threads(dnnl_get_max_threads(), work_amount);
+    int nthr = adjust_num_threads(dnnl_get_current_num_threads(), work_amount);
     if (nthr)
         parallel(nthr,
                 [&](int ithr, int nthr) { for_nd(ithr, nthr, D0, D1, D2, f); });
@@ -417,7 +417,7 @@ void parallel_nd(const T0 &D0, const T1 &D1, const T2 &D2, F f) {
 template <typename T0, typename T1, typename T2, typename T3, typename F>
 void parallel_nd(const T0 &D0, const T1 &D1, const T2 &D2, const T3 &D3, F f) {
     const size_t work_amount = (size_t)D0 * D1 * D2 * D3;
-    int nthr = adjust_num_threads(dnnl_get_max_threads(), work_amount);
+    int nthr = adjust_num_threads(dnnl_get_current_num_threads(), work_amount);
     if (nthr)
         parallel(nthr, [&](int ithr, int nthr) {
             for_nd(ithr, nthr, D0, D1, D2, D3, f);
@@ -429,7 +429,7 @@ template <typename T0, typename T1, typename T2, typename T3, typename T4,
 void parallel_nd(const T0 &D0, const T1 &D1, const T2 &D2, const T3 &D3,
         const T4 &D4, F f) {
     const size_t work_amount = (size_t)D0 * D1 * D2 * D3 * D4;
-    int nthr = adjust_num_threads(dnnl_get_max_threads(), work_amount);
+    int nthr = adjust_num_threads(dnnl_get_current_num_threads(), work_amount);
     if (nthr)
         parallel(nthr, [&](int ithr, int nthr) {
             for_nd(ithr, nthr, D0, D1, D2, D3, D4, f);
@@ -441,7 +441,7 @@ template <typename T0, typename T1, typename T2, typename T3, typename T4,
 void parallel_nd(const T0 &D0, const T1 &D1, const T2 &D2, const T3 &D3,
         const T4 &D4, const T5 &D5, F f) {
     const size_t work_amount = (size_t)D0 * D1 * D2 * D3 * D4 * D5;
-    int nthr = adjust_num_threads(dnnl_get_max_threads(), work_amount);
+    int nthr = adjust_num_threads(dnnl_get_current_num_threads(), work_amount);
     if (nthr)
         parallel(nthr, [&](int ithr, int nthr) {
             for_nd(ithr, nthr, D0, D1, D2, D3, D4, D5, f);

@@ -35,7 +35,8 @@ struct jit_avx512_core_amx_copy_to_wbuffer_t : public jit_generator {
     using reg64_t = const Xbyak::Reg64;
 
     jit_avx512_core_amx_copy_to_wbuffer_t(const jit_conv_conf_t &ajcp)
-        : jcp(ajcp) {}
+        : jit_generator(nullptr, MAX_CODE_SIZE, true, avx512_core_amx)
+        , jcp(ajcp) {}
 
 private:
     jit_conv_conf_t jcp;
@@ -60,7 +61,8 @@ struct jit_avx512_core_amx_copy_to_pbuffer_t : public jit_generator {
     using reg64_t = const Xbyak::Reg64;
 
     jit_avx512_core_amx_copy_to_pbuffer_t(const jit_conv_conf_t &ajcp)
-        : jcp(ajcp) {}
+        : jit_generator(nullptr, MAX_CODE_SIZE, true, avx512_core_amx)
+        , jcp(ajcp) {}
 
 private:
     jit_conv_conf_t jcp;
@@ -117,7 +119,8 @@ struct jit_avx512_core_amx_fwd_kernel_t : public jit_generator {
 
     jit_avx512_core_amx_fwd_kernel_t(
             const jit_conv_conf_t &ajcp, const primitive_attr_t &attr)
-        : jcp(ajcp)
+        : jit_generator(nullptr, MAX_CODE_SIZE, true, avx512_core_amx)
+        , jcp(ajcp)
         , attr_(attr)
         , eltwise_injector_(nullptr)
         , copy_to_wbuffer_(nullptr) {
@@ -167,6 +170,11 @@ private:
     jit_avx512_core_amx_copy_to_pbuffer_t *copy_to_pbuffer_;
     jit_avx512_core_amx_copy_to_wbuffer_t *copy_to_wbuffer_;
 
+    enum {
+        zmm_idx_limit_bf16 = 29,
+        zmm_idx_limit_int8 = 27,
+    };
+
     int prv_width_;
     int row_count_;
     bool is_store_done_;
@@ -183,18 +191,20 @@ private:
     const Xbyak::Reg64 reg_ptr_sum_scale = r9;
     const Xbyak::Reg64 aux_reg_saturation = reg_ptr_sum_scale;
 
-    const Xbyak::Reg64 aux_inp_ptr = r8;
-    const Xbyak::Reg64 aux_wei_ptr = rax;
     const Xbyak::Reg64 reg_inp_stride = rbx;
     const Xbyak::Reg64 reg_wei_stride = rdx;
+    // zero-point computation
+    const Xbyak::Reg64 reg_zp_compensation = rax;
+    const Xbyak::Reg64 reg_src_zero_point = r8;
+    const Xbyak::Reg64 reg_dst_zero_point = abi_not_param1;
 
     // rsi - free and available
     // rbp - reserved for EVEX compression
     const Xbyak::Reg64 reg_last_h = abi_not_param1;
 
     // temporary, used in generate() function only
-    const Xbyak::Reg64 reg_oc_blocks = aux_wei_ptr;
-    const Xbyak::Reg64 reg_tmp = aux_inp_ptr;
+    const Xbyak::Reg64 reg_oc_blocks = rax;
+    const Xbyak::Reg64 reg_tmp = r8;
 
     const Xbyak::Opmask ktail_mask = Xbyak::Opmask(2);
 
@@ -202,6 +212,10 @@ private:
     const Xbyak::Zmm zmm_saturation = zmm_bias;
     const Xbyak::Zmm zmm_zero = Xbyak::Zmm(30);
     const Xbyak::Zmm zmm_prev_dst = Xbyak::Zmm(29);
+    /* zero-point */
+    const Xbyak::Zmm zmm_zp = Xbyak::Zmm(29);
+    const Xbyak::Zmm zmm_src_zp = Xbyak::Zmm(28);
+    const Xbyak::Zmm zmm_dst_zp = Xbyak::Zmm(27);
 
     // AUX: Steps, shifts and offsets
     size_t get_inp_icb_step() const;
@@ -228,6 +242,14 @@ private:
     bool maybe_eltwise(int position);
     void cvt2ps(data_type_t type_in, Xbyak::Zmm ymm_in,
             const Xbyak::Operand &op, bool mask_flag);
+    Xbyak::Zmm zmm_out(const int idx) {
+        const int upper_limit = jcp.src_dt == data_type::bf16
+                ? zmm_idx_limit_bf16
+                : zmm_idx_limit_int8;
+        assert(upper_limit > idx);
+        MAYBE_UNUSED(upper_limit);
+        return Xbyak::Zmm(idx);
+    }
     Xbyak::Ymm ymm_mask(
             const Xbyak::Ymm zmm_in, bool mask_flag, bool store = false);
     Xbyak::Zmm zmm_mask(

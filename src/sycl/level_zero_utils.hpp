@@ -23,6 +23,8 @@
 
 #include <CL/sycl.hpp>
 
+#include "gpu/compute/kernel.hpp"
+
 namespace dnnl {
 namespace impl {
 namespace sycl {
@@ -33,11 +35,10 @@ device_uuid_t get_device_uuid(const cl::sycl::device &dev);
 // including sycl_gpu_engine.hpp leads to circular dependencies, w/a for now.
 struct sycl_gpu_engine_t;
 
-status_t sycl_create_kernel_with_level_zero(
-        std::unique_ptr<cl::sycl::kernel> &sycl_kernel,
+status_t sycl_create_program_with_level_zero(
+        std::unique_ptr<cl::sycl::program> &sycl_program,
         const sycl_gpu_engine_t *sycl_engine,
-        const std::vector<unsigned char> &binary,
-        const std::string &kernel_name);
+        const gpu::compute::binary_t *binary);
 
 } // namespace sycl
 } // namespace impl

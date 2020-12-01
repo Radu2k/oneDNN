@@ -29,9 +29,14 @@ namespace sycl {
 
 class sycl_interop_gpu_kernel_t : public gpu::compute::kernel_impl_t {
 public:
-    sycl_interop_gpu_kernel_t(const std::vector<unsigned char> &binary,
-            const std::string &binary_name)
-        : state_(state_t::binary), binary_(binary), binary_name_(binary_name) {
+    sycl_interop_gpu_kernel_t(
+            const std::shared_ptr<gpu::compute::binary_t> &binary,
+            const std::string &binary_name,
+            const std::vector<gpu::compute::scalar_type_t> &arg_types)
+        : state_(state_t::binary)
+        , binary_(binary)
+        , binary_name_(binary_name)
+        , arg_types_(arg_types) {
         MAYBE_UNUSED(state_);
     }
 
@@ -44,15 +49,15 @@ public:
             const gpu::compute::nd_range_t &range,
             const gpu::compute::kernel_arg_list_t &arg_list) const override;
 
-    status_t realize(gpu::compute::kernel_t *kernel,
-            const engine_t *engine) const override;
+    status_t realize(gpu::compute::kernel_t *kernel, const engine_t *engine,
+            gpu::compute::program_list_t *programs) const override;
 
     const char *name() const {
         assert(state_ == state_t::binary);
         return binary_name_.c_str();
     }
 
-    const std::vector<unsigned char> &binary() const {
+    const std::shared_ptr<gpu::compute::binary_t> &binary() const {
         assert(state_ == state_t::binary);
         return binary_;
     }
@@ -68,7 +73,7 @@ protected:
 
     state_t state_;
     std::unique_ptr<cl::sycl::kernel> sycl_kernel_;
-    std::vector<unsigned char> binary_;
+    std::shared_ptr<gpu::compute::binary_t> binary_;
     std::string binary_name_;
 
     std::vector<gpu::compute::scalar_type_t> arg_types_;

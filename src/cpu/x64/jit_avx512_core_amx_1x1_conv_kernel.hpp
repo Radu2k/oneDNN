@@ -34,7 +34,10 @@ struct jit_avx512_core_amx_1x1_fwd_kernel_t : public jit_generator {
 
     jit_avx512_core_amx_1x1_fwd_kernel_t(
             const jit_conv_conf_t &ajcp, const primitive_attr_t &attr)
-        : jcp(ajcp), attr_(attr), eltwise_injector_(nullptr) {
+        : jit_generator(nullptr, MAX_CODE_SIZE, true, avx512_core_amx)
+        , jcp(ajcp)
+        , attr_(attr)
+        , eltwise_injector_(nullptr) {
         if (jcp.with_eltwise)
             eltwise_injector_ = new jit_uni_eltwise_injector_f32<avx512_common>(
                     this, jcp.eltwise);
@@ -61,6 +64,11 @@ struct jit_avx512_core_amx_1x1_fwd_kernel_t : public jit_generator {
 private:
     jit_uni_eltwise_injector_f32<avx512_common> *eltwise_injector_;
 
+    enum {
+        zmm_idx_limit_bf16 = 29,
+        zmm_idx_limit_int8 = 27,
+    };
+
     int row_count_;
     int buf_count_;
     bool is_store_done_;
@@ -79,7 +87,6 @@ private:
     Xbyak::Reg64 reg_ptr_sum_scale = r9;
     Xbyak::Reg64 aux_reg_saturation = reg_ptr_sum_scale;
     Xbyak::Reg64 reg_last_h = r8;
-    Xbyak::Reg64 reg_tail = rax;
 
     Xbyak::Reg64 stride_seq = rbx;
     Xbyak::Reg64 stride_nhwc = rsi;
@@ -90,11 +97,19 @@ private:
     Xbyak::Reg64 reg_postop = abi_not_param1;
     Xbyak::Reg64 reg_scratch = reg_bias;
     Xbyak::Reg64 reg_tilebuff = reg_ptr_scales;
+    /* zero-point */
+    Xbyak::Reg64 reg_zp_compensation = reg_last_h;
+    Xbyak::Reg64 reg_src_zero_point = reg_oc_blocks;
+    Xbyak::Reg64 reg_dst_zero_point = rax;
 
     Xbyak::Zmm zmm_bias = Xbyak::Zmm(31);
     Xbyak::Zmm zmm_saturation = zmm_bias;
     Xbyak::Zmm zmm_zero = Xbyak::Zmm(30);
     Xbyak::Zmm zmm_prev_dst = Xbyak::Zmm(29);
+    /* zero-point */
+    Xbyak::Zmm zmm_zp = Xbyak::Zmm(29);
+    Xbyak::Zmm zmm_src_zp = Xbyak::Zmm(28);
+    Xbyak::Zmm zmm_dst_zp = Xbyak::Zmm(27);
 
     const Xbyak::Opmask ktail_mask = Xbyak::Opmask(2);
 
@@ -117,6 +132,13 @@ private:
     bool maybe_eltwise(int position);
     void cvt2ps(data_type_t type_in, Xbyak::Zmm ymm_in,
             const Xbyak::Operand &op, bool mask_flag);
+    Xbyak::Zmm zmm_out(const int idx) {
+        const int upper_limit
+                = is_bf16() ? zmm_idx_limit_bf16 : zmm_idx_limit_int8;
+        assert(upper_limit > idx);
+        MAYBE_UNUSED(upper_limit);
+        return Xbyak::Zmm(idx);
+    }
     Xbyak::Zmm zmm_mask(
             const Xbyak::Zmm zmm_in, bool mask_flag, bool store = false);
     Xbyak::Ymm ymm_mask(

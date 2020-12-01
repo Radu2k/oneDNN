@@ -79,7 +79,7 @@ status_t get_ocl_devices(
 }
 
 status_t get_ocl_kernel_arg_type(compute::scalar_type_t *type,
-        cl_kernel ocl_kernel, int idx, bool allow_undef) {
+        cl_kernel ocl_kernel, cl_uint idx, bool allow_undef) {
     char s_type[16];
     OCL_CHECK(clGetKernelArgInfo(ocl_kernel, idx, CL_KERNEL_ARG_TYPE_NAME,
             sizeof(s_type), s_type, nullptr));
@@ -125,7 +125,7 @@ void dump_kernel_binary(
 
     static int counter = 0;
     compute::kernel_t realized_kernel;
-    auto status = binary_kernel.realize(&realized_kernel, engine);
+    auto status = binary_kernel.realize(&realized_kernel, engine, nullptr);
 
     // Ignore error.
     if (status != status::success) return;
@@ -155,7 +155,7 @@ void dump_kernel_binary(
                       ->name();
     fname << "dnnl_dump_gpu_" << kernel_name << "." << counter << ".bin";
 
-    FILE *fp = fopen(fname.str().c_str(), "w+");
+    FILE *fp = fopen(fname.str().c_str(), "wb+");
 
     // Ignore error.
     if (!fp) return;
@@ -168,6 +168,24 @@ void dump_kernel_binary(
 #else
 void dump_kernel_binary(const engine_t *, const compute::kernel_t &) {}
 #endif
+
+status_t get_kernel_arg_types(cl_kernel ocl_kernel,
+        std::vector<gpu::compute::scalar_type_t> *arg_types) {
+    cl_uint nargs;
+    OCL_CHECK(clGetKernelInfo(
+            ocl_kernel, CL_KERNEL_NUM_ARGS, sizeof(nargs), &nargs, nullptr));
+
+    *arg_types = std::vector<gpu::compute::scalar_type_t>(nargs);
+
+    for (cl_uint i = 0; i < nargs; i++) {
+        gpu::compute::scalar_type_t type;
+        CHECK(gpu::ocl::get_ocl_kernel_arg_type(
+                &type, ocl_kernel, i, /*allow_undef=*/true));
+        (*arg_types)[i] = type;
+    }
+
+    return status::success;
+}
 
 } // namespace ocl
 } // namespace gpu
