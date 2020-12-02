@@ -30,20 +30,6 @@
 #define HAS_PAD_H (PH != 0 || PH_R != 0)
 #define HAS_PAD_W (PW != 0 || PW_R != 0)
 
-inline void atomic_add_global(
-        volatile __global atomic_float *source, float operand) {
-    float old_val = atomic_load_explicit(
-            source, memory_order_relaxed, memory_scope_device);
-    if (isnan(operand)) return;
-    bool success = false;
-    do {
-        float new_val = old_val + operand;
-        success = atomic_compare_exchange_strong_explicit(source, &old_val,
-                new_val, memory_order_acq_rel, memory_order_relaxed,
-                memory_scope_device);
-    } while (!success);
-}
-
 #if DST_DT_F32
 #define BLOCK_READ_DST(ptr) \
     as_float(intel_sub_group_block_read((__global uint *)ptr))
@@ -287,11 +273,7 @@ gen9_conv_bwd_weights(__global SRC_DATA_T *src,
         atomic_add_global(diff_wei + i * OC_BLOCK + sglid, blockC00[i]);
 
     for (int i = 0; i < 8; i++)
-<<<<<<< HEAD:src/gpu/ocl/gen9_conv_bwd_weights.cl
         atomic_add_global(diff_wei + (8 + i) * OC_BLOCK + sglid, blockC01[i]);
-=======
-        atomic_add_global(diff_wei + (8 + i) * OC_BLOCK + local_x, blockC01[i]);
->>>>>>> master:src/gpu/ocl/gen9_conv_bwd_weights_f32.cl
 #endif
 
 #endif
