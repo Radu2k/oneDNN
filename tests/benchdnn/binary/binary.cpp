@@ -112,8 +112,6 @@ static int init_pd(dnnl_engine_t engine, const prb_t *prb,
     DNN_SAFE(dnnl_binary_desc_init(&bd, alg, &src_d[0], &src_d[1], &dst_d),
             WARN);
 
-    auto src0_scale = prb->attr.scales.get(DNNL_ARG_SRC_0).scale;
-    auto src1_scale = prb->attr.scales.get(DNNL_ARG_SRC_1).scale;
     attr_args_t attr_args;
     attr_args.prepare_binary_post_op_mds(prb->attr, prb->ndims[0], dst_dims);
     auto dnnl_attr = create_dnnl_attr(prb->attr, attr_args);
