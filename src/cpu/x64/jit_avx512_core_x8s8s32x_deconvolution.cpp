@@ -51,7 +51,7 @@ jit_avx512_core_x8s8s32x_deconv_fwd_kernel<Vmm>::
         static constexpr bool use_exact_tail_scalar_bcast = false;
 
         const binary_injector::rhs_arg_static_params_t rhs_sp {
-                static_cast<std::size_t>(Xbyak::Xmm(31).getIdx()), this->rdx,
+                static_cast<size_t>(Xbyak::Xmm(31).getIdx()), this->rdx,
                 this->r14, preserve_gpr, preserve_vmm,
                 GET_OFF(post_ops_binary_rhs_arg_vec),
                 memory_desc_wrapper(dst_md), tail_size, ktail_mask,
@@ -213,7 +213,7 @@ status_t _jit_avx512_core_x8s8s32x_deconv_fwd_kernel::init_conf(
                         || (jcp.oc % jcp.oc_block != 0))) {
             /* For grouped deconvolutions, oneDNN doesn't support padding.
                 When channels per group is not multiple of 16:
-                - Use Ymm when channels per group is multiple of 8, 
+                - Use Ymm when channels per group is multiple of 8,
                 - Use Xmm when channels per group is multiple of 4,
                 - Otherwise return unimplemented. */
             jcp.ic_block = (jcp.ic % 8 == 0) && (jcp.oc % 8 == 0) ? 8 : 4;
@@ -883,8 +883,8 @@ void jit_avx512_core_x8s8s32x_deconv_fwd_kernel<Vmm>::icb_loop(
         int ur_w, int l_overflow, int r_overflow, bool is_last_sp_block) {
 
     int shift_src_icb = jcp.typesize_in * jcp.ic_block;
-    int shift_filt_icb = jcp.typesize_in * jcp.kd * jcp.kh * jcp.kw
-            * jcp.ic_block * jcp.oc_block;
+    const size_t shift_filt_icb = (size_t)jcp.typesize_in * jcp.kd * jcp.kh
+            * jcp.kw * jcp.ic_block * jcp.oc_block;
 
     prepare_output(ur_w);
 
@@ -912,7 +912,7 @@ void jit_avx512_core_x8s8s32x_deconv_fwd_kernel<Vmm>::icb_loop(
         }
 
         add(reg_src, shift_src_icb);
-        add(reg_filt, shift_filt_icb);
+        safe_add(reg_filt, shift_filt_icb, reg_ker_long_offt);
         dec(reg_icb);
         cmp(reg_icb, 0);
         jg(icb_loop_label, T_NEAR);
@@ -920,7 +920,7 @@ void jit_avx512_core_x8s8s32x_deconv_fwd_kernel<Vmm>::icb_loop(
 
     /* come-back pointers */
     sub(reg_src, jcp.nb_ic * shift_src_icb);
-    sub(reg_filt, jcp.nb_ic * shift_filt_icb);
+    safe_sub(reg_filt, jcp.nb_ic * shift_filt_icb, reg_ker_long_offt);
     L(skip_icb_loop);
 
     if (jcp.ngroups % jcp.ch_block != 0 || jcp.oc_without_padding != jcp.oc) {

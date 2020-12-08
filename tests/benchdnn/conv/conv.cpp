@@ -14,6 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <cstring>
+
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
@@ -23,6 +25,7 @@
 
 #include "tests/test_thread.hpp"
 
+#include "compare.hpp"
 #include "dnnl_common.hpp"
 #include "dnnl_memory.hpp"
 #include "norm.hpp"
@@ -140,7 +143,6 @@ inline int compare_dat(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
     // Update trh with the largest value from all eltwise post-ops
     const auto &po = prb->attr.post_ops;
     bool has_eltwise = po.eltwise_index() != -1;
-    const bool has_binary = po.binary_index() != -1;
     using pk_t = attr_t::post_ops_t::kind_t;
 
     int sum_ind = po.find(pk_t::SUM);
@@ -169,22 +171,19 @@ inline int compare_dat(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
             // the library for integral target data types.
             not_a_num += 1;
             not_a_num_ok += true;
-        } else if (fp < f_min) {
+        } else if (fp0 < f_min) {
             diff_norm.update(f_min, dt);
             ok = dt == f_min;
-            if (!ok && has_eltwise)
-                ok = eltwise::check_extreme_values(fp, dt, pk_t::ELTWISE_END);
-            if (!ok && has_binary)
-                ok = binary::check_extreme_values(fp, dt, pk_t::BINARY_END);
+            if (!ok) ok = compare::compare_extreme_values(fp, dt);
             below += 1;
             below_ok += ok;
-        } else if (fp > f_max) {
+        } else if (fp0 > f_max) {
             diff_norm.update(f_max, dt);
             ok = dt == f_max;
-            if (!ok && has_eltwise)
-                ok = eltwise::check_extreme_values(fp, dt, pk_t::ELTWISE_END);
-            if (!ok && has_binary)
-                ok = binary::check_extreme_values(fp, dt, pk_t::BINARY_END);
+            if (!ok) ok = compare::compare_extreme_values(fp, dt);
+            // Hack for (TODO: Intel only?) CPU saturation check.
+            if (is_cpu() && f_dt == dnnl_s32)
+                ok = dt >= BENCHDNN_S32_TO_F32_SAT_CONST && dt < f_max;
             above += 1;
             above_ok += ok;
         } else {
@@ -200,10 +199,7 @@ inline int compare_dat(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
                 }
             }
             ok = (fabs(fp) > 1e-5 ? rel_diff : diff) <= trh;
-            if (!ok && has_eltwise)
-                ok = eltwise::check_extreme_values(fp, dt, pk_t::ELTWISE_END);
-            if (!ok && has_binary)
-                ok = binary::check_extreme_values(fp, dt, pk_t::BINARY_END);
+            if (!ok) ok = compare::compare_extreme_values(fp, dt);
             in += 1;
             in_ok += ok;
         }
@@ -392,6 +388,17 @@ int fill_wei(
     if (check_reorder) {
         SAFE(mem_fp.reorder(mem_dt), WARN);
         SAFE(compare_wei(prb, mem_fp, mem_00, res), WARN);
+    }
+    if ((s8_s8 || !is_def_zp) && is_cpu()) {
+        // Check that s8 -> s8_comp exists in the library since users may have
+        // already quantized data.
+        dnn_mem_t mem_fp_s8(mem_fp.md_, dnnl_s8, get_test_engine());
+        dnn_mem_t mem_dt_s8(mem_dt.md_, dnnl_s8, get_test_engine());
+        SAFE(mem_fp_s8.reorder(mem_fp), WARN);
+        SAFE(mem_dt_s8.reorder(mem_fp_s8), WARN);
+        SAFE(mem_dt.size() == mem_dt_s8.size() ? OK : FAIL, WARN);
+        int rc = std::memcmp((void *)mem_dt, (void *)mem_dt_s8, mem_dt.size());
+        SAFE(rc == 0 ? OK : FAIL, WARN);
     }
 
     return OK;
@@ -628,7 +635,7 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
 
     // Winograd implementation limitations.
     if (prb->alg == WINO) {
-        if (engine_tgt_kind == dnnl_cpu) {
+        if (is_cpu()) {
 #ifdef DNNL_X64
             static auto isa = dnnl_get_effective_cpu_isa();
             static bool has_avx512_common = isa >= dnnl_cpu_isa_avx512_mic
@@ -682,7 +689,7 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
             res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
             return;
 #endif
-        } else if (engine_tgt_kind == dnnl_gpu) {
+        } else if (is_gpu()) {
             bool shape_ok = prb->ndims == 4 && prb->g == 1 && prb->kh == 3
                     && prb->kw == 3 && prb->sh == 1 && prb->sw == 1
                     && prb->dh == 0 && prb->dw == 0;
@@ -802,8 +809,8 @@ int doit(const prb_t *prb, res_t *res) {
     // testing time
     dnnl_primitive_t c_ref {};
 
-    if (bench_mode & CORR && engine_tgt_kind == dnnl_gpu && fast_ref_gpu
-            && // TODO: temporary disable cpu as ref for testcases with binary post-ops
+    if (bench_mode & CORR && is_gpu() && fast_ref_gpu &&
+            // TODO: temporary disable cpu as ref for testcases with binary post-ops
             prb->attr.post_ops.binary_index() == -1) {
         dnnl_primitive_desc_t cpd_ref = nullptr;
         SAFE(init_pd_custom(get_cpu_engine(), prb, cpd_ref, nullptr, fp, fp, fp,

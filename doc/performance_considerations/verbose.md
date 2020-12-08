@@ -2,29 +2,11 @@ Verbose Mode {#dev_guide_verbose}
 ========================================================
 
 It is often useful to collect information about how much of an application
-runtime is spent executing oneDNN primitives and which of those take
-the most time. oneDNN verbose mode enables tracing execution of oneDNN
-primitives and collection of basic statistics like execution time and
-primitive parameters.
-
+runtime is spent executing oneDNN primitives and which of those take the most
+time. oneDNN verbose mode enables tracing execution of oneDNN primitives and
+collection of basic statistics like execution time and primitive parameters.
 When verbose mode is enabled oneDNN will print out information to `stdout`.
-The first lines of verbose information contain the build version and git hash,
-if available, as well as CPU and GPU runtimes, and the supported instruction
-set architecture.
 
-Each subsequent line of verbose information is formatted as a comma-separated list
-containing:
-1. `dnnl_verbose` marker string
-2. operation: `create:<cache_hit|cache_miss>` or `exec`
-3. engine kind: `cpu` or `gpu`
-4. primitive name: `convolution`, `reorder`, `sum`, etc
-5. primitive implementation
-6. propagation: `forward_training`, `forward_inference`, or `backward`
-7. information about input and output data types and formats
-8. primitive attributes
-9. auxiliary information like algorithm name or number of inputs
-10. a problem description in [benchdnn format](@ref dev_guide_benchdnn)
-11. execution time in milliseconds
 
 ## Build-time Controls
 
@@ -72,9 +54,38 @@ dnnl_verbose,exec,cpu,convolution,jit:avx2,forward_training,src_f32::blocked:aBc
 dnnl_verbose,exec,cpu,reorder,jit:uni,undef,src_f32::blocked:aBcd8b:f0 dst_f32::blocked:abcd:f0,,,2x16x7x7,0.173096
 ~~~
 
-Please see the profiling example [here](@ref performance_profiling_cpp), as it uses
-DNNL_VERBOSE output to tune oneDNN code to align with
-[best practices](@ref dev_guide_inference).
+The first lines of verbose information, which are denoted with `info`, contain
+the build version and git hash, if available, as well as CPU and GPU runtimes,
+and the supported instruction set architecture.
+
+
+Each subsequent line of verbose information is formatted as a comma-separated
+list containing:
+1. `dnnl_verbose` marker string
+2. operation: `create:<cache_hit|cache_miss>` or `exec`
+3. engine kind: `cpu` or `gpu` (`cpu2gpu` or `gpu2cpu` for cross-engine reorder)
+4. primitive name: `convolution`, `reorder`, `sum`, etc
+5. primitive implementation
+6. propagation kind: `forward_training`, `forward_inference`, or `backward`
+7. information about all operation tensors (separated by space)
+8. primitive attributes
+9. auxiliary information like algorithm name or number of inputs
+10. a problem description in [benchdnn format](@ref dev_guide_benchdnn)
+11. execution time in milliseconds
+
+The information about a particular operation tensors has the following format:
+`tensor_name`_`data_type`::`format_kind`:`format_tag`:`extra_flags`, where:
+
+1. `tensor_name` is one of the tensors names listed in the [Naming Conventions](@ref dev_guide_conventions),
+   and denotes a tensor supported by the corresponding primitive, and
+2. `data_type`, `format_kind`, `format_tag`, and `extra_flags` denote values
+   from #dnnl::memory::data_type, #dnnl::memory::format_kind,
+   #dnnl::memory::format_tag, and #dnnl_memory_extra_flags_t respectively. Note,
+   that certain markers may be missing in some cases, such as `format_tag` for
+   the \weights tensor for the int8 Winograd convolution.
+
+Please see the profiling example [here](@ref performance_profiling_cpp), as it
+uses DNNL_VERBOSE output to tune oneDNN code to align with [best practices](@ref dev_guide_inference).
 
 @note
 When oneDNN verbose mode is enabled with GPU engines, oneDNN adds extra stream
