@@ -976,9 +976,12 @@ public:
         if (n1 == 1 && n2 == 1) {
             // 1D
             mov(1, _i0, x);
+            if (!i1.isInvalid()) mov(1, i1, 0);
+            if (!i2.isInvalid()) mov(1, i2, 0);
         } else if (n2 == 1) {
             // 2D
             e_idiv(_i1, _i0, x, n0);
+            if (!i2.isInvalid()) mov(1, i2, 0);
         } else {
             // 3D
             auto i12 = ra.alloc_sub<int32_t>();
@@ -1565,46 +1568,64 @@ public:
         setDefaultAutoSWSB(false);
     }
 
-    // Emulate integer division, math.iqot/math.irem do not work with integers.
-    // For x >= 0, y > 0:
+    // Adapted version of magicgu function from Hacker's Delight 10-15.
+    void e_idiv_magicgu(uint32_t d, uint32_t &m, uint32_t &p) {
+        uint32_t s32_max = std::numeric_limits<int32_t>::max();
+        assert(d != 0 && d <= s32_max);
+        uint64_t nc = (s32_max / d) * d - 1;
+        for (p = 32; p < 64; p++) {
+            uint64_t _2p = 1LL << p;
+            if (_2p > nc * (d - 1 - (_2p - 1) % d)) {
+                m = (_2p + d - 1 - (_2p - 1) % d) / d;
+                return;
+            }
+        }
+        assert(!"not expected");
+    }
+
+    // Emulates integer division by a constant.
+    // Requirements:
+    //     0 <= x <= UINT32_MAX
+    //     0 <  y <= INT32_MAX
+    // Computes:
     //     qot = x / y
     //     rem = x % y
-    // For now implementing very naive version, using a loop.
     void e_idiv(const Subregister &qot, const Subregister &rem,
-            const Subregister &x, int y) {
-
-        assert(is_auto_swsb);
-        assert(x.getType() == DataType::d);
-        assert(utils::one_of(qot.getType(), DataType::d, DataType::w));
-        assert(utils::one_of(rem.getType(), DataType::d, DataType::w));
-        assert(y >= 1);
-
-        if (y == 1) {
-            mov(1, qot, x);
-            mov(1, rem, 0);
+            const Subregister &x, uint32_t y) {
+        if (ngen::utils::is_zero_or_pow2(y)) {
+            if (!qot.isInvalid()) shr(1, qot, x, ngen::utils::log2(y));
+            if (!rem.isInvalid()) and_(1, rem, x, y - 1);
             return;
         }
 
-        auto tmp = ra.alloc_sub<int32_t>();
+        uint32_t m, p;
+        e_idiv_magicgu(y, m, p);
 
-        auto qot_by_y = tmp;
-        mov(1, qot_by_y, 0);
-        mov(1, qot, 0);
+        auto _x = ra.alloc().ud();
+        auto _qot = ra.alloc().ud();
+        mov(1, _x, x);
 
-        Label loop;
-        mark(loop);
+        // qot = (x * m) >> p
+        mul(1, acc0.ud(0), _x, m & 0xFFFF);
+        mach(1, _qot, _x, m);
+        shr<uint32_t>(1, _qot, _qot, p - 32);
+        if (!qot.isInvalid()) mov(1, qot, _qot);
 
-        add(1, qot, qot, 1);
-        add(1, qot_by_y, qot_by_y, y);
-        cmp(8 | le | f0[0], qot_by_y, x);
+        if (!rem.isInvalid()) {
+            // rem = x - qot * y
+            bool y_is_16_bit = (y <= std::numeric_limits<int16_t>::max());
+            if (y_is_16_bit) {
+                mad(1, rem, x, _qot, -int16_t(y));
+            } else {
+                auto tmp = ra.alloc_sub<uint64_t>();
+                mul(1, tmp, _qot, y);
+                add(1, rem, x, -tmp.ud(0));
+                ra.safeRelease(tmp);
+            }
+        }
 
-        while_(8 | f0[0], loop);
-
-        add(1, qot_by_y, qot_by_y, -y);
-        add(1, qot, qot, -1);
-        add(1, rem, x, -qot_by_y);
-
-        ra.safeRelease(tmp);
+        ra.safeRelease(_x);
+        ra.safeRelease(_qot);
     }
 
     void e_mul(const Subregister &dst, const Subregister &src1, int src2) {
