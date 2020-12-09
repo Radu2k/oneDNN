@@ -582,9 +582,6 @@ public:
         enable_auto_swsb();
         prologue();
 
-        // Enable IEEE f32 -> s32 rounding and f32/f16 denorms.
-        or_(1, cr0, cr0, uint16_t(0x1480));
-
         ra.claim(r0);
 
         src_ptr = getArgument("src");
@@ -653,55 +650,25 @@ public:
             }
         }
 
-        // Start kernel body.
+        // Start execution.
+        // Enable IEEE f32 -> s32 rounding and f32/f16 denorms.
+        or_(1, cr0, cr0, uint16_t(0x1480));
 
         // Header for signal.
         and_(8, signal_header.ud(), r0.ud(2), uint32_t(0x7F000000));
 
         // ithr0 = get_local_id(0) / 8    [0, oc_group - 1]
-        // ithr1 = get_local_id(1)        [0, sp_group - 1]
         shr<uint32_t>(1, ithr0, local_id_0.uw(0), 3);
-        mov(1, ithr1, local_id_1.uw(0));
-
-        // Initialize SLM read offset for A in owords.
-        // Account for DPASW offset.
         and_<uint32_t>(1, fused_idx, ithr0, 1);
 
-        for (int i = 0; i < slm_desc.a_blocks; i++) {
-            int fused_block = std::min(mb_block - i * 16, 16);
-            mul(1, off_tmp, fused_idx, uint16_t(fused_block));
-            mad(1, a_slm_off_rd_init[i], off_tmp, ithr1,
-                    uint16_t(slm_desc.a_block_size / 16));
-            add(1, a_slm_off_rd_init[i], a_slm_off_rd_init[i], i * 32);
-        }
+        // ithr1 = get_local_id(1)        [0, sp_group - 1]
+        mov(1, ithr1, local_id_1.uw(0));
 
-        // Initialze SLM read offset for B in owords.
-        mov(4, b_slm_off_rd_init[0], uint16_t(slm_desc.b_off() / 16));
-        mad(4, b_slm_off_rd_init[0], b_slm_off_rd_init[0], ithr0,
-                uint16_t(slm_desc.b_block_size / 16));
+        // Initialize SLM offsets.
+        init_a_slm_off();
+        init_b_slm_off();
 
-        for (int i = 0; i < 32; i += 8) {
-            add(1, b_slm_off_rd_init[i / 8], b_slm_off_rd_init[i / 8],
-                    (i / 8) * 16);
-        }
-
-        mul(1, oc_tg, group_id_0, uint16_t(conf.oc_group * 32));
-        mad(1, oc, oc_tg, ithr0, uint16_t(32));
-        // oc index shared between fused EUs.
-        and_<uint32_t>(1, oc_fused, oc, ~(1 << 5));
-        mul(1, mb, group_id_2, uint16_t(mb_block));
-
-        if (conf.ver == ver_v1) {
-            // od = get_group_id(1) / (OW_PADDED / sp_group) / OH
-            // oh = get_group_id(1) / (OW_PADDED / sp_group) % OH
-            // ow = get_group_id(1) % (OW_PADDED / sp_group) * sp_group +
-            //      get_local_id(1)
-            unpack_1d_to_3d(group_id_1.d(0), ow_tg, ow_padded / conf.sp_group,
-                    oh, conf.oh, od, conf.od);
-            mul<int32_t>(1, ow_tg, ow_tg, uint16_t(conf.sp_group));
-            add<int32_t>(1, ow, ow_tg, ithr1);
-        } else {
-            // conf.ver == ver_v2.
+        if (conf.ver == ver_v2) {
             // Boundary conditions: sp[idx] <= sp_bound[idx].
             // Forward (any stride) and backward (unit stride):
             //   [0]   iw_load <= IW - 1
@@ -718,11 +685,33 @@ public:
                 if (has_h) mov(1, sp_bound[2], conf.ih - 1);
                 if (has_d) mov(1, sp_bound[4], conf.id - 1);
             }
+        }
 
+        auto oc_tg_block_idx = group_id_0;
+        auto sp_tg_block_idx = group_id_1;
+        auto mb_tg_block_idx = group_id_2;
+
+        mul(1, oc_tg, oc_tg_block_idx, uint16_t(conf.oc_group * 32));
+        mad(1, oc, oc_tg, ithr0, uint16_t(32));
+        // oc index shared between fused EUs.
+        and_<uint32_t>(1, oc_fused, oc, ~(1 << 5));
+        mul(1, mb, mb_tg_block_idx, uint16_t(mb_block));
+
+        if (conf.ver == ver_v1) {
+            // od = get_group_id(1) / (OW_PADDED / sp_group) / OH
+            // oh = get_group_id(1) / (OW_PADDED / sp_group) % OH
+            // ow = get_group_id(1) % (OW_PADDED / sp_group) * sp_group +
+            //      get_local_id(1)
+            unpack_1d_to_3d(sp_tg_block_idx, ow_tg, ow_padded / conf.sp_group,
+                    oh, conf.oh, od, conf.od);
+            mul<int32_t>(1, ow_tg, ow_tg, uint16_t(conf.sp_group));
+            add<int32_t>(1, ow, ow_tg, ithr1);
+        } else {
+            // conf.ver == ver_v2.
             auto odhw = tmp0.d(0);
             Subregister odhw_load[2] = {tmp0.d(1), tmp0.d(2)};
 
-            mul(1, odhw, group_id_1.d(0), conf.sp_group);
+            mul(1, odhw, sp_tg_block_idx, conf.sp_group);
             add(1, odhw_load[0], odhw, ithr0);
             if (is_4x2_tg) add(1, odhw_load[1], odhw_load[0], 2);
 
@@ -801,29 +790,6 @@ public:
                 }
             }
         }
-
-        // Initialize SLM write offsets for A and B in owords.
-        if (is_1st) {
-            mul(1, a_slm_off_wr_init, ithr1, uint16_t(slm_desc.a_block_size / 16));
-        } else {
-            mul(1, a_slm_off_wr_init, ithr0, uint16_t(slm_desc.a_block_size / 16));
-        }
-        mul(1, b_slm_off_wr_init, ithr0, uint16_t(slm_desc.b_block_size / 16));
-        if (is_1st) {
-            mad(1, a_slm_off_wr_init, a_slm_off_wr_init, ithr0,
-                    uint16_t(mb_read01 * 32 / 16));
-            if (conf.oc_group == 4) {
-                cmp(1 | eq | f0[0], ithr0, 3);
-                add(1 | f0[0], a_slm_off_wr_init, a_slm_off_wr_init,
-                        -(mb_read01 - mb_read23) * 32 / 16);
-            }
-        } else {
-            mad(1, a_slm_off_wr_init, a_slm_off_wr_init, ithr1,
-                    uint16_t((conf.mb_block / 4) * 32 / 16));
-        }
-        mad(1, b_slm_off_wr_init, b_slm_off_wr_init, ithr1,
-                uint16_t(32 * 32 / 4 / 16));
-        add(1, b_slm_off_wr_init, b_slm_off_wr_init, slm_desc.b_off() / 16);
 
         if (is_bwd && has_non_unit_stride && conf.ver == ver_v2) {
             precompute_src_off_bwd_v2();
@@ -1691,6 +1657,59 @@ public:
         }
         e_mul(tmp0.q(0), src1, src2);
         add(1, dst, dst, tmp0.retype(dst.getType()));
+    }
+
+    // Initializes SLM read/write offsets for A in owords.
+    void init_a_slm_off() {
+        assert(slm_desc.a_off() == 0);
+
+        // Read offsets.
+        for (int i = 0; i < slm_desc.a_blocks; i++) {
+            // Account for DPASW offset.
+            int fused_block = std::min(mb_block - i * 16, 16);
+            mul(1, off_tmp, fused_idx, uint16_t(fused_block));
+
+            mad(1, a_slm_off_rd_init[i], off_tmp, ithr1,
+                    uint16_t(slm_desc.a_block_size / 16));
+            add(1, a_slm_off_rd_init[i], a_slm_off_rd_init[i], i * 32);
+        }
+
+        // Write offsets.
+        if (is_1st) {
+            mul(1, a_slm_off_wr_init, ithr1,
+                    uint16_t(slm_desc.a_block_size / 16));
+            mad(1, a_slm_off_wr_init, a_slm_off_wr_init, ithr0,
+                    uint16_t(mb_read01 * 32 / 16));
+            if (conf.oc_group == 4) {
+                cmp(1 | eq | f0[0], ithr0, 3);
+                add(1 | f0[0], a_slm_off_wr_init, a_slm_off_wr_init,
+                        -(mb_read01 - mb_read23) * 32 / 16);
+            }
+        } else {
+            mul(1, a_slm_off_wr_init, ithr0,
+                    uint16_t(slm_desc.a_block_size / 16));
+            mad(1, a_slm_off_wr_init, a_slm_off_wr_init, ithr1,
+                    uint16_t((conf.mb_block / 4) * 32 / 16));
+        }
+    }
+
+    // Initialzes SLM read/write offsets for B in owords.
+    void init_b_slm_off() {
+        // Read offsets.
+        mov(4, b_slm_off_rd_init[0], uint16_t(slm_desc.b_off() / 16));
+        mad(4, b_slm_off_rd_init[0], b_slm_off_rd_init[0], ithr0,
+                uint16_t(slm_desc.b_block_size / 16));
+
+        for (int i = 0; i < 32; i += 8) {
+            add(1, b_slm_off_rd_init[i / 8], b_slm_off_rd_init[i / 8],
+                    (i / 8) * 16);
+        }
+
+        // Write offsets.
+        mul(1, b_slm_off_wr_init, ithr0, uint16_t(slm_desc.b_block_size / 16));
+        mad(1, b_slm_off_wr_init, b_slm_off_wr_init, ithr1,
+                uint16_t(32 * 32 / 4 / 16));
+        add(1, b_slm_off_wr_init, b_slm_off_wr_init, slm_desc.b_off() / 16);
     }
 
     void init_src_off() {
