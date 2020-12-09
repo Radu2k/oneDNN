@@ -164,22 +164,84 @@ public:
     Label label;
 };
 
+class slm_desc_t {
+public:
+    slm_desc_t() = default;
+
+    slm_desc_t(const conv_conf_t &conf, int slm_nbuf) {
+        // Double or triple SLM buffering.
+        assert(utils::one_of(slm_nbuf, 2, 3));
+
+        // Layout for int8 for 4x4 thread-group:
+        // - 1st convolution:
+        //     src - 4w x <mb_block>n8w4c
+        //     wei - 4o x 4o8w8o4i
+        // - other convolutions:
+        //     src - 4w x <mb_block>n32c
+        //     wei - 4o x 4o8i8o4i
+        // Pad inner blocks to avoid SLM bank conflicts.
+        // Apply renaming: src -> A, wei -> B, dst -> C.
+        switch (conf.mb_block) {
+            case 32: a_block_size = 1104; break;
+            case 40: a_block_size = 1376; break;
+            default: assert(!"not expected");
+        }
+        // Read/write 8 rows (registers) per load/store.
+        a_blocks = utils::div_up(conf.mb_block / 2, 8);
+        b_block_size = 1104;
+        b_blocks = 4;
+
+        a_buf_size = conf.sp_group * a_block_size;
+        b_buf_size = conf.oc_group * b_block_size;
+
+        int slm_dss_size = (1 << 17); // 128 KiB per DSS.
+        int eus_per_dss = 16;
+        int threads_per_eu = 4;
+        int tg_size = 16;
+        int max_slm_tg_size = slm_dss_size / threads_per_eu
+                * utils::div_up(eus_per_dss, tg_size);
+
+        a_nbuf = slm_nbuf;
+        b_nbuf = slm_nbuf;
+
+        size = a_nbuf * a_buf_size + b_nbuf * b_buf_size;
+
+        assert(size <= max_slm_tg_size);
+    }
+
+    int a_off() const { return 0; }
+    int b_off() const { return a_nbuf * a_buf_size; }
+
+    int a_nbuf;
+    int b_nbuf;
+
+    int size;
+
+    int a_block_size;
+    int b_block_size;
+
+    int a_buf_size;
+    int b_buf_size;
+
+    int a_blocks;
+    int b_blocks;
+};
+
 // Helper class to implement reduction across (IC * KD * KH * KW) and SLM
 // buffering.
 class loop_iterator_t {
 public:
     loop_iterator_t(const conv_conf_t &conf, int unroll, int gmem_nbuf,
-            int slm_nbuf, int ab_slm_size, bool check_src_load)
+            int slm_nbuf, const slm_desc_t &slm_desc, bool check_src_load)
         : conf(conf)
         , unroll(unroll)
         , gmem_nbuf(gmem_nbuf)
         , slm_nbuf(slm_nbuf)
-        , ab_slm_size(ab_slm_size)
+        , slm_desc(slm_desc)
         , check_src_load(check_src_load) {
 
         assert(unroll % (conf.kd * conf.kh * conf.kw) == 0);
         assert(gmem_nbuf == 1 || gmem_nbuf == 2);
-        assert(slm_nbuf == 2 || slm_nbuf == 3);
 
         pad_sign = (conf.prop_kind == backward_data) ? 1 : -1;
 
@@ -264,24 +326,40 @@ public:
 
     int gmem_read_src_off_update() const;
 
-    int smem_read_off_update() const {
+    int smem_read_off_update(int buf_size, int nbuf) const {
         assert(do_multiply());
 
         int smem_iter = iter - (gmem_nbuf - 1) - (slm_nbuf - 1);
-        int cur_slm_idx = smem_iter % slm_nbuf;
-        int next_slm_idx = (smem_iter + 1) % slm_nbuf;
-        int ret = next_slm_idx * ab_slm_size - cur_slm_idx * ab_slm_size;
+        int cur_slm_idx = smem_iter % nbuf;
+        int next_slm_idx = (smem_iter + 1) % nbuf;
+        int ret = next_slm_idx * buf_size - cur_slm_idx * buf_size;
         return ret;
     }
 
-    int smem_write_off_update() const {
+    int smem_read_a_off_update() const {
+        return smem_read_off_update(slm_desc.a_buf_size, slm_desc.a_nbuf);
+    }
+
+    int smem_read_b_off_update() const {
+        return smem_read_off_update(slm_desc.b_buf_size, slm_desc.b_nbuf);
+    }
+
+    int smem_write_off_update(int buf_size, int nbuf) const {
         assert(do_reg2smem());
 
         int smem_iter = iter - (gmem_nbuf - 1);
-        int cur_slm_idx = smem_iter % slm_nbuf;
-        int next_slm_idx = (smem_iter + 1) % slm_nbuf;
-        int ret = next_slm_idx * ab_slm_size - cur_slm_idx * ab_slm_size;
+        int cur_slm_idx = smem_iter % nbuf;
+        int next_slm_idx = (smem_iter + 1) % nbuf;
+        int ret = next_slm_idx * buf_size - cur_slm_idx * buf_size;
         return ret;
+    }
+
+    int smem_write_a_off_update() const {
+        return smem_write_off_update(slm_desc.a_buf_size, slm_desc.a_nbuf);
+    }
+
+    int smem_write_b_off_update() const {
+        return smem_write_off_update(slm_desc.b_buf_size, slm_desc.b_nbuf);
     }
 
     // NCdhw32n32c layout.
@@ -305,7 +383,7 @@ public:
     int unroll;
     int gmem_nbuf;
     int slm_nbuf;
-    int ab_slm_size;
+    const slm_desc_t &slm_desc;
     bool check_src_load;
     int pad_sign;
 
@@ -495,34 +573,8 @@ public:
         requireBarrier();
         requireDPAS();
 
-        // Implement double/triple SLM buffering. Layout for int8 for 4x4
-        // thread-group:
-        // - 1st convolution:
-        //     src - 4w x <mb_block>n8w4c
-        //     wei - 4o x 4o8w8o4i
-        // - other convolutions:
-        //     src - 4w x <mb_block>n32c
-        //     wei - 4o x 4o8i8o4i
-        // Pad inner blocks to avoid SLM bank conflicts.
-        // Apply renaming: src -> A, wei -> B, dst -> C.
-        switch (mb_block) {
-            case 32:
-                a_slm_block_size = 1104;
-                a_slm_blocks = 2;
-                break;
-            case 40:
-                a_slm_block_size = 1376;
-                a_slm_blocks = 3;
-                break;
-            default: assert(!"not expected");
-        }
-        b_slm_block_size = 1104;
-        b_slm_blocks = 4;
-
-        a_slm_size = conf.sp_group * a_slm_block_size;
-        b_slm_size = conf.oc_group * b_slm_block_size;
-        ab_slm_size = a_slm_size + b_slm_size;
-        requireSLM(slm_nbuf * ab_slm_size);
+        slm_desc = slm_desc_t(conf, slm_nbuf);
+        requireSLM(slm_desc.size);
 
         finalizeInterface();
 
@@ -615,18 +667,18 @@ public:
         // Account for DPASW offset.
         and_<uint32_t>(1, fused_idx, ithr0, 1);
 
-        for (int i = 0; i < a_slm_blocks; i++) {
+        for (int i = 0; i < slm_desc.a_blocks; i++) {
             int fused_block = std::min(mb_block - i * 16, 16);
             mul(1, off_tmp, fused_idx, uint16_t(fused_block));
             mad(1, a_slm_off_rd_init[i], off_tmp, ithr1,
-                    uint16_t(a_slm_block_size / 16));
+                    uint16_t(slm_desc.a_block_size / 16));
             add(1, a_slm_off_rd_init[i], a_slm_off_rd_init[i], i * 32);
         }
 
         // Initialze SLM read offset for B in owords.
-        mov(4, b_slm_off_rd_init[0], uint16_t(a_slm_size / 16));
+        mov(4, b_slm_off_rd_init[0], uint16_t(slm_desc.b_off() / 16));
         mad(4, b_slm_off_rd_init[0], b_slm_off_rd_init[0], ithr0,
-                uint16_t(b_slm_block_size / 16));
+                uint16_t(slm_desc.b_block_size / 16));
 
         for (int i = 0; i < 32; i += 8) {
             add(1, b_slm_off_rd_init[i / 8], b_slm_off_rd_init[i / 8],
@@ -752,11 +804,11 @@ public:
 
         // Initialize SLM write offsets for A and B in owords.
         if (is_1st) {
-            mul(1, a_slm_off_wr_init, ithr1, uint16_t(a_slm_block_size / 16));
+            mul(1, a_slm_off_wr_init, ithr1, uint16_t(slm_desc.a_block_size / 16));
         } else {
-            mul(1, a_slm_off_wr_init, ithr0, uint16_t(a_slm_block_size / 16));
+            mul(1, a_slm_off_wr_init, ithr0, uint16_t(slm_desc.a_block_size / 16));
         }
-        mul(1, b_slm_off_wr_init, ithr0, uint16_t(b_slm_block_size / 16));
+        mul(1, b_slm_off_wr_init, ithr0, uint16_t(slm_desc.b_block_size / 16));
         if (is_1st) {
             mad(1, a_slm_off_wr_init, a_slm_off_wr_init, ithr0,
                     uint16_t(mb_read01 * 32 / 16));
@@ -771,7 +823,7 @@ public:
         }
         mad(1, b_slm_off_wr_init, b_slm_off_wr_init, ithr1,
                 uint16_t(32 * 32 / 4 / 16));
-        add(1, b_slm_off_wr_init, b_slm_off_wr_init, a_slm_size / 16);
+        add(1, b_slm_off_wr_init, b_slm_off_wr_init, slm_desc.b_off() / 16);
 
         if (is_bwd && has_non_unit_stride && conf.ver == ver_v2) {
             precompute_src_off_bwd_v2();
@@ -832,15 +884,15 @@ public:
         ithr1 = ra.alloc_sub<int32_t>();
         fused_idx = ra.alloc_sub<int32_t>();
 
-        a_slm_rd = ra.alloc_range(a_slm_blocks);
-        b_slm_rd = ra.alloc_range(b_slm_blocks);
+        a_slm_rd = ra.alloc_range(slm_desc.a_blocks);
+        b_slm_rd = ra.alloc_range(slm_desc.b_blocks);
 
-        for (int i = 0; i < a_slm_blocks; i++)
+        for (int i = 0; i < slm_desc.a_blocks; i++)
             a_slm_off_rd_init[i] = ra.alloc_sub<int32_t>();
 
         auto b_slm_off_rd_init_reg = ra.alloc();
-        assert(b_slm_blocks < 8);
-        for (int i = 0; i < b_slm_blocks; i++)
+        assert(slm_desc.b_blocks <= 8);
+        for (int i = 0; i < slm_desc.b_blocks; i++)
             b_slm_off_rd_init[i] = b_slm_off_rd_init_reg.d(i);
 
         a_slm_off_wr_init = ra.alloc_sub<int32_t>();
@@ -1237,7 +1289,7 @@ public:
                     add(1, src_header[idx].uq(0), src_header[idx].uq(0), off);
 
                     int slm_off = j * 32;
-                    if (i == 1) slm_off += 2 * a_slm_block_size;
+                    if (i == 1) slm_off += 2 * slm_desc.a_block_size;
                     add(1, a_slm_wr[idx].ud(2), a_slm_off_wr_init,
                             slm_off / 16);
 
@@ -1259,10 +1311,10 @@ public:
         }
 
         // Set up offsets for SLM reads.
-        for (int i = 0; i < a_slm_blocks; i++)
+        for (int i = 0; i < slm_desc.a_blocks; i++)
             mov(1, a_slm_rd[i].ud(2), a_slm_off_rd_init[i]);
 
-        for (int i = 0; i < b_slm_blocks; i++)
+        for (int i = 0; i < slm_desc.b_blocks; i++)
             mov(1, b_slm_rd[i].ud(2), b_slm_off_rd_init[i]);
 
         if (check_src_load) {
@@ -1284,7 +1336,7 @@ public:
         // offsets.
         int unroll = math::lcm(gmem_nbuf * slm_nbuf, kdhw);
         loop_iterator_t it(
-                conf, unroll, gmem_nbuf, slm_nbuf, ab_slm_size, check_src_load);
+                conf, unroll, gmem_nbuf, slm_nbuf, slm_desc, check_src_load);
 
         // Ramp-up.
         for (int i = 0; i < it.ramp_up_iters; i++) {
@@ -2031,7 +2083,8 @@ public:
     void reg2smem_v2(const loop_iterator_t &it) {
         if (!enable_smem_write) return;
 
-        int upd = it.smem_write_off_update();
+        int a_upd = it.smem_write_a_off_update();
+        int b_upd = it.smem_write_b_off_update();
 
         int idx;
         int reg_off;
@@ -2059,7 +2112,7 @@ public:
                 store(16 | SWSB(sbid), block_oword(owords), SLM, a_slm_wr[idx],
                         A_tmp[reg_off]);
                 add(1 | sbid.src, a_slm_wr[idx].ud(2), a_slm_wr[idx].ud(2),
-                        upd / 16);
+                        a_upd / 16);
 
                 idx++;
                 reg_off += owords / 2;
@@ -2078,7 +2131,7 @@ public:
             store(16 | SWSB(sbid), block_oword(16), SLM, b_slm_wr[idx],
                     B_tmp[reg_off]);
             add(1 | sbid.src, b_slm_wr[idx].ud(2), b_slm_wr[idx].ud(2),
-                    upd / 16);
+                    b_upd / 16);
 
             idx++;
             reg_off += 8;
@@ -2088,8 +2141,9 @@ public:
 
     void smem2reg_v2(const loop_iterator_t &it) {
         bool is_last = it.is_last_multiply();
-        int upd = it.smem_read_off_update();
-        int dist = a_slm_blocks + b_slm_blocks;
+        int a_upd = it.smem_read_a_off_update();
+        int b_upd = it.smem_read_b_off_update();
+        int dist = slm_desc.a_blocks + slm_desc.b_blocks;
 
         // Load A.
         for (int i = 0; i < mb_block / 2; i += 8) {
@@ -2101,7 +2155,7 @@ public:
             load(16 | mod, A[i], block_oword(owords), SLM, a_slm_rd[idx]);
             if (!is_last)
                 add(1 | sbid.src, a_slm_rd[idx].ud(2), a_slm_rd[idx].ud(2),
-                        upd / 16);
+                        a_upd / 16);
         }
 
         // Load B.
@@ -2113,7 +2167,7 @@ public:
             load(16 | mod, B[i], block_oword(16), SLM, b_slm_rd[idx]);
             if (!is_last)
                 add(1 | sbid.src, b_slm_rd[idx].ud(2), b_slm_rd[idx].ud(2),
-                        upd / 16);
+                        b_upd / 16);
         }
     }
 
@@ -2136,12 +2190,12 @@ public:
             // Reuse B[oc] for later multiplies (case of oc_group == 2).
             if (reuse_b_regs && oc < B.getLen()) {
                 auto sbid = dpasw_sbid(idx);
-                int upd = it.smem_read_off_update();
+                int b_upd = it.smem_read_b_off_update();
                 load(16 | SWSB(sbid), B[oc], block_oword(16), SLM,
                         b_slm_rd[idx + 2]);
                 if (!is_last) {
                     add(1 | sbid.src, b_slm_rd[idx + 2].ud(2),
-                            b_slm_rd[idx + 2].ud(2), upd / 16);
+                            b_slm_rd[idx + 2].ud(2), b_upd / 16);
                 }
             }
         }
@@ -2154,10 +2208,10 @@ public:
         int src_load_iters = (conf.oc_group == 4 ? 1 : 2);
 
         mad(1, a_slm_wr[0].d(2), a_slm_off_wr_init, slm_buf_load,
-                uint16_t(ab_slm_size / 16));
+                uint16_t(slm_desc.a_buf_size / 16));
         if (A_block_regs > 8) {
             mad(1, a_slm_wr[1].d(2), a_slm_off_wr_init, slm_buf_load,
-                    uint16_t(ab_slm_size / 16));
+                    uint16_t(slm_desc.a_buf_size / 16));
             add(1 | SWSB(1), a_slm_wr[1].d(2), a_slm_wr[1].d(2), uint16_t(16));
         }
 
@@ -2173,10 +2227,10 @@ public:
             }
             if (iter + 1 < src_load_iters) {
                 add(1 | sb_store0.src, a_slm_wr[0].d(2), a_slm_wr[0].d(2),
-                        uint16_t(a_slm_block_size * 2 / 16));
+                        uint16_t(slm_desc.a_block_size * 2 / 16));
                 if (A_block_regs > 8) {
                     add(1 | sb_store1.src, a_slm_wr[1].d(2), a_slm_wr[1].d(2),
-                            uint16_t(a_slm_block_size * 2 / 16));
+                            uint16_t(slm_desc.a_block_size * 2 / 16));
                 }
             }
         }
@@ -2187,10 +2241,10 @@ public:
 
         assert(a_slm_wr.getLen() >= 2);
         mad(1, a_slm_wr[0].d(2), a_slm_off_wr_init, slm_buf_load,
-                uint16_t(ab_slm_size / 16));
+                uint16_t(slm_desc.a_buf_size / 16));
         if (A_block_regs > 8) {
             mad(1, a_slm_wr[1].d(2), a_slm_off_wr_init, slm_buf_load,
-                    uint16_t(ab_slm_size / 16));
+                    uint16_t(slm_desc.a_buf_size / 16));
             add(1 | SWSB(1), a_slm_wr[1].d(2), a_slm_wr[1].d(2), uint16_t(16));
         }
 
@@ -2230,7 +2284,7 @@ public:
         assert(!is_auto_swsb);
 
         mad(1, b_slm_wr[0].d(2), b_slm_off_wr_init, slm_buf_load,
-                uint16_t(ab_slm_size / 16));
+                uint16_t(slm_desc.b_buf_size / 16));
 
         if (is_1st) {
             // Set 8o4i block to zero for kw = 7.
@@ -2319,14 +2373,14 @@ public:
         if (slm_nbuf == 3) wait();
 
         if (enable_smem_read) {
-            for (int i = 0; i < a_slm_blocks; i++) {
+            for (int i = 0; i < slm_desc.a_blocks; i++) {
                 mad(1, a_slm_rd[i].d(2), a_slm_off_rd_init[i], slm_buf_compute,
-                        uint16_t(ab_slm_size / 16));
+                        uint16_t(slm_desc.a_buf_size / 16));
             }
 
-            for (int i = 0; i < b_slm_blocks; i++) {
+            for (int i = 0; i < slm_desc.b_blocks; i++) {
                 mad(1, b_slm_rd[i].d(2), b_slm_off_rd_init[i], slm_buf_compute,
-                        uint16_t(ab_slm_size / 16));
+                        uint16_t(slm_desc.b_buf_size / 16));
             }
 
             auto sync_mask = to_sbid_mask({dpasw_sbid(0), dpasw_sbid(1),
@@ -2336,14 +2390,15 @@ public:
             // Load A.
             for (int i = 0; i < mb_block / 2; i += 8) {
                 int owords = std::min(8, mb_block / 2 - i) * 2;
-                int dist = std::min(7, b_slm_blocks + a_slm_blocks - i / 8);
+                int dist = std::min(
+                        7, slm_desc.b_blocks + slm_desc.a_blocks - i / 8);
                 load(16 | SWSB(smem_a_sbid(i / 8), dist), A[i],
                         block_oword(owords), SLM, a_slm_rd[i / 8]);
             }
 
             // Load B.
             for (int i = 0; i < B.getLen(); i += 8) {
-                int dist = b_slm_blocks - i / 8;
+                int dist = slm_desc.b_blocks - i / 8;
                 load(16 | SWSB(dpasw_sbid(i / 8), dist), B[i], block_oword(16),
                         SLM, b_slm_rd[i / 8]);
             }
@@ -2800,11 +2855,8 @@ public:
 
     int gmem_nbuf;
     int slm_nbuf;
-    int a_slm_block_size;
-    int b_slm_block_size;
-    int a_slm_size;
-    int b_slm_size;
-    int ab_slm_size;
+
+    slm_desc_t slm_desc;
 
     Subregister group_id_0 = r0.ud(1);
     Subregister group_id_1 = r0.ud(6);
@@ -2830,9 +2882,6 @@ public:
 
     GRFRange a_slm_rd;
     GRFRange b_slm_rd;
-
-    int a_slm_blocks;
-    int b_slm_blocks;
 
     // SLM read offsets in owords for the first buffer.
     // Reading up to 3 SLM blocks for A (for 40n32c).
