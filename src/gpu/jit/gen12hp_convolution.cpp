@@ -43,8 +43,7 @@ status_t gen12hp_convolution_data_common_init_conf(engine_t *engine,
             = utils::one_of(conf.src_data_type, data_type::s8, data_type::u8);
 
     if (conf.with_groups && conf.ngroups > 1) return status::unimplemented;
-    if ((conf.ic < (is_int8 ? 32 : 16)) && !is_1st)
-        return status::unimplemented;
+    if (conf.ic < 16 && !is_1st) return status::unimplemented;
     if (conf.mb < 16) return status::unimplemented;
     if (conf.prop_kind == prop_kind::backward_data && is_1st)
         return status::unimplemented;
