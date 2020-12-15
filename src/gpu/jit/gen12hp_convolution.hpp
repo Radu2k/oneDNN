@@ -105,11 +105,23 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
             if (!gpu_convolution_fwd_pd_t::post_ops_ok(attr)) return false;
 
             auto &po = attr->post_ops_;
-
-            // Binary is not supported.
-            if (po.find(primitive_kind::binary) != -1) return false;
-
+            int bin_cnt = 0;
             for (int i = 0; i < po.len(); i++) {
+                if (po.entry_[i].is_binary()) {
+                    // Limited binary postops support:
+                    // common and per_oc policy
+                    // f32 data type
+                    // only one binary operation in postops list
+                    auto src1_binary_po_d = memory_desc_wrapper(
+                            po.entry_[i].binary.src1_desc);
+                    int mask_binary_po = utils::get_dims_mask(dst_md_.dims,
+                            src1_binary_po_d.dims(), dst_md_.ndims);
+                    if (mask_binary_po != 0 && mask_binary_po != 2)
+                        return false;
+                    if (src1_binary_po_d.data_type() != data_type::f32)
+                        return false;
+                    if (++bin_cnt > 1) return false;
+                }
                 if (po.entry_[i].is_eltwise()) {
                     if (!jit_eltwise_injector_f32<ngen::HW::Gen12HP>::
                                     is_supported(po.entry_[i].eltwise.alg))

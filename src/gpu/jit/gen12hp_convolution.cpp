@@ -268,6 +268,11 @@ status_t gen12hp_convolution_fwd_t::execute(const exec_ctx_t &ctx) const {
             = (attr_info.with_per_oc_oscales && !attr_info.with_runtime_oscales)
             ? CTX_GPU_RES_STORAGE(OSCALES_)
             : CTX_IN_STORAGE(DNNL_ARG_ATTR_OUTPUT_SCALES);
+    auto &binaries = attr_info.with_binary
+            ? CTX_IN_STORAGE(
+                    DNNL_ARG_ATTR_MULTIPLE_POST_OP(attr_info.binary_idx)
+                    | DNNL_ARG_SRC_1)
+            : memory_storage_t::empty_storage();
 
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, src);
@@ -276,6 +281,7 @@ status_t gen12hp_convolution_fwd_t::execute(const exec_ctx_t &ctx) const {
     arg_list.set(3, dst);
     arg_list.set(4, oscales);
     arg_list.set(5, attr_info.common_oscales);
+    arg_list.set(6, binaries);
 
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);
     return parallel_for(ctx, nd_range, kernel_, arg_list);
@@ -310,6 +316,7 @@ status_t gen12hp_convolution_bwd_data_t::execute(const exec_ctx_t &ctx) const {
     arg_list.set(3, diff_src);
     arg_list.set(4, memory_storage_t::empty_storage());
     arg_list.set(5, memory_storage_t::empty_storage());
+    arg_list.set(6, memory_storage_t::empty_storage());
 
     const auto &conf = pd()->conf;
     auto nd_range = compute::nd_range_t(conf.gws_d, conf.lws_d);

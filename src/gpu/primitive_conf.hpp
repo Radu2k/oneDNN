@@ -96,8 +96,8 @@ struct attr_info_t {
 
         attr_info.all_post_ops.copy_from(po);
 
-        int binary_idx = po.find(primitive_kind::binary);
-        attr_info.with_binary = (binary_idx != -1);
+        attr_info.binary_idx = po.find(primitive_kind::binary);
+        attr_info.with_binary = (attr_info.binary_idx != -1);
 
         // Eltwise
         attr_info.eltwise_idx = po.find(primitive_kind::eltwise);
@@ -182,6 +182,7 @@ struct attr_info_t {
     bool with_binary;
     bool with_eltwise;
     int eltwise_idx;
+    int binary_idx;
     alg_kind_t eltwise_alg;
     float eltwise_scale;
     float eltwise_alpha;

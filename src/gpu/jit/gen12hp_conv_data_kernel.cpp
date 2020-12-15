@@ -564,6 +564,7 @@ public:
         newArgument("dst", ExternalArgumentType::GlobalPtr);
         newArgument("oscales", ExternalArgumentType::GlobalPtr);
         newArgument("common_oscales", DataType::f);
+        newArgument("binary", ExternalArgumentType::GlobalPtr);
 
         externalName("gen12hp_conv_data");
         requireLocalID(3);
@@ -600,6 +601,7 @@ public:
             common_oscales = getArgument("common_oscales");
             ra.claim(common_oscales);
         }
+        binary_surf = getArgumentSurface("binary");
 
         local_id_0 = getLocalID(0);
         ra.claim(local_id_0);
@@ -2478,6 +2480,7 @@ public:
         if (!has_mb_padding && !has_oc_padding) return false;
 
         if (conf.with_bias) return true;
+        if (attr_info.with_binary) return true;
 
         for (int po_idx = 0; po_idx < attr_info.all_post_ops.len(); po_idx++) {
             auto &e = attr_info.all_post_ops.entry_[po_idx];
@@ -2566,7 +2569,37 @@ public:
         }
     }
 
-    void apply_post_ops() {
+    void apply_binary_postops(dnnl::impl::alg_kind_t alg, int mb_idx,
+            int mb_step, int oc_idx, int oc_step) {
+        if (!attr_info.with_binary) return;
+
+        int ireg = 0;
+        for_(int mb_inner = 0; mb_inner < mb_step; mb_inner++)
+        for_(int oc_inner = 0; oc_inner < oc_step; oc_inner += 16)
+        {
+            auto C_reg = C_dense[ireg];
+            auto binary_reg = with_common_binary ? binary_common(0, 1, 0)
+                                                 : binary[oc_inner / 8].f(0)(1);
+            switch (alg) {
+                case alg_kind::binary_add:
+                    add(16, C_reg.f(), C_reg.f(), binary_reg);
+                    break;
+                case alg_kind::binary_mul:
+                    mul(16, C_reg.f(), C_reg.f(), binary_reg);
+                    break;
+                case alg_kind::binary_max:
+                    max_(16, C_reg.f(), C_reg.f(), binary_reg);
+                    break;
+                case alg_kind::binary_min:
+                    min_(16, C_reg.f(), C_reg.f(), binary_reg);
+                    break;
+                default: assert(!"not expected");
+            }
+            ireg += 2;
+        }
+    }
+
+    void apply_post_ops(int mb_idx, int mb_step, int oc_idx, int oc_step) {
         for (int po_idx = 0; po_idx < attr_info.all_post_ops.len(); po_idx++) {
             auto &e = attr_info.all_post_ops.entry_[po_idx];
             switch (e.kind) {
@@ -2590,6 +2623,10 @@ public:
                     ra.safeRelease(scratch);
                     break;
                 }
+                case primitive_kind::binary:
+                    apply_binary_postops(
+                            e.binary.alg, mb_idx, mb_step, oc_idx, oc_step);
+                    break;
                 default: assert(!"not supported");
             }
         }
@@ -2621,7 +2658,7 @@ public:
 
         apply_bias(mb_idx, mb_step, oc_idx, oc_step);
         apply_oscales(mb_idx, mb_step, oc_idx, oc_step);
-        apply_post_ops();
+        apply_post_ops(mb_idx, mb_step, oc_idx, oc_step);
 
         // Zero out the padded area if needed.
         if (need_to_restore_zero_padding()) {
@@ -2702,6 +2739,14 @@ public:
                 int32_t(oc_idx * sizeof(float)));
         load(16, oscales[0], aligned_block_oword(oc_step * sizeof(float) / 16),
                 Surface(oscales_surf), oc_off[0]);
+    }
+
+    void load_per_oc_binary(int oc_idx, int oc_step) {
+        if (!attr_info.with_binary || with_common_binary) return;
+
+        add(1, oc_off[0].d(2), binary_off_init, oc_idx * sizeof(float));
+        load(16, binary[0], aligned_block_oword(oc_step * sizeof(float) / 16),
+                Surface(binary_surf), oc_off[0]);
     }
 
     void read_update_write_dst() {
@@ -2785,6 +2830,26 @@ public:
                     tmp0);
         }
 
+        // Initialize binary arg offset.
+        if (attr_info.with_binary) {
+            int bin_idx = attr_info.all_post_ops.find(primitive_kind::binary);
+            assert(bin_idx != -1);
+            auto &e = attr_info.all_post_ops.entry_[bin_idx];
+            with_common_binary
+                    = memory_desc_wrapper(e.binary.src1_desc).nelems(false)
+                    == 1;
+            if (with_common_binary) {
+                binary_common = ra.alloc().f(0);
+                mov(1, tmp0.d(0), 0);
+                load(1, binary_common, scattered_dword(1), Surface(binary_surf),
+                        tmp0);
+            } else {
+                binary = ra.alloc_range(oc_step * sizeof(float) / 32);
+                binary_off_init = ra.alloc_sub<int32_t>();
+                mul(1, binary_off_init, oc, uint16_t(sizeof(float)));
+            }
+        }
+
         // Setup for sum post-op.
         if (attr_info.with_sum) {
             sum_type = dst_type;
@@ -2806,6 +2871,7 @@ public:
 
             load_bias(oc_idx, oc_step);
             load_per_oc_oscales(oc_idx, oc_step);
+            load_per_oc_binary(oc_idx, oc_step);
 
             add(1, dst_header.uq(0), dst_off_init,
                     oc_idx * conf.od * conf.oh * conf.ow * mb_block * dst_size);
@@ -2911,6 +2977,7 @@ public:
 
     int bia_surf;
     int oscales_surf;
+    int binary_surf;
 
     GRF tmp0;
     GRF signal_header;
@@ -3003,6 +3070,12 @@ public:
     GRFRange C_old_cvt;
     DataType sum_type;
     Subregister sum_scale;
+
+    // Binary postops.
+    Subregister binary_common;
+    GRFRange binary;
+    Subregister binary_off_init;
+    bool with_common_binary = false;
 
     // Output scales.
     Subregister common_oscales;
