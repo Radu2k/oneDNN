@@ -936,7 +936,7 @@ inline void def_eltwise_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
 }
 
 inline bool post_ops_with_binary_ok(const primitive_attr_t *attr,
-        const data_type_t dst_dt, const uint max_ndims_supported = 2) {
+        const data_type_t dst_dt, const int max_ndims_supported = 2) {
     const auto &p = attr->post_ops_;
 
     auto is_eltwise = [&](int idx) { return p.entry_[idx].is_eltwise(false); };
