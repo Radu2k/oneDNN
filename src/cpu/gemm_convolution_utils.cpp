@@ -16,13 +16,13 @@
 
 #include "oneapi/dnnl/dnnl_types.h"
 
+#include "common/bfloat16.hpp"
 #include "common/c_types_map.hpp"
 #include "common/dnnl_thread.hpp"
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
-
-#include "common/bfloat16.hpp"
 #include "cpu/gemm_convolution_utils.hpp"
+#include "cpu/x64/injectors/jit_uni_postops_injector.hpp"
 
 #include "cpu/platform.hpp"
 
@@ -1035,6 +1035,15 @@ status_t init_conf(conv_gemm_conf_t &jcp,
     jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef
             || cd.diff_bias_desc.format_kind != format_kind::undef;
 
+    jcp.post_ops = attr.post_ops_;
+
+    const int eltwise_ind = jcp.post_ops.find(primitive_kind::eltwise);
+    jcp.with_eltwise = eltwise_ind != -1;
+    const int binary_ind = jcp.post_ops.find(primitive_kind::binary);
+    jcp.with_binary = binary_ind != -1;
+    const int sum_ind = jcp.post_ops.find(primitive_kind::sum);
+    jcp.with_sum = sum_ind != -1;
+
     jcp.is = jcp.ih * jcp.iw;
     jcp.os = jcp.oh * jcp.ow;
     jcp.ks = jcp.kh * jcp.kw * jcp.kd;
@@ -1044,9 +1053,26 @@ status_t init_conf(conv_gemm_conf_t &jcp,
     jcp.outer_threading = false;
 
     jcp.zp = zero_point_config_t(attr);
+    jcp.b_pad = nstl::max((jcp.oh - 1) * jcp.stride_h
+                    + (jcp.kh - 1) * (jcp.dilate_h + 1)
+                    - (jcp.ih + jcp.t_pad - 1),
+            0);
+    jcp.r_pad = nstl::max((jcp.ow - 1) * jcp.stride_w
+                    + (jcp.kw - 1) * (jcp.dilate_w + 1)
+                    - (jcp.iw + jcp.l_pad - 1),
+            0);
+    jcp.e_pad = nstl::max((jcp.od - 1) * jcp.stride_d
+                    + (jcp.kd - 1) * (jcp.dilate_d + 1)
+                    - (jcp.id + jcp.f_pad - 1),
+            0);
 
-    if (jcp.zp.src_exists && (jcp.f_pad || jcp.t_pad || jcp.l_pad))
-        return status::unimplemented;
+    const bool zp_src_with_padding = jcp.zp.src_exists && padding_exists(jcp);
+
+    if (zp_src_with_padding) {
+        jcp.zp.src_pad_comp = zero_point_pad_comp_config_t(jcp.f_pad, jcp.e_pad,
+                jcp.t_pad, jcp.b_pad, jcp.l_pad, jcp.r_pad, jcp.stride_d,
+                jcp.stride_h, jcp.stride_w, jcp.od, jcp.oh, jcp.ow);
+    }
 
     const auto set_or_check_tags
             = [&](format_tag_t desired_src_tag, format_tag_t desired_dst_tag,
@@ -1173,12 +1199,20 @@ status_t init_conf(conv_gemm_conf_t &jcp,
     // possible crash on memory allocation:
     // 1Gb or size of the buffers already used for this convolution proportional
     // to the number of threads and multiplied by a heuristic coefficient (15)
-    size_t scratchpad_limit_by_absolute_value = (size_t)1 << 30; // 1Gb
-    size_t scratchpad_limit_by_tensor_sizes = 15 * max_threads
-            * (src_d.size() + weights_d.size() + dst_d.size());
+    const size_t zp_src_pad_comp_size = zp_src_with_padding
+            ? (jcp.oc * jcp.ngroups * jcp.zp.src_pad_comp.d
+                    * jcp.zp.src_pad_comp.h * jcp.zp.src_pad_comp.w)
+            : 0u;
+    const size_t weights_size
+            = weights_d.size() + zp_src_pad_comp_size * sizeof(int32_t);
 
-    size_t scratchpad_limit = nstl::min(scratchpad_limit_by_absolute_value,
-            scratchpad_limit_by_tensor_sizes);
+    static constexpr size_t scratchpad_limit_by_absolute_value = (size_t)1
+            << 30; // 1Gb
+    const size_t scratchpad_limit_by_tensor_sizes
+            = 15 * max_threads * (src_d.size() + weights_size + dst_d.size());
+    const size_t scratchpad_limit
+            = nstl::min(scratchpad_limit_by_absolute_value,
+                    scratchpad_limit_by_tensor_sizes);
 
     if (is_int8_conv) {
         if (is_fwd) {
@@ -2053,6 +2087,17 @@ status_t init_conf(conv_gemm_conf_t &jcp,
         }
     }
 
+    jcp.bias_data_type = cd.bias_desc.data_type;
+    jcp.dst_data_type = dst_md.data_type;
+    jcp.dst_os_stride = dst_d.is_blocking_desc()
+            ? dst_d.blocking_desc().strides[ndims - 1]
+            : 0;
+    jcp.scale_idx_mult = (attr.output_scales_.mask_ == (1 << 1));
+
+    if (zp_src_with_padding)
+        scratchpad.book<int32_t>(
+                key_conv_gemm_zp_src_pad_comp, zp_src_pad_comp_size);
+
     if (scratchpad.size() > scratchpad_limit) return status::unimplemented;
     return status::success;
 }
@@ -2118,8 +2163,36 @@ void bwd_weights_reduction_par_nspc(int ithr, int nthr, size_t g_start,
     }
 }
 
-}; // namespace jit_gemm_convolution_utils
+bool post_ops_ok(const post_ops_t &post_ops, const memory_desc_wrapper *dst_d) {
+#if DNNL_X64
+    using namespace x64::injector;
+    static constexpr bool sum_at_pos_0_only = true;
+    static constexpr bool sum_requires_scale_one = true;
+    return x64::injector::post_ops_ok({x64::isa_all, {binary, eltwise, sum},
+            post_ops, dst_d, sum_at_pos_0_only, sum_requires_scale_one});
+#endif
+    for (int i = 0; i < post_ops.entry_.size(); i++) {
+        const auto &post_op = post_ops.entry_[i];
+        const bool sum_postop_present = post_op.is_sum();
+        if (sum_postop_present && i > 0) return false;
+        if (!(sum_postop_present || post_op.is_eltwise()
+                    || post_op.is_binary()))
+            return false;
+    }
+    return true;
+}
 
+bool post_ops_ok(const post_ops_t &post_ops, const memory_desc_t *dst_d) {
+    const auto dst_md = memory_desc_wrapper(dst_d);
+    return post_ops_ok(post_ops, &dst_md);
+}
+
+bool padding_exists(const conv_gemm_conf_t &jcp) noexcept {
+    return jcp.l_pad || jcp.t_pad || jcp.f_pad || jcp.e_pad || jcp.b_pad
+            || jcp.r_pad;
+}
+
+} // namespace jit_gemm_convolution_utils
 } // namespace cpu
 } // namespace impl
 } // namespace dnnl

@@ -680,6 +680,8 @@ std::ostream &dump_global_params(std::ostream &s) {
         s << "--mem-check=" << bool2str(mem_check) << " ";
     if (canonical || allow_enum_tags_only != true)
         s << "--allow-enum-tags-only=" << bool2str(allow_enum_tags_only) << " ";
+    if (canonical || hints.get() != isa_hints_t::none)
+        s << "--cpu-isa-hints=" << isa_hints_t::hints2str(hints) << " ";
 
     return s;
 }
@@ -1098,6 +1100,7 @@ std::string normalize_tag(const std::string &tag_, int ndims) {
 
 int check_tag(const std::string &tag_, bool check_enum_tags_only) {
     auto tag = normalize_tag(tag_);
+    if (tag == tag::undef || tag == tag::any) return OK;
     return check_abc_tag(tag, check_enum_tags_only);
 }
 
@@ -1248,7 +1251,7 @@ void maybe_post_ops(const attr_t &attr, float &val, float sum_val,
 }
 
 engine_t::engine_t(dnnl_engine_kind_t engine_kind) {
-#ifdef DNNL_SYCL_DPCPP
+#ifdef DNNL_WITH_SYCL
     if (engine_kind == dnnl_cpu) {
         static dnnl_engine_t inst = nullptr;
         if (!inst) DNN_SAFE_V(dnnl_engine_create(&inst, engine_kind, 0));
@@ -1265,8 +1268,8 @@ engine_t::engine_t(dnnl_engine_kind_t engine_kind) {
 }
 
 engine_t::~engine_t() {
-#ifdef DNNL_SYCL_DPCPP
-    engine_ = NULL;
+#ifdef DNNL_WITH_SYCL
+    engine_ = nullptr;
 #else
     DNN_SAFE_V(dnnl_engine_destroy(engine_));
 #endif

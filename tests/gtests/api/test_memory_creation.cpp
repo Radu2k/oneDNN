@@ -141,6 +141,8 @@ auto cases_generic = ::testing::Values(params_t {{2, 15, 3, 2}, fmt::nChw16c},
         params_t {{1, 2, 9, 3, 3, 2}, fmt::gOIdhw4o4i},
         params_t {{2, 9, 3, 2}, fmt::OIhw16i16o4i},
         params_t {{2, 9, 3, 2}, fmt::OIhw16i16o2i},
+        params_t {{2, 9, 4, 3, 2}, fmt::OIdhw16i16o4i},
+        params_t {{2, 9, 4, 3, 2}, fmt::OIdhw16i16o2i},
         params_t {{2, 9, 4, 3, 2}, fmt::gOihw16o},
         params_t {{2, 17, 9, 3, 2}, fmt::gOIhw8o4i},
         params_t {{1, 2, 9, 3, 2}, fmt::gOIhw8o8i},
@@ -166,7 +168,9 @@ auto cases_generic = ::testing::Values(params_t {{2, 15, 3, 2}, fmt::nChw16c},
         params_t {{2, 17, 9, 3}, fmt::gOIw2i8o4i},
         params_t {{15, 16, 16, 3}, fmt::Goiw8g},
         params_t {{2, 17, 9, 3, 2}, fmt::gOIhw16i16o4i},
-        params_t {{2, 17, 9, 3, 2}, fmt::gOIhw16i16o2i});
+        params_t {{2, 17, 9, 3, 2}, fmt::gOIhw16i16o2i},
+        params_t {{2, 15, 17, 9, 3, 2}, fmt::gOIdhw16i16o4i},
+        params_t {{2, 15, 17, 9, 3, 2}, fmt::gOIdhw16i16o2i});
 } // namespace
 
 INSTANTIATE_TEST_SUITE_P(TestMemoryCreationEF, memory_creation_test_t,
@@ -183,7 +187,9 @@ class c_api_memory_test_t : public ::testing::Test {
 };
 
 TEST_F(c_api_memory_test_t, TestZeroPadBoom) {
-    SKIP_IF(DNNL_WITH_SYCL, "Test does not support SYCL.");
+#ifdef DNNL_WITH_SYCL
+    SKIP_IF(true, "Test does not support SYCL.");
+#endif
 
     dnnl_memory_desc_t md;
     memset(&md, 0xcc, sizeof(md));

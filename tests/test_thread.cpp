@@ -29,6 +29,8 @@
 #include "tests/test_thread.hpp"
 
 #if !defined(DNNL_TEST_THREADPOOL_USE_TBB)
+
+#include "src/cpu/platform.hpp"
 namespace dnnl {
 namespace testing {
 namespace {
@@ -51,8 +53,9 @@ inline int read_num_threads_from_env() {
         int nt = strtol(env_num_threads, &endp, 10);
         if (*endp == '\0') num_threads = nt;
     }
-    if (num_threads <= 0)
-        num_threads = (int)std::thread::hardware_concurrency();
+    if (num_threads <= 0) {
+        num_threads = (int)dnnl::impl::cpu::platform::get_max_threads_to_use();
+    }
     return num_threads;
 }
 } // namespace

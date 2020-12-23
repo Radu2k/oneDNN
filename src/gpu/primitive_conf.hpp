@@ -271,7 +271,7 @@ struct conv_conf_t {
     int stride_d, stride_h, stride_w;
     int dilate_d, dilate_h, dilate_w;
 
-    int sp_block;
+    int sp_block, sp;
     int od_block, oh_block, ow_block;
     int id_block, ih_block, iw_block;
     int oc_block, ic_block, nchunk;
@@ -586,6 +586,7 @@ struct reduction_conf_t {
     compute::dispatch_t finilize_dispatch;
     memory_desc_info_t src_md_info, dst_md_info;
     offsets_t off;
+    attr_info_t attr_info;
 };
 
 // Reorder
@@ -599,6 +600,8 @@ enum reorder_kernel_t {
     vectorize_last_dim,
     plain_to_ABxx8ayb,
     plain_xFxE_to_abcdef,
+    transpose8x8_a,
+    transpose8x8_b,
     transpose16x16_a,
     transpose16x16_b,
     reorder_nchw,
@@ -653,15 +656,11 @@ struct eltwise_conf_t {
 struct shuffle_conf_t {
     data_type_t data_type;
     int axis;
-    int axis_size;
-    int group_size;
     int transpose_row;
     int transpose_col;
-    size_t outer_size;
-    size_t inner_size;
-    size_t dim;
-    int ndims;
-    size_t gws_d[3];
+    compute::dispatch_t dispatch;
+    memory_desc_info_t src_md_info;
+    memory_desc_info_t dst_md_info;
 };
 
 inline void set_default_pool_conf(pool_conf_t &conf,

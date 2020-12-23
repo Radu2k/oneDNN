@@ -64,6 +64,8 @@ inline void dnnl_thr_barrier() {
 #include "oneapi/dnnl/dnnl_threadpool_iface.hpp"
 #define DNNL_THR_SYNC 0
 
+#include "cpu/platform.hpp"
+
 namespace dnnl {
 namespace impl {
 namespace threadpool_utils {
@@ -92,7 +94,15 @@ inline int dnnl_get_max_threads() {
     using namespace dnnl::impl::threadpool_utils;
     dnnl::threadpool_interop::threadpool_iface *tp = get_active_threadpool();
     // This is the maximum number of threads oneDNN would use
-    int def_max_threads = std::thread::hardware_concurrency();
+    static int def_max_threads = 0;
+    // get_max_threads_to_use() will return the number of physical cores in a
+    // socket. If running in a VM, a limited number of cores will be used (e.g.,
+    // 4 or 8) depending on the configuration of the cpuid mask. It is expected
+    // that the number of threads in user's threadpool will not exceed this
+    // value.
+    if (def_max_threads == 0)
+        def_max_threads
+                = (int)dnnl::impl::cpu::platform::get_max_threads_to_use();
     assert(def_max_threads > 0);
     // Use the default value if the threadpool-provided is outside the range
     // [1, def_max_threads]

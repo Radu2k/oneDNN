@@ -17,8 +17,6 @@
 #ifndef CPU_X64_JIT_UNI_TBB_BATCH_NORMALIZATION_HPP
 #define CPU_X64_JIT_UNI_TBB_BATCH_NORMALIZATION_HPP
 
-#include <assert.h>
-
 #include "common/c_types_map.hpp"
 #include "common/primitive.hpp"
 #include "common/type_helpers.hpp"
@@ -26,6 +24,7 @@
 
 #include "cpu/cpu_batch_normalization_pd.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
+#include "jit_primitive_conf.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -56,6 +55,8 @@ struct jit_uni_tbb_batch_normalization_fwd_t : public primitive_t {
                 jit_uni_tbb_batch_normalization_fwd_t);
 
         status_t init(engine_t *engine);
+
+        jit_memory_tag_kind_t tag_kind_;
     };
 
     jit_uni_tbb_batch_normalization_fwd_t(const pd_t *apd);
@@ -90,6 +91,8 @@ struct jit_uni_tbb_batch_normalization_bwd_t : public primitive_t {
                 jit_uni_tbb_batch_normalization_bwd_t);
 
         status_t init(engine_t *engine);
+
+        jit_memory_tag_kind_t tag_kind_;
     };
 
     jit_uni_tbb_batch_normalization_bwd_t(const pd_t *apd);

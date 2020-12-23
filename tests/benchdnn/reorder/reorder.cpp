@@ -182,7 +182,15 @@ static int init_pd(dnnl_engine_t engine, const prb_t *prb,
     SAFE(init_status, WARN);
 
     res->impl_name = query_impl_info(rpd);
-    BENCHDNN_PRINT(5, "oneDNN implementation: %s\n", res->impl_name.c_str());
+    if (maybe_skip(res->impl_name)) {
+        BENCHDNN_PRINT(2, "SKIPPED: oneDNN implementation: %s\n",
+                res->impl_name.c_str());
+        DNN_SAFE(dnnl_primitive_desc_destroy(rpd), WARN);
+        return res->state = SKIPPED, res->reason = SKIP_IMPL_HIT, OK;
+    } else {
+        BENCHDNN_PRINT(
+                5, "oneDNN implementation: %s\n", res->impl_name.c_str());
+    }
 
     return OK;
 }
@@ -279,7 +287,7 @@ int doit(const prb_t *prb, res_t *res) {
     const_dnnl_primitive_desc_t const_pd;
     DNN_SAFE(dnnl_primitive_get_primitive_desc(rp, &const_pd), CRIT);
 
-    if (dnn_mem_t::check_mem_size(const_pd) != OK) {
+    if (check_mem_size(const_pd) != OK) {
         DNN_SAFE_V(dnnl_primitive_destroy(rp));
         return res->state = SKIPPED, res->reason = NOT_ENOUGH_RAM, OK;
     }

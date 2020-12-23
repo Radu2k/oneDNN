@@ -345,6 +345,7 @@ typedef enum {
     dnnl_ABcde4b32a4b,
     dnnl_ABcde4b64a4b,
     dnnl_ABcde16b16a4b,
+    dnnl_ABcde16b16a2b,
     /// 5D tensor blocked by 1st dimension with block size 8
     dnnl_ABcde2b8a4b,
     /// 5D tensor blocked by 2nd dimension with block size 16
@@ -422,6 +423,8 @@ typedef enum {
     dnnl_aBCdef16b16c,
     dnnl_aBCdef16c16b,
     dnnl_aBCdef4c16b4c,
+    dnnl_aBCdef16c16b4c,
+    dnnl_aBCdef16c16b2c,
     /// 6D tensor blocked by 2nd dimension with block size 8
     dnnl_aBCdef2c8b4c,
     dnnl_aBCdef4c8b2c,
@@ -785,6 +788,7 @@ typedef enum {
     dnnl_OIdhw4i32o4i = dnnl_ABcde4b32a4b,
     dnnl_OIdhw4i64o4i = dnnl_ABcde4b64a4b,
     dnnl_OIdhw16i16o4i = dnnl_ABcde16b16a4b,
+    dnnl_OIdhw16i16o2i = dnnl_ABcde16b16a2b,
     dnnl_OIdhw2i8o4i = dnnl_ABcde2b8a4b,
     dnnl_OIdhw8o8i = dnnl_ABcde8a8b,
     dnnl_OIdhw8o4i = dnnl_ABcde8a4b,
@@ -896,7 +900,9 @@ typedef enum {
     dnnl_gOdhwi8o = dnnl_aBdefc8b,
     dnnl_gOIdhw16i16o = dnnl_aBCdef16c16b,
     dnnl_gOIdhw4i16o4i = dnnl_aBCdef4c16b4c,
+    dnnl_gOIdhw16i16o4i = dnnl_aBCdef16c16b4c,
     dnnl_gOIdhw2i8o4i = dnnl_aBCdef2c8b4c,
+    dnnl_gOIdhw16i16o2i = dnnl_aBCdef16c16b2c,
     dnnl_gOIdhw16o16i = dnnl_aBCdef16b16c,
     dnnl_gOidhw16o = dnnl_aBcdef16b,
     dnnl_gOIdhw4i4o = dnnl_aBCdef4c4b,
@@ -2613,6 +2619,15 @@ typedef enum {
     dnnl_cpu_isa_avx2_vnni = 0x407,
 
 } dnnl_cpu_isa_t;
+
+/// CPU ISA hints flags
+typedef enum {
+    /// No hints (use default features)
+    dnnl_cpu_isa_no_hints = 0x0,
+
+    /// Prefer to exclusively use Ymm registers for computations
+    dnnl_cpu_isa_prefer_ymm = 0x1,
+} dnnl_cpu_isa_hints_t;
 
 /// @} dnnl_api_service
 

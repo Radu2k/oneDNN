@@ -65,6 +65,10 @@ if(DNNL_ENABLE_MAX_CPU_ISA)
     add_definitions(-DDNNL_ENABLE_MAX_CPU_ISA)
 endif()
 
+if(DNNL_ENABLE_CPU_ISA_HINTS)
+    add_definitions(-DDNNL_ENABLE_CPU_ISA_HINTS)
+endif()
+
 if(WIN32)
     add_definitions(-D_WIN)
     add_definitions(-DNOMINMAX)
@@ -227,12 +231,7 @@ if(DNNL_GPU_RUNTIME STREQUAL "OCL")
             DESTINATION ${LIB_CONFIG_INSTALL_DIR_COMPAT})
 endif()
 
-if(DNNL_SYCL_RUNTIME STREQUAL "COMPUTECPP")
-    install(FILES
-        "../cmake/FindComputeCpp.cmake"
-        "../cmake/FindOpenCL.cmake"
-        DESTINATION ${LIB_CONFIG_INSTALL_DIR})
-elseif(DNNL_SYCL_RUNTIME STREQUAL "DPCPP")
+if(DNNL_WITH_SYCL)
     install(FILES
         "../cmake/FindLevelZero.cmake"
         DESTINATION ${LIB_CONFIG_INSTALL_DIR})

@@ -55,7 +55,7 @@
 #include "gpu/ocl/verbose.hpp"
 #endif
 
-#if DNNL_WITH_SYCL
+#ifdef DNNL_WITH_SYCL
 #include "sycl/verbose.hpp"
 #endif
 
@@ -86,13 +86,34 @@ int get_verbose() {
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         gpu::ocl::print_verbose_header();
 #endif
-#if DNNL_WITH_SYCL
+#ifdef DNNL_WITH_SYCL
         sycl::print_verbose_header();
 #endif
+        printf("dnnl_verbose,info,prim_template:");
+        printf("%soperation,engine,primitive,implementation,prop_"
+               "kind,memory_descriptors,attributes,auxiliary,problem_desc,exec_"
+               "time\n",
+                get_verbose_timestamp() ? "timestamp," : "");
         version_printed = true;
     }
 #endif
     return verbose.get();
+}
+
+static setting_t<bool> verbose_timestamp {false};
+bool get_verbose_timestamp() {
+#if !defined(DISABLE_VERBOSE)
+    if (!verbose_timestamp.initialized()) {
+        // Assumes that all threads see the same environment
+        const int len = 2;
+        char val[len] = {0};
+        if (getenv("DNNL_VERBOSE_TIMESTAMP", val, len) == 1)
+            verbose_timestamp.set(atoi(val));
+        if (!verbose_timestamp.initialized()) verbose_timestamp.set(false);
+    }
+#endif
+    // No effect if verbose is not set.
+    return verbose.get() && verbose_timestamp.get();
 }
 
 double get_msec() {

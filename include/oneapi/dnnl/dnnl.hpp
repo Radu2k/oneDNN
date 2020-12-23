@@ -1531,6 +1531,7 @@ struct memory : public handle<dnnl_memory_t> {
         aBCde4c16b4c = dnnl_aBCde4c16b4c,
         aBCde16c16b4c = dnnl_aBCde16c16b4c,
         aBCde16c16b2c = dnnl_aBCde16c16b2c,
+        aBCdef16c16b2c = dnnl_aBCdef16c16b2c,
         aBCde4c4b = dnnl_aBCde4c4b,
         Abcde8a = dnnl_Abcde8a,
         ABcde8a8b = dnnl_ABcde8a8b,
@@ -1544,6 +1545,7 @@ struct memory : public handle<dnnl_memory_t> {
         ABcde4b32a4b = dnnl_ABcde4b32a4b,
         ABcde4b64a4b = dnnl_ABcde4b64a4b,
         ABcde16b16a4b = dnnl_ABcde16b16a4b,
+        ABcde16b16a2b = dnnl_ABcde16b16a2b,
         ABcde2b8a4b = dnnl_ABcde2b8a4b,
         aBCde8b16c2b = dnnl_aBCde8b16c2b,
         ABcde8b8a = dnnl_ABcde8b8a,
@@ -1624,6 +1626,7 @@ struct memory : public handle<dnnl_memory_t> {
         abdEc32e = dnnl_abdEc32e,
         abdEC32e2c = dnnl_abdEC32e2c,
         abdEC32e4c = dnnl_abdEC32e4c,
+        aBCdef16c16b4c = dnnl_aBCdef16c16b4c,
 
         format_tag_last = dnnl_format_tag_last,
 
@@ -1793,6 +1796,7 @@ struct memory : public handle<dnnl_memory_t> {
         gIOw4i8o8i2o = dnnl_gIOw4i8o8i2o,
         OIhw16i16o4i = dnnl_OIhw16i16o4i,
         OIhw16i16o2i = dnnl_OIhw16i16o2i,
+        OIdhw16i16o2i = dnnl_OIdhw16i16o2i,
         gOIhw16i16o4i = dnnl_gOIhw16i16o4i,
         gOIhw16i16o2i = dnnl_gOIhw16i16o2i,
         gOIhw8o8i = dnnl_gOIhw8o8i,
@@ -1811,6 +1815,8 @@ struct memory : public handle<dnnl_memory_t> {
         gOidhw4o = dnnl_gOidhw4o,
         gOIdhw8i16o2i = dnnl_gOIdhw8i16o2i,
         gOIdhw4i16o4i = dnnl_gOIdhw4i16o4i,
+        gOIdhw16i16o4i = dnnl_gOIdhw16i16o4i,
+        gOIdhw16i16o2i = dnnl_gOIdhw16i16o2i,
         gOIdhw2i8o4i = dnnl_gOIdhw2i8o4i,
         gOIdhw8i8o = dnnl_gOIdhw8i8o,
         gOIdhw8o8i = dnnl_gOIdhw8o8i,
@@ -10074,11 +10080,9 @@ struct resampling_backward : public primitive {
 
 /// @} dnnl_api_resampling
 
-/// @addtogroup dnnl_api_pooling Pooling
+/// @addtogroup dnnl_api_pooling_v2 Pooling_v2
 ///
-/// Pooling version 2 (dilated pooling).
-///
-/// A primitive to perform max or average pooling.
+/// A primitive to perform max or average pooling with dilation.
 ///
 /// @sa @ref dev_guide_pooling in developer guide
 ///
@@ -10719,6 +10723,25 @@ inline status set_max_cpu_isa(cpu_isa isa) {
 /// @copydoc dnnl_get_effective_cpu_isa()
 inline cpu_isa get_effective_cpu_isa() {
     return static_cast<cpu_isa>(dnnl_get_effective_cpu_isa());
+}
+
+/// @copydoc dnnl_cpu_isa_hints_t
+enum class cpu_isa_hints {
+    /// @copydoc dnnl_cpu_isa_no_hints
+    no_hints = dnnl_cpu_isa_no_hints,
+    /// @copydoc dnnl_cpu_isa_prefer_ymm
+    prefer_ymm = dnnl_cpu_isa_prefer_ymm,
+};
+
+/// @copydoc dnnl_set_cpu_isa_hints()
+inline status set_cpu_isa_hints(cpu_isa_hints isa_hints) {
+    return static_cast<status>(dnnl_set_cpu_isa_hints(
+            static_cast<dnnl_cpu_isa_hints_t>(isa_hints)));
+}
+
+/// @copydoc dnnl_get_cpu_isa_hints()
+inline cpu_isa_hints get_cpu_isa_hints() {
+    return static_cast<cpu_isa_hints>(dnnl_get_cpu_isa_hints());
 }
 
 /// @} dnnl_api_service
