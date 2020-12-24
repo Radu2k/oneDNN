@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ namespace ngen {
 
 // Forward declarations.
 template <HW hw> class BinaryCodeGenerator;
+template <HW hw> class ELFCodeGenerator;
 
 // MSVC v140 workaround for enum comparison in template arguments.
 static constexpr bool hwLT(HW hw1, HW hw2) { return hw1 < hw2; }
@@ -89,6 +90,8 @@ public:
 template <HW hw>
 class BinaryCodeGenerator
 {
+    friend class ELFCodeGenerator<hw>;
+
 protected:
     class InstructionStream {
         friend class BinaryCodeGenerator;
@@ -175,6 +178,9 @@ protected:
 
     static constexpr HW hardware = hw;
     static constexpr bool isGen12 = (hw >= HW::Gen12LP);
+
+    Label _labelLocalIDsLoaded;
+    Label _labelArgsLoaded;
 
 private:
     InstructionModifier defaultModifier;
@@ -1605,7 +1611,7 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
     i.binary.src1RegFile = RegFileGRF;
 
 #ifdef NGEN_SAFE
-    if (src1.isARF()) throw grf_expected_exception();
+    if (src1.isARF() && op != Opcode::illegal) throw grf_expected_exception();
 #endif
 
     db(i);
@@ -1976,6 +1982,8 @@ BinaryCodeGenerator<hw>::opSend(Opcode op, const InstructionModifier &mod, const
     i.sendsGen9.dstRegFile = getRegFile(dst);
     i.binary.src0RegFile = getRegFile(src0);
     i.binary.src1RegFile = RegFileIMM;
+
+    i.binary.dstType = getTypecode<hw>(dst.getType());
 
     i.sendsGen9.sfid = exdesc & 0xF;
     i.sendGen8.zero = 0;

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -210,8 +210,9 @@ struct AsmInstruction {
     SharedFunction sfid() const { return static_cast<SharedFunction>(ext); }
     bool eot() const            { return mod.isEOT(); }
     bool predicated() const     { return !mod.isWrEn() || (mod.getPredCtrl() != PredCtrl::None); }
+    bool atomic() const         { return mod.isAtomic(); }
 
-    unsigned dstTypecode() const;
+    inline unsigned dstTypecode() const;
     inline autoswsb::DestinationMask destinations(int &jip, int &uip) const;
     inline bool getOperandRegion(autoswsb::DependencyRegion &region, int opNum) const;
 
@@ -333,6 +334,23 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
             region = DependencyRegion();
         else
             region = DependencyRegion(GRFRange(rd.getBase(), len));
+    } else if (op == Opcode::dpas || op == Opcode::dpasw) {
+        unsigned sdepth = ext >> 8;
+        unsigned rcount = ext & 0xFF;
+        unsigned len;
+
+        switch (opNum) {
+            case -1:
+            case 0: len = rcount; break;
+            case 1: len = sdepth; break;
+            case 2:
+                if (op == Opcode::dpasw) rcount = (rcount + 1) >> 1;
+                len = (operand.reg.getByteOffset() + sdepth * rcount * 4 + 31) >> 5;
+                break;
+            default: return false;
+        }
+
+        region = DependencyRegion(GRFRange(operand.reg.getBase(), len));
     } else
         region = DependencyRegion(mod.getExecSize(), rd);
 
@@ -362,6 +380,7 @@ public:
             delete s;
     }
     inline void getCode(std::ostream &out);
+    void enableLineNumbers(bool enable = true) { lineNumbers = enable; }
 
 protected:
     struct InstructionStream {
@@ -396,6 +415,10 @@ protected:
     HW hardware;
     bool isGen12;
     std::ostream *defaultOutput;
+    bool lineNumbers = false;
+
+    Label _labelLocalIDsLoaded;
+    Label _labelArgsLoaded;
 
 private:
     InstructionModifier defaultModifier;
@@ -468,7 +491,7 @@ private:
     inline void finalize();
 
     enum class ModPlacementType {Pre, Mid, Post};
-    inline void outX(std::ostream &out, const AsmInstruction &i);
+    inline void outX(std::ostream &out, const AsmInstruction &i, int lineNo);
     inline void outExt(std::ostream &out, const AsmInstruction &i);
     inline void outMods(std::ostream &out, const InstructionModifier &mod, Opcode op, ModPlacementType location);
     inline void outSync(std::ostream &out, const autoswsb::SyncInsertion &si);
@@ -1307,6 +1330,7 @@ void AsmCodeGenerator::getCode(std::ostream &out)
             syncs.insert(std::make_pair(sync.inum, &sync));
 
     auto nextSync = syncs.begin();
+    int lineNo = 0;
 
     for (auto &i : streamStack.back()->buffer) {
         if (i.isLabel()) {
@@ -1316,8 +1340,8 @@ void AsmCodeGenerator::getCode(std::ostream &out)
             out << "// " << i.comment << std::endl;
         } else {
             while ((nextSync != syncs.end()) && (nextSync->second->inum == i.inum))
-                outX(out, *(nextSync++)->second);
-            outX(out, i);
+                outX(out, *(nextSync++)->second, lineNo++);
+            outX(out, i, lineNo++);
         }
     }
 }
@@ -1348,7 +1372,7 @@ void AsmCodeGenerator::opX(Opcode op, DataType defaultType, const InstructionMod
     streamStack.back()->append(op, ext, emod, dst, src0, src1, src2, NoOperand{}, &labelManager);
 }
 
-void AsmCodeGenerator::outX(std::ostream &out, const AsmInstruction &i)
+void AsmCodeGenerator::outX(std::ostream &out, const AsmInstruction &i, int lineNo)
 {
     bool ternary = (i.src[2].type != AsmOperand::Type::none);
     PrintDetail ddst = PrintDetail::hs;
@@ -1397,6 +1421,8 @@ void AsmCodeGenerator::outX(std::ostream &out, const AsmInstruction &i)
     }
 
     outMods(out, i.mod, i.op, ModPlacementType::Post);
+    if (lineNumbers)
+        out << "\t// " << lineNo * 2;
     out << std::endl;
 }
 

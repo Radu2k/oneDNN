@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -214,6 +214,7 @@ union Instruction12 {
     SharedFunction sfid() const  { return static_cast<SharedFunction>(send.sfid); }
     bool eot() const             { return (opcode() == Opcode::send || opcode() == Opcode::sendc) && send.eot; }
     bool predicated() const      { return !common.maskCtrl || (static_cast<PredCtrl>(common.predCtrl) != PredCtrl::None); }
+    bool atomic() const          { return common.atomicCtrl; }
     unsigned dstTypecode() const { return binary.dstType; }
     void shiftJIP(int32_t shift) { branches.jip += shift * sizeof(Instruction12); }
     void shiftUIP(int32_t shift) { branches.uip += shift * sizeof(Instruction12); }

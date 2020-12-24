@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -403,23 +403,27 @@ public:
         return nextID++;
     }
 
+    bool hasTarget(uint32_t id) const {
+        return (targets[id] != TargetConstants::noTarget);
+    }
+
     void setTarget(uint32_t id, uint32_t target) {
 #ifdef NGEN_SAFE
-        if (targets[id] != TargetConstants::noTarget) throw multiple_label_exception();
+        if (hasTarget(id)) throw multiple_label_exception();
 #endif
         targets[id] = target;
     }
 
     void offsetTarget(uint32_t id, uint32_t offset) {
 #ifdef NGEN_SAFE
-        if (targets[id] == TargetConstants::noTarget) throw dangling_label_exception();
+        if (!hasTarget(id)) throw dangling_label_exception();
 #endif
         targets[id] += offset;
     }
 
     uint32_t getTarget(uint32_t id) const {
 #ifdef NGEN_SAFE
-        if (targets[id] == TargetConstants::noTarget) throw dangling_label_exception();
+        if (!hasTarget(id)) throw dangling_label_exception();
 #endif
         return targets[id];
     }
@@ -1525,6 +1529,7 @@ public:
     constexpr bool isNoDDChk()             const { return parts.noDDChk; }
     constexpr int getChannelOffset()       const { return parts.chanOff << 2; }
     constexpr ThreadCtrl getThreadCtrl()   const { return static_cast<ThreadCtrl>(parts.threadCtrl); }
+    constexpr bool isAtomic()              const { return getThreadCtrl() == ThreadCtrl::Atomic; }
     constexpr PredCtrl getPredCtrl()       const { return static_cast<PredCtrl>(parts.predCtrl); }
     constexpr bool isPredInv()             const { return parts.predInv; }
     constexpr ConditionModifier getCMod()  const { return static_cast<ConditionModifier>(parts.cmod); }
@@ -2345,7 +2350,7 @@ protected:
     bool structured;
 
 public:
-    surface_dword(ChannelMask cmask_, bool structured_ = false) : cmask(cmask_), structured(structured_) {}
+    surface_dword(ChannelMask cmask_ = ChannelMask::r, bool structured_ = false) : cmask(cmask_), structured(structured_) {}
 
     template <Access access> void getDescriptors(const InstructionModifier &mod, AddressBase base, MessageDescriptor &desc, ExtendedMessageDescriptor &exdesc) const
     {

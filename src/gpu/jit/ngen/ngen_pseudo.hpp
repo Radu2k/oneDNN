@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -164,11 +164,13 @@ void sqt(const InstructionModifier &mod, const RegData &dst, const RegData &src0
 //   dst, num, denom must be distinct GRFs.
 template <typename DT = void, typename A>
 void fdiv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, RegData num, RegData denom,
-               RegData zero, RegData one, const A &tmp)
+               RegData zero, RegData one, const A &tmp, InstructionModifier cfmod = InstructionModifier())
 {
     DataType dt = getDataType<DT>();
     if (dt == DataType::invalid)
         dt = dst.getType();
+    if (cfmod.getExecSize() == 0)
+        cfmod = mod;
 
     Label labelSkip;
 
@@ -178,7 +180,7 @@ void fdiv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, R
             break;
         case DataType::f:
             invm<DT>(mod | eo | flag,         dst | mme0,      num | nomme,   denom | nomme);
-            if_(mod | ~flag, labelSkip);
+            if_(cfmod | ~flag, labelSkip);
 
             madm<DT>(mod, TMP(0) | mme1,     zero | nomme,     num | nomme,     dst | mme0);
             madm<DT>(mod, TMP(1) | mme2,      one | nomme,  -denom | nomme,     dst | mme0);
@@ -189,11 +191,11 @@ void fdiv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, R
             madm<DT>(mod,    dst | nomme,  TMP(0) | mme5,   TMP(1) | mme6,   TMP(2) | mme3);
 
             mark(labelSkip);
-            endif(mod);
+            endif(cfmod);
             break;
         case DataType::df:
             invm<DT>(mod | eo | flag,         dst | mme0,      num | nomme,   denom | nomme);
-            if_(mod | ~flag, labelSkip);
+            if_(cfmod | ~flag, labelSkip);
 
             madm<DT>(mod, TMP(0) | mme1,     zero | nomme,     num | nomme,     dst | mme0);
             madm<DT>(mod, TMP(1) | mme2,      one | nomme,  -denom | nomme,     dst | mme0);
@@ -207,7 +209,7 @@ void fdiv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, R
             madm<DT>(mod,    dst | nomme,  TMP(0) | mme7,   TMP(2) | mme1,   TMP(3) | mme0);
 
             mark(labelSkip);
-            endif(mod);
+            endif(cfmod);
             break;
         default:
 #ifdef NGEN_SAFE
@@ -217,15 +219,18 @@ void fdiv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, R
     }
 }
 
-// IEEE 754-compliant reciprocal math macro sequence. Only needed for double precision (use math.inv for single/half precision).
+// IEEE 754-compliant reciprocal math macro sequence.
 //   Requires GRF initialized with 1.0, as well as 3 temporary GRFs.
 //   dst and src must be distinct GRFs.
 template <typename DT = void, typename A>
-void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, RegData src, RegData one, const A &tmp)
+void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, RegData src, RegData one,
+              const A &tmp, InstructionModifier cfmod = InstructionModifier())
 {
     DataType dt = getDataType<DT>();
     if (dt == DataType::invalid)
         dt = dst.getType();
+    if (cfmod.getExecSize() == 0)
+        cfmod = mod;
 
     Label labelSkip;
 
@@ -235,7 +240,7 @@ void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             break;
         case DataType::f:
             invm<DT>(mod | eo | flag,         dst | mme0,      one | nomme,     src | nomme);
-            if_(mod | ~flag, labelSkip);
+            if_(cfmod | ~flag, labelSkip);
 
             madm<DT>(mod, TMP(1) | mme2,      one | nomme,    -src | nomme,     dst | mme0);
             madm<DT>(mod, TMP(2) | mme3,      dst | mme0,   TMP(1) | mme2,      dst | mme0);
@@ -244,11 +249,11 @@ void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             madm<DT>(mod,    dst | nomme,  TMP(0) | mme5,   TMP(1) | mme6,   TMP(2) | mme3);
 
             mark(labelSkip);
-            endif(mod);
+            endif(cfmod);
             break;
         case DataType::df:
             invm<DT>(mod | eo | flag,        dst | mme0,      one | nomme,     src | nomme);
-            if_(mod | ~flag, labelSkip);
+            if_(cfmod | ~flag, labelSkip);
 
             madm<DT>(mod, TMP(0) | mme2,     one | nomme,    -src | nomme,     dst | mme0);
             madm<DT>(mod, TMP(1) | mme4,     dst | mme0,   TMP(0) | mme2,      dst | mme0);
@@ -259,7 +264,7 @@ void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             madm<DT>(mod,    dst | nomme,    dst | mme6,   TMP(0) | mme1,   TMP(1) | mme0);
 
             mark(labelSkip);
-            endif(mod);
+            endif(cfmod);
             break;
         default:
 #ifdef NGEN_SAFE
@@ -275,11 +280,13 @@ void inv_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
 //   dst and src must be distinct GRFs.
 template <typename DT = void, typename A>
 void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, RegData src,
-               RegData zero, RegData oneHalf, RegData one, const A &tmp)
+               RegData zero, RegData oneHalf, RegData one, const A &tmp, InstructionModifier cfmod = InstructionModifier())
 {
     DataType dt = getDataType<DT>();
     if (dt == DataType::invalid)
         dt = dst.getType();
+    if (cfmod.getExecSize() == 0)
+        cfmod = mod;
 
     Label labelSkip;
 
@@ -289,7 +296,7 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             break;
         case DataType::f:
             rsqtm<DT>(mod | eo | flag,        dst | mme0,       src | nomme);
-            if_(mod | ~flag, labelSkip);
+            if_(cfmod | ~flag, labelSkip);
 
             madm<DT>(mod, TMP(0) | mme1,     zero | nomme,  oneHalf | nomme,     dst | mme0);
             madm<DT>(mod, TMP(1) | mme2,     zero | nomme,      src | nomme,     dst | mme0);
@@ -300,11 +307,11 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             madm<DT>(mod,    dst | nomme,     dst | mme5,    TMP(0) | mme4,   TMP(2) | mme6);
 
             mark(labelSkip);
-            endif(mod);
+            endif(cfmod);
             break;
         case DataType::df:
             rsqtm<DT>(mod | eo | flag,        dst | mme0,       src | nomme);
-            if_(mod | ~flag, labelSkip);
+            if_(cfmod | ~flag, labelSkip);
 
             madm<DT>(mod, TMP(0) | mme1,     zero | mme0,   oneHalf | nomme,     dst | mme0);
             madm<DT>(mod, TMP(1) | mme2,     zero | mme0,       src | nomme,     dst | mme0);
@@ -319,7 +326,7 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
             madm<DT>(mod,    dst | nomme,     dst | mme6,    TMP(0) | mme1,   TMP(3) | mme5);
 
             mark(labelSkip);
-            endif(mod);
+            endif(cfmod);
             break;
         default:
 #ifdef NGEN_SAFE
@@ -479,27 +486,33 @@ void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127)
             for (int i = 0; i < nops; i++)
                 nop();
         }
+
+        mark(_labelLocalIDsLoaded);
     }
 }
 
 void loadargs(const GRF &base, int argGRFs, const GRF &temp = GRF(127))
 {
-    if (argGRFs > 0 && hardware >= HW::Gen12HP) {
-        auto dst = base;
-        auto dmSave = defaultModifier;
-        defaultModifier |= NoMask | AutoSWSB;
+    if (hardware >= HW::Gen12HP) {
+        if (argGRFs > 0) {
+            auto dst = base;
+            auto dmSave = defaultModifier;
+            defaultModifier |= NoMask | AutoSWSB;
 
-        mov<uint32_t>(8, temp, uint16_t(0));
-        and_<uint32_t>(1, temp[2], r0[0], uint32_t(~0x1F));
-        while (argGRFs > 0) {
-            int nload = std::min(utils::rounddown_pow2(argGRFs), 4);
-            load(8, dst, aligned_block_oword(2 * nload), A32NC, temp);
-            argGRFs -= nload;
-            dst += nload;
-            if (argGRFs > 0)
-                add<uint32_t>(1, temp[2], temp[2], uint32_t(0x20 * nload));
+            mov<uint32_t>(8, temp, uint16_t(0));
+            and_<uint32_t>(1, temp[2], r0[0], uint32_t(~0x1F));
+            while (argGRFs > 0) {
+                int nload = std::min(utils::rounddown_pow2(argGRFs), 4);
+                load(8, dst, aligned_block_oword(2 * nload), A32NC, temp);
+                argGRFs -= nload;
+                dst += nload;
+                if (argGRFs > 0)
+                    add<uint32_t>(1, temp[2], temp[2], uint32_t(0x20 * nload));
+            }
+
+            defaultModifier = dmSave;
         }
 
-        defaultModifier = dmSave;
+        mark(_labelArgsLoaded);
     }
 }
