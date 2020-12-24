@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -112,6 +112,8 @@ const gemm_recipe_t gemm_recipes[] = {
     {ngen::HW::Gen12HP, "SSS", "NTN", {}, 32, 16, "sb4/2x2 sb4x2 sb cs di bm8192 bn8192 bk8192"},
     {ngen::HW::Gen12HP, "SSS", "TNN", {}, 16, 16, "sb8 sb8 su cab1 wg 4x4 cs di bm8192 bn8192 bk8192"},
     {ngen::HW::Gen12HP, "SSS", "TTN", {}, 8,  64, "su4/2x2 sb1x2 su cb1 wg 8x2 cs di fn bm8192 bn8192 bk8192"},
+    {ngen::HW::Gen12HP, "HHH", "TNN", {}, 16, 8,  "sb16 sb16 ab cab2 wg 2x4 cs pab"},         // DLRM
+    {ngen::HW::Gen12HP, "BBS", "TNN", {}, 32, 8,  "sb16 sb16 ab ca2 wg 1x4 fn nmk cs pab"},   // DLRM
 };
 // clang-format on
 

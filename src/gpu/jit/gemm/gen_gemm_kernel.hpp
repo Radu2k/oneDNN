@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -56,6 +56,7 @@ protected:
             default: assert(!"Unknown type");
             case data_type::f32: return Type::f32;
             case data_type::f16: return Type::f16;
+            case data_type::bf16: return Type::bf16;
             case data_type::s32: return Type::s32;
             case data_type::u8: return Type::u8;
             case data_type::s8: return Type::s8;
@@ -92,6 +93,8 @@ struct gen_gemm_nocopy_kernel_t : public gen_gemm_kernel_t {
         problem_.Ta = convert_dnnl_to_kernel_type(a_type);
         problem_.Tb = convert_dnnl_to_kernel_type(b_type);
         problem_.Tc = convert_dnnl_to_kernel_type(c_type);
+        problem_.Tc_ext = problem_.Tc;
+        if (problem_.Tc == Type::bf16) problem_.Tc = Type::f32;
         problem_.Ts = problem_.Tc;
         problem_.A.layout = trans_a ? MatrixLayout::T : MatrixLayout::N;
         problem_.B.layout = trans_b ? MatrixLayout::T : MatrixLayout::N;

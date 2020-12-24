@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ char precision_char(Type T) {
     switch (T) {
         default: assert(!"Unknown type.");
         case Type::f16: return 'H';
+        case Type::bf16: return 'B';
         case Type::f32: return 'S';
         case Type::u8:
         case Type::s8: return 'O';
@@ -110,16 +111,11 @@ status_t gen_gemm_kernel_t::read_strategy(const char *str) {
     bool override_register_scheme = false;
     bool override_c_remainder = false;
 
-    bool dp4aIGEMM = hw_ >= HW::Gen12LP && problem_.Ta.size() == 1
-            && problem_.Tb.size() == 1 && problem_.Tc.size() == 4;
-
     strategy_.ka_load_masked = strategy_.kb_load_masked = 0;
     strategy_.unroll[LoopK] = 1;
     strategy_.fmaSIMD = 64
             / std::max<int>({problem_.Ta.size(), problem_.Tb.size(),
                     problem_.Tc.size()});
-
-    strategy_.kernelCrosspack = dp4aIGEMM ? 4 : 1;
 
     strategy_.remHandling[LoopM] = RemainderHandling::Split;
     strategy_.remHandling[LoopN] = RemainderHandling::Split;
@@ -177,6 +173,8 @@ status_t gen_gemm_kernel_t::read_strategy(const char *str) {
             strategy_.delayABInc = true;
         else if (mod == "ws")
             strategy_.wgInSS = true;
+        else if (mod == "pab")
+            problem_.A.padded = problem_.B.padded = true;
         else if (mod == "nmk") {
             strategy_.loopOrder[0] = LoopN;
             strategy_.loopOrder[1] = LoopM;
@@ -472,6 +470,11 @@ const kernel_table_t *gen9_x8_nocopy_tables[2][2] = {
     {gen9_x8_nocopy_tn_table, gen9_x8_nocopy_tt_table}
 };
 
+const kernel_table_t *gen9_bf16_nocopy_tables[2][2] = {
+    {nullptr, nullptr},
+    {nullptr, nullptr}
+};
+
 const kernel_table_t gen12lp_f32_nocopy_nn_table[] = {
     {{8,  4 }, { 0,  0}, {0, 0}},
     {{8,  8 }, { 0,  0}, {0, 0}},
@@ -544,6 +547,11 @@ const kernel_table_t *gen12lp_x8_nocopy_tables[2][2] = {
     {gen12lp_x8_nocopy_tn_table, gen12lp_x8_nocopy_tt_table}
 };
 
+const kernel_table_t *gen12lp_bf16_nocopy_tables[2][2] = {
+    {nullptr, nullptr},
+    {nullptr, nullptr}
+};
+
 const kernel_table_t gen12hp_f16_nocopy_nn_table[] = {
     {{32, 32}, {-1, -1}, {0, 0}}
 };
@@ -553,7 +561,8 @@ const kernel_table_t gen12hp_f16_nocopy_nt_table[] = {
 };
 
 const kernel_table_t gen12hp_f16_nocopy_tn_table[] = {
-    {{16, 16}, {-1, -1}, {0, 0}}
+    {{16,  8}, {32, 32}, {32, 32}},
+    {{16, 16}, {-1, -1}, {0,   0}}
 };
 
 const kernel_table_t gen12hp_f16_nocopy_tt_table[] = {
@@ -592,6 +601,16 @@ const kernel_table_t *gen12hp_x8_nocopy_tables[2][2] = {
     {nullptr, nullptr},
     {nullptr, nullptr}
 };
+
+const kernel_table_t gen12hp_bf16_nocopy_tn_table[] = {
+    {{32, 8}, {-1, -1}, {0, 0}}
+};
+
+const kernel_table_t *gen12hp_bf16_nocopy_tables[2][2] = {
+    {nullptr,                      nullptr},
+    {gen12hp_bf16_nocopy_tn_table, nullptr}
+};
+
 // clang-format on
 
 } // anonymous namespace
@@ -604,20 +623,23 @@ void gen_gemm_nocopy_kernel_t::choose_unrolls(compute::gpu_arch_t arch,
     unroll_m = unroll_n = 1;
 
     using tables_t = decltype(gen9_f32_nocopy_tables);
-    const tables_t *all_tables[3][3]
+    const tables_t *all_tables[4][3]
             = {{&gen9_f32_nocopy_tables, &gen12lp_f32_nocopy_tables,
                        &gen12hp_f32_nocopy_tables},
                     {&gen9_f16_nocopy_tables, &gen12lp_f16_nocopy_tables,
                             &gen12hp_f16_nocopy_tables},
+                    {&gen9_bf16_nocopy_tables, &gen12lp_bf16_nocopy_tables,
+                            &gen12hp_bf16_nocopy_tables},
                     {&gen9_x8_nocopy_tables, &gen12lp_x8_nocopy_tables,
                             &gen12hp_x8_nocopy_tables}};
 
-    int arch_idx = (arch == compute::gpu_arch_t::gen12lp)
-            ? 1
-            : (arch == compute::gpu_arch_t::gen12hp) ? 2 : 0;
-    int type_idx = (c_type == data_type::f16)
-            ? 1
-            : (c_type == data_type::s32) ? 2 : 0;
+    // clang-format off
+    int arch_idx = (arch == compute::gpu_arch_t::gen12lp) ? 1
+                 : (arch == compute::gpu_arch_t::gen12hp) ? 2 : 0;
+    int type_idx = (c_type == data_type::f16) ? 1
+                : (c_type == data_type::bf16) ? 2
+                :  (c_type == data_type::s32) ? 3 : 0;
+    // clang-format on
 
     const kernel_table_t *table
             = (*all_tables[type_idx][arch_idx])[trans_a][trans_b];

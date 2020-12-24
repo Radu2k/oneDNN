@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -79,6 +79,9 @@ struct gen_gemm_t : public gpu_gemm_t {
                 ok &= utils::one_of(cmask, 0, 1 << 0, 1 << 1);
 
                 attr_skip_mask |= smask_t::zero_points_runtime;
+            } else if (d->c_type() == bf16) {
+                ok = ok && d->a_type() == bf16 && d->b_type() == bf16
+                        && utils::one_of(d->acc_type, bf16, f32);
             } else {
                 ok = ok && utils::one_of(d->c_type(), f32, f16)
                         && d->a_type() == d->c_type()
@@ -111,9 +114,12 @@ struct gen_gemm_t : public gpu_gemm_t {
             ok &= utils::one_of(
                     arch_, arch_t::gen9, arch_t::gen12lp, arch_t::gen12hp);
 
-            // Only f16 and f32 enabled on Gen12HP for now.
+            // int8 not enabled on Gen12HP for now. bf16 only enabled on Gen12HP for TN case.
             ok &= IMPLICATION(arch_ == arch_t::gen12hp,
-                    utils::one_of(d->c_type(), f16, f32));
+                    utils::one_of(d->c_type(), f16, bf16, f32));
+            ok &= IMPLICATION(d->c_type() == bf16,
+                    arch_ == arch_t::gen12hp && (d->transa() == dnnl_trans)
+                            && (d->transb() == dnnl_notrans));
 
             if (!ok) return status::unimplemented;
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #define STANDALONE 0
 
 #include "common/float16.hpp"
+#include "common/math_utils.hpp"
 #include "common/utils.hpp"
 #include "gpu/jit/gemm/gen_gemm_kernel_common.hpp"
 #include "gpu/jit/gemm/utils.hpp"
@@ -51,6 +52,7 @@ namespace jit {
 class Type {
 public:
     enum _Type : uint32_t {
+        invalid = 0,
         f16 = 0x000201,
         f32 = 0x010402,
         u8 = 0x840100,
@@ -262,6 +264,7 @@ struct MatrixAddressing {
     uint8_t packSize; // # of elements in a packed row/column for packed layouts.
     uint8_t crosspack; // Crosspack for packed layouts.
     uint8_t alignment; // Alignment for all addresses, offsets, and leading dimensions.
+    uint8_t tileR = 0, tileC = 0; // Tiling (0 if none) for packed layouts.
 
     void setAlignment(int align) {
         alignment = std::min(128, largest_pow2_divisor(align));
@@ -271,22 +274,26 @@ struct MatrixAddressing {
 struct MatrixAddressingStrategy {
     AccessType accessType; // Block/scattered/etc. access
     bool atomic = false; // Atomic access? (only relevant for C)
+    uint8_t tileR = 0, tileC = 0; // Desired tiling (0 if none) in registers.
 };
 
 struct MaskInfo {
     union {
         struct {
-            bool isFixed; // = false (variable mask)
-            uint8_t maskRep; // # of repetitions of mask pattern.
+            uint8_t isFixed : 1; // = false (variable mask)
+            uint8_t reverse : 1; // True to reverse mask.
+            uint8_t : 6;
             uint8_t rsize; // Maximum remainder value. (e.g. 16 if we need the last 4 bits of the index).
+            uint8_t maskRep; // # of repetitions of mask pattern.
             uint8_t bitRep : 4; // # of times each mask bit is repeated.
             uint8_t rdivide : 4; // Amount by which to divide index before forming mask. Fractions are rounded up.
                     // Note maskRep * bitRep * (rsize >> rshift) = # mask bits.
         } variable;
         struct {
-            bool isFixed; // = true (fixed mask)
-            uint8_t _; // not used
-            uint16_t value; // mask value
+            uint8_t isFixed : 1; // = true (fixed mask)
+            uint8_t : 7;
+            uint8_t rsize; // Maximum remainder value.
+            uint16_t value; // Mask value.
         } fixed;
         uint32_t raw;
     };
@@ -314,6 +321,10 @@ struct MaskAssignment {
 
     bool compatible(const MaskAssignment &other) const {
         return mask == other.mask && var == other.var && offset == other.offset;
+    }
+    void reverse(int width) {
+        offset = width - offset - mask.variable.rsize;
+        mask.variable.reverse = !mask.variable.reverse;
     }
 };
 
@@ -364,6 +375,8 @@ struct RegisterBlock {
 
     int nregs() const;
     int offsetReg() const;
+
+    void simplify(Type T);
 };
 
 struct VirtualFlagAllocator {
@@ -420,6 +433,20 @@ struct CommonState {
     ngen::GRFRange eatomicAddRegs[2];
     int vflagEAtomicAdd;
     ngen::Subregister all1s;
+    ngen::RegData r0_info; // T_real
+    struct {
+        ngen::GRF zero, one;
+        ngen::GRFRange src1Storage;
+        ngen::GRF src1, srcR1, srcI1, r, d;
+        ngen::GRFRange mathTemp;
+        ngen::GRF temp;
+        std::array<ngen::FlagRegister, 2> tempFlags;
+        ngen::Subregister flagStore; // ud
+        ngen::Label label;
+        int simd;
+        ngen::Subregister callStorageSub, callStorage;
+        bool use = false;
+    } invertSub;
 
     CommonState(ngen::HW hw) : ra(hw), raVFlag(hw) {}
 
@@ -438,21 +465,11 @@ struct CommonState {
     }
 };
 
-// Strategy parameters shared between different kernel types.
-struct CommonStrategy {
-    int subgroupSize = 8; // Subgroup size provided to OpenCL runtime.
-    bool dualGRF = true; // Enable two-GRF instructions
-    bool ieeeDenormals = true; // Enable IEEE-compliant denormals
-    bool spf = false; // Enable Single Program Flow (SPF) mode in EUs.
-    bool accR0 = true; // Stuff r0 header in an accumulator register.
-    bool emulate64 = false; // Emulate 64-bit arithmetic (required for GenXLP)
-    bool emulateDWxDW
-            = false; // Emulate DW x DW -> DW multiplication (required for Gen12)
-    bool emulate64_add32
-            = false; // Use 32-bit adds for 64-bit arithmetic, assuming no 2^32 boundaries crossed.
-    bool wgInSS
-            = false; // Pretend to use barriers so that each WG belongs to 1 SS/DSS.
-    int GRFs = 128; // # of GRFs to use.
+enum class MoveR0 { // Places to store r0 information.
+    None,
+    Acc,
+    Addr,
+    GRF
 };
 
 // Problem parameters shared between kernel types.
@@ -462,6 +479,26 @@ struct CommonProblem {
     bool nonuniformWGs = true; // Support nonuniform workgroups?
     bool gtpinSupport = false; // Support GT-Pin?
     bool fused = false; // Fused kernels?
+};
+
+// Strategy parameters shared between different kernel types.
+struct CommonStrategy {
+    int subgroupSize = 8; // Subgroup size provided to OpenCL runtime.
+    bool dualGRF = true; // Enable two-GRF instructions
+    bool ieeeDenormals = true; // Enable IEEE-compliant denormals
+    bool spf = false; // Enable Single Program Flow (SPF) mode in EUs.
+    MoveR0 moveR0 = MoveR0::Acc; // Where to store r0 information.
+    bool sipR0WA = false; // Avoid using r0 to avoid clobbering by SIP.
+    bool emulate64 = false; // Emulate 64-bit arithmetic (required for GenXLP)
+    bool emulateDWxDW
+            = false; // Emulate DW x DW -> DW multiplication (required for Gen12)
+    bool emulate64_add32
+            = false; // Use 32-bit adds for 64-bit arithmetic, assuming no 2^32 boundaries crossed.
+    bool wgInSS
+            = false; // Pretend to use barriers so that each WG belongs to 1 SS/DSS.
+    int GRFs = 128; // # of GRFs to use.
+
+    void sanityCheck(ngen::HW hw, const CommonProblem &problem);
 };
 
 // Driver information, shared by all kernel types.
@@ -514,7 +551,8 @@ enum class COffset {
 
 // GEMM kernel problem description.
 struct GEMMProblem : public CommonProblem {
-    Type Ta, Tb, Tc, Ts; // Types for A/B/C/scalars
+    Type Ta, Tb, Tc, Ts; // Types for A/B/C/scalars in registers.
+    Type Tc_ext; // Type for C data in memory.
 
     Scalar<double> alpha_real, alpha_imag; // Alpha value, if fixed.
     Scalar<double> beta_real, beta_imag; // Beta value, if fixed.
@@ -523,8 +561,8 @@ struct GEMMProblem : public CommonProblem {
     bool backward = false; // If true, k loop is backwards.
     bool checkBeta0 = true; // If true, check for beta = 0 and handle specially.
     LoopType fusedLoop = LoopM; // Direction of fusing if threads fused.
-    bool batchedS = false; // Strided batch kernel
-    bool batchedN = false; // Non-strided batch kernel
+    bool batchedS = false; // Strided batch kernel.
+    bool batchedN = false; // Non-strided batch kernel.
     ABOffset abOffset = ABOffset::None; // A/B offset mode.
     COffset cOffset = COffset::None; // C offset mode.
 
@@ -544,17 +582,20 @@ struct GEMMProblem : public CommonProblem {
     bool fusedN() const { return fused && (fusedLoop == LoopN); }
 };
 
+struct GEMMState;
+
 // Strategy parameters for GEMM kernels.
 struct GEMMStrategy : public CommonStrategy {
     int blocking[3] = {
             0}; // Recommended block size in each dimension (m/n/k) -- for driver.
-    int unroll[3]; // Unrolls in each dimension (m/n/k)
+    int unroll[3]; // Unrolls in each dimension (m/n/k), indexed by LoopType.
     int unrollK_masked = 0; // k unroll to use when masking.
     LoopType loopOrder[3] = {LoopM, LoopN,
             LoopK}; // Expected order of loops in driver code (in order from innermost to outermost).
+    bool reverse[2] = {false, false}; // Reverse m/n walk order?
     int fmaSIMD; // Vector length for FMA.
-    int wg[3] = {0}; // m/n/k workgroup sizes, 0 if unconstrained.
-    int kernelCrosspack = 1; // Crosspack to use when accumulating C.
+    int wg[3] = {
+            0}; // m/n/k workgroup sizes, 0 if unconstrained. Indexed by LoopType.
     MatrixAddressingStrategy A, B, C; // Strategies for accessing A/B/C.
     int ka_load, kb_load; // How much of A/B is loaded at once, in k dimension
     int ka_load_masked = 0,
@@ -603,6 +644,11 @@ struct GEMMStrategy : public CommonStrategy {
             = true; // Check inside kernel if inner loop additions can be done in 32-bit.
     bool delayABInc
             = false; // Delay A/B increment a few outer products in the k loop.
+    bool slmMBlockSplit
+            = false; // Split SLM copies in m/n dimensions using block loads if possible.
+    bool slmNBlockSplit = false;
+    bool systolic = false; // Use systolic array if applicable.
+    bool xParallel = false; // TRSM: parallelize in x dimension.
 
     bool insideSK = false; // Inside a superkernel?
 
@@ -611,26 +657,30 @@ struct GEMMStrategy : public CommonStrategy {
     void sanityCheck(ngen::HW hw, const GEMMProblem &problem);
     bool minimize(ngen::HW hw, const GEMMProblem &problem);
 
-    int slmABufBlockSize(Type Ta) const {
-        return int(slmA) * Ta * unroll[LoopM] * unrollKSLM;
+    int maxKSLM(const GEMMState &state, bool isA) const;
+    int slmABufBlockSize(Type Ta, const GEMMState &state) const {
+        return int(slmA) * Ta * unroll[LoopM] * maxKSLM(state, true);
     }
-    int slmBBufBlockSize(Type Tb) const {
-        return int(slmB) * Tb * unroll[LoopN] * unrollKSLM;
+    int slmBBufBlockSize(Type Tb, const GEMMState &state) const {
+        return int(slmB) * Tb * unroll[LoopN] * maxKSLM(state, false);
     }
-    int slmABufSize(Type Ta) const {
-        return slmABufBlockSize(Ta) * wg[LoopM] * slmBuffers;
+    int slmABufSize(Type Ta, const GEMMState &state) const {
+        return slmABufBlockSize(Ta, state) * wg[LoopM] * slmBuffers;
     }
-    int slmBBufSize(Type Tb) const {
-        return slmBBufBlockSize(Tb) * wg[LoopN] * slmBuffers;
+    int slmBBufSize(Type Tb, const GEMMState &state) const {
+        return slmBBufBlockSize(Tb, state) * wg[LoopN] * slmBuffers;
+    }
+    int slmTotal(Type Ta, Type Tb, const GEMMState &state) const {
+        return slmABufSize(Ta, state) + slmBBufSize(Tb, state);
     }
 
     int ka_inc() const { return slmA ? unrollKSLM : ka_load; }
     int kb_inc() const { return slmB ? unrollKSLM : kb_load; }
 
-    bool needsBarrier() const { return (barrierFreq > 0) || (slmBuffers > 0); }
-
-    int wgM() const { return wg[loopOrder[0]]; }
-    int wgN() const { return wg[loopOrder[1]]; }
+    bool needsBarrier() const {
+        return (barrierFreq > 0) || (slmBuffers > 0) || xParallel;
+    }
+    bool fixedWG() const { return (slmBuffers > 0); }
 };
 
 // State parameters for GEMM kernels.
@@ -674,12 +724,13 @@ struct GEMMState : public CommonState {
     ngen::GRFRange broadcast_regs;
     std::vector<ngen::GRFRange> tempMul_regs;
     ngen::Subregister i0, j0, h0; // d
-    ngen::Subregister remainders[3]; // d
-    ngen::Subregister remaindersFused[2]; // d
-    ngen::Subregister remaindersWG[2]; // d
+    ngen::Subregister remainders[3]; // d (todo: w)
+    ngen::Subregister remaindersFused[2]; // w
+    ngen::Subregister remaindersWG[2]; // d (todo: w)
     ngen::Subregister remFusedStorage; // d
     ngen::FlagRegister mMask, nMask, kMask;
     ngen::Subregister lda_ka, ldb_kb; // d
+    int ka_cached, kb_cached; // Multipliers for lda_ka/ldb_kb.
     ngen::Subregister K; // d
     ngen::FlagRegister flagAP;
     ngen::Subregister beta1; // d
@@ -687,13 +738,16 @@ struct GEMMState : public CommonState {
     ngen::Subregister lidM, lidN, lidStorage; // uw, uw, ud
     ngen::Subregister ha0_slm, hb0_slm, hab0Storage; // uw, uw, ud
     ngen::Subregister ia0_slm, jb0_slm; // uw
+    ngen::Subregister postRemA, postRemB; // ud
+    ngen::Subregister postRemAi, postRemBi; // ud
     int ma_slm, ka_slm, kb_slm, nb_slm;
-    bool A_slmScatter = false, B_slmScatter = false;
+    bool A_slmSplitM = false, B_slmSplitN = false;
     std::vector<RegisterBlock> A_layout, B_layout, C_layout;
     std::vector<RegisterBlock> Ar_layout, Br_layout;
     std::vector<RegisterBlock> Ai_layout, Bi_layout;
     std::vector<RegisterBlock> Ao_layout, Bo_layout;
     std::vector<RegisterBlock> As_layout, Bs_layout;
+    std::vector<RegisterBlock> C_layoutExt;
     bool aioShare, bioShare;
     MatrixAddressing Ai, Bi, Ao, Bo;
     MatrixAddressingStrategy Ai_strategy, Bi_strategy;
@@ -704,6 +758,9 @@ struct GEMMState : public CommonState {
     bool cSwapActive = false;
     int C_count = 1;
     bool allocedAo = false, allocedBo = false;
+    bool allowEmptyC = false;
+    bool copyC = false;
+    bool broadcast;
 
     struct {
         ngen::Subregister copyIDs; // ud
@@ -747,6 +804,7 @@ struct CopyProblem : public CommonProblem {
     bool unit;
     bool trsm;
     bool sum = false;
+    int targetWG = 1;
     bool reflecting() const { return false; }
 };
 
@@ -810,17 +868,7 @@ struct CopyState : public CommonState {
     std::vector<RegisterBlock> Ds_layout;
     ngen::Subregister remainderX, remainderY; // ud
     ngen::GRF indexVec; // w
-    ngen::GRF zero, one, complexOne; // T_real
-    struct {
-        ngen::GRFRange src1Storage;
-        ngen::GRF src1, srcR1, srcI1, r, d;
-        ngen::GRFRange mathTemp;
-        ngen::GRF temp;
-        ngen::Label label;
-        int simd;
-        ngen::Subregister callStorageSub, callStorage;
-        bool use;
-    } invertSub;
+    ngen::GRFRange complexOne; // T_real
 
     bool isNested;
 
@@ -914,6 +962,7 @@ protected:
         TempComp0,
         TempComp1,
         LongTerm,
+        R0Info,
         A0,
         A0Broadcast,
         A1,
@@ -1020,8 +1069,26 @@ protected:
     template <typename DT = void, typename S0, typename S2>
     void eadd3(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
             const S0 &src0, const ngen::RegData &src1, const S2 &src2);
+    template <typename S0, typename S2>
+    void emad(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const S0 &src0, const ngen::RegData &src1, const S2 &src2,
+            const CommonStrategy &strategy, CommonState &state);
+    template <typename S0>
+    void emad(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const S0 &src0, const ngen::RegData &src1, int32_t src2,
+            const CommonStrategy &strategy, CommonState &state);
     void cmp0(const ngen::InstructionModifier &mod, ngen::RegData src0);
+    void syncall();
 
+    template <typename DT = void>
+    void mod(const ngen::Subregister &dst, const ngen::Subregister &src,
+            uint16_t modulus, const CommonStrategy &strategy,
+            CommonState &state);
+    template <typename DT = void>
+    void modExt(const ngen::Subregister &dstMod,
+            const ngen::Subregister &dstMultiple, const ngen::Subregister &src,
+            uint16_t modulus, const CommonStrategy &strategy,
+            CommonState &state);
     template <typename DT = void>
     void alignDown(const ngen::Subregister &dst, const ngen::Subregister &src,
             uint16_t align, const CommonStrategy &strategy, CommonState &state);
@@ -1043,6 +1110,7 @@ protected:
     void getFusedID(int scale, const CommonProblem &problem,
             const CommonStrategy &strategy, CommonState &state);
     void moveR0(const CommonStrategy &strategy, CommonState &state);
+    void moveR0(const GEMMStrategy &strategy, GEMMState &state);
     void removeSG(const CommonProblem &problem, const CommonStrategy &strategy,
             const CommonState &state);
     void reorderFusedEUs(const GEMMProblem &problem,
@@ -1079,6 +1147,12 @@ protected:
             bool column, int x1, int x2, bool overrunOK,
             const MatrixAddressing &atype,
             const MatrixAddressingStrategy &astrategy);
+    bool reblockLayout(Type Tdst, std::vector<int32_t> &blockMap,
+            std::vector<RegisterBlock> &layoutDst,
+            const std::vector<RegisterBlock> &layoutRef,
+            const std::vector<RegisterBlock> &layoutSrc,
+            const MatrixAddressing &atype,
+            const MatrixAddressingStrategy &astrategy);
 
     void adjustSubblockAddrs(const std::vector<RegisterBlock> &sublayout,
             const std::vector<ngen::GRFRange> &subaddrs,
@@ -1106,7 +1180,8 @@ protected:
             const MatrixAddressing &atype,
             const MatrixAddressingStrategy &astrategy);
     void makeUnbackedRegLayout(Type T, std::vector<RegisterBlock> &layout,
-            int r, int c, bool colMajor, int crosspack);
+            int r, int c, bool colMajor, int crosspack = 1, int tileR = 0,
+            int tileC = 0);
 
     void setupTeardownLoadStoreDesc(
             bool setup, const CommonStrategy &strategy, CommonState &state);
@@ -1118,12 +1193,14 @@ protected:
     void loadMatrixBlock(const ngen::GRF &dest, const RegisterBlock &layout,
             const MatrixAddressing &atype,
             const MatrixAddressingStrategy &astrategy,
-            const ngen::GRFRange &addr, CommonState &state);
+            const ngen::GRFRange &addr, CommonState &state,
+            bool zeroMask = false);
     void loadMatrix(const GRFMultirange &dest,
             const std::vector<RegisterBlock> &layout,
             const MatrixAddressing &atype,
             const MatrixAddressingStrategy &astrategy,
-            const std::vector<ngen::GRFRange> &addrs, CommonState &state);
+            const std::vector<ngen::GRFRange> &addrs, CommonState &state,
+            bool zeroMask = false);
     void storeMatrixBlock(const ngen::GRF &src, const RegisterBlock &layout,
             const MatrixAddressing &atype,
             const MatrixAddressingStrategy &astrategy,
@@ -1196,6 +1273,12 @@ protected:
             const MatrixAddressingStrategy &astrategy,
             const CommonStrategy &strategy, const CommonState &state);
     template <typename I>
+    void incAddrUnshifted(const std::vector<ngen::GRFRange> &addr, I inc,
+            const std::vector<RegisterBlock> &layout,
+            const MatrixAddressing &atype,
+            const MatrixAddressingStrategy &astrategy,
+            const CommonStrategy &strategy, CommonState &state);
+    template <typename I>
     void incAddr(const ngen::GRFRange &addrDst, const ngen::GRFRange &addrSrc,
             I inc, const RegisterBlock &layoutDst,
             const RegisterBlock &layoutSrc, const MatrixAddressing &atype,
@@ -1218,9 +1301,18 @@ protected:
             const std::vector<RegisterBlock> &C_layout, int C_count,
             GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state);
 
-    std::tuple<int, int> targetKernelCrosspack(const GEMMProblem &problem,
-            const GEMMStrategy &strategy, const GEMMState &state);
+    std::tuple<int, int> targetKernelCrosspack(
+            const GEMMProblem &problem, const GEMMStrategy &strategy);
+    std::tuple<int, int> targetSLMCrosspack(
+            const GEMMProblem &problem, const GEMMStrategy &strategy);
+    std::tuple<int, int, int, int> targetKernelTiling(
+            const GEMMProblem &problem, const GEMMStrategy &strategy);
     void outerProductGen9IGEMM(int ha, int hb,
+            const std::vector<RegisterBlock> &A_layout,
+            const std::vector<RegisterBlock> &B_layout,
+            const GRFMultirange &A_regs, const GRFMultirange &B_regs,
+            GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state);
+    void outerProductSystolic(int h, int ha, int hb,
             const std::vector<RegisterBlock> &A_layout,
             const std::vector<RegisterBlock> &B_layout,
             const GRFMultirange &A_regs, const GRFMultirange &B_regs,
@@ -1234,10 +1326,10 @@ protected:
     void updateC(const GRFMultirange &C_acc, const GRFMultirange &C_accSwap,
             const GRFMultirange &C_load, GEMMProblem &problem,
             GEMMStrategy &strategy, GEMMState &state);
-    void updateCLayout(const std::vector<RegisterBlock> &layout,
+    void updateCLayout(const std::vector<RegisterBlock> &layoutExt,
             const ngen::GRFRange (&C_addr0)[2], COperation op,
             GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state);
-    bool doStdCRemainder(std::vector<RegisterBlock> &layout, bool inside,
+    bool doStdCRemainder(std::vector<RegisterBlock> &layoutExt, bool inside,
             bool columns[2], StdCRemType remTypes[2], bool fragments[2],
             bool fragPositives[2], int fragSizes[2],
             const ngen::GRFRange (&C_addr0)[2], COperation op,
@@ -1260,6 +1352,9 @@ protected:
     bool gemmFinalizeSums(const GEMMProblem &problem,
             const GEMMStrategy &strategy, GEMMState &state);
 
+    bool maySLMSplitN(const GEMMProblem &problem, const GEMMStrategy &strategy);
+    bool maySLMSplitM(const GEMMProblem &problem, const GEMMStrategy &strategy);
+
     void convert(const GRFMultirange &range, Type Told, Type Tnew,
             const GEMMProblem &problem, const GEMMStrategy &strategy,
             GEMMState &state);
@@ -1272,7 +1367,7 @@ protected:
             GEMMState &state);
     void gemmVariableOffsetC(bool column, const GRFMultirange &offsets,
             const ngen::Subregister &scale, const GEMMProblem &problem,
-            const GEMMStrategy &strategy, GEMMState &state);
+            const GEMMStrategy &strategy, GEMMState &state, int crosspack = 1);
     bool gemmLoadABOffset(const GEMMProblem &problem,
             const GEMMStrategy &strategy, GEMMState &state);
     void gemmApplyABOffset(const GEMMProblem &problem,
@@ -1346,6 +1441,16 @@ protected:
     void gemmCalcIncrements(const GEMMProblem &problem,
             const GEMMStrategy &strategy, GEMMState &state, int ka_load = 0,
             int kb_load = 0);
+    void gemmCalcAiOffset(ngen::Subregister dst, const GEMMProblem &problem,
+            const GEMMStrategy &strategy, const GEMMState &state);
+    void gemmCalcBiOffset(ngen::Subregister dst, const GEMMProblem &problem,
+            const GEMMStrategy &strategy, const GEMMState &state);
+    void gemmPrepPostRemAB(const GEMMProblem &problem,
+            const GEMMStrategy &strategy, GEMMState &state);
+    void gemmRestorePostRemAB(const GEMMProblem &problem,
+            const GEMMStrategy &strategy, GEMMState &state);
+    bool gemmPrepMaskedAB(const GEMMProblem &problem, GEMMStrategy &strategy,
+            GEMMState &state);
 
     bool gemmKLoop(int ka_repack, int kb_repack, bool lateKLoopCheck,
             GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state);
@@ -1360,20 +1465,27 @@ protected:
     bool gemmBodyInternal(
             GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state);
 
-    bool mnRemainderHandling(LoopType loop, GEMMProblem &problem,
+    bool wgRemCheck(const GEMMProblem &problem, const GEMMStrategy &strategy);
+    template <typename Problem>
+    bool mnRemainderHandling(LoopType loop, Problem &problem,
             GEMMStrategy &strategy, GEMMState &state,
             bool (gemm_kernel_generator_t<hw>::*func)(
-                    GEMMProblem, GEMMStrategy, GEMMState));
-    bool mnJointSplitRemainderHandling(GEMMProblem &problem,
-            GEMMStrategy &strategy, GEMMState &state,
+                    Problem, GEMMStrategy, GEMMState));
+    template <typename Problem>
+    bool mnJointSplitRemainderHandling(Problem &problem, GEMMStrategy &strategy,
+            GEMMState &state,
             bool (gemm_kernel_generator_t<hw>::*func)(
-                    GEMMProblem, GEMMStrategy, GEMMState));
+                    Problem, GEMMStrategy, GEMMState));
     bool gemmMEdge(
             GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state);
     bool gemmNEdge(GEMMProblem problem, GEMMStrategy strategy, GEMMState state);
 
     void gemmCheck32(const GEMMProblem &problem, GEMMStrategy &strategy,
             GEMMState &state);
+    void gemmOffsetAk(int h, const GEMMProblem &problem,
+            const GEMMStrategy &strategy, GEMMState &state);
+    void gemmOffsetBk(int h, const GEMMProblem &problem,
+            const GEMMStrategy &strategy, GEMMState &state);
     void gemmOffsetABC(bool initial, ngen::Subregister i0, ngen::Subregister j0,
             ngen::Subregister h0, GEMMProblem &problem, GEMMStrategy &strategy,
             GEMMState &state, bool doA = true, bool doB = true,
@@ -1390,6 +1502,10 @@ protected:
     void gemmSuperkernelInitState(GEMMProblem &problem,
             GEMMSuperkernelStrategy &strategy, GEMMSuperkernelState &state);
 
+    bool copyRegisterBlock(Type Ts, Type Td, const RegisterBlock &blockSrc,
+            const RegisterBlock &blockDst, const ngen::GRFRange &src,
+            const ngen::GRFRange &dst, int dOffR, int dOffC,
+            CommonStrategy &strategy, CommonState &state);
     bool copyRegisters(Type Ts, Type Td,
             const std::vector<RegisterBlock> &layoutSrc,
             const std::vector<RegisterBlock> &layoutDst,
@@ -1421,7 +1537,7 @@ protected:
             CopyProblem &problem, CopyStrategy &strategy, CopyState &state);
 
     void prologue(const CommonStrategy &strategy);
-    void epilogue(const CommonStrategy &strategy);
+    void epilogue(const CommonState &state);
     void padding();
     void initState(const CommonProblem &problem, const CommonStrategy &strategy,
             CommonState &state);

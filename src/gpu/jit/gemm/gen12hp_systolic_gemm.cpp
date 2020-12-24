@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -41,6 +41,9 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     if (!compute_engine->mayiuse_ngen_kernels()) return status::unimplemented;
 
     const auto d = desc();
+
+    // Use FMA implementation for small cases.
+    if (d->m() < 32 && d->n() < 32) return status::unimplemented;
 
     bool ok = set_default_formats(d->a_type());
     if (!ok) return status::unimplemented;
