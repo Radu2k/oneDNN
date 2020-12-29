@@ -200,6 +200,7 @@ public:
         int tg_size = 16;
         int max_slm_tg_size = slm_dss_size / threads_per_eu
                 * utils::div_up(eus_per_dss, tg_size);
+        MAYBE_UNUSED(max_slm_tg_size);
 
         a_nbuf = slm_nbuf;
         b_nbuf = slm_nbuf;
@@ -209,7 +210,6 @@ public:
         assert(size <= max_slm_tg_size);
     }
 
-    int a_off() const { return 0; }
     int b_off() const { return a_nbuf * a_buf_size; }
 
     int a_nbuf;
@@ -1615,7 +1615,8 @@ public:
 
         if (!rem.isInvalid()) {
             // rem = x - qot * y
-            bool y_is_16_bit = (y <= std::numeric_limits<int16_t>::max());
+            bool y_is_16_bit = (y <= static_cast<uint32_t>(
+                                        std::numeric_limits<int16_t>::max()));
             if (y_is_16_bit) {
                 mad(1, rem, x, _qot, -int16_t(y));
             } else {
@@ -1684,8 +1685,6 @@ public:
 
     // Initializes SLM read/write offsets for A in owords.
     void init_a_slm_off() {
-        assert(slm_desc.a_off() == 0);
-
         // Read offsets.
         for (int i = 0; i < slm_desc.a_blocks; i++) {
             // Account for DPASW offset.
