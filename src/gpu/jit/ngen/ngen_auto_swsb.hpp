@@ -282,6 +282,8 @@ PipeMask getPipeMask(HW hw, const Instruction &insn)
 
 PipeMask GeneralizedPipe::syncPipes(HW hw) const
 {
+    if ((hw >= HW::Gen12HP) && (v & PipeMaskA))
+        return allPipes(hw) & ~PipeMaskA & ~PipeMaskO;
     return (v == PipeMaskNone) ? allPipes(hw) : inOrderPipe();
 }
 
@@ -480,7 +482,7 @@ inline bool intersects(const Dependency<false> &dep1, const Dependency<true> &de
         if (dep1.pipe.inOrder()) {
             auto commonPipe = (dep1.pipe.inOrderPipe() | PipeMaskA) & dep2.depPipe;
             if (commonPipe)
-                return (distance(dep1, dep2, commonPipe) >= dep2.dist);     // In theory should check timeout, but this
+                return (distance(dep1, dep2, dep1.pipe) >= dep2.dist);      // In theory should check timeout, but this
                                                                             // path is only used for removing dependencies.
         }
         return false;
@@ -548,6 +550,8 @@ inline bool impliesWithoutRegion(const Dependency<true> &dep1, const Dependency<
     if (dep2.pipe.inOrder()) {
         // Pipeline dependency. Consumer dependencies are only compared
         //  within BBs, so it's enough to check the A counter.
+        // Note distance check not always valid for A@ consumers >= Gen12HP,
+        //  but is never used in these cases.
         if (dep2.counters[PipeBitA] < dep1.counters[PipeBitA])
             return false;
         if (dep2.hasDist() != dep1.hasDist())
@@ -1133,11 +1137,13 @@ inline void analyze(HW hw, Program &program, BasicBlock &bb, int phase)
 
     auto recordIOPreconsumes = [&](Dependency<true> &generated) {
         if ((phase == 1) && generated.hasDist()) {
-            auto pDep = utils::log2(generated.depPipe);
             auto spipes = generated.pipe.syncPipes(hw);
-            for (int pidx = 0; pidx <= NPipes; pidx++)
-                if (spipes & (1 << pidx))
-                    preconsumeIO[pDep][pidx] = std::max<int>(preconsumeIO[pDep][pidx], counters[pDep] - generated.dist);
+            auto dpipes = GeneralizedPipe(generated.depPipe).syncPipes(hw);
+            for (int dpidx = 0; dpidx < NPipes; dpidx++)
+                if (dpipes & (1 << dpidx))
+                    for (int pidx = 0; pidx <= NPipes; pidx++)
+                        if (spipes & (1 << pidx))
+                            preconsumeIO[dpidx][pidx] = std::max<int>(preconsumeIO[dpidx][pidx], counters[dpidx] - generated.dist);
         }
     };
 
@@ -1258,9 +1264,7 @@ inline void analyze(HW hw, Program &program, BasicBlock &bb, int phase)
                 consumeOp.rw = (srcN < 0);
                 consumeOp.region = regions[srcN + 1];
 
-                // Grab all intersecting live producers.
-                // If src op, clear this pipe from the live pipe list of each intersecting producer.
-                // If dst op, clear the entire live pipe list.
+                // Remove all intersecting live producers from the table and save them.
                 auto dStart = depList.size();
                 bb.producers.findAndRemoveIntersections(consumeOp, &depList, hw);
                 auto dEnd = depList.size();
