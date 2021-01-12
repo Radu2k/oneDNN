@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * licensed under the apache license, version 2.0 (the "license");
 * you may not use this file except in compliance with the license.
@@ -56,7 +56,7 @@
             if (HAS_PADDING) { \
                 PAD_BLOCK_READ(d[_i + d_idx], src, sp, _i + sp_off, 0, 0) \
             } else { \
-                d[_i + d_idx] = AS_MMAD_DATA_T(intel_sub_group_block_read( \
+                d[_i + d_idx] = AS_SRC_MMAD_DATA_T(intel_sub_group_block_read( \
                         (__global uint *)&src[idx + _i * SW * G * IC])); \
             } \
         } \
@@ -199,7 +199,7 @@ DECLARE_MMAD_EMU(mmad_tail1, idot4, IC_NBLOCKS_TAIL, 8, SRC_DATA_BLOCK_T1, int8,
         int off = id * IH * IW + ih * IW + iw; \
         if (read_kind == 0) { \
             data = pad ? 0 \
-                       : AS_MMAD_DATA_T(intel_sub_group_block_read( \
+                       : AS_SRC_MMAD_DATA_T(intel_sub_group_block_read( \
                                (global uint *)&src[off * SRC_SP_STRIDE])); \
         } else if (read_kind == 1) { \
             data = pad ? 0 \
