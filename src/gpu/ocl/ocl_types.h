@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -87,6 +87,13 @@
 #define AS_BLOCK_DATA2_T as_uint2
 #define AS_BLOCK_DATA4_T as_uint4
 #define AS_BLOCK_DATA8_T as_uint8
+
+#define MMAD_DATA_T uint
+#define MMAD_DATA4_T uint4
+#define MMAD_DATA8_T uint8
+#define MMAD_ACC_DATA4_T float4
+#define MMAD_ACC_DATA8_T float8
+
 #elif DT_F16 == 1
 
 #define DATA_T half
