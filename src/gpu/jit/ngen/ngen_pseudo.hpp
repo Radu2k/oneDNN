@@ -340,11 +340,9 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
 
 // Thread spawner messages.
 void threadend(const InstructionModifier &mod, const RegData &r0_info) {
-    uint32_t exdesc = 0x20; // set EOT bit
-    if (hardware <= HW::Gen12HP)
-        exdesc |= static_cast<int>(SharedFunction::ts) & 0xF;
-    else
-        exdesc |= static_cast<int>(SharedFunction::gtwy) & 0xF;
+    auto sf = (hardware <= HW::Gen12HP) ? SharedFunction::ts
+                                        : SharedFunction::gtwy;
+    uint32_t exdesc = 0x20 | (static_cast<int>(sf) & 0xF);
     send(8 | EOT | mod | NoMask, null, r0_info, exdesc, 0x2000010);
 }
 
@@ -361,6 +359,10 @@ void barriermsg(const GRF &header) { barriermsg(InstructionModifier(), header); 
 
 void barriersignal(const InstructionModifier &mod, const GRF &temp, const GRF &r0_info = r0)
 {
+    if (hardware == HW::Gen12p7) {
+        mov(1 | NoMask, temp.hf(4), Immediate::hf(0));
+        mov(2 | NoMask, temp.ub(10)(1), r0_info.ub(11)(0));
+    } else
     and_(8 | NoMask, temp.ud(), r0_info.ud(2), uint32_t((hardware >= HW::Gen11) ? 0x7F000000 : 0x8F000000));
     barriermsg(mod, temp);
 }

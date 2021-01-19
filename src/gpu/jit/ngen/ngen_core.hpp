@@ -27,7 +27,7 @@
 
 #ifndef NGEN_NO_OP_NAMES
 #if not +0
-#error use -fno-operator-names [Linux/OS X] or without /Za [Windows] if you want to use and(), or(), xor(), not(), or define NGEN_NO_OP_NAMES and use and_(), or_(), xor_(), not().
+#error use -fno-operator-names [Linux/OS X] or without /Za [Windows] if you want to use and(), or(), xor(), or define NGEN_NO_OP_NAMES and use and_(), or_(), xor_().
 #endif
 #endif
 
@@ -326,12 +326,11 @@ enum class SharedFunction : uint8_t {
     pixi = 0xB,
     dc1 = 0xC,
     cre = 0xD,
-
-    btd = 0x17,
-    rta = 0x18,
-    tgm = 0x1D,
-    slm = 0x1E,
-    ugm = 0x1F,
+    btd = 0x7,
+    rta = 0x8,
+    tgm = 0xD,
+    slm = 0xE,
+    ugm = 0xF,
 
     // alias
     sampler = smpl,
@@ -340,16 +339,18 @@ enum class SharedFunction : uint8_t {
 };
 
 #ifdef NGEN_ASM
-static inline std::ostream &operator<<(std::ostream &str, SharedFunction sfid)
+static inline const char *getMnemonic(SharedFunction sfid, HW hw)
 {
-    static const char *names[32] = {
+    static const char *names[16] = {
         "null", ""    , "smpl", "gtwy", "dc2", "rc" , "urb", "ts" ,
         "vme" , "dcro", "dc0" , "pixi", "dc1", "cre", ""   , ""   ,
-        ""    , ""    , ""    , ""    , ""   , ""   , ""   , "btd",
-        "rta" , ""    , ""    , ""    , ""   , "tgm", "slm", "ugm",
     };
-    str << names[static_cast<uint8_t>(sfid) & 0x1F];
-    return str;
+    static const char *names12p7[16] = {
+        "null", ""    , "smpl", "gtwy", "dc2", "rc" , "urb", "btd",
+        "rta" , "dcro", "dc0" , "pixi", "dc1", "tgm", "slm", "ugm",
+    };
+    const auto &table = (hw >= HW::Gen12p7) ? names12p7 : names;
+    return table[static_cast<uint8_t>(sfid) & 0xF];
 }
 #endif
 

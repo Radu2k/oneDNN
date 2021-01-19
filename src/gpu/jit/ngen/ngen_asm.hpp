@@ -1431,16 +1431,16 @@ void AsmCodeGenerator::outExt(std::ostream &out, const AsmInstruction &i)
     switch (i.opcode()) {
         case Opcode::else_:
         case Opcode::goto_:
-        case Opcode::if_:       if (i.ext) out << ".b";                                         break;
-        case Opcode::math:      out << '.' << static_cast<MathFunction>(i.ext);                 break;
+        case Opcode::if_:       if (i.ext) out << ".b";                         break;
+        case Opcode::math:      out << '.' << static_cast<MathFunction>(i.ext); break;
         default: break;
     }
 
     if (isGen12) switch (i.opcode()) {
         case Opcode::send:
-        case Opcode::sends:     out << '.' << static_cast<SharedFunction>(i.ext);               break;
-        case Opcode::sync:      out << '.' << static_cast<SyncFunction>(i.ext);                 break;
-        case Opcode::bfn:       out << ".0x" << std::hex << i.ext << std::dec;                  break;
+        case Opcode::sends:     out << '.' << getMnemonic(static_cast<SharedFunction>(i.ext), hardware); break;
+        case Opcode::sync:      out << '.' << static_cast<SyncFunction>(i.ext);                          break;
+        case Opcode::bfn:       out << ".0x" << std::hex << i.ext << std::dec;                           break;
         case Opcode::dpas:
         case Opcode::dpasw: {
             int sdepth = i.ext >> 8;
