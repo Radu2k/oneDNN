@@ -300,103 +300,6 @@ void gemm_kernel_generator_t<hw>::allocVFlagStorage(
 /* Pseudo-instructions. */
 /************************/
 
-template <typename DT, typename O>
-static inline void applyDefaultType(O &op) {
-    if (op.getType() == DataType::invalid) op.setType(getDataType<DT>());
-}
-
-template <typename O>
-static inline bool isQW(const O &op) {
-    return one_of(op.getType(), DataType::q, DataType::uq);
-}
-
-template <typename O>
-static inline bool isDW(const O &op) {
-    return one_of(op.getType(), DataType::d, DataType::ud);
-}
-
-static inline void downgradeToDW(RegData &op) {
-    if (isQW(op)) {
-        op.setType((op.getType() == DataType::q) ? DataType::d : DataType::ud);
-        op.setOffset(op.getOffset() * 2);
-    }
-}
-
-static inline void downgradeToDW(Immediate &op) {
-    if (isQW(op))
-        op.setType((op.getType() == DataType::q) ? DataType::d : DataType::ud);
-}
-
-// Get the DW equivalent of a QW region.
-static inline void makeDWPair(RegData &op, int esize) {
-    if (isQW(op)) {
-        downgradeToDW(op);
-        if (op.getHS() > 1) {
-            if (op.getVS() != op.getHS() * op.getWidth()) stub();
-            op.setRegion(op.getHS() * 2, 2, 1);
-        } else {
-            auto newVS = op.getVS() * 2;
-            if (esize == op.getWidth()) newVS = esize * 2;
-            op.setRegion(newVS, op.getWidth() * 2, 1);
-        }
-    }
-}
-
-// Split a register into DW pairs.
-static inline void splitToDW(RegData in, RegData &outLo, RegData &outHi) {
-    bool isQ = (in.getType() == DataType::q);
-    bool isUQ = (in.getType() == DataType::uq);
-
-    if (isQ || isUQ) {
-        outLo = in;
-        outLo.setRegion(in.getVS() * 2, in.getWidth(), in.getHS() * 2);
-        outLo.setOffset(in.getOffset() * 2);
-        outLo.setType(DataType::ud);
-
-        outHi = outLo;
-        outHi.setOffset(in.getOffset() * 2 + 1);
-        outHi.setType(isQ ? DataType::d : DataType::ud);
-    } else {
-        outLo = in;
-        outHi = Subregister {}; // invalid
-    }
-}
-
-// Split an immediate into DW pairs.
-static inline void splitToDW(
-        const Immediate &in, Immediate &outLo, Immediate &outHi) {
-    bool isQ = (in.getType() == DataType::q);
-    bool isUQ = (in.getType() == DataType::uq);
-
-    if (isQ || isUQ) {
-        outLo = uint32_t(static_cast<uint64_t>(in));
-        outLo.setType(DataType::ud);
-
-        outHi = uint32_t(static_cast<uint64_t>(in) >> 32);
-        outHi.setType(isQ ? DataType::d : DataType::ud);
-    } else {
-        outLo = in;
-        outHi = uint16_t(0);
-    }
-}
-
-static inline RegData lowWord(RegData in) {
-    auto outLo = in;
-    outLo.setRegion(in.getVS() * 2, in.getWidth(), in.getHS() * 2);
-    outLo.setOffset(in.getOffset() * 2);
-    outLo.setType(DataType::uw);
-
-    return outLo;
-}
-
-static inline Immediate lowWord(const Immediate &in) {
-    return uint16_t(static_cast<uint64_t>(in));
-}
-
-static inline bool isUnitStride(const RegData &rd) {
-    return (rd.getHS() == 1 && rd.getVS() == rd.getWidth());
-}
-
 // goto instruction with Gen12 semantics.
 template <HW hw>
 void gemm_kernel_generator_t<hw>::goto12(const InstructionModifier &mod,
@@ -425,67 +328,27 @@ void gemm_kernel_generator_t<hw>::syncall() {
         sync.allwr(SWSB<AllPipes>(1), null);
 }
 
-// Move, emulating 64-bit moves with 32-bit (generally a good idea).
+// Multiply by a constant, optimizing for power-of-2 constants.
 template <HW hw>
 template <typename DT>
-void gemm_kernel_generator_t<hw>::emov(const InstructionModifier &mod,
-        RegData dst, RegData src0, const CommonStrategy &strategy) {
-    applyDefaultType<DT>(dst);
-    applyDefaultType<DT>(src0);
-
-    bool dstQ = isQW(dst);
-    bool s0Q = isQW(src0);
-
-    if ((dstQ || s0Q) && strategy.emulate64) {
-        if (dstQ != s0Q) stub();
-
-        auto mod2x = mod;
-        mod2x.setExecSize(mod.getExecSize() * 2);
-
-        makeDWPair(dst, mod.getExecSize());
-        makeDWPair(src0, mod.getExecSize());
-        mov(mod2x, dst, src0);
-    } else if (dst.getType() == DataType::f && src0.getType() == DataType::bf
-            && src0.getHS() != 1) {
-        // Emulate bf16->f32 upconversion
-        dst.setType(DataType::ud);
-        src0.setType(DataType::uw);
-        shl(mod, dst, src0, 16);
-    } else
-        mov(mod, dst, src0);
-}
-
-template <HW hw>
-template <typename DT>
-void gemm_kernel_generator_t<hw>::emov(const InstructionModifier &mod,
-        RegData dst, Immediate src0, const CommonStrategy &strategy) {
-    applyDefaultType<DT>(dst);
-    applyDefaultType<DT>(src0);
-
-    bool dstQ = isQW(dst);
-    bool s0Q = isQW(src0);
-
-    if ((dstQ || s0Q) && strategy.emulate64) {
-        if (dstQ != s0Q) stub();
-
-        RegData dstHi, dstLo;
-        Immediate s0Hi = 0, s0Lo = 0;
-
-        splitToDW(src0, s0Lo, s0Hi);
-
-        if (static_cast<uint64_t>(s0Lo) == static_cast<uint64_t>(s0Hi)) {
-            auto mod2x = mod;
-            mod2x.setExecSize(mod.getExecSize() * 2);
-
-            downgradeToDW(dst);
-            mov(mod2x, dst, s0Lo);
-        } else {
-            splitToDW(dst, dstLo, dstHi);
-            mov(mod, dstLo, s0Lo);
-            mov(mod, dstHi, s0Hi);
-        }
-    } else
-        mov(mod, dst, src0);
+void gemm_kernel_generator_t<hw>::mulConstant(const InstructionModifier &mod,
+        const RegData &dst, const RegData &src0, int32_t src1) {
+    if (src1 == 0)
+        mov<DT>(mod, dst, uint16_t(0));
+    else if (src1 == 1) {
+        if (dst != src0) mov<DT>(mod, dst, src0);
+    } else if (src1 == -1)
+        mov<DT>(mod, dst, -src0);
+    else if (is_zero_or_pow2(src1))
+        shl<DT>(mod, dst, src0, uint16_t(log2(src1)));
+    else if (src1 >= 0x10000)
+        mul<DT>(mod, dst, src0, uint32_t(src1));
+    else if (src1 < -0x8000)
+        mul<DT>(mod, dst, src0, int32_t(src1));
+    else if (src1 > 0)
+        mul<DT>(mod, dst, src0, uint16_t(src1));
+    else
+        mul<DT>(mod, dst, src0, int16_t(src1));
 }
 
 // Three-argument add.
@@ -543,410 +406,6 @@ void gemm_kernel_generator_t<hw>::emad(const InstructionModifier &mod,
     }
 }
 
-template <HW hw>
-void gemm_kernel_generator_t<hw>::eaddSignExtend1(
-        const InstructionModifier &mod, bool &doSub, const Immediate &src1,
-        Immediate &s1LoPos, const Immediate &s1Lo, const Immediate &s1Hi,
-        bool &s1Q, const GRF (&temp)[2]) {
-    uint64_t raw = static_cast<uint64_t>(src1);
-    if (src1.getType() == DataType::d) {
-        int32_t val = raw;
-        s1LoPos = uint32_t(std::abs(val));
-        doSub = (val < 0);
-    } else if (src1.getType() == DataType::w) {
-        int16_t val = raw;
-        s1LoPos = uint16_t(std::abs(val));
-        doSub = (val < 0);
-    }
-}
-
-template <HW hw>
-void gemm_kernel_generator_t<hw>::eaddSignExtend1(
-        const InstructionModifier &mod, bool &doSub, const RegData &src1,
-        RegData &s1LoPos, RegData &s1Lo, RegData &s1Hi, bool &s1Q,
-        const GRF (&temp)[2]) {
-    s1Q = true;
-    s1Hi = temp[0].d();
-    if (s1Lo.getNeg()) {
-        asr(mod, s1Hi, -s1Lo, uint16_t(31));
-        s1Hi = -s1Hi;
-    } else
-        asr(mod, s1Hi, s1Lo, uint16_t(31));
-    s1Lo.setType(DataType::ud);
-}
-
-template <HW hw>
-void gemm_kernel_generator_t<hw>::eaddHandleS1Neg(
-        bool &doSub, RegData &s1LoPos, const RegData &s1Lo) {
-    if (isSigned(s1Lo.getType())) stub();
-    doSub = s1Lo.getNeg();
-    s1LoPos = -s1Lo;
-}
-
-template <HW hw>
-void gemm_kernel_generator_t<hw>::eaddHandleS1Neg(
-        bool &doSub, const Immediate &s1LoPos, const Immediate &s1Lo) {
-    /* no-op */
-}
-
-// Integer addition, emulating 64-bit arithmetic if configured.
-template <HW hw>
-template <typename DT, typename S1>
-void gemm_kernel_generator_t<hw>::eaddInternal(const InstructionModifier &mod,
-        RegData dst, RegData src0, S1 src1, const CommonStrategy &strategy,
-        const CommonState &state) {
-    const auto &temp = state.emulate64Temp;
-
-    applyDefaultType<DT>(dst);
-    applyDefaultType<DT>(src0);
-    applyDefaultType<DT>(src1);
-
-    bool dstQ = isQW(dst);
-    bool s0Q = isQW(src0);
-    bool s1Q = isQW(src1);
-
-    if (dstQ && strategy.emulate64_add32) {
-        RegData dstHi, dstLo, s0Hi, s0Lo;
-        S1 s1Hi, s1Lo;
-
-        splitToDW(dst, dstLo, dstHi);
-        splitToDW(src0, s0Lo, s0Hi);
-        splitToDW(src1, s1Lo, s1Hi);
-        add(mod, dstLo, s0Lo, s1Lo);
-
-        if (s0Q && s1Q)
-            add(mod, dstHi, s0Hi, s1Hi);
-        else if (s0Q) {
-            if (dstHi != s0Hi) mov(mod, dstHi, s0Hi);
-        } else if (s1Q) {
-            if (dstHi != s1Hi) mov(mod, dstHi, s1Hi);
-        } else
-            mov(mod, dstHi, uint16_t(0));
-    } else if (!strategy.emulate64)
-        add<DT>(mod, dst, src0, src1);
-    else {
-        if (!dstQ) {
-            downgradeToDW(src0);
-            downgradeToDW(src1);
-            add(mod, dst, src0, src1);
-        } else {
-            RegData dstHi, dstLo, s0Hi, s0Lo;
-            S1 s1Hi, s1Lo, s1LoPos;
-
-            splitToDW(dst, dstLo, dstHi);
-            splitToDW(src0, s0Lo, s0Hi);
-            splitToDW(src1, s1Lo, s1Hi);
-            s1LoPos = s1Lo;
-
-            RegData carry = temp[0].ud();
-            bool lateCarry = false;
-            RegData subDstLo;
-
-            bool s0Signed = isSigned(s0Lo.getType());
-            bool s1Signed = isSigned(s1Lo.getType());
-            bool doSub = false;
-
-            // For :uq + :d or :q + :ud, sign extend 32-bit input to 64 bits.
-            if (s0Signed != s1Signed) {
-                if (s0Signed) {
-                    s0Q = true;
-                    s0Hi = temp[0].d();
-                    asr(mod, s0Hi, s0Lo, uint16_t(31));
-                    s0Lo.setType(DataType::ud);
-                    if (s0Lo.getNeg()) s0Hi = -s0Hi;
-                } else
-                    eaddSignExtend1(
-                            mod, doSub, src1, s1LoPos, s1Lo, s1Hi, s1Q, temp);
-                carry = temp[1].ud();
-                lateCarry = true;
-            }
-
-            // Handle modifiers.
-            if (s0Lo.getNeg()) stub();
-            eaddHandleS1Neg(doSub, s1LoPos, s1Lo);
-
-            // Compute low 32 bits, saving carry/borrow.
-            if (dstLo.getOffset() != 0) {
-                doSub ? subb(mod, null.retype(s0Lo.getType()), s0Lo, s1LoPos)
-                      : addc(mod, null.retype(s0Lo.getType()), s0Lo, s1Lo);
-                add(mod, dstLo, s0Lo, s1Lo);
-            } else if ((mod.getExecSize() > 1) && !isUnitStride(dstLo)) {
-                subDstLo = temp[1].ud();
-                doSub ? subb(mod, subDstLo, s0Lo, s1LoPos)
-                      : addc(mod, subDstLo, s0Lo, s1Lo);
-            } else {
-                doSub ? subb(mod, dstLo, s0Lo, s1LoPos)
-                      : addc(mod, dstLo, s0Lo, s1Lo);
-            }
-
-            // Retrieve carry from accumulator, unless it conflicts with subDstLo.
-            if (!lateCarry) mov(mod, carry, acc0.ud());
-
-            // Move low 32-bits to final resting place, if needed.
-            if (subDstLo.isValid()) mov(mod, dstLo, subDstLo);
-
-            // Retrieve carry from accumulator once subDstLo isn't needed.
-            if (lateCarry) mov(mod, carry, acc0.ud());
-
-            if (doSub) carry = -carry;
-
-            // Compute high 32 bits of sum.
-            if (s0Q && s1Q) {
-                add(mod, dstHi, s0Hi, s1Hi);
-                add(mod, dstHi, carry, dstHi);
-            } else if (s0Q)
-                add(mod, dstHi, carry, s0Hi);
-            else if (s1Q)
-                add(mod, dstHi, carry, s1Hi);
-            else
-                mov(mod, dstHi, carry);
-        }
-    }
-}
-
-template <HW hw>
-template <typename DT>
-void gemm_kernel_generator_t<hw>::eadd(const InstructionModifier &mod,
-        const RegData &dst, const RegData &src0, const RegData &src1,
-        const CommonStrategy &strategy, const CommonState &state) {
-    eaddInternal<DT>(mod, dst, src0, src1, strategy, state);
-}
-
-template <HW hw>
-template <typename DT>
-void gemm_kernel_generator_t<hw>::eadd(const InstructionModifier &mod,
-        const RegData &dst, const RegData &src0, Immediate src1,
-        const CommonStrategy &strategy, const CommonState &state) {
-    eaddInternal<DT>(mod, dst, src0, src1, strategy, state);
-}
-
-// Integer multiplication, emulating 32x32 multiplication as configured.
-template <HW hw>
-template <typename DT, typename S1>
-void gemm_kernel_generator_t<hw>::emulInternal(const InstructionModifier &mod,
-        RegData dst, RegData src0, S1 src1, const CommonStrategy &strategy,
-        const CommonState &state) {
-    applyDefaultType<DT>(dst);
-    applyDefaultType<DT>(src0);
-    applyDefaultType<DT>(src1);
-
-    bool dstD = isDW(dst);
-    bool dstQ = isQW(dst);
-    bool s0D = isDW(src0);
-    bool s0Q = isQW(src0);
-    bool s1D = isDW(src1);
-    bool s1Q = isQW(src1);
-
-    bool s0Signed = isSigned(src0.getType());
-    bool s1Signed = isSigned(src1.getType());
-    auto mulHiType = (s0Signed || s1Signed) ? DataType::d : DataType::ud;
-
-    const auto &temp = state.emulate64Temp;
-
-    if (s0Q || s1Q)
-        stub();
-    else if (dstQ && s0D && s1D && strategy.emulate64) {
-        RegData dstLo, dstHi;
-
-        splitToDW(dst, dstLo, dstHi);
-        auto acc = acc0.ud();
-
-        dstHi.setType(mulHiType);
-
-        RegData subDstLo = dstLo, subDstHi = dstHi;
-        bool copyDstLo = false, copyDstHi = false;
-        if ((dstHi.getOffset() != 0)
-                || ((mod.getExecSize() > 1) && !isUnitStride(dstHi))) {
-            copyDstHi = true;
-            subDstHi = temp[0].retype(dstHi.getType());
-        }
-        if ((dstLo.getOffset() & 3)
-                || ((mod.getExecSize() > 1) && !isUnitStride(dstLo))) {
-            copyDstLo = true;
-            subDstLo = temp[1].retype(dstLo.getType());
-        }
-
-        mul(mod, acc, src0, lowWord(src1));
-        mach(mod, subDstHi, src0, src1);
-        mov(mod, subDstLo, acc);
-        if (copyDstHi) mov(mod, dstHi, subDstHi);
-        if (copyDstLo) mov(mod, dstLo, subDstLo);
-    } else if (dstD && s0D && s1D && strategy.emulateDWxDW) {
-        // Emulate with mul/mach sequence. Or on Gen10+, mul/macl.
-        if (s0Signed != s1Signed) src1.setType(src0.getType());
-
-        auto acc = acc0.ud();
-        RegData subDst = dst;
-        bool copyDst = false;
-        if ((dst.getOffset() > 0)
-                || ((mod.getExecSize() > 1) && !isUnitStride(dst))) {
-            copyDst = true;
-            subDst = temp[0].retype(dst.getType());
-        }
-
-        if (hw < HW::Gen10) {
-            mul(mod, acc, src0, lowWord(src1));
-            mach(mod, null.retype(mulHiType), src0, src1);
-            mov(mod, subDst, acc);
-        } else {
-            mul(mod, acc, src0, lowWord(src1));
-            macl(mod, subDst, src0, src1);
-        }
-
-        if (copyDst) mov(mod, dst, subDst);
-    } else
-        mul(mod, dst, src0, src1);
-}
-
-template <HW hw>
-template <typename DT>
-void gemm_kernel_generator_t<hw>::emul(const InstructionModifier &mod,
-        const RegData &dst, const RegData &src0, const RegData &src1,
-        const CommonStrategy &strategy, const CommonState &state) {
-    emulInternal<DT>(mod, dst, src0, src1, strategy, state);
-}
-
-template <HW hw>
-template <typename DT>
-void gemm_kernel_generator_t<hw>::emul(const InstructionModifier &mod,
-        const RegData &dst, const RegData &src0, Immediate src1,
-        const CommonStrategy &strategy, const CommonState &state) {
-    emulInternal<DT>(mod, dst, src0, src1, strategy, state);
-}
-
-template <ngen::HW hw>
-template <typename S1>
-void gemm_kernel_generator_t<hw>::emul32High(const InstructionModifier &mod,
-        const RegData &dstHi, const RegData &src0, const S1 &src1) {
-    if (dstHi.getOffset() != 0) stub();
-    mul(mod, acc0.ud(0), src0, lowWord(src1));
-    mach(mod, dstHi, src0, src1);
-}
-
-// Shift left, emulating 64-bit arithmetic if configured.
-template <HW hw>
-template <typename DT>
-void gemm_kernel_generator_t<hw>::eshl(const InstructionModifier &mod,
-        RegData dst, RegData src0, uint16_t src1,
-        const CommonStrategy &strategy, const CommonState &state) {
-    const auto &temp = state.emulate64Temp;
-
-    applyDefaultType<DT>(dst);
-    applyDefaultType<DT>(src0);
-
-    bool dstQ = isQW(dst);
-    bool s0Q = isQW(src0);
-
-    if (dstQ && strategy.emulate64) {
-        if (src1 >= 32) stub();
-
-        RegData dstHi, dstLo, s0Hi, s0Lo;
-
-        auto acc = temp[0].ud();
-
-        splitToDW(dst, dstLo, dstHi);
-
-        if (s0Q) {
-            splitToDW(dst, s0Lo, s0Hi);
-
-            shr(mod, acc, s0Lo, uint16_t(32 - src1));
-            shl(mod, dstHi, s0Hi, src1);
-            shl(mod, dstLo, s0Lo, src1);
-            or_(mod, dstHi, acc, dstHi);
-        } else {
-            dstHi.setType(DataType::ud);
-            shl(mod, dstLo, src0, src1);
-            shr(mod, dstHi, src0, uint16_t(32 - src1));
-        }
-    } else {
-        if (s0Q && !dstQ) downgradeToDW(src0);
-        shl(mod, dst, src0, src1);
-    }
-}
-
-// Shift right, emulating 64-bit arithmetic if configured.
-template <HW hw>
-template <typename DT>
-void gemm_kernel_generator_t<hw>::eshr(const InstructionModifier &mod,
-        RegData dst, RegData src0, uint16_t src1,
-        const CommonStrategy &strategy, const CommonState &state) {
-    const auto &temp = state.emulate64Temp;
-
-    applyDefaultType<DT>(dst);
-    applyDefaultType<DT>(src0);
-
-    bool dstQ = isQW(dst);
-    bool s0Q = isQW(src0);
-
-    if (dstQ && strategy.emulate64) {
-        if (src1 >= 32) stub();
-
-        RegData dstHi, dstLo, s0Hi, s0Lo;
-
-        auto acc = temp[0].ud();
-
-        splitToDW(dst, dstLo, dstHi);
-
-        if (s0Q) {
-            splitToDW(dst, s0Lo, s0Hi);
-
-            shl(mod, acc, s0Lo, uint16_t(32 - src1));
-            shr(mod, dstLo, s0Lo, src1);
-            isSigned(src0.getType()) ? asr(mod, dstHi, s0Hi, src1)
-                                     : shr(mod, dstHi, s0Hi, src1);
-            or_(mod, dstLo, acc, dstLo);
-        } else {
-            dstLo.setType(dstHi.getType());
-            isSigned(src0.getType()) ? asr(mod, dstLo, src0, src1)
-                                     : shr(mod, dstLo, src0, src1);
-            mov(mod, dstHi, uint16_t(0));
-        }
-    } else {
-        if (s0Q && !dstQ) downgradeToDW(src0);
-        isSigned(src0.getType()) ? asr(mod, dst, src0, src1)
-                                 : shr(mod, dst, src0, src1);
-    }
-}
-
-// Multiply by a constant, optimizing for power-of-2 constants.
-template <HW hw>
-template <typename DT>
-void gemm_kernel_generator_t<hw>::mulConstant(const InstructionModifier &mod,
-        const RegData &dst, const RegData &src0, int32_t src1) {
-    if (src1 == 0)
-        mov<DT>(mod, dst, uint16_t(0));
-    else if (src1 == 1) {
-        if (dst != src0) mov<DT>(mod, dst, src0);
-    } else if (is_zero_or_pow2(src1))
-        shl<DT>(mod, dst, src0, uint16_t(log2(src1)));
-    else if (src1 >= 0x10000)
-        mul<DT>(mod, dst, src0, uint32_t(src1));
-    else if (src1 < -0x8000)
-        mul<DT>(mod, dst, src0, int32_t(src1));
-    else if (src1 > 0)
-        mul<DT>(mod, dst, src0, uint16_t(src1));
-    else
-        mul<DT>(mod, dst, src0, int16_t(src1));
-}
-
-// Multiply by a constant, optimizing for power-of-2 constants and emulating 64-bit arithmetic if configured.
-template <HW hw>
-template <typename DT>
-void gemm_kernel_generator_t<hw>::emulConstant(const InstructionModifier &mod,
-        const RegData &dst, const RegData &src0, int32_t src1,
-        const CommonStrategy &strategy, const CommonState &state) {
-    if (src1 == 0)
-        emov<DT>(mod, dst, uint16_t(0), strategy);
-    else if (src1 == 1) {
-        if (dst != src0) emov<DT>(mod, dst, src0, strategy);
-    } else if (is_zero_or_pow2(src1))
-        eshl<DT>(mod, dst, src0, uint16_t(log2(src1)), strategy, state);
-    else if (src1 > 0)
-        emul<DT>(mod, dst, src0, uint32_t(src1), strategy, state);
-    else
-        emul<DT>(mod, dst, src0, int32_t(src1), strategy, state);
-}
-
 /********************/
 /* Utility routines */
 /********************/
@@ -959,7 +418,7 @@ void gemm_kernel_generator_t<hw>::mod(const ngen::Subregister &dst,
         const CommonStrategy &strategy, CommonState &state) {
     if (is_zero_or_pow2(modulus))
         and_<DT>(1, dst, src, modulus - 1);
-    else if (strategy.emulate64 && (hw <= HW::Gen12LP))
+    else if (strategy.emulate.emulate64 && (hw <= HW::Gen12LP))
         math<DT>(1, MathFunction::irem, dst, src, modulus);
     else {
         alignDown<DT>(dst, src, modulus, strategy, state);
@@ -976,7 +435,7 @@ void gemm_kernel_generator_t<hw>::modExt(const ngen::Subregister &dstMod,
     if (is_zero_or_pow2(modulus)) {
         and_<DT>(1, dstMultiple, src, ~uint32_t(modulus - 1));
         and_<DT>(1, dstMod, src, modulus - 1);
-    } else if (strategy.emulate64 && (hw <= HW::Gen12LP)) {
+    } else if (strategy.emulate.emulate64 && (hw <= HW::Gen12LP)) {
         math<DT>(1, MathFunction::irem, dstMod, src, modulus);
         add<DT>(1, dstMultiple, src, -dstMod);
     } else {
@@ -993,7 +452,7 @@ void gemm_kernel_generator_t<hw>::alignDown(const ngen::Subregister &dst,
         const CommonStrategy &strategy, CommonState &state) {
     if (is_zero_or_pow2(align))
         and_<DT>(1, dst, src, uint32_t(-align));
-    else if (strategy.emulate64 && (hw <= HW::Gen12LP)) {
+    else if (strategy.emulate.emulate64 && (hw <= HW::Gen12LP)) {
         auto rem = state.ra.alloc_sub<uint32_t>();
         math<DT>(1, MathFunction::irem, rem, src, uint32_t(align));
         add<DT>(1, dst, src, -rem);
@@ -1001,7 +460,7 @@ void gemm_kernel_generator_t<hw>::alignDown(const ngen::Subregister &dst,
     } else {
         // Replace integer division with multiplication by reciprocal.
         uint32_t recip32 = (0xFFFFFFFFu / align) + 1;
-        if (strategy.emulate64) {
+        if (strategy.emulate.emulate64) {
             auto temp = state.ra.alloc().ud();
             emul32High(1, temp, src, recip32);
             mul(1, dst, temp, align);
@@ -1327,7 +786,7 @@ static inline void moveToIntPipe(int esize, RegData &s) {
         case DataType::f: s.setType(DataType::ud); break;
         case DataType::df:
             s.setType(DataType::uq);
-            makeDWPair(s, esize);
+            EmulationImplementation::makeDWPair(s, esize);
             break;
         default: break;
     }
@@ -2797,7 +2256,7 @@ static bool matchLayouts(Type T, vector<RegisterBlock> &layout,
 template <ngen::HW hw>
 void gemm_kernel_generator_t<hw>::setupTeardownLoadStoreDesc(
         bool setup, const CommonStrategy &strategy, CommonState &state) {
-    if (strategy.emulateDWxDW) {
+    if (strategy.emulate.emulateDWxDW) {
         if (setup)
             for (int s = 0; s < 2; s++) {
                 state.lsDescConstant[s] = state.ra.alloc_sub<uint32_t>();
@@ -2837,7 +2296,7 @@ void gemm_kernel_generator_t<hw>::loadLoadStoreDescriptors(bool load,
 
             auto bitmask = uint16_t(0x0F00);
 
-            if (strategy.emulateDWxDW)
+            if (strategy.emulate.emulateDWxDW)
                 mul(1, t1, state.lsDescConstant[block.simdSize == 16],
                         count.uw());
             else
@@ -3172,7 +2631,7 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
                         atomic(AtomicOp::cmpwr, atomicMod, rOld,
                                 scattered_qword(), atype.base, addr[hoff],
                                 rOld);
-                        if (strategy.emulate64) {
+                        if (strategy.emulate.emulate64) {
                             cmp<uint32_t>(simd | ne | flagToDo | eoMod,
                                     rSave[0][0](2), rOld[0](2));
                             cmp<uint32_t>(
@@ -3768,10 +3227,10 @@ void gemm_kernel_generator_t<hw>::incDecAddr(const A &addr, I inc,
     incAddr(addr, signedInc, layout, atype, astrategy, strategy, state);
 }
 
-// Get a subregister containing the address of the (0,0) entry of a layout.
+// Get a subregister containing the (shifted) address of the (0,0) entry of a layout.
 Subregister getOriginAddr(const vector<RegisterBlock> &layout,
         const vector<GRFRange> &addrRegs, const MatrixAddressing &atype,
-        const MatrixAddressingStrategy &astrategy) {
+        const MatrixAddressingStrategy &astrategy, int *shiftOut = nullptr) {
     bool a64 = atype.base.getModel() == ModelA64;
 
     for (size_t b = 0; b < layout.size(); b++) {
@@ -3787,9 +3246,11 @@ Subregister getOriginAddr(const vector<RegisterBlock> &layout,
             case AccessType::Block: off = a64 ? 0 : 2; break;
         }
 
+        if (shiftOut) *shiftOut = block.addrShift;
         return addrRegs[b][0].sub(off, a64 ? DataType::uq : DataType::ud);
     }
 
+    if (shiftOut) *shiftOut = 0;
     return Subregister();
 }
 
@@ -7030,117 +6491,6 @@ void gemm_kernel_generator_t<hw>::gemmCalcBiOffset(Subregister dst,
     }
 }
 
-// Prepare for restoring Ai/Bi/A/B addresses after a remainder loop, in preparation for another one.
-template <ngen::HW hw>
-void gemm_kernel_generator_t<hw>::gemmPrepPostRemAB(const GEMMProblem &problem,
-        const GEMMStrategy &strategy, GEMMState &state) {
-    auto Ta = problem.Ta, Tb = problem.Tb;
-
-    if (strategy.slmA) {
-        state.postRemA = state.ra.alloc_sub<uint32_t>(
-                getHint(HintType::LongTerm, strategy));
-        state.postRemAi = state.ra.alloc_sub<uint32_t>(
-                getHint(HintType::LongTerm, strategy));
-
-        switch (state.Ai.layout) {
-            case MatrixLayout::Pc:
-                mulConstant(1, state.postRemAi, state.K,
-                        strategy.unroll[LoopM] * Ta);
-                break;
-            case MatrixLayout::N:
-                mul(1, state.postRemAi, state.inputs.lda, state.K.uw());
-                break;
-            case MatrixLayout::T:
-                mulConstant(1, state.postRemAi, state.K, Ta.size());
-                break;
-            default: stub();
-        }
-
-        auto shift = state.Ai_layout[0].addrShift;
-        if (shift > 0) shr(1, state.postRemAi, state.postRemAi, shift);
-
-        auto a0 = getOriginAddr(
-                state.A_layout, state.A_addrs, problem.A, strategy.A);
-        mov(1, state.postRemA, a0);
-
-        auto ai0 = getOriginAddr(
-                state.Ai_layout, state.Ai_addrs, state.Ai, state.Ai_strategy);
-        add(1, state.postRemAi,
-                problem.backward ? -state.postRemAi : state.postRemAi,
-                ai0.ud());
-    }
-
-    if (strategy.slmB) {
-        state.postRemB = state.ra.alloc_sub<uint32_t>(
-                getHint(HintType::LongTerm, strategy));
-        state.postRemBi = state.ra.alloc_sub<uint32_t>(
-                getHint(HintType::LongTerm, strategy));
-
-        switch (state.Bi.layout) {
-            case MatrixLayout::Pr:
-                mulConstant(1, state.postRemBi, state.K,
-                        strategy.unroll[LoopN] * Tb);
-                break;
-            case MatrixLayout::T:
-                mul(1, state.postRemBi, state.inputs.ldb, state.K.uw());
-                break;
-            case MatrixLayout::N:
-                mulConstant(1, state.postRemBi, state.K, Tb.size());
-                break;
-            default: stub();
-        }
-
-        auto shift = state.Bi_layout[0].addrShift;
-        if (shift > 0) shr(1, state.postRemBi, state.postRemBi, shift);
-
-        auto b0 = getOriginAddr(
-                state.B_layout, state.B_addrs, problem.B, strategy.B);
-        mov(1, state.postRemB, b0);
-
-        auto bi0 = getOriginAddr(
-                state.Bi_layout, state.Bi_addrs, state.Bi, state.Bi_strategy);
-        add(1, state.postRemBi,
-                problem.backward ? -state.postRemBi : state.postRemBi,
-                bi0.ud());
-    }
-}
-
-// Restore Ai/Bi/A/B addresses after a remainder loop, in preparation for another one.
-template <ngen::HW hw>
-void gemm_kernel_generator_t<hw>::gemmRestorePostRemAB(
-        const GEMMProblem &problem, const GEMMStrategy &strategy,
-        GEMMState &state) {
-    if (strategy.slmA) {
-        auto a0 = getOriginAddr(
-                state.A_layout, state.A_addrs, problem.A, strategy.A);
-        auto ai0 = getOriginAddr(
-                state.Ai_layout, state.Ai_addrs, state.Ai, state.Ai_strategy);
-        add(1, state.postRemA, state.postRemA, -a0.ud());
-        add(1, state.postRemAi, state.postRemAi, -ai0.ud());
-        incAddrUnshifted(state.A_addrs, state.postRemA.d(), state.A_layout,
-                problem.A, strategy.A, strategy, state);
-        incAddrUnshifted(state.Ai_addrs, state.postRemAi.d(), state.Ai_layout,
-                state.Ai, state.Ai_strategy, strategy, state);
-        state.ra.safeRelease(state.postRemA);
-        state.ra.safeRelease(state.postRemAi);
-    }
-
-    if (strategy.slmB) {
-        auto b0 = getOriginAddr(
-                state.B_layout, state.B_addrs, problem.B, strategy.B);
-        auto bi0 = getOriginAddr(
-                state.Bi_layout, state.Bi_addrs, state.Bi, state.Bi_strategy);
-        add(1, state.postRemB, state.postRemB, -b0.ud());
-        add(1, state.postRemBi, state.postRemBi, -bi0.ud());
-        incAddrUnshifted(state.B_addrs, state.postRemB.d(), state.B_layout,
-                problem.B, strategy.B, strategy, state);
-        incAddrUnshifted(state.Bi_addrs, state.postRemBi.d(), state.Bi_layout,
-                state.Bi, state.Bi_strategy, strategy, state);
-        state.ra.safeRelease(state.postRemB);
-        state.ra.safeRelease(state.postRemBi);
-    }
-}
-
 // Perform the body of the GEMM computation, updating a block of C.
 template <ngen::HW hw>
 bool gemm_kernel_generator_t<hw>::gemmKLoop(int ka_repack_in, int kb_repack_in,
@@ -7976,8 +7326,9 @@ bool gemm_kernel_generator_t<hw>::gemmKLoop(int ka_repack_in, int kb_repack_in,
                     break;
                 case MatrixLayout::T: incA *= Ta.size(); break;
                 case MatrixLayout::N:
-                    incASub = state.ra.alloc_sub<int32_t>();
-                    mulConstant(1, incASub, state.inputs.lda, incA);
+                    incASub = state.ra.alloc_sub<uint32_t>();
+                    mulConstant(1, incASub, state.inputs.lda, std::abs(incA));
+                    if (incA < 0) incASub = -incASub;
                     break;
                 default: stub();
             }
@@ -7987,8 +7338,9 @@ bool gemm_kernel_generator_t<hw>::gemmKLoop(int ka_repack_in, int kb_repack_in,
                     break;
                 case MatrixLayout::N: incB *= Tb.size(); break;
                 case MatrixLayout::T:
-                    incBSub = state.ra.alloc_sub<int32_t>();
-                    mulConstant(1, incBSub, state.inputs.ldb, incB);
+                    incBSub = state.ra.alloc_sub<uint32_t>();
+                    mulConstant(1, incBSub, state.inputs.ldb, std::abs(incB));
+                    if (incB < 0) incBSub = -incBSub;
                     break;
                 default: stub();
             }
@@ -8049,6 +7401,7 @@ bool gemm_kernel_generator_t<hw>::gemmKLoop(int ka_repack_in, int kb_repack_in,
         }
 
         // SLM remainder copy logic.
+        bool repacked = false;
         auto remainderCopy = [&]() {
             bool restoreState = false;
             auto savedState = state;
@@ -8102,11 +7455,10 @@ bool gemm_kernel_generator_t<hw>::gemmKLoop(int ka_repack_in, int kb_repack_in,
 
             // SLM loads. Try to avoid repacking data if possible.
             bool success = false;
-            bool repacked = false;
 
-            if ((strategy.slmA && state.aioShare)
-                    || (strategy.slmB && state.bioShare)) {
-
+            if (!repacked
+                    && ((strategy.slmA && state.aioShare)
+                            || (strategy.slmB && state.bioShare))) {
                 pushStream();
                 success = doRemainderSLMLoads(false);
                 success ? appendCurrentStream() : discardStream();
@@ -8674,6 +8026,19 @@ bool gemm_kernel_generator_t<hw>::gemmAccumulateC(
         reclaimRanges(state.A_regs, state);
     }
 
+    // Release 64-bit emulation registers as they aren't needed in the inner loop.
+    // Could also move r0 to acc here.
+    GRF emulate64Temp[2];
+    if (strategy.emulate.emulate64) {
+        for (int q = 0; q < 2; q++) {
+            emulate64Temp[q] = state.emulate.temp[q];
+            state.ra.safeRelease(state.emulate.temp[q]);
+        }
+        state.emulate.flag = state.flagAP;
+        state.emulate.flagOffset = 8;
+        lateKLoopCheck = false;
+    }
+
     // Synthesize k loop. If configured, choose between 32-bit adds and 64-bit adds.
     if (strategy.checkAdd32 && state.add64.isValid()) {
         Label loop64, done;
@@ -8684,14 +8049,14 @@ bool gemm_kernel_generator_t<hw>::gemmAccumulateC(
         state.ra.safeRelease(state.add64);
 
         status << "k loop: 32-bit address update" << status_stream::endl;
-        strategy.emulate64_add32 = true;
+        strategy.emulate.emulate64_add32 = true;
         success &= gemmKLoop(
                 ka_repack, kb_repack, lateKLoopCheck, problem, strategy, state);
         jmpi(1, done);
 
         mark(loop64);
         status << "k loop: 64-bit address update" << status_stream::endl;
-        strategy.emulate64_add32 = false;
+        strategy.emulate.emulate64_add32 = false;
         success &= gemmKLoop(
                 ka_repack, kb_repack, lateKLoopCheck, problem, strategy, state);
 
@@ -8702,6 +8067,16 @@ bool gemm_kernel_generator_t<hw>::gemmAccumulateC(
         if (!gemmKLoop(ka_repack, kb_repack, lateKLoopCheck, problem, strategy,
                     state))
             return false;
+    }
+
+    // Restore emulation registers.
+    if (strategy.emulate.emulate64) {
+        for (int q = 0; q < 2; q++) {
+            state.emulate.temp[q] = emulate64Temp[q];
+            if (emulate64Temp[q].isValid()) state.ra.claim(emulate64Temp[q]);
+        }
+        state.emulate.flag = invalid;
+        state.emulate.flagOffset = 0;
     }
 
     // We're done with A and B. Free their address, data, and flag registers.
@@ -9746,7 +9121,8 @@ void gemm_kernel_generator_t<hw>::gemmInitState(GEMMProblem &problem,
     state.flagAP = state.raVFlag.alloc();
     state.fused.copyA = state.fused.copyB = false;
 
-    state.allocEmulate64Temp(strategy.emulate64, strategy.emulateDWxDW);
+    state.allocEmulate64Temp(
+            strategy.emulate.emulate64, strategy.emulate.emulateDWxDW);
 
     state.Tacc = problem.Tc;
     state.copyC = (problem.Tc != problem.Tc_ext)
@@ -10683,10 +10059,11 @@ void GEMMStrategy::sanityCheck(HW hw, const GEMMProblem &problem) {
     duplicateB &= !doubleWA;
 
     // Accumulator usage: 64-bit emulation, or extra C registers, or storage for r0 header.
-    bool emulate = emulate64 || emulateDWxDW;
-    cAccumulators &= !emulate;
+    bool emulateNeedsAcc = emulate.emulate64 || emulate.emulateDWxDW;
+    cAccumulators &= !emulateNeedsAcc;
     if (moveR0 == MoveR0::Acc)
-        if (cAccumulators || emulate || xParallel) moveR0 = MoveR0::None;
+        if (cAccumulators || emulateNeedsAcc || xParallel)
+            moveR0 = MoveR0::None;
 
     // Mixed mode restrictions:
     //   mixed hf/f is max SIMD 8 on Gen9
@@ -10700,7 +10077,7 @@ void GEMMStrategy::sanityCheck(HW hw, const GEMMProblem &problem) {
     spf &= !noJumpTables;
     spf &= !C.atomic;
 
-    checkAdd32 &= !emulate64_add32;
+    checkAdd32 &= !emulate.emulate64_add32;
 
     // SLM copy logic.
     int ukAlign = 1;
@@ -10920,7 +10297,8 @@ void gemm_kernel_generator_t<hw>::copyInitState(
     state.isNested = false;
     state.flagAP = state.raVFlag.alloc();
 
-    state.allocEmulate64Temp(strategy.emulate64, strategy.emulateDWxDW);
+    state.allocEmulate64Temp(
+            strategy.emulate.emulate64, strategy.emulate.emulateDWxDW);
 }
 
 // Copy kernel generation interface.
@@ -11784,11 +11162,17 @@ bool gemm_kernel_generator_t<hw>::copyBodyInternal(
 
         // Get the current S, D addresses.
         Subregister S_addr0, S1_addr0, D_addr0;
+        int S_shift, D_shift;
         S_addr0 = getOriginAddr(
-                state.S_layout, state.S_addrs, problem.S, strategy.S);
+                state.S_layout, state.S_addrs, problem.S, strategy.S, &S_shift);
 
         D_addr0 = getOriginAddr(
-                state.D_layout, state.D_addrs, problem.D, strategy.D);
+                state.D_layout, state.D_addrs, problem.D, strategy.D, &D_shift);
+
+        auto unshiftAddr0 = [&]() {
+            if (S_shift) shl(1, S_addr0, S_addr0, S_shift);
+            if (D_shift) shl(1, D_addr0, D_addr0, D_shift);
+        };
 
         // Prepare for potential new layout.
         vector<RegisterBlock> S_layout1, S_layout1Reflect, D_layout1;
@@ -11807,6 +11191,7 @@ bool gemm_kernel_generator_t<hw>::copyBodyInternal(
                 cleanup();
                 state.ra.claim(S_addr0);
                 state.ra.claim(D_addr0);
+                unshiftAddr0();
 
                 wholeRem = setup(strategy.s_load, strategy.d_load, S_addr0,
                         S1_addr0, D_addr0, true);
@@ -11854,6 +11239,7 @@ bool gemm_kernel_generator_t<hw>::copyBodyInternal(
                 cleanup();
                 state.ra.claim(S_addr0);
                 state.ra.claim(D_addr0);
+                unshiftAddr0();
 
                 if (!setup(newSLoad, newDLoad, S_addr0, S1_addr0, D_addr0,
                             false))

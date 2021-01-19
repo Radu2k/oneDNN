@@ -36,6 +36,8 @@ using half = dnnl::impl::float16_t;
 #include "../ngen/ngen_opencl.hpp"
 #include "../ngen/ngen_register_allocator.hpp"
 
+#include "gpu/jit/gemm/emulation.hpp"
+
 #include <array>
 #include <complex>
 #include <cstdint>
@@ -427,9 +429,9 @@ struct CommonState {
     VirtualFlagAllocator raVFlag;
     ngen::Subregister readFailures;
     ngen::Subregister fusedID;
-    ngen::GRF emulate64Temp[2];
     ngen::Subregister lsDescConstant[2];
     ngen::FlagRegister flagSwizzle;
+    EmulationState emulate;
     ngen::GRFRange eatomicAddRegs[2];
     int vflagEAtomicAdd;
     ngen::Subregister all1s;
@@ -460,8 +462,8 @@ struct CommonState {
     }
 
     void allocEmulate64Temp(bool emulate64, bool emulateDWxDW) {
-        if (emulateDWxDW || emulate64) emulate64Temp[0] = ra.alloc();
-        if (emulate64) emulate64Temp[1] = ra.alloc();
+        if (emulateDWxDW || emulate64) emulate.temp[0] = ra.alloc();
+        if (emulate64) emulate.temp[1] = ra.alloc();
     }
 };
 
@@ -489,14 +491,10 @@ struct CommonStrategy {
     bool spf = false; // Enable Single Program Flow (SPF) mode in EUs.
     MoveR0 moveR0 = MoveR0::Acc; // Where to store r0 information.
     bool sipR0WA = false; // Avoid using r0 to avoid clobbering by SIP.
-    bool emulate64 = false; // Emulate 64-bit arithmetic (required for GenXLP)
-    bool emulateDWxDW
-            = false; // Emulate DW x DW -> DW multiplication (required for Gen12)
-    bool emulate64_add32
-            = false; // Use 32-bit adds for 64-bit arithmetic, assuming no 2^32 boundaries crossed.
     bool wgInSS
             = false; // Pretend to use barriers so that each WG belongs to 1 SS/DSS.
     int GRFs = 128; // # of GRFs to use.
+    EmulationStrategy emulate;
 
     void sanityCheck(ngen::HW hw, const CommonProblem &problem);
 };
@@ -1001,74 +999,78 @@ protected:
             ngen::Label &uip, bool branchCtrl = false);
 
     template <typename DT = void>
-    void emov(const ngen::InstructionModifier &mod, ngen::RegData dst,
-            ngen::RegData src0, const CommonStrategy &strategy);
+    void mulConstant(const ngen::InstructionModifier &mod,
+            const ngen::RegData &dst, const ngen::RegData &src0, int32_t src1);
+
+    friend struct EmulationImplementation;
     template <typename DT = void>
     void emov(const ngen::InstructionModifier &mod, ngen::RegData dst,
-            ngen::Immediate src0, const CommonStrategy &strategy);
-
-    void eaddSignExtend1(const ngen::InstructionModifier &mod, bool &doSub,
-            const ngen::Immediate &src1, ngen::Immediate &s1LoPos,
-            const ngen::Immediate &s1Lo, const ngen::Immediate &s1Hi, bool &s1Q,
-            const ngen::GRF (&temp)[2]);
-    void eaddSignExtend1(const ngen::InstructionModifier &mod, bool &doSub,
-            const ngen::RegData &src1, ngen::RegData &s1LoPos,
-            ngen::RegData &s1Lo, ngen::RegData &s1Hi, bool &s1Q,
-            const ngen::GRF (&temp)[2]);
-    void eaddHandleS1Neg(
-            bool &doSub, ngen::RegData &s1LoPos, const ngen::RegData &s1Lo);
-    void eaddHandleS1Neg(bool &doSub, const ngen::Immediate &s1LoPos,
-            const ngen::Immediate &s1Lo);
-
-    template <typename DT = void, typename S1>
-    void eaddInternal(const ngen::InstructionModifier &mod, ngen::RegData dst,
-            ngen::RegData src0, S1 src1, const CommonStrategy &strategy,
-            const CommonState &state);
+            ngen::RegData src0, const CommonStrategy &strategy) {
+        EmulationImplementation::emov<DT>(
+                *this, mod, dst, src0, strategy.emulate);
+    }
+    template <typename DT = void>
+    void emov(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::Immediate src0, const CommonStrategy &strategy) {
+        EmulationImplementation::emov<DT>(
+                *this, mod, dst, src0, strategy.emulate);
+    }
     template <typename DT = void>
     void eadd(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
             const ngen::RegData &src0, const ngen::RegData &src1,
-            const CommonStrategy &strategy, const CommonState &state);
+            const CommonStrategy &strategy, const CommonState &state) {
+        EmulationImplementation::eadd<DT>(
+                *this, mod, dst, src0, src1, strategy.emulate, state.emulate);
+    }
     template <typename DT = void>
     void eadd(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
             const ngen::RegData &src0, ngen::Immediate src1,
-            const CommonStrategy &strategy, const CommonState &state);
-    template <typename DT = void, typename S1>
-    void emulInternal(const ngen::InstructionModifier &mod, ngen::RegData dst,
-            ngen::RegData src0, S1 src1, const CommonStrategy &strategy,
-            const CommonState &state);
+            const CommonStrategy &strategy, const CommonState &state) {
+        EmulationImplementation::eadd<DT>(
+                *this, mod, dst, src0, src1, strategy.emulate, state.emulate);
+    }
     template <typename DT = void>
     void emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
             const ngen::RegData &src0, const ngen::RegData &src1,
-            const CommonStrategy &strategy, const CommonState &state);
+            const CommonStrategy &strategy, const CommonState &state) {
+        EmulationImplementation::emul<DT>(
+                *this, mod, dst, src0, src1, strategy.emulate, state.emulate);
+    }
     template <typename DT = void>
     void emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
             const ngen::RegData &src0, ngen::Immediate src1,
-            const CommonStrategy &strategy, const CommonState &state);
-    template <typename S1>
-    void emul32High(const ngen::InstructionModifier &mod,
-            const ngen::RegData &dstHi, const ngen::RegData &src0,
-            const S1 &src1);
-
+            const CommonStrategy &strategy, const CommonState &state) {
+        EmulationImplementation::emul<DT>(
+                *this, mod, dst, src0, src1, strategy.emulate, state.emulate);
+    }
     template <typename DT = void>
     void eshl(const ngen::InstructionModifier &mod, ngen::RegData dst,
             ngen::RegData src0, uint16_t src1, const CommonStrategy &strategy,
-            const CommonState &state);
+            const CommonState &state) {
+        EmulationImplementation::eshl<DT>(
+                *this, mod, dst, src0, src1, strategy.emulate, state.emulate);
+    }
     template <typename DT = void>
     void eshr(const ngen::InstructionModifier &mod, ngen::RegData dst,
             ngen::RegData src0, uint16_t src1, const CommonStrategy &strategy,
-            const CommonState &state);
-
-    template <typename DT = void>
-    void mulConstant(const ngen::InstructionModifier &mod,
-            const ngen::RegData &dst, const ngen::RegData &src0, int32_t src1);
+            const CommonState &state) {
+        EmulationImplementation::eshr<DT>(
+                *this, mod, dst, src0, src1, strategy.emulate, state.emulate);
+    }
     template <typename DT = void>
     void emulConstant(const ngen::InstructionModifier &mod,
             const ngen::RegData &dst, const ngen::RegData &src0, int32_t src1,
-            const CommonStrategy &strategy, const CommonState &state);
+            const CommonStrategy &strategy, const CommonState &state) {
+        EmulationImplementation::emulConstant<DT>(
+                *this, mod, dst, src0, src1, strategy.emulate, state.emulate);
+    }
+    template <typename S1>
+    void emul32High(const ngen::InstructionModifier &mod,
+            const ngen::RegData &dstHi, const ngen::RegData &src0,
+            const S1 &src1) {
+        EmulationImplementation::emul32High(*this, mod, dstHi, src0, src1);
+    }
 
-    template <typename DT = void, typename S0, typename S2>
-    void eadd3(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
-            const S0 &src0, const ngen::RegData &src1, const S2 &src2);
     template <typename S0, typename S2>
     void emad(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
             const S0 &src0, const ngen::RegData &src1, const S2 &src2,
@@ -1077,6 +1079,11 @@ protected:
     void emad(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
             const S0 &src0, const ngen::RegData &src1, int32_t src2,
             const CommonStrategy &strategy, CommonState &state);
+
+    template <typename DT = void, typename S0, typename S2>
+    void eadd3(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const S0 &src0, const ngen::RegData &src1, const S2 &src2);
+
     void cmp0(const ngen::InstructionModifier &mod, ngen::RegData src0);
     void syncall();
 
@@ -1445,10 +1452,6 @@ protected:
             const GEMMStrategy &strategy, const GEMMState &state);
     void gemmCalcBiOffset(ngen::Subregister dst, const GEMMProblem &problem,
             const GEMMStrategy &strategy, const GEMMState &state);
-    void gemmPrepPostRemAB(const GEMMProblem &problem,
-            const GEMMStrategy &strategy, GEMMState &state);
-    void gemmRestorePostRemAB(const GEMMProblem &problem,
-            const GEMMStrategy &strategy, GEMMState &state);
     bool gemmPrepMaskedAB(const GEMMProblem &problem, GEMMStrategy &strategy,
             GEMMState &state);
 

@@ -72,19 +72,27 @@ ngen::AddressBase get_address_base(char c) {
 
 } // anonymous namespace
 
+bool gen_gemm_kernel_t::matching_hw(ngen::HW hw, ngen::HW hw_ref) {
+    using ngen::HW;
+    if (hw == hw_ref) return true;
+    if (hw == HW::Gen12p7 && hw_ref == HW::Gen12HP) return true;
+    return false;
+}
+
 status_t gen_gemm_kernel_t::complete_strategy() {
     using ngen::HW;
 
     problem_.nonuniformWGs = false;
     problem_.fused = (hw_ >= HW::Gen12LP);
-    strategy_.emulate64 = (hw_ == HW::Gen11 || hw_ == HW::Gen12LP);
-    strategy_.emulateDWxDW = (hw_ >= HW::Gen12LP);
-    strategy_.checkAdd32 = strategy_.emulate64;
+    strategy_.emulate.emulate64
+            = (hw_ == HW::Gen11 || hw_ == HW::Gen12LP || hw_ == HW::Gen12p7);
+    strategy_.emulate.emulateDWxDW = (hw_ >= HW::Gen12LP);
+    strategy_.checkAdd32 = strategy_.emulate.emulate64;
     strategy_.spf = !problem_.fused;
 
     for (int r = 0; r < gemm_recipe_count; r++) {
         auto &recipe = gemm_recipes[r];
-        if (recipe.hw == hw_
+        if (matching_hw(hw_, recipe.hw)
                 && recipe.precisions[0] == precision_char(problem_.Ta)
                 && recipe.precisions[1] == precision_char(problem_.Tb)
                 && recipe.precisions[2] == precision_char(problem_.Tc)
@@ -349,6 +357,12 @@ std::vector<unsigned char> gen_gemm_kernel_t::get_binary(
         }
         case HW::Gen12HP: {
             gemm_kernel_generator_t<HW::Gen12HP> generator;
+            generator.gemm(problem_, strategy_, interface_);
+            program_binary = generator.getBinary(ctx, dev);
+            break;
+        }
+        case HW::Gen12p7: {
+            gemm_kernel_generator_t<HW::Gen12p7> generator;
             generator.gemm(problem_, strategy_, interface_);
             program_binary = generator.getBinary(ctx, dev);
             break;
@@ -635,7 +649,7 @@ void gen_gemm_nocopy_kernel_t::choose_unrolls(compute::gpu_arch_t arch,
 
     // clang-format off
     int arch_idx = (arch == compute::gpu_arch_t::gen12lp) ? 1
-                 : (arch == compute::gpu_arch_t::gen12hp) ? 2 : 0;
+                 : (arch >= compute::gpu_arch_t::gen12hp) ? 2 : 0;
     int type_idx = (c_type == data_type::f16) ? 1
                 : (c_type == data_type::bf16) ? 2
                 :  (c_type == data_type::s32) ? 3 : 0;

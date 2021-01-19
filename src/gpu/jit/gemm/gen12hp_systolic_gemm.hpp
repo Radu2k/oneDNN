@@ -96,10 +96,6 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
             return gpu_gemm_pd_t::set_default_formats();
         }
 
-        dim_t m_aligned() const;
-        dim_t n_aligned() const;
-        dim_t k_aligned() const;
-
         size_t dyn_offset_a = 0;
         size_t dyn_offset_b = 0;
         size_t dyn_offset_c = 0;
@@ -185,9 +181,14 @@ private:
     compute::kernel_t kernel_[2][2]; // [first_k_block][last_k_block]
     compute::kernel_t copy_kernel_[2][2]; // [trans][clear_sum]
 
+    compute::gpu_arch_t arch_;
+    int eu_count_;
+
+    int unroll_m_ = 0;
+    int unroll_n_ = 0;
+
     char co_kind_;
     bool ab_zero_points_;
-    int eu_count_;
     bool walk_n_first_;
 
     const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }

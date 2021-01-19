@@ -322,6 +322,7 @@ void jit_eltwise_injector_f32<hw>::prepare() {
 }
 
 template struct jit_eltwise_injector_f32<gpu_gen12hp>;
+template struct jit_eltwise_injector_f32<gpu_gen12p7>;
 
 } // namespace jit
 } // namespace gpu

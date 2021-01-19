@@ -34,11 +34,14 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     using namespace data_type;
     using namespace primitive_kind;
     using smask_t = primitive_attr_t::skip_mask_t;
+    using arch_t = compute::gpu_arch_t;
 
     assert(engine->kind() == engine_kind::gpu);
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
 
     if (!compute_engine->mayiuse_ngen_kernels()) return status::unimplemented;
+
+    auto arch = compute_engine->device_info()->gpu_arch();
 
     const auto d = desc();
 
@@ -74,6 +77,7 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     if (dt_int_ok) attr_skip_mask |= smask_t::zero_points_runtime;
 
     ok = true && limits_ok && (dt_float_ok || dt_int_ok)
+            && utils::one_of(arch, arch_t::gen12hp, arch_t::gen12p7)
             && compute_engine->mayiuse(compute::device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate)
             && attr()->has_default_values(attr_skip_mask)
@@ -112,26 +116,16 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     return status::success;
 }
 
-dim_t gen12hp_systolic_gemm_t::pd_t::m_aligned() const {
-    using kernel_t = gen12hp_systolic_gemm_kernel_t;
-    return utils::rnd_up(
-            desc()->m(), kernel_t::unroll_m * kernel_t::thread_group_m);
-}
-
-dim_t gen12hp_systolic_gemm_t::pd_t::n_aligned() const {
-    using kernel_t = gen12hp_systolic_gemm_kernel_t;
-    return utils::rnd_up(
-            desc()->n(), kernel_t::unroll_n * kernel_t::thread_group_n);
-}
-
-dim_t gen12hp_systolic_gemm_t::pd_t::k_aligned() const {
-    return utils::rnd_up(desc()->k(),
-            gen12hp_systolic_gemm_kernel_t::unroll_k(desc()->a_type()));
-}
-
 status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     using namespace data_type;
-    using kernel_t = gen12hp_systolic_gemm_kernel_t;
+    using arch_t = compute::gpu_arch_t;
+
+    // Read device information
+    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+    assert(compute_engine);
+
+    arch_ = compute_engine->device_info()->gpu_arch();
+    eu_count_ = compute_engine->device_info()->eu_count();
 
     auto a_type = pd()->desc()->a_type();
     auto b_type = pd()->desc()->b_type();
@@ -143,6 +137,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     ab_zero_points_ = (c_type == s32);
 
     // Initialize compute kernels (assembly)
+    using kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
     kernel_t::config_t cfg;
     auto attr_info = pd()->attr_info();
 
@@ -164,6 +159,8 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     cfg.batch = pd()->with_batch();
     walk_n_first_ = cfg.walk_n_first
             = (pd()->desc()->m() >= 2 * pd()->desc()->n());
+    unroll_m_ = cfg.tile_m = 32;
+    unroll_n_ = cfg.tile_n = 48;
 
     int cmask = -1;
 
@@ -219,10 +216,32 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
                     cfg_copy.c_bias = kernel_t::bias_t::none;
                     cfg_copy.post_op = alg_kind::undef;
                 }
-                auto kernel = kernel_t(cfg_copy);
 
-                create_kernel(
-                        engine, &kernel_[first_k_block][last_k_block], kernel);
+                switch (arch_) {
+                    case arch_t::gen12hp: {
+                        auto kernel = kernel_t(cfg_copy);
+
+                        create_kernel(engine,
+                                &kernel_[first_k_block][last_k_block], kernel);
+                        break;
+                    }
+                    case arch_t::gen12p7: {
+                        using kernel_12p7_t
+                                = gen12hp_systolic_gemm_kernel_t<gpu_gen12p7>;
+                        cfg_copy.emulate64 = true;
+                        auto kernel = kernel_12p7_t(
+                                reinterpret_cast<kernel_12p7_t::config_t &>(
+                                        cfg_copy));
+
+                        create_kernel(engine,
+                                &kernel_[first_k_block][last_k_block], kernel);
+                        break;
+                    }
+                    default:
+                        assert(!"Unsupported GPU architecture.");
+                        return status::unimplemented;
+                        break;
+                }
             }
         }
     }
@@ -249,18 +268,12 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
         }
     }
 
-    // Read device information
-    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
-    assert(compute_engine);
-
-    eu_count_ = compute_engine->device_info()->eu_count();
-
     return status::success;
 }
 
 status_t gen12hp_systolic_gemm_t::init_res_storage(
         engine_t *engine, gpu_resource_t *r) const {
-    using kernel_t = gen12hp_systolic_gemm_kernel_t;
+    using kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
 
     auto a_type = pd()->desc()->a_type();
     auto b_type = pd()->desc()->b_type();
@@ -269,8 +282,8 @@ status_t gen12hp_systolic_gemm_t::init_res_storage(
     auto n = pd()->desc()->n();
     auto k = pd()->desc()->k();
 
-    int64_t align_m = kernel_t::unroll_m * kernel_t::thread_group_m;
-    int64_t align_n = kernel_t::unroll_n * kernel_t::thread_group_n;
+    int64_t align_m = unroll_m_ * kernel_t::thread_group_m;
+    int64_t align_n = unroll_n_ * kernel_t::thread_group_n;
 
     auto m_aligned = utils::rnd_up(m, align_m);
     auto n_aligned = utils::rnd_up(n, align_n);
@@ -319,19 +332,17 @@ int64_t gen12hp_systolic_gemm_t::default_block_k(data_type_t dt) const {
 
 std::tuple<int64_t, int64_t, int64_t>
 gen12hp_systolic_gemm_t::get_blocking() const {
-    using kernel_t = gen12hp_systolic_gemm_kernel_t;
+    using kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
 
     int64_t m = pd()->desc()->m();
     int64_t n = pd()->desc()->n();
     int64_t k = pd()->desc()->k();
     auto dt = pd()->desc()->a_type();
 
-    int64_t unroll_m = kernel_t::unroll_m;
-    int64_t unroll_n = kernel_t::unroll_n;
     int64_t unroll_k = kernel_t::unroll_k(dt);
 
-    int64_t align_m = unroll_m * kernel_t::thread_group_m;
-    int64_t align_n = unroll_n * kernel_t::thread_group_n;
+    int64_t align_m = unroll_m_ * kernel_t::thread_group_m;
+    int64_t align_n = unroll_n_ * kernel_t::thread_group_n;
 
     m = utils::rnd_up(m, align_m);
     n = utils::rnd_up(n, align_n);
@@ -378,7 +389,7 @@ status_t gen12hp_systolic_gemm_t::launch_copy(const gemm_exec_ctx_t &ctx,
         int64_t ld_src, const memory_storage_t &dst, int32_t offset_dst,
         int32_t ld_dst, bool copyb) const {
 
-    using compute_kernel_t = gen12hp_systolic_gemm_kernel_t;
+    using compute_kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
     using copy_kernel_t = ocl::gen12hp_systolic_gemm_copy_kernel_t;
 
     if (ab_zero_points_) {
@@ -387,18 +398,16 @@ status_t gen12hp_systolic_gemm_t::launch_copy(const gemm_exec_ctx_t &ctx,
         if (status) return status;
     }
 
-    int64_t unroll_m = compute_kernel_t::unroll_m;
-    int64_t unroll_n = compute_kernel_t::unroll_n;
     int64_t unroll_k = compute_kernel_t::unroll_k(pd()->desc()->a_type());
 
     int64_t align_r = 0, align_c = 0;
 
     if (!copyb) {
-        align_r = unroll_m * compute_kernel_t::thread_group_m;
+        align_r = unroll_m_ * compute_kernel_t::thread_group_m;
         align_c = unroll_k;
     } else {
         align_r = unroll_k;
-        align_c = unroll_n * compute_kernel_t::thread_group_n;
+        align_c = unroll_n_ * compute_kernel_t::thread_group_n;
     }
 
     bool transa = (pd()->desc()->transa() == dnnl_trans);
@@ -448,9 +457,8 @@ status_t gen12hp_systolic_gemm_t::launch_clear_sum(const gemm_exec_ctx_t &ctx,
     arg_list.set(4, ld_dst);
 
     auto elt_size = types::data_type_size(pd()->desc()->a_type());
-    size_t threads = !copyb
-            ? utils::div_up(r, gen12hp_systolic_gemm_kernel_t::unroll_m)
-            : utils::div_up(c, gen12hp_systolic_gemm_kernel_t::unroll_n);
+    size_t threads = !copyb ? utils::div_up(r, unroll_m_)
+                            : utils::div_up(c, unroll_n_);
     size_t sg
             = ocl::gen12hp_systolic_gemm_copy_kernel_t::subgroup_size_clear_sum(
                     elt_size, copyb);
@@ -472,9 +480,7 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
         bool first_k_block, bool last_k_block, int32_t batch, int32_t stride_a,
         int32_t stride_b, int32_t stride_c) const {
 
-    using kernel_t = gen12hp_systolic_gemm_kernel_t;
-    auto unroll_m = kernel_t::unroll_m;
-    auto unroll_n = kernel_t::unroll_n;
+    using kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
     auto tg_m = kernel_t::thread_group_m;
     auto tg_n = kernel_t::thread_group_n;
     auto sg = kernel_t::nominal_subgroup_size;
@@ -522,8 +528,8 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
         arg_list.set(argn++, stride_c);
     }
 
-    auto thread_m = utils::div_up(m, unroll_m * tg_m) * tg_m;
-    auto thread_n = utils::div_up(n, unroll_n * tg_n) * tg_n;
+    auto thread_m = utils::div_up(m, unroll_m_ * tg_m) * tg_m;
+    auto thread_n = utils::div_up(n, unroll_n_ * tg_n) * tg_n;
 
     if (walk_n_first_) std::swap(thread_m, thread_n);
 
@@ -538,7 +544,7 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
 
 status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
 
-    using compute_kernel_t = gen12hp_systolic_gemm_kernel_t;
+    using compute_kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
 
     auto a_type = pd()->desc()->a_type();
     auto b_type = pd()->desc()->b_type();
@@ -634,16 +640,14 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
             int64_t size_m = m - Bm;
             if (size_m > block_m) size_m = block_m;
 
-            auto off_a_packed
-                    = Bm * lda_packed + Bk * compute_kernel_t::unroll_m;
+            auto off_a_packed = Bm * lda_packed + Bk * unroll_m_;
             if (packed_a) off_a_packed += off_a0;
 
             for (int64_t Bn = 0; Bn < n; Bn += block_n) {
                 int64_t size_n = n - Bn;
                 if (size_n > block_n) size_n = block_n;
 
-                auto off_b_packed
-                        = Bn * ldb_packed + Bk * compute_kernel_t::unroll_n;
+                auto off_b_packed = Bn * ldb_packed + Bk * unroll_n_;
                 if (packed_b) off_b_packed += off_b0;
 
                 auto off_c = off_c0 + Bm + Bn * ldc;

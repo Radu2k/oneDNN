@@ -79,6 +79,7 @@ protected:
     ngen::NEOInterfaceHandler interface_ {ngen::HW::Unknown};
 
 private:
+    static bool matching_hw(ngen::HW hw, ngen::HW hw_ref);
     status_t complete_strategy();
     status_t read_strategy(const char *str);
     status_t init_interface();

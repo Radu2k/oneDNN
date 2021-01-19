@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -25,13 +25,20 @@
 #include "gpu/jit/jit_eltwise_injector.hpp"
 #include "gpu/jit/jit_generator.hpp"
 
+// clang-format off
+// This header must be loaded after ngen.
+#include "gpu/jit/gemm/emulation.hpp"
+// clang-format on
+
 namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace jit {
 
-class gen12hp_systolic_gemm_kernel_t : public jit_generator<gpu_gen12hp> {
+template <gpu_gen_t hw>
+class gen12hp_systolic_gemm_kernel_t : public jit_generator<hw> {
 public:
+    NGEN_FORWARD_OPENCL(hw);
     enum class bias_t { none, fixed, row, column, runtime };
 
     struct config_t {
@@ -46,13 +53,17 @@ public:
         bool early_c_bias = false;
         bool c_packed = false;
         bool batch = false;
+        bool emulate64 = (hw == ngen::HW::Gen12p7);
 
+        int tile_m = 32;
+        int tile_n = 48;
         bool walk_n_first = false;
         bool alt_barriers = false;
         bool use_slm_fence = true;
         bool c_remainder = true;
         bool c_align16_check = true;
         bool pad_a = true;
+        bool global_3x_buf = false;
         bool fulsim = true;
 
         alg_kind_t post_op = alg_kind::undef;
@@ -81,14 +92,15 @@ public:
                     || (early_c_bias
                             && (co_type == acc_type || co_type == a_type))
                     || co_type == c_type);
+            ok &= (tile_m == 32);
+            ok &= (tile_n == 32 || tile_n == 48);
+            ok &= !(tile_n > 32 && global_3x_buf);
 
             if (have_post_op()) ok &= injector_t::is_supported(post_op);
             return ok;
         }
     };
 
-    static constexpr size_t unroll_m = 32;
-    static constexpr size_t unroll_n = 48;
     static constexpr size_t unroll_k_bytes = 32;
     static constexpr size_t thread_group_m = 4;
     static constexpr size_t thread_group_n = 4;
@@ -119,18 +131,24 @@ public:
 private:
     config_t cfg;
 
-    using injector_t = jit_eltwise_injector_f32<gpu_gen12hp>;
+    using injector_t = jit_eltwise_injector_f32<hw>;
     std::unique_ptr<injector_t> post_op_injector;
 
     // Surface assignments
     int ap_surface, bp_surface, co_surface;
 
     // Register assignments (main loop)
-    ngen::GRFRange a_copy = r40 - r47;
-    ngen::GRFRange b_copy = r2 - r13;
+    ngen::GRFRange a_copy0 = r40 - r47;
+    ngen::GRFRange b_copy0 = r2 - r13;
     ngen::GRFRange a_regs = r48 - r63;
     ngen::GRFRange b_regs = r14 - r37;
     ngen::GRFRange c_regs = r64 - r255;
+    ngen::GRFRange a_copy1 = r96 - r103;
+    ngen::GRFRange b_copy1 = r104 - r111;
+    ngen::GRFRange a_copy2 = r144 - r151;
+    ngen::GRFRange b_copy2 = r152 - r159;
+    ngen::GRFRange a_copy[3] = {a_copy0, a_copy1, a_copy2};
+    ngen::GRFRange b_copy[3] = {b_copy0, b_copy1, b_copy2};
     ngen::GRF addr0 = r1;
     ngen::GRF addr1 = r38;
     ngen::GRF addr2 = r39;
@@ -171,6 +189,7 @@ private:
     ngen::GRFRange uheaders = r0 - r15;
     ngen::GRFRange upost_op_scratch = r16 - r21;
     ngen::GRFRange uoffset = r22 - r27;
+    ngen::GRFRange uemulate_temp = r20 - r21;
 
     ngen::GRF ubase = r28.ud();
     ngen::Subregister uldc = r28.ud(1);
@@ -193,6 +212,10 @@ private:
     ngen::Subregister uldc_x4 = r31.ud(2);
     ngen::Subregister uldc_x8 = r31.ud(3);
 
+    // 64-bit emulation registers
+    EmulationStrategy emu_strategy;
+    EmulationState emu_state;
+
     // Scoreboard usage:
     //   $0-2   B SLM loads
     //   $3-4   A SLM loads
@@ -206,15 +229,71 @@ private:
     //   $15    Barriers/SLM fences
 
     static constexpr int acc_stride = 48;
-    static constexpr uint16_t flag_c_bias_row = FlagCORow;
-    static constexpr uint16_t flag_c_bias_col = FlagCOColumn;
+
+    friend struct EmulationImplementation;
+    template <typename DT = void>
+    void emov(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::RegData src0) {
+        EmulationImplementation::emov<DT>(*this, mod, dst, src0, emu_strategy);
+    }
+    template <typename DT = void>
+    void emov(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::Immediate src0) {
+        EmulationImplementation::emov<DT>(*this, mod, dst, src0, emu_strategy);
+    }
+    template <typename DT = void>
+    void eadd(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, const ngen::RegData &src1) {
+        EmulationImplementation::eadd<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void eadd(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, ngen::Immediate src1) {
+        EmulationImplementation::eadd<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, const ngen::RegData &src1) {
+        EmulationImplementation::emul<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, ngen::Immediate src1) {
+        EmulationImplementation::emul<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void eshl(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::RegData src0, uint16_t src1) {
+        EmulationImplementation::eshl<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void eshr(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::RegData src0, uint16_t src1) {
+        EmulationImplementation::eshr<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void emulConstant(const ngen::InstructionModifier &mod,
+            const ngen::RegData &dst, const ngen::RegData &src0, int32_t src1) {
+        EmulationImplementation::emulConstant<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
 
     int slm_buf_size() const {
         return cfg.pad_a
                 ? 10752 // 4.5k A (128x32 + 4*128 padding) + 6k B (192x32)
-                : 10240; // 4k A (128x32) + 6k B (192x32)
+                : 10240; //   4k A (128x32)                 + 6k B (192x32)
     }
 
+    void barrier_prep(
+            const ngen::InstructionModifier &swsb, const ngen::GRF &header);
+    void mul_constant(const ngen::InstructionModifier &mod,
+            const ngen::RegData &dst, const ngen::RegData &src0, int32_t src1);
     void zero_c();
 
     void scattered_setup_c(int stride, bool load);
@@ -249,7 +328,7 @@ private:
             = ngen::InstructionModifier());
     void multiply(int buffer, bool last_multiply = false);
 
-    void copy_load(int load_buffer, bool use_c = false);
+    void copy_load(int store_buffer, bool use_c = false);
     void copy_store(int store_buffer, bool first = false);
     void store_signal(bool force_fence = false);
 
