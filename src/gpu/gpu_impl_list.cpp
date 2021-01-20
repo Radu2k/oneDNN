@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -31,7 +31,6 @@
 #include "gpu/ocl/gen12hp_1x1_convolution.hpp"
 #include "gpu/ocl/gen12hp_bf16_convolution.hpp"
 #include "gpu/ocl/gen12hp_convolution.hpp"
-#include "gpu/ocl/gen12hp_reduction.hpp"
 #include "gpu/ocl/gen12lp_x8s8s32x_1x1_convolution.hpp"
 #include "gpu/ocl/gen12lp_x8s8s32x_convolution.hpp"
 #include "gpu/ocl/gen9_batch_normalization.hpp"
@@ -39,6 +38,7 @@
 #include "gpu/ocl/gen9_convolution.hpp"
 #include "gpu/ocl/gen9_eltwise.hpp"
 #include "gpu/ocl/gen9_pooling.hpp"
+#include "gpu/ocl/gen9_reduction.hpp"
 #include "gpu/ocl/gen9_softmax.hpp"
 #include "gpu/ocl/gen9_wino_convolution.hpp"
 #include "gpu/ocl/ref_batch_normalization.hpp"
@@ -163,7 +163,7 @@ const pd_create_f gpu_impl_list[] = {
         INSTANCE(ocl::ref_matmul_t),
 
         // Reduction
-        INSTANCE(ocl::gen12hp_reduction_t),
+        INSTANCE(ocl::gen9_reduction_t),
         INSTANCE(ocl::ref_reduction_t),
 
         // Resampling

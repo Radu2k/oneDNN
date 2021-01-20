@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GPU_GEN12HP_REDUCTION_HPP
-#define GPU_GEN12HP_REDUCTION_HPP
+#ifndef GPU_GEN9_REDUCTION_HPP
+#define GPU_GEN9_REDUCTION_HPP
 
 #include "common/c_types_map.hpp"
 #include "common/primitive.hpp"
@@ -32,11 +32,11 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-struct gen12hp_reduction_t : public gpu_primitive_t {
+struct gen9_reduction_t : public gpu_primitive_t {
     struct pd_t : public gpu_reduction_pd_t {
         using gpu_reduction_pd_t::gpu_reduction_pd_t;
 
-        DECLARE_COMMON_PD_T("ocl:gen12hp", gen12hp_reduction_t);
+        DECLARE_COMMON_PD_T("ocl:gen9", gen9_reduction_t);
 
         status_t init(engine_t *engine) {
             bool ok = set_default_params() == status::success
@@ -56,7 +56,7 @@ struct gen12hp_reduction_t : public gpu_primitive_t {
         reduction_conf_t conf;
     };
 
-    gen12hp_reduction_t(const pd_t *apd) : gpu_primitive_t(apd) {}
+    gen9_reduction_t(const pd_t *apd) : gpu_primitive_t(apd) {}
 
     status_t init(engine_t *engine) override {
         compute::kernel_ctx_t kernel_ctx;
@@ -65,21 +65,21 @@ struct gen12hp_reduction_t : public gpu_primitive_t {
         CHECK(status);
 
         status = create_kernel(
-                engine, &initial_kernel, "gen12hp_initial_reduce", kernel_ctx);
+                engine, &initial_kernel, "gen9_initial_reduce", kernel_ctx);
         CHECK(status);
         status = create_kernel(
-                engine, &final_kernel, "gen12hp_final_reduce", kernel_ctx);
+                engine, &final_kernel, "gen9_final_reduce", kernel_ctx);
         CHECK(status);
 
         return status::success;
     }
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
-        return execute_gen12hp(ctx);
+        return execute_gen9(ctx);
     }
 
 private:
-    status_t execute_gen12hp(const exec_ctx_t &ctx) const;
+    status_t execute_gen9(const exec_ctx_t &ctx) const;
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
 
     compute::kernel_t initial_kernel;
