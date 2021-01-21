@@ -47,6 +47,8 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
 
     // Use FMA implementation for small cases.
     if (d->m() < 32 && d->n() < 32) return status::unimplemented;
+    if (d->m() < 32 && d->k() < 32) return status::unimplemented;
+    if (d->n() < 32 && d->k() < 32) return status::unimplemented;
 
     bool ok = set_default_formats(d->a_type());
     if (!ok) return status::unimplemented;

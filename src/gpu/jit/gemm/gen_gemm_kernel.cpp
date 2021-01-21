@@ -616,13 +616,25 @@ const kernel_table_t *gen12hp_x8_nocopy_tables[2][2] = {
     {nullptr, nullptr}
 };
 
+const kernel_table_t gen12hp_bf16_nocopy_nn_table[] = {
+    {{32, 8}, {-1, -1}, {0, 0}}
+};
+
+const kernel_table_t gen12hp_bf16_nocopy_nt_table[] = {
+    {{16, 16}, {-1, -1}, {0, 0}}
+};
+
 const kernel_table_t gen12hp_bf16_nocopy_tn_table[] = {
     {{32, 8}, {-1, -1}, {0, 0}}
 };
 
+const kernel_table_t gen12hp_bf16_nocopy_tt_table[] = {
+    {{8, 32}, {-1, -1}, {0, 0}}
+};
+
 const kernel_table_t *gen12hp_bf16_nocopy_tables[2][2] = {
-    {nullptr,                      nullptr},
-    {gen12hp_bf16_nocopy_tn_table, nullptr}
+    {gen12hp_bf16_nocopy_nn_table, gen12hp_bf16_nocopy_nt_table},
+    {gen12hp_bf16_nocopy_tn_table, gen12hp_bf16_nocopy_tt_table}
 };
 
 // clang-format on
