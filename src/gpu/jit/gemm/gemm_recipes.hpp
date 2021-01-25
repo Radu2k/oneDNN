@@ -34,6 +34,9 @@ struct gemm_recipe_t {
     } crosspacks;
     int unrollM, unrollN;
     const char *strategyString;
+    struct {
+    } unused;
+    char tag;
 };
 
 // clang-format off
@@ -112,11 +115,13 @@ const gemm_recipe_t gemm_recipes[] = {
     {ngen::HW::Gen12HP, "SSS", "NTN", {}, 32, 16, "sb4/2x2 sb4x2 sb cs di bm8192 bn8192 bk8192"},
     {ngen::HW::Gen12HP, "SSS", "TNN", {}, 16, 16, "sb8 sb8 su cab1 wg 4x4 cs di bm8192 bn8192 bk8192"},
     {ngen::HW::Gen12HP, "SSS", "TTN", {}, 8,  64, "su4/2x2 sb1x2 su cb1 wg 8x2 cs di fn bm8192 bn8192 bk8192"},
-    {ngen::HW::Gen12HP, "HHH", "TNN", {}, 16, 8,  "sb16 sb16 ab cab2 wg 2x4 cs pab"},         // DLRM
-    {ngen::HW::Gen12HP, "BBS", "NNN", {}, 32,  8, "sb16 sb16 ab cab1 wg 4x4 fn nmk cs pab"},  // DLRM
-    {ngen::HW::Gen12HP, "BBS", "NTN", {}, 16, 16, "sb1x4 sb1x4 sb l4 cs di nmk fn pab"},      // DLRM
-    {ngen::HW::Gen12HP, "BBS", "TNN", {}, 32,  8, "sb16 sb16 ab ca2 wg 1x4 fn nmk cs pab"},   // DLRM
-    {ngen::HW::Gen12HP, "BBS", "TTN", {}, 8,  32, "sb16 sb16 as cab1 wg 4x4 cs pab"},         // DLRM
+    {ngen::HW::Gen12HP, "HHH", "TNN", {}, 16, 8,  "sb16 sb16 ab cab2 wg 2x4 cs pab"},              // DLRM
+    {ngen::HW::Gen12HP, "BBS", "NNN", {}, 32,  8, "sb16 sb16 ab cab1 wg 4x4 fn nmk cs pab"},       // DLRM
+    {ngen::HW::Gen12HP, "BBS", "NTN", {}, 16, 16, "sb1x4 sb1x4 sb l4 cs di nmk fn pab"},           // DLRM
+    {ngen::HW::Gen12HP, "BBS", "TNN", {}, 32,  8, "sb16 sb16 ab ca2 wg 1x4 fn nmk cs pab"},        // DLRM
+    {ngen::HW::Gen12HP, "BBS", "TTN", {}, 8,  32, "sb16 sb16 as cab1 wg 4x4 cs pab"},              // DLRM
+    {ngen::HW::Gen12HP, "HHH", "NNN", {}, 32, 16, "ab16/8 as16 ab l4 cab1 wg 4x4 cs di", {}, 'A'}, // BERT
+    {ngen::HW::Gen12HP, "HHH", "NNN", {}, 32, 16, "ab8 ab16 ab l4 ca1 wg 2x8 cs di", {}, 'B'},     // BERT
 };
 // clang-format on
 

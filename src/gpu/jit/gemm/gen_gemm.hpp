@@ -181,6 +181,7 @@ struct gen_gemm_t : public gpu_gemm_t {
         using kernel_t = gen_gemm_nocopy_kernel_t;
 
         int unroll_m, unroll_n;
+        char tag;
         auto batch = pd()->desc()->batch();
         bool batched = (batch > 1);
         bool transa = (pd()->desc()->transa() == dnnl_trans);
@@ -191,13 +192,13 @@ struct gen_gemm_t : public gpu_gemm_t {
 
         kernel_t::choose_unrolls(pd()->arch_, pd()->hw_threads_, transa, transb,
                 a_type, b_type, c_type, pd()->desc()->m(), pd()->desc()->n(),
-                pd()->desc()->k(), batch, unroll_m, unroll_n);
+                pd()->desc()->k(), batch, unroll_m, unroll_n, tag);
 
         kernel_t kernel;
 
         auto status = kernel.init(pd()->arch_, batched, transa, transb,
                 pd()->with_c_offset(), pd()->with_bias(), a_type, b_type,
-                c_type, unroll_m, unroll_n);
+                c_type, unroll_m, unroll_n, tag);
         if (status != status::success) return status;
 
         create_kernel(engine, &nocopy_kernel_, kernel);

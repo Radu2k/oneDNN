@@ -102,7 +102,8 @@ status_t gen_gemm_kernel_t::complete_strategy() {
                 && recipe.crosspacks.a == problem_.A.crosspack
                 && recipe.crosspacks.b == problem_.B.crosspack
                 && recipe.unrollM == strategy_.unroll[LoopM]
-                && recipe.unrollN == strategy_.unroll[LoopN]) {
+                && recipe.unrollN == strategy_.unroll[LoopN]
+                && recipe.tag == strategy_tag_) {
 
             return read_strategy(recipe.strategyString);
         }
@@ -411,6 +412,8 @@ struct kernel_table_t {
                        //   always be chosen. (-1 = last in list)
     int min_reject[2]; // Minimum values for m/n beyond which this kernel will
                        //   always be rejected (0 if none)
+    char tag;          // Optional tag character, to select between strategies
+                       //   with identical unrolls.
 };
 
 const kernel_table_t gen9_f32_nocopy_nn_table[] = {
@@ -567,7 +570,8 @@ const kernel_table_t *gen12lp_bf16_nocopy_tables[2][2] = {
 };
 
 const kernel_table_t gen12hp_f16_nocopy_nn_table[] = {
-    {{32, 32}, {-1, -1}, {0, 0}}
+    {{32, 16}, {64,  0}, {64, 0}, 'B'},
+    {{32, 16}, {-1, -1}, {0,  0}, 'A'}
 };
 
 const kernel_table_t gen12hp_f16_nocopy_nt_table[] = {
@@ -644,7 +648,7 @@ const kernel_table_t *gen12hp_bf16_nocopy_tables[2][2] = {
 void gen_gemm_nocopy_kernel_t::choose_unrolls(compute::gpu_arch_t arch,
         int hw_threads, bool trans_a, bool trans_b, data_type_t a_type,
         data_type_t b_type, data_type_t c_type, dim_t m, dim_t n, dim_t k,
-        dim_t batch, int &unroll_m, int &unroll_n) {
+        dim_t batch, int &unroll_m, int &unroll_n, char &tag) {
 
     unroll_m = unroll_n = 1;
 
@@ -693,6 +697,7 @@ void gen_gemm_nocopy_kernel_t::choose_unrolls(compute::gpu_arch_t arch,
 
     unroll_m = table->unrolls[0];
     unroll_n = table->unrolls[1];
+    tag = table->tag;
 }
 
 } // namespace jit

@@ -77,6 +77,7 @@ protected:
     GEMMProblem problem_;
     GEMMStrategy strategy_;
     ngen::NEOInterfaceHandler interface_ {ngen::HW::Unknown};
+    char strategy_tag_ = '\0';
 
 private:
     static bool matching_hw(ngen::HW hw, ngen::HW hw_ref);
@@ -88,8 +89,8 @@ private:
 struct gen_gemm_nocopy_kernel_t : public gen_gemm_kernel_t {
     status_t init(compute::gpu_arch_t arch, bool batch, bool trans_a,
             bool trans_b, bool c_offset, bool bias, data_type_t a_type,
-            data_type_t b_type, data_type_t c_type, int unroll_m,
-            int unroll_n) {
+            data_type_t b_type, data_type_t c_type, int unroll_m, int unroll_n,
+            char tag) {
 
         problem_.Ta = convert_dnnl_to_kernel_type(a_type);
         problem_.Tb = convert_dnnl_to_kernel_type(b_type);
@@ -125,6 +126,7 @@ struct gen_gemm_nocopy_kernel_t : public gen_gemm_kernel_t {
 
         strategy_.unroll[LoopM] = unroll_m;
         strategy_.unroll[LoopN] = unroll_n;
+        strategy_tag_ = tag;
 
         return init_gemm(arch);
     }
@@ -132,7 +134,7 @@ struct gen_gemm_nocopy_kernel_t : public gen_gemm_kernel_t {
     static void choose_unrolls(compute::gpu_arch_t arch, int hw_threads,
             bool trans_a, bool trans_b, data_type_t a_type, data_type_t b_type,
             data_type_t c_type, dim_t m, dim_t n, dim_t k, dim_t batch,
-            int &unroll_m, int &unroll_n);
+            int &unroll_m, int &unroll_n, char &tag);
 };
 
 } // namespace jit
