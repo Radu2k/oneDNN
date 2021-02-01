@@ -346,8 +346,10 @@ void gen9_reduction_t::pd_t::init_scratchpad() {
 }
 
 status_t gen9_reduction_t::execute_gen9(const exec_ctx_t &ctx) const {
+    status_t status = status::success;
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
-    auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
+    auto &dst = CTX_OUT_CLEAN_STORAGE(DNNL_ARG_DST, status);
+    CHECK(status);
 
     std::unique_ptr<memory_storage_t> temp_reduce
             = ctx.get_scratchpad_grantor().get_memory_storage(
@@ -358,7 +360,7 @@ status_t gen9_reduction_t::execute_gen9(const exec_ctx_t &ctx) const {
     reduction_arg_list.set(0, src);
     reduction_arg_list.set(1, conf.skip_final_phase ? dst : *temp_reduce);
     auto initial_nd_range = conf.dispatch.nd_range();
-    status_t status = parallel_for(
+    status = parallel_for(
             ctx, initial_nd_range, initial_kernel, reduction_arg_list);
 
     if (!conf.skip_final_phase) {

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@
 #define CPU_GEMM_X8S8S32X_CONVOLUTION_UTILS_HPP
 
 #include "cpu/gemm_convolution_utils.hpp"
+#if DNNL_X64
 #include "cpu/x64/injectors/jit_uni_postops_injector.hpp"
+#endif
 
 namespace dnnl {
 namespace impl {
@@ -34,10 +36,10 @@ struct pp_ker_t {
 
     virtual void operator()(void *dst, const acc_data_t *acc, const char *bias,
             const float *scales, float sum_scale, float signed_scale, int g,
-            size_t start, size_t end, const int32_t *zp_src,
-            const int32_t *zp_dst, const int32_t *zp_src_comp,
+            size_t start, size_t end, const zero_point_call_params_t &zp,
             const void *post_ops_binary_rhs_arg_vec, const void *dst_orig,
-            const exec_ctx_t &ctx, const memory_desc_t &dst_md) const = 0;
+            const exec_ctx_t &ctx, const memory_desc_t &dst_md,
+            const single_gemm_conv_chunk_desc_t &chunk_desc) const = 0;
 
     virtual status_t create_kernel() { return status::success; }
 
@@ -49,6 +51,7 @@ protected:
 
 bool post_ops_ok(const post_ops_t &post_ops, const memory_desc_wrapper *dst_d);
 bool post_ops_ok(const post_ops_t &post_ops, const memory_desc_t *dst_d);
+bool mayiuse_jit_pp_kernel() noexcept;
 
 } // namespace gemm_x8s8s32x_convolution_utils
 } // namespace cpu

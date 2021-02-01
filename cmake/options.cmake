@@ -1,5 +1,5 @@
 #===============================================================================
-# Copyright 2018-2020 Intel Corporation
+# Copyright 2018-2021 Intel Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -117,6 +117,12 @@ option(DNNL_ENABLE_JIT_PROFILING
     registrations, VTune Amplifier would report data collected inside
     the kernels as `outside any known module`."
     OFF)
+
+option(DNNL_ENABLE_ITT_TASKS
+    "Enable ITT Tasks tagging feature and tag all primitive execution 
+    (on by default). VTune Amplifier can group profiling results based 
+    on those ITT tasks and show corresponding timeline information."
+    ON)
 
 # ===================
 # Engine capabilities

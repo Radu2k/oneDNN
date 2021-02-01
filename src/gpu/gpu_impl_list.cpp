@@ -31,8 +31,8 @@
 #include "gpu/ocl/gen12hp_1x1_convolution.hpp"
 #include "gpu/ocl/gen12hp_bf16_convolution.hpp"
 #include "gpu/ocl/gen12hp_convolution.hpp"
-#include "gpu/ocl/gen12lp_x8s8s32x_1x1_convolution.hpp"
-#include "gpu/ocl/gen12lp_x8s8s32x_convolution.hpp"
+#include "gpu/ocl/gen12lp_x8s8x_1x1_convolution.hpp"
+#include "gpu/ocl/gen12lp_x8s8x_convolution.hpp"
 #include "gpu/ocl/gen9_batch_normalization.hpp"
 #include "gpu/ocl/gen9_binary.hpp"
 #include "gpu/ocl/gen9_convolution.hpp"
@@ -89,9 +89,9 @@ const pd_create_f gpu_impl_list[] = {
         INSTANCE(ocl::gen12hp_bf16_convolution_bwd_weights_t),
         INSTANCE(ocl::gen12hp_convolution_fwd_t),
         INSTANCE(ocl::gen12hp_convolution_bwd_data_t),
-        INSTANCE(ocl::gen12lp_x8s8s32x_1x1_convolution_fwd_t),
-        INSTANCE(ocl::gen12lp_x8s8s32x_convolution_fwd_t),
-        INSTANCE(ocl::gen12lp_x8s8s32x_convolution_bwd_data_t),
+        INSTANCE(ocl::gen12lp_x8s8x_1x1_convolution_fwd_t),
+        INSTANCE(ocl::gen12lp_x8s8x_convolution_fwd_t),
+        INSTANCE(ocl::gen12lp_x8s8x_convolution_bwd_data_t),
         INSTANCE(ocl::gen9_wino_convolution_fwd_t),
         INSTANCE(ocl::gen9_convolution_fwd_t),
         INSTANCE(ocl::gen9_convolution_bwd_data_t),

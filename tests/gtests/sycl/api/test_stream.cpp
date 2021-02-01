@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -96,6 +96,22 @@ TEST_F(sycl_stream_test, BasicInterop) {
     auto ref_count = interop_sycl_queue.get_info<info::queue::reference_count>();
     EXPECT_EQ(ref_count, 1);
 #endif
+}
+
+TEST_F(sycl_stream_test, BasicInteropCPU) {
+    cl_device_id cpu_ocl_dev = find_ocl_device(CL_DEVICE_TYPE_CPU);
+    SKIP_IF(!cpu_ocl_dev, "CPU device not found.");
+
+    queue cpu_sycl_queue(cpu_selector {});
+    SKIP_IF(!cpu_sycl_queue.get_device().is_cpu(), "CPU-only device not found");
+
+    {
+        auto cpu_eng = sycl_interop::make_engine(
+                cpu_sycl_queue.get_device(), cpu_sycl_queue.get_context());
+        auto s = sycl_interop::make_stream(cpu_eng, cpu_sycl_queue);
+        auto sycl_queue = sycl_interop::get_queue(s);
+        EXPECT_EQ(sycl_queue, cpu_sycl_queue);
+    }
 }
 
 TEST_F(sycl_stream_test, InteropIncompatibleQueue) {

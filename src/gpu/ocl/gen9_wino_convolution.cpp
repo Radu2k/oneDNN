@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -44,14 +44,16 @@ static void fwd_compute_block_sizes(conv_conf_t &conf) {
     }
 
     //Using F(m, r) for r = 3 and tile_size = m + r - 1
-    const int m = 6;
+    const int m = conf.oh > 8 ? 6 : conf.oh > 2 ? 4 : 2;
     const int r = 3;
-    conf.is_fused = (m == 6);
+    conf.is_fused = true;
 
     conf.wino_m = m;
     conf.wino_r = r;
     conf.tile_size = m + r - 1;
 
+    conf.vect_size
+            = static_cast<int>(16 / types::data_type_size(conf.src_data_type));
     conf.oc_block = 16;
     conf.ic_block = nstl::min(conf.ic, 16);
     conf.wino_ic_block = 32;
@@ -60,7 +62,7 @@ static void fwd_compute_block_sizes(conv_conf_t &conf) {
     if (conf.is_fused) {
         conf.wino_oc_block = 16;
         conf.oh_block = conf.wino_m;
-        conf.ow_block = 14;
+        conf.ow_block = conf.ow > 14 ? 14 : utils::rnd_up(conf.ow, 2);
     } else {
         conf.wino_oc_block = 32;
         conf.oh_block = 8;
@@ -92,8 +94,9 @@ status_t gen9_wino_convolution_fwd_t::pd_t::init_conf() {
 
     const bool is_wino_shape = conf.kh == 3 && conf.kw == 3 && conf.ngroups == 1
             && conf.stride_h == 1 && conf.stride_w == 1 && conf.dilate_h == 0
-            && conf.dilate_w == 0 && conf.l_pad <= 1 && conf.r_pad <= 1
-            && conf.t_pad <= 1 && conf.b_pad <= 1;
+            && conf.dilate_w == 0 && conf.l_pad < conf.kw
+            && conf.r_pad < conf.kw && conf.t_pad < conf.kh
+            && conf.b_pad < conf.kh;
     if (!is_wino_shape) return status::unimplemented;
 
     const bool is_16oc = conf.oc % 16 == 0;
@@ -164,7 +167,7 @@ status_t gen9_wino_convolution_fwd_t::pd_t::init_conf() {
         conf.U_lws_d[0] = 16;
         conf.U_lws_d[1] = 1;
         conf.U_lws_d[2] = 1;
-        conf.U_gws_d[0] = conf.wino_ic * conf.wino_oc / 8;
+        conf.U_gws_d[0] = conf.wino_ic * conf.wino_oc / conf.vect_size;
         conf.U_gws_d[1] = 3;
         conf.U_gws_d[2] = 1; // kh or kw depending
     }
@@ -274,6 +277,7 @@ status_t gen9_wino_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("WINO_OW", conf.wino_ow);
     kernel_ctx.define_int("OC_BLOCK", conf.oc_block);
     kernel_ctx.define_int("IC_BLOCK", conf.ic_block);
+    kernel_ctx.define_int("VECT_DT_N", conf.vect_size);
 
     kernel_ctx.set_data_type(conf.src_data_type);
 
@@ -366,7 +370,7 @@ status_t gen9_wino_convolution_fwd_t::execute_forward(
             && !gpu_eltwise_fwd_pd_t::eltwise_preserves_zero(
                     attr_info.eltwise_alg, attr_info.eltwise_alpha,
                     attr_info.eltwise_beta)) {
-        ctx.memory(DNNL_ARG_DST)->zero_pad(ctx.stream());
+        ctx.zero_pad_output(DNNL_ARG_DST);
     }
     return status;
 }

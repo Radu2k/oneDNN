@@ -89,7 +89,7 @@ struct gen_gemm_t : public gpu_gemm_t {
                         && d->acc_type == d->c_type();
             }
 
-            ok = ok
+            ok = ok && !has_blocks()
                     && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m(), d->n(),
                             d->k(), d->lda(), d->ldb(), d->ldc(), d->batch())
                     && IMPLICATION(d->c_type() != f32,

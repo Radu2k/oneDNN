@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2017-2020 Intel Corporation
+* Copyright 2017-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -104,9 +104,9 @@ const _dt_conf_t conf_f32_wino = {
 
 const _dt_conf_t conf_f16_wino = {
         {dnnl_f16, HALF_MIN, HALF_MAX, -2, 16, 0, 1, .25, 5e-3},
-        {dnnl_f16, HALF_MIN, HALF_MAX, 1, 32, -2, 1, .75, 6e-3},
+        {dnnl_f16, HALF_MIN, HALF_MAX, 1, 6, -2, 1, .5, 6e-3},
         {dnnl_f16, HALF_MIN, HALF_MAX, 1, 2048, 0, 1, .25, 2e-3},
-        {dnnl_f16, HALF_MIN, HALF_MAX, -2, 8, 0, 1, .25, 5e-3},
+        {dnnl_f16, HALF_MIN, HALF_MAX, -2, 8, 0, 1, .25, 7e-3},
         {dnnl_f16},
 };
 

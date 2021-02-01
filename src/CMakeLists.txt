@@ -1,5 +1,5 @@
 #===============================================================================
-# Copyright 2016-2020 Intel Corporation
+# Copyright 2016-2021 Intel Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -56,9 +56,18 @@ else()
     message(STATUS "Primitive cache is disabled")
 endif()
 
-if(DNNL_ENABLE_JIT_PROFILING AND UNIX AND NOT APPLE)
-    # Not every compiler adds -ldl automatically
-    list(APPEND EXTRA_SHARED_LIBS "${CMAKE_DL_LIBS}")
+if(DNNL_ENABLE_JIT_PROFILING OR DNNL_ENABLE_ITT_TASKS)
+    if (UNIX AND NOT APPLE)
+        # Not every compiler adds -ldl automatically
+        list(APPEND EXTRA_SHARED_LIBS "${CMAKE_DL_LIBS}")
+    endif()
+endif()
+
+if(DNNL_ENABLE_ITT_TASKS)
+    # Only supported for certain architectures (see src/common/CMakeLists.txt)
+    if(DNNL_TARGET_ARCH STREQUAL "AARCH64" OR DNNL_TARGET_ARCH STREQUAL "X64")
+        add_definitions(-DDNNL_ENABLE_ITT_TASKS)
+    endif()
 endif()
 
 if(DNNL_ENABLE_MAX_CPU_ISA)

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright 2020 Intel Corporation
+ * Copyright 2020-2021 Intel Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -80,8 +80,7 @@ status_t compute_stream_t::zero_pad(
 
         return status;
     } else {
-        CHECK(zero_pad_primitive->execute(zero_pad_ctx));
-        return this->wait();
+        return zero_pad_primitive->execute(zero_pad_ctx);
     }
 };
 } // namespace compute

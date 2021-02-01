@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -272,7 +272,7 @@
 
 KERNEL_ATTR
 __kernel void gen9_binary(__global SRC0_DATA_T *src0,
-        __global SRC1_DATA_T *src1, __global DATA_T *dst POST_OP_ARGS,
+        __global SRC1_DATA_T *src1, __global DST_DATA_T *dst POST_OP_ARGS,
         float src0_scale, float src1_scale) {
 
     // since gws = no. of total elems in A, id will be the logical offset
@@ -391,7 +391,7 @@ __kernel void gen9_binary(__global SRC0_DATA_T *src0,
 
 KERNEL_ATTR
 __kernel void gen9_binary(__global SRC0_DATA_T *src0,
-        __global SRC1_DATA_T *src1, __global DATA_T *dst POST_OP_ARGS,
+        __global SRC1_DATA_T *src1, __global DST_DATA_T *dst POST_OP_ARGS,
         float src0_scale, float src1_scale) {
 
     int dims0[6] = {0};

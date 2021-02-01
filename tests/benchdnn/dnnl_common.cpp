@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2017-2020 Intel Corporation
+* Copyright 2017-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -51,9 +51,12 @@ float round_to_nearest_representable(dnnl_data_type_t dt, float value) {
 
 // Engine kind used to run oneDNN primitives for testing
 dnnl_engine_kind_t engine_tgt_kind = dnnl_cpu;
-
+// Engine index used to run oneDNN primitives for testing
+size_t engine_index = 0;
 // CPU ISA specific hints : none by default
 isa_hints_t hints {isa_hints_t::none};
+
+sycl_memory_kind_ext_t sycl_memory_kind {sycl_memory_kind_ext_t::usm};
 
 void init_isa_settings() {
     if (hints.get() == isa_hints_t::no_hints)
@@ -97,26 +100,14 @@ void execute_map_args(const args_t &args) {
         if (!args.dnn_mem(i).is_mapped()) args.dnn_mem(i).map();
 }
 
-int execute_and_wait(dnnl_primitive_t prim, const args_t &args) {
-    const_dnnl_primitive_desc_t pd;
-    dnnl_engine_t engine;
-
-    dnnl_status_t status = dnnl_success;
-    status = dnnl_primitive_get_primitive_desc(prim, &pd);
-    if (status != dnnl_success) return status;
-
-    status = dnnl_primitive_desc_query(pd, dnnl_query_engine, 0, &engine);
-    if (status != dnnl_success) return status;
-
+int execute_and_wait(perf_function_t &exec_func, const dnnl_engine_t &engine,
+        const args_t &args) {
     stream_t stream(engine);
     std::vector<dnnl_exec_arg_t> dnnl_args;
     execute_unmap_args(args, dnnl_args);
 
-    status = dnnl_primitive_execute(
-            prim, stream, (int)dnnl_args.size(), dnnl_args.data());
-    if (status != dnnl_success) return status;
-    status = dnnl_stream_wait(stream);
-    if (status != dnnl_success) return status;
+    DNN_SAFE(exec_func(stream, dnnl_args), CRIT);
+    DNN_SAFE(dnnl_stream_wait(stream), CRIT);
 
     execute_map_args(args);
 
@@ -127,6 +118,28 @@ int execute_and_wait(dnnl_primitive_t prim, const args_t &args) {
     }
 
     return OK;
+}
+
+dnnl_status_t primitive_executor(dnnl_primitive_t prim,
+        const dnnl_stream_t &stream,
+        const std::vector<dnnl_exec_arg_t> &dnnl_args) {
+    return dnnl_primitive_execute(
+            prim, stream, (int)dnnl_args.size(), dnnl_args.data());
+}
+
+int execute_and_wait(dnnl_primitive_t prim, const args_t &args) {
+    perf_function_t exec_func = std::bind(&primitive_executor, prim,
+            std::placeholders::_1, std::placeholders::_2);
+
+    const_dnnl_primitive_desc_t pd;
+    dnnl_engine_t engine;
+
+    DNN_SAFE(dnnl_primitive_get_primitive_desc(prim, &pd), CRIT);
+
+    DNN_SAFE(
+            dnnl_primitive_desc_query(pd, dnnl_query_engine, 0, &engine), CRIT);
+
+    return execute_and_wait(exec_func, engine, args);
 }
 
 inline bool should_stop(const benchdnn_timer_t &t) {
@@ -212,13 +225,6 @@ int measure_perf(
     return ret;
 }
 
-dnnl_status_t primitive_executor(dnnl_primitive_t prim,
-        const dnnl_stream_t &stream,
-        const std::vector<dnnl_exec_arg_t> &dnnl_args) {
-    return dnnl_primitive_execute(
-            prim, stream, (int)dnnl_args.size(), dnnl_args.data());
-}
-
 int measure_perf(benchdnn_timer_t &t, dnnl_primitive_t prim, args_t &args) {
     perf_function_t perf_func = std::bind(&primitive_executor, prim,
             std::placeholders::_1, std::placeholders::_2);
@@ -251,12 +257,6 @@ void maybe_prepare_runtime_zero_points(dnn_mem_t &zero_points_m,
         ((int32_t *)zero_points_m)[c] = zero_points[c];
 }
 
-void maybe_prepare_runtime_zero_points(
-        dnn_mem_t &zero_points_m, const attr_t &attr, int arg) {
-    const auto e = attr.zero_points.get(arg);
-    maybe_prepare_runtime_zero_points(zero_points_m, attr, arg, 1, &(e.value));
-}
-
 bool check_md_consistency_with_tag(
         const dnnl_memory_desc_t &md, const std::string &tag) {
     dnnl_memory_desc_t md_new_tag;
@@ -266,6 +266,12 @@ bool check_md_consistency_with_tag(
 
 void check_known_skipped_case_common(
         const std::vector<dnnl_data_type_t> &v_dt, dir_t dir, res_t *res) {
+    if (benchdnn_stat.tests < test_start) {
+        res->state = SKIPPED;
+        res->reason = SKIP_START;
+        return;
+    }
+
     const bool has_bf16_support = is_gpu()
             || (is_cpu()
                     && dnnl::impl::cpu::platform::has_data_type_support(
@@ -324,6 +330,12 @@ bool is_cpu(const dnnl_engine_t &engine) {
 
 bool is_gpu(const dnnl_engine_t &engine) {
     return get_engine_kind(engine) == dnnl_gpu;
+}
+
+bool is_sycl_engine(const dnnl_engine_t &engine) {
+    if (is_cpu(engine)) return DNNL_CPU_RUNTIME == DNNL_RUNTIME_DPCPP;
+    if (is_gpu(engine)) return DNNL_GPU_RUNTIME == DNNL_RUNTIME_DPCPP;
+    return false;
 }
 
 bool is_nvidia_gpu(const dnnl_engine_t &engine) {
@@ -554,10 +566,11 @@ static size_t get_memory_bytes(const_dnnl_primitive_desc_t const_pd,
                        : dnnl_query_num_of_outputs_s32,
             0);
 
-    dnnl_prop_kind_t prop_kind;
+    dnnl_prop_kind_t prop_kind = dnnl_prop_kind_undef;
     dnnl_primitive_desc_query(const_pd, dnnl_query_prop_kind, 0, &prop_kind);
     const bool is_fwd = prop_kind == dnnl_forward_training
-            || prop_kind == dnnl_forward_inference;
+            || prop_kind == dnnl_forward_inference
+            || prop_kind == dnnl_prop_kind_undef;
 
 #define MD(name) dnnl_query_##name##_md
     std::vector<dnnl_query_t> query_fwd_in_mds {MD(src), MD(weights)};
@@ -631,4 +644,19 @@ int get_memory_footprint(const_dnnl_primitive_desc_t const_pd, res_t *res) {
         }
     }
     return OK;
+}
+
+sycl_memory_kind_ext_t str2sycl_memory_kind(const char *str) {
+#define CASE(param) \
+    if (!strcasecmp(#param, str)) return sycl_memory_kind_ext_t::param
+
+    CASE(usm);
+    CASE(buffer);
+    CASE(usm_device);
+    CASE(usm_shared);
+
+#undef CASE
+
+    assert(!"not expected");
+    return sycl_memory_kind_ext_t::usm;
 }

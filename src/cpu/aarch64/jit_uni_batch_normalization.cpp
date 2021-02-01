@@ -1,6 +1,6 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
-* Copyright 2020 FUJITSU LIMITED
+* Copyright 2020-2021 Intel Corporation
+* Copyright 2020-2021 FUJITSU LIMITED
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -447,27 +447,6 @@ struct jit_bnorm_t : public jit_generator {
         L(l_ret);
     }
 
-    void uni_fdiv(const VReg4S &dst, const VReg4S &src, const VReg4S &src2) {
-        fdiv(dst, src, src2);
-    }
-
-    void uni_fdiv(const ZRegS &dst, const ZRegS &src, const ZRegS &src2) {
-        uint32_t dstIdx = IDX(dst);
-        uint32_t srcIdx = IDX(src);
-        uint32_t src2Idx = IDX(src2);
-
-        if (dstIdx == src2Idx) {
-            mov(t_tmp0.s, P_ALL_ONE / T_m, src2);
-            mov(dst, P_ALL_ONE / T_m, src);
-            fdiv(dst, p_512 / T_m, t_tmp0.s);
-        } else if (dstIdx == srcIdx) {
-            fdiv(dst, p_512 / T_m, src2);
-        } else {
-            mov(dst, P_ALL_ONE / T_m, src);
-            fdiv(dst, p_512 / T_m, src2);
-        }
-    }
-
     void uni_fsqrt(const VReg4S &dst, const VReg4S &src) { fsqrt(dst, src); }
 
     void uni_fsqrt(const ZRegS &dst, const ZRegS &src) {
@@ -795,7 +774,7 @@ struct jit_bnorm_t : public jit_generator {
                     TReg vscale = bdesc_->use_scaleshift() ? vgamma : vone;
                     TReg vdiv = bdesc_->use_scaleshift() ? vgamma : vsqrtvar;
 
-                    uni_fdiv(vdiv.s, vscale.s, vsqrtvar.s);
+                    uni_fdiv(vdiv.s, vscale.s, vsqrtvar.s, t_tmp0.s, p_512);
 
                     add(X_TMP_0, reg_src, reg_soff_nspc);
                     if (offt) add_imm(X_TMP_0, X_TMP_0, offt, X_TMP_1);
@@ -1146,7 +1125,7 @@ struct jit_bnorm_t : public jit_generator {
             TReg vscale = bdesc_->use_scaleshift() ? vgamma : vone;
             TReg vdiv = bdesc_->use_scaleshift() ? vgamma : vsqrtvar;
 
-            uni_fdiv(vdiv.s, vscale.s, vsqrtvar.s);
+            uni_fdiv(vdiv.s, vscale.s, vsqrtvar.s, t_tmp0.s, p_512);
 
             auto compute = [=](bool stream_store_allowed) {
                 spat_loop(
@@ -1528,14 +1507,15 @@ struct jit_bnorm_t : public jit_generator {
             uni_load_maybe_tail(vsqrtvar, var_ptr());
             fadd(vsqrtvar.s, vsqrtvar.s, veps.s);
             uni_fsqrt(vsqrtvar.s, vsqrtvar.s);
-            uni_fdiv(vsqrtvar.s, vone.s, vsqrtvar.s);
+            uni_fdiv(vsqrtvar.s, vone.s, vsqrtvar.s, t_tmp0.s, p_512);
             if (bdesc_->use_scaleshift())
                 uni_load_maybe_tail(vgamma, gamma_ptr());
             uni_load_maybe_tail(vdiff_gamma, diff_gamma_ptr());
             uni_load_maybe_tail(vdiff_beta, diff_beta_ptr());
             fmul(vdiff_gamma.s, vdiff_gamma.s, vsqrtvar.s);
-            uni_fdiv(vdiff_beta.s, vdiff_beta.s, vchan_size.s);
-            uni_fdiv(vdiff_gamma.s, vdiff_gamma.s, vchan_size.s);
+            uni_fdiv(vdiff_beta.s, vdiff_beta.s, vchan_size.s, t_tmp0.s, p_512);
+            uni_fdiv(vdiff_gamma.s, vdiff_gamma.s, vchan_size.s, t_tmp0.s,
+                    p_512);
 
             auto compute = [=](bool stream_store_allowed) {
                 spat_loop(
@@ -1643,7 +1623,7 @@ struct jit_bnorm_t : public jit_generator {
 
                     fadd(vsqrtvar.s, vsqrtvar.s, veps.s);
                     uni_fsqrt(vsqrtvar.s, vsqrtvar.s);
-                    uni_fdiv(vsqrtvar.s, vone.s, vsqrtvar.s);
+                    uni_fdiv(vsqrtvar.s, vone.s, vsqrtvar.s, t_tmp0.s, p_512);
 
                     if (bdesc_->use_scaleshift())
                         uni_load_maybe_tail(vgamma, gamma_ptr(coff));
@@ -1665,8 +1645,10 @@ struct jit_bnorm_t : public jit_generator {
                     ldr(reg_ws, ptr(X_TMP_0));
 
                     fmul(vdiff_gamma.s, vdiff_gamma.s, vsqrtvar.s);
-                    uni_fdiv(vdiff_beta.s, vdiff_beta.s, vchan_size.s);
-                    uni_fdiv(vdiff_gamma.s, vdiff_gamma.s, vchan_size.s);
+                    uni_fdiv(vdiff_beta.s, vdiff_beta.s, vchan_size.s, t_tmp0.s,
+                            p_512);
+                    uni_fdiv(vdiff_gamma.s, vdiff_gamma.s, vchan_size.s,
+                            t_tmp0.s, p_512);
 
                     add(X_TMP_0, reg_diff_dst, reg_soff_nspc);
                     if (offt) add_imm(X_TMP_0, X_TMP_0, offt, X_TMP_1);
@@ -1872,7 +1854,7 @@ struct jit_bnorm_t : public jit_generator {
                 uni_load_maybe_tail(vsqrtvar, var_ptr());
                 fadd(vsqrtvar.s, vsqrtvar.s, veps.s);
                 uni_fsqrt(vsqrtvar.s, vsqrtvar.s);
-                uni_fdiv(vsqrtvar.s, vone.s, vsqrtvar.s);
+                uni_fdiv(vsqrtvar.s, vone.s, vsqrtvar.s, t_tmp0.s, p_512);
                 mov(reg_ctr, reg_nnthr);
                 Label sh_reduction_thrs;
                 L(sh_reduction_thrs);
@@ -2287,19 +2269,25 @@ status_t jit_uni_batch_normalization_fwd_t<isa>::init(engine_t *engine) {
 template <cpu_isa_t isa>
 status_t jit_uni_batch_normalization_fwd_t<isa>::execute(
         const exec_ctx_t &ctx) const {
+    status_t status = status::success;
     auto src = CTX_IN_MEM(const void *, DNNL_ARG_SRC);
     auto scale_shift = CTX_IN_MEM(const acc_data_t *, DNNL_ARG_SCALE_SHIFT);
 
-    auto mean = pd()->stats_is_src() ? const_cast<acc_data_t *>(
-                        CTX_IN_MEM(const acc_data_t *, DNNL_ARG_MEAN))
-                                     : CTX_OUT_MEM(acc_data_t *, DNNL_ARG_MEAN);
+    auto mean = pd()->stats_is_src()
+            ? const_cast<acc_data_t *>(
+                    CTX_IN_MEM(const acc_data_t *, DNNL_ARG_MEAN))
+            : CTX_OUT_CLEAN_MEM(acc_data_t *, DNNL_ARG_MEAN, status);
+    CHECK(status);
     auto var = pd()->stats_is_src()
             ? const_cast<acc_data_t *>(
                     CTX_IN_MEM(const acc_data_t *, DNNL_ARG_VARIANCE))
-            : CTX_OUT_MEM(acc_data_t *, DNNL_ARG_VARIANCE);
+            : CTX_OUT_CLEAN_MEM(acc_data_t *, DNNL_ARG_VARIANCE, status);
+    CHECK(status);
 
-    auto dst = CTX_OUT_MEM(void *, DNNL_ARG_DST);
-    auto ws = CTX_OUT_MEM(uint8_t *, DNNL_ARG_WORKSPACE);
+    auto dst = CTX_OUT_CLEAN_MEM(void *, DNNL_ARG_DST, status);
+    CHECK(status);
+    auto ws = CTX_OUT_CLEAN_MEM(uint8_t *, DNNL_ARG_WORKSPACE, status);
+    CHECK(status);
 
     auto scratchpad = ctx.get_scratchpad_grantor();
 
@@ -2388,6 +2376,7 @@ status_t jit_uni_batch_normalization_bwd_t<isa>::init(engine_t *engine) {
 template <cpu_isa_t isa>
 status_t jit_uni_batch_normalization_bwd_t<isa>::execute(
         const exec_ctx_t &ctx) const {
+    status_t status = status::success;
     auto src = CTX_IN_MEM(const void *, DNNL_ARG_SRC);
     auto mean = CTX_IN_MEM(const acc_data_t *, DNNL_ARG_MEAN);
     auto var = CTX_IN_MEM(const acc_data_t *, DNNL_ARG_VARIANCE);
@@ -2395,9 +2384,11 @@ status_t jit_uni_batch_normalization_bwd_t<isa>::execute(
     auto scale_shift = CTX_IN_MEM(const acc_data_t *, DNNL_ARG_SCALE_SHIFT);
     auto ws = CTX_IN_MEM(const uint8_t *, DNNL_ARG_WORKSPACE);
 
-    auto diff_src = CTX_OUT_MEM(void *, DNNL_ARG_DIFF_SRC);
-    auto diff_scale_shift
-            = CTX_OUT_MEM(acc_data_t *, DNNL_ARG_DIFF_SCALE_SHIFT);
+    auto diff_src = CTX_OUT_CLEAN_MEM(void *, DNNL_ARG_DIFF_SRC, status);
+    CHECK(status);
+    auto diff_scale_shift = CTX_OUT_CLEAN_MEM(
+            acc_data_t *, DNNL_ARG_DIFF_SCALE_SHIFT, status);
+    CHECK(status);
 
     auto scratchpad = ctx.get_scratchpad_grantor();
 

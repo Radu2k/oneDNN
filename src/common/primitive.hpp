@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2020 Intel Corporation
+* Copyright 2016-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -210,7 +210,14 @@ status_t primitive_execute(
 #define CTX_IN_MEM(type, arg) \
     static_cast<const ARG_TYPE(type) *>(ctx.host_ptr(arg))
 
+// Returns destination memory which may not have been zero pad initialized.
 #define CTX_OUT_MEM(type, arg) static_cast<ARG_TYPE(type) *>(ctx.host_ptr(arg))
+
+// Returns destination memory which has been zero pad initialized. This macro
+// may result in a failure returned via the `status` input since zero pad
+// may fail.
+#define CTX_OUT_CLEAN_MEM(type, arg, status) \
+    static_cast<ARG_TYPE(type) *>(ctx.host_ptr(arg, true, &status))
 
 // dnnl_primitive is a user facing entity that has an alias primitive_iface_t
 // for internal use.

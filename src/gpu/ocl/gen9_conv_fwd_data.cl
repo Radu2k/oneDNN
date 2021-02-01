@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -707,12 +707,23 @@ gen9_conv_fwd(const __global DATA_T *src, const __global DATA_T *wei,
             for (int oc_outer = 0; oc_outer < OC_OUTER; oc_outer++) {
                 const int bg_off = g * OC;
                 const int bc_off = oc + oc_outer * 16 + sglid;
+#if DT_F16
                 if (OC_WO_PADDING % OC_BLOCK == 0 || bc_off < OC_WO_PADDING) {
                     for (int ow_block = 0; ow_block < OW_BLOCK; ow_block++) {
                         const int c_off = dst_idx(mb_block, oc_outer, ow_block);
                         C[c_off] = bia[bg_off + bc_off];
                     } // ow_block
                 } // copy-bias
+#else
+
+                for (int ow_block = 0; ow_block < OW_BLOCK; ow_block++) {
+                    const int c_off = dst_idx(mb_block, oc_outer, ow_block);
+                    C[c_off] = (OC_WO_PADDING % OC_BLOCK == 0
+                                       || bc_off < OC_WO_PADDING)
+                            ? bia[bg_off + bc_off]
+                            : DATA_ZERO;
+                }
+#endif
             } // oc_outer
         } // mb_block
     } // if-bias
@@ -731,6 +742,7 @@ gen9_conv_fwd(const __global DATA_T *src, const __global DATA_T *wei,
 
     if (WITH_SUM) { read_dst_block(S, dst, ow); }
 
+#if WITH_POST_OP
     if (OW_BLOCK == 1) {
         const int po_mb = mb;
         const int po_oc = (g * OC + oc) % (OC * G);
@@ -760,6 +772,7 @@ gen9_conv_fwd(const __global DATA_T *src, const __global DATA_T *wei,
             }
         }
     }
+#endif // #if WITH_POST_OP
 
     write_dst_block((DATA_T *)(&C), dst, ow);
 }

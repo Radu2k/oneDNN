@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -91,6 +91,11 @@ bool zero_point_config_t::zp_exists() const noexcept {
     return src_exists || dst_exists;
 }
 
+zero_point_call_params_t::zero_point_call_params_t(const int32_t *src,
+        const int32_t *dst, const int32_t *src_comp,
+        const int32_t *src_pad_comp)
+    : src(src), dst(dst), src_comp(src_comp), src_pad_comp(src_pad_comp) {}
+
 bool zero_points_valid(const primitive_attr_t *attr) noexcept {
 
     int mask_src = -1, mask_dst = -1;
@@ -107,7 +112,7 @@ void set_zp_src_comp_flags(memory_desc_t &weights_md, bool with_groups) {
             = (1 << 0) + (with_groups ? (1 << 1) : 0);
 }
 
-const int32_t *get_src_zp_comp(const int8_t *weights,
+const int32_t *get_src_zp_comp_from_wei(const int8_t *weights,
         const memory_desc_wrapper &weights_md, bool signed_input, dim_t ngroups,
         dim_t oc) {
 

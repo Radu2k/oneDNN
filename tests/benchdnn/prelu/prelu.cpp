@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ static int init_pd(dnnl_engine_t engine, const prb_t *prb,
                      prb->stag[0]),
                 CRIT);
         SAFE(init_md(&diff_weights_d, prb->ndims, weight_dims.data(),
-                     prb->sdt[0], prb->stag[1]),
+                     prb->sdt[1], prb->stag[1]),
                 CRIT);
 
         DNN_SAFE(dnnl_prelu_backward_desc_init(&pd, &data_d, &weights_d,
@@ -91,8 +91,6 @@ int fill_data(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
     // Do fixed partitioning to have same filling for any number of threads.
     const int64_t n_chunks = 16;
     const int64_t chunk_size = div_up(nelems, n_chunks);
-    // Current filling will not work for int data types
-    assert(!is_integral_dt(mem_dt.dt()));
 
     dnnl::impl::parallel_nd(n_chunks, [&](int idx_chunk) {
         int64_t idx_start = idx_chunk * chunk_size;
@@ -111,15 +109,21 @@ int fill_data(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
         // src/dst and diff_dst. The +1 is to avoid 0 again.
         std::minstd_rand msr((idx_start + 1) * (kind + 1));
         msr.discard(1);
-        std::uniform_int_distribution<> igen(0, 2);
+        std::uniform_int_distribution<> igen_02(0, 2), igen_05(0, 5);
         std::uniform_real_distribution<> fgen(-1.f, 1.f);
         for (int64_t idx = idx_start; idx < idx_end; ++idx) {
-            float value = kind == SRC
-                    ? igen(msr)
-                    : kind == WEI ? fgen(msr) : igen(msr) / 16.f;
+            float value;
+            if (is_integral_dt(mem_dt.dt()))
+                value = igen_05(msr);
+            else
+                value = kind == SRC
+                        ? igen_02(msr)
+                        : kind == WEI ? fgen(msr) : igen_02(msr) / 16.f;
             // TODO: amount of negative values should depend on number of points
             // to reduce as summation becomes inaccurate.
-            float sign = flip_coin(idx, 0.1f) ? -1.f : 1.f;
+            float sign = mem_dt.dt() == dnnl_u8
+                    ? 1.f
+                    : flip_coin(idx, 0.1f) ? -1.f : 1.f;
             value = round_to_nearest_representable(mem_dt.dt(), sign * value);
             mem_fp.set_elem(idx, value);
         }
@@ -133,13 +137,6 @@ int fill_data(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
 void check_known_skipped_case(const prb_t *prb, res_t *res) {
     check_known_skipped_case_common(prb->sdt, FWD_D, res);
     if (res->state == SKIPPED) return;
-
-    if (is_cpu()) {
-        if (prb->sdt[0] != prb->sdt[1]) {
-            res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
-            return;
-        }
-    }
 
     if (is_nvidia_gpu()) {
         res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;

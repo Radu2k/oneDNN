@@ -1,5 +1,5 @@
 #===============================================================================
-# Copyright 2016-2020 Intel Corporation
+# Copyright 2016-2021 Intel Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -113,8 +113,10 @@ if(MSVC)
     endif()
 elseif(UNIX OR MINGW)
     append(CMAKE_CCXX_FLAGS "-Wall -Wno-unknown-pragmas")
-    # XXX: Intel oneAPI DPC++ Compiler generates a lot of warnings
-    append(CMAKE_CCXX_FLAGS "-w")
+    if(DNNL_WITH_SYCL)
+        # XXX: Intel oneAPI DPC++ Compiler generates a lot of warnings
+        append(CMAKE_CCXX_FLAGS "-w")
+    endif()
     append_if(DNNL_WERROR CMAKE_CCXX_FLAGS "-Werror")
     append(CMAKE_CCXX_FLAGS "-fvisibility=internal")
     append(CMAKE_CXX_FLAGS "-fvisibility-inlines-hidden")
@@ -122,19 +124,25 @@ elseif(UNIX OR MINGW)
     # compiler specific settings
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         if(DNNL_TARGET_ARCH STREQUAL "AARCH64")
-             set(DEF_ARCH_OPT_FLAGS "-O3")
+             if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+                 set(DEF_ARCH_OPT_FLAGS "-O3")
+             endif()
              # For native compilation tune for the host processor
              if (CMAKE_SYSTEM_PROCESSOR STREQUAL CMAKE_HOST_SYSTEM_PROCESSOR)
                  append(DEF_ARCH_OPT_FLAGS "-mcpu=native")
              endif()
         elseif(DNNL_TARGET_ARCH STREQUAL "PPC64")
-             set(DEF_ARCH_OPT_FLAGS "-O3")
+             if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+                 set(DEF_ARCH_OPT_FLAGS "-O3")
+             endif()
              # For native compilation tune for the host processor
              if (CMAKE_SYSTEM_PROCESSOR STREQUAL CMAKE_HOST_SYSTEM_PROCESSOR)
                  append(DEF_ARCH_OPT_FLAGS "-mcpu=native")
              endif()
         elseif(DNNL_TARGET_ARCH STREQUAL "S390X")
-             set(DEF_ARCH_OPT_FLAGS "-O3")
+             if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+                 set(DEF_ARCH_OPT_FLAGS "-O3")
+             endif()
              # For native compilation tune for the host processor
              if (CMAKE_SYSTEM_PROCESSOR STREQUAL CMAKE_HOST_SYSTEM_PROCESSOR)
                  append(DEF_ARCH_OPT_FLAGS "-march=native")
@@ -204,20 +212,26 @@ elseif(UNIX OR MINGW)
 
     elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
         if(DNNL_TARGET_ARCH STREQUAL "AARCH64")
-             set(DEF_ARCH_OPT_FLAGS "-O3")
+             if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+                 set(DEF_ARCH_OPT_FLAGS "-O3")
+             endif()
              # For native compilation tune for the host processor
              if (CMAKE_SYSTEM_PROCESSOR STREQUAL CMAKE_HOST_SYSTEM_PROCESSOR)
                  append(DEF_ARCH_OPT_FLAGS "-mcpu=native")
              endif()
         elseif(DNNL_TARGET_ARCH STREQUAL "PPC64")
-             set(DEF_ARCH_OPT_FLAGS "-O3")
+             if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+                 set(DEF_ARCH_OPT_FLAGS "-O3")
+             endif()
              # In GCC, -ftree-vectorize is turned on under -O3 since 2007.
              # For native compilation tune for the host processor
              if (CMAKE_SYSTEM_PROCESSOR STREQUAL CMAKE_HOST_SYSTEM_PROCESSOR)
                  append(DEF_ARCH_OPT_FLAGS "-mcpu=native")
              endif()
         elseif(DNNL_TARGET_ARCH STREQUAL "S390X")
-             set(DEF_ARCH_OPT_FLAGS "-O3")
+             if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+                 set(DEF_ARCH_OPT_FLAGS "-O3")
+             endif()
              # In GCC, -ftree-vectorize is turned on under -O3 since 2007.
              # For native compilation tune for the host processor
              if (CMAKE_SYSTEM_PROCESSOR STREQUAL CMAKE_HOST_SYSTEM_PROCESSOR)

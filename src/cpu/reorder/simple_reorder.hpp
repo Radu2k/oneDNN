@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2020 Intel Corporation
+* Copyright 2016-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -70,8 +70,10 @@ struct conv_req_comp {}; // {s8, u8: asymmetric quantization}
 #define SIMPLE_REORDER_TEMPL_CALL type_i, tag_i, type_o, tag_o, order_keep
 
 #define DECLARE_COMMON_PARAMS() \
+    status_t status = status::success; \
     auto input = CTX_IN_MEM(const data_t<type_i> *, DNNL_ARG_FROM); \
-    auto output = CTX_OUT_MEM(data_t<type_o> *, DNNL_ARG_TO); \
+    auto output = CTX_OUT_CLEAN_MEM(data_t<type_o> *, DNNL_ARG_TO, status); \
+    CHECK(status); \
     const auto &scratchpad = ctx.get_scratchpad_grantor(); \
     MAYBE_UNUSED(scratchpad); \
     const auto input_d = ctx.memory_mdw(DNNL_ARG_FROM, pd->src_md()); \
@@ -605,7 +607,14 @@ struct simple_reorder_impl<SIMPLE_REORDER_TEMPL_CALL,
                         || (utils::one_of(
                                     tag_i, format_tag::goihw, format_tag::hwigo)
                                 && utils::one_of(tag_o, format_tag::gOhwI16o4i,
-                                        format_tag::gOIhw16i16o4i)),
+                                        format_tag::gOIhw16i16o4i))
+                        || (utils::one_of(
+                                    tag_i, format_tag::dhwio, format_tag::oidhw)
+                                && utils::one_of(tag_o, format_tag::OdhwI16o4i,
+                                        format_tag::OIdhw16i16o4i))
+                        || (utils::one_of(tag_i, format_tag::goidhw)
+                                && utils::one_of(tag_o, format_tag::gOdhwI16o4i,
+                                        format_tag::gOIdhw16i16o4i)),
                 spec::conv_req_comp>::type> {
     static bool is_applicable(const memory_desc_wrapper &input_d,
             const memory_desc_wrapper &output_d, const primitive_attr_t *attr) {
@@ -615,8 +624,8 @@ struct simple_reorder_impl<SIMPLE_REORDER_TEMPL_CALL,
 
         if (input_d.has_runtime_dims_or_strides()) return false;
 
-        const bool w_groups = !one_of(
-                tag_o, OwI16o4i, OIw16i16o4i, OhwI16o4i, OIhw16i16o4i);
+        const bool w_groups = !one_of(tag_o, OwI16o4i, OIw16i16o4i, OhwI16o4i,
+                OIhw16i16o4i, OdhwI16o4i, OIdhw16i16o4i);
 
         // Current formats are only used in jit kernels that natively
         // support s8 instructions, hence, there is no need for signed
@@ -647,11 +656,13 @@ struct simple_reorder_impl<SIMPLE_REORDER_TEMPL_CALL,
         DECLARE_COMMON_PARAMS();
         using namespace format_tag;
 
-        static constexpr bool w_groups = !utils::one_of(
-                tag_o, OwI16o4i, OIw16i16o4i, OhwI16o4i, OIhw16i16o4i);
+        static constexpr bool w_groups
+                = !utils::one_of(tag_o, OwI16o4i, OIw16i16o4i, OhwI16o4i,
+                        OIhw16i16o4i, OdhwI16o4i, OIdhw16i16o4i);
         constexpr int is_1d = utils::one_of(
                 tag_o, OwI16o4i, gOwI16o4i, OIw16i16o4i, gOIw16i16o4i);
-        const bool is_3d = false; // TODO once enabled
+        const bool is_3d = utils::one_of(
+                tag_o, OdhwI16o4i, gOdhwI16o4i, OIdhw16i16o4i, gOIdhw16i16o4i);
 
         constexpr int oc_blksize = 16;
         constexpr int ic_blksize = utils::one_of(tag_traits<tag_o>::inner_blks,
@@ -1713,8 +1724,10 @@ struct simple_reorder_impl<SIMPLE_REORDER_TEMPL_CALL,
         // function.
         auto pd = [pd_object]() { return pd_object; };
 
+        status_t status = status::success;
         auto input = CTX_IN_MEM(const data_t<type_i> *, DNNL_ARG_FROM);
-        auto output = CTX_OUT_MEM(data_t<type_o> *, DNNL_ARG_TO);
+        auto output = CTX_OUT_CLEAN_MEM(data_t<type_o> *, DNNL_ARG_TO, status);
+        CHECK(status);
 
         const float beta = pd()->beta();
         DEFINE_SCALES_BUFFER(scales);

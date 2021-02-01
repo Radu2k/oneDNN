@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -64,7 +64,9 @@ struct gen9_simple_sum_t : public gpu_primitive_t {
     virtual status_t init(engine_t *engine);
 
     virtual status_t execute(const exec_ctx_t &ctx) const {
-        auto &output = CTX_OUT_STORAGE(DNNL_ARG_DST);
+        status_t status = status::success;
+        auto &output = CTX_OUT_CLEAN_STORAGE(DNNL_ARG_DST, status);
+        CHECK(status);
 
         const int num_arrs = pd()->n_inputs();
         const memory_desc_wrapper o_d(pd()->dst_md());
@@ -83,7 +85,7 @@ struct gen9_simple_sum_t : public gpu_primitive_t {
             size_t gws[3] = {nelems, 1, 1};
             size_t lws[3] = {1, 1, 1};
             auto nd_range = compute::nd_range_t(gws, lws);
-            status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
+            status = parallel_for(ctx, nd_range, kernel_, arg_list);
             if (status != status::success) return status;
         }
         return status::success;

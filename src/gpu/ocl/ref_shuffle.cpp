@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -69,10 +69,14 @@ status_t ref_shuffle_t::pd_t::init_kernel_ctx(
 
 template <dnnl_format_tag_t tag>
 status_t ref_shuffle_t::execute_(const exec_ctx_t &ctx) const {
+    status_t status = status::success;
+
     auto &src = pd()->is_fwd() ? CTX_IN_STORAGE(DNNL_ARG_SRC)
                                : CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
-    auto &dst = pd()->is_fwd() ? CTX_OUT_STORAGE(DNNL_ARG_DST)
-                               : CTX_OUT_STORAGE(DNNL_ARG_DIFF_SRC);
+    auto &dst = pd()->is_fwd()
+            ? CTX_OUT_CLEAN_STORAGE(DNNL_ARG_DST, status)
+            : CTX_OUT_CLEAN_STORAGE(DNNL_ARG_DIFF_SRC, status);
+    CHECK(status);
 
     const auto &conf = pd()->conf;
 
@@ -81,7 +85,7 @@ status_t ref_shuffle_t::execute_(const exec_ctx_t &ctx) const {
     arg_list.set(1, dst);
 
     auto nd_range = conf.dispatch.nd_range();
-    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
+    status = parallel_for(ctx, nd_range, kernel_, arg_list);
     return status;
 }
 template status_t ref_shuffle_t::execute_<any>(const exec_ctx_t &ctx) const;

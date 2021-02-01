@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2020 Intel Corporation
+* Copyright 2016-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -67,6 +67,19 @@ struct conv_gemm_conf_t {
     data_type_t dst_data_type;
     size_t dst_os_stride;
     size_t scale_idx_mult;
+};
+
+struct single_gemm_conv_chunk_desc_t {
+    single_gemm_conv_chunk_desc_t() = default;
+    single_gemm_conv_chunk_desc_t(dim_t d_off, dim_t d_size, dim_t h_off,
+            dim_t h_size, dim_t w_off, dim_t w_size);
+
+    dim_t d_off_ = 0;
+    dim_t d_size_ = 0;
+    dim_t h_off_ = 0;
+    dim_t h_size_ = 0;
+    dim_t w_off_ = 0;
+    dim_t w_size_ = 0;
 };
 
 namespace jit_gemm_convolution_utils {

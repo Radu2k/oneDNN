@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2020 Intel Corporation
+* Copyright 2016-2021 Intel Corporation
 * Copyright 2018 YANDEX LLC
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
@@ -94,8 +94,9 @@ void jit_avx2_conv_fwd_kernel_f32::oh_step_unroll_kw(
 
                 for (int ii = 0; ii < oc_blocks; ii++) {
                     vmovups(ymm15,
-                            ptr[aux_reg_kernel
-                                    + get_kernel_offset(ii, ki, ifm2)]);
+                            make_safe_addr(aux_reg_kernel,
+                                    get_kernel_offset(ii, ki, ifm2),
+                                    reg_long_offt));
                     for (int jj = jj_start; jj < jj_end; jj++)
                         if (mayiuse(avx2))
                             vfmadd231ps(Ymm(ur_w * ii + jj),
@@ -152,7 +153,8 @@ void jit_avx2_conv_fwd_kernel_f32::oh_step_nopad(
             }
             for (int ii = 0; ii < oc_blocks; ii++) {
                 vmovups(ymm15,
-                        ptr[aux_reg_kernel + get_kernel_offset(ii, 0, ifm2)]);
+                        make_safe_addr(aux_reg_kernel,
+                                get_kernel_offset(ii, 0, ifm2), reg_long_offt));
                 for (int jj = jj_start; jj < jj_end; jj++)
                     if (mayiuse(avx2))
                         vfmadd231ps(Ymm(ur_w * ii + jj),
@@ -163,8 +165,9 @@ void jit_avx2_conv_fwd_kernel_f32::oh_step_nopad(
                     }
             }
         }
-        add(aux_reg_kernel, get_kernel_offset(0, 1, 0));
-        add(aux_reg_input, get_input_offset(0, filter_w_to_input(1)));
+        safe_add(aux_reg_kernel, get_kernel_offset(0, 1, 0), reg_long_offt);
+        safe_add(aux_reg_input, get_input_offset(0, filter_w_to_input(1)),
+                reg_long_offt);
 
         inc(ki_iter);
         cmp(ki_iter, kw);
@@ -396,8 +399,10 @@ void jit_avx2_conv_fwd_kernel_f32::width_blk_step(
                             - get_input_offset(0, filter_w_to_input(kw)));
         } else {
             oh_step_unroll_kw(ur_w, pad_l, pad_r, oc_blocks);
-            add(aux_reg_kernel, get_kernel_offset(0, kw, 0));
-            add(aux_reg_input, get_input_offset(0, filter_h_to_input(1)));
+            safe_add(
+                    aux_reg_kernel, get_kernel_offset(0, kw, 0), reg_long_offt);
+            safe_add(aux_reg_input, get_input_offset(0, filter_h_to_input(1)),
+                    reg_long_offt);
         }
 
         dec(kj);
@@ -408,8 +413,10 @@ void jit_avx2_conv_fwd_kernel_f32::width_blk_step(
     L(skip_kh_loop);
 
     if (jcp.ndims == 5) {
-        add(aux_reg_inp_d, get_input_offset(0, filter_d_to_input(1)));
-        add(aux_reg_ker_d, get_kernel_offset(0, jcp.kw * jcp.kh, 0));
+        safe_add(aux_reg_inp_d, get_input_offset(0, filter_d_to_input(1)),
+                reg_long_offt);
+        safe_add(aux_reg_ker_d, get_kernel_offset(0, jcp.kw * jcp.kh, 0),
+                reg_long_offt);
 
         dec(reg_ki);
         cmp(reg_ki, 0);
@@ -638,6 +645,9 @@ status_t jit_avx2_conv_fwd_kernel_f32::init_conf(jit_conv_conf_t &jcp,
     jcp.wei_tag = weights_d.matches_one_of_tag(wei_tag_OIxio, wei_tag_Oxio);
     jcp.dst_tag = dst_d.matches_one_of_tag(dat_tag_nxc, dat_tag_nCx8c);
 
+    jcp.typesize_in = types::data_type_size(src_d.data_type());
+    jcp.typesize_out = types::data_type_size(dst_d.data_type());
+
     bool is_data_layout_nxc
             = everyone_is(dat_tag_nxc, jcp.src_tag, jcp.dst_tag);
 
@@ -776,6 +786,25 @@ status_t jit_avx2_conv_fwd_kernel_f32::init_conf(jit_conv_conf_t &jcp,
 
     jcp.nb_ic_blocking = 12;
     jcp.nb_ic_blocking_max = 16;
+
+    /* adjust the thread decomposition
+     * to improve the perf for small problem size
+     * the threshold L1_cache_size is empirical 
+     * simply set the thread as 4 for now
+     * TODO: Add get_thr_eff func to get the optimal thread number*/
+    size_t wei_size = (size_t)sizeof(float) * jcp.ic * jcp.oc * jcp.kh * jcp.kw
+            * jcp.kd;
+    size_t inp_size = (size_t)jcp.typesize_in * jcp.mb * jcp.ic * jcp.ih
+            * jcp.iw * jcp.id;
+    size_t out_size = (size_t)jcp.typesize_out * jcp.mb * jcp.oc * jcp.oh
+            * jcp.ow * jcp.od;
+    size_t total_size = jcp.ngroups * (wei_size + inp_size + out_size);
+
+    const unsigned int L1_cache_size = platform::get_per_core_cache_size(1);
+
+    if (jcp.ngroups < jcp.nthr && total_size < L1_cache_size) {
+        jcp.nthr = nstl::min(jcp.nthr, 4);
+    }
 
     return status::success;
 }
@@ -1120,6 +1149,9 @@ status_t jit_avx2_conv_bwd_data_kernel_f32::init_conf(jit_conv_conf_t &jcp,
     jcp.dst_tag = diff_dst_d.matches_one_of_tag(dat_tag_nxc, dat_tag_nCx8c);
     jcp.wei_tag = weights_d.matches_one_of_tag(wei_tag);
 
+    jcp.typesize_in = types::data_type_size(diff_src_d.data_type());
+    jcp.typesize_out = types::data_type_size(diff_dst_d.data_type());
+
     bool is_data_layout_nxc
             = everyone_is(dat_tag_nxc, jcp.src_tag, jcp.dst_tag);
     bool ok_to_pad_channels = true && !is_data_layout_nxc && jcp.ngroups == 1;
@@ -1227,6 +1259,24 @@ status_t jit_avx2_conv_bwd_data_kernel_f32::init_conf(jit_conv_conf_t &jcp,
             /* r_pad must not extend beyond ur_w_tail */
             || ((jcp.iw > jcp.ur_w) && (jcp.r_pad + jcp.ur_w_tail < 0));
     if (tails_not_ok) return status::unimplemented;
+
+    /* adjust the thread decomposition
+     * to improve the perf for small problem size
+     * the threshold L1_cache_size is empirical 
+     * simply set the thread to 4 for now
+     * TODO: Add get_thr_eff func to get optimal thread number */
+    size_t wei_size = (size_t)sizeof(float) * jcp.ic * jcp.oc * jcp.kh * jcp.kw
+            * jcp.kd;
+    size_t inp_size = (size_t)jcp.typesize_in * jcp.mb * jcp.ic * jcp.ih
+            * jcp.iw * jcp.id;
+    size_t out_size = (size_t)jcp.typesize_out * jcp.mb * jcp.oc * jcp.oh
+            * jcp.ow * jcp.od;
+    size_t total_size = jcp.ngroups * (wei_size + inp_size + out_size);
+    const unsigned int L1_cache_size = platform::get_per_core_cache_size(1);
+
+    if (jcp.ngroups < jcp.nthr && total_size < L1_cache_size) {
+        jcp.nthr = nstl::min(jcp.nthr, 4);
+    }
 
     return status::success;
 }

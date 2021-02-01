@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@
 #include <cmath>
 #include <vector>
 #include "cpu/gemm_x8s8s32x_conv_zp_src_pad_comp.hpp"
+#if DNNL_X64
 #include "cpu/x64/jit_primitive_conf.hpp"
+#endif
 
 namespace dnnl {
 namespace impl {

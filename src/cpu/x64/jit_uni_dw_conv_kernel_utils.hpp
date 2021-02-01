@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -95,11 +95,13 @@ status_t jit_uni_dw_conv_fwd_kernel<isa, kernel_dt>::init_conf(
     const auto wei_tag
             = one_of(isa, avx512_common, avx512_core) ? Goihw16g : Goihw8g;
     const auto nxc_tag = nhwc;
+    const auto def_tag = mayiuse(avx512_core) ? nxc_tag : blocked_tag;
+
     jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
 
     if (src_d.format_kind() == format_kind::any) {
-        CHECK(memory_desc_init_by_tag(src_md, blocked_tag));
-        jcp.src_tag = blocked_tag;
+        CHECK(memory_desc_init_by_tag(src_md, def_tag));
+        jcp.src_tag = def_tag;
     } else {
         jcp.src_tag = src_d.matches_one_of_tag(blocked_tag, nxc_tag);
     }
@@ -112,8 +114,8 @@ status_t jit_uni_dw_conv_fwd_kernel<isa, kernel_dt>::init_conf(
     }
 
     if (dst_d.format_kind() == format_kind::any) {
-        CHECK(memory_desc_init_by_tag(dst_md, blocked_tag));
-        jcp.dst_tag = blocked_tag;
+        CHECK(memory_desc_init_by_tag(dst_md, def_tag));
+        jcp.dst_tag = def_tag;
     } else {
         jcp.dst_tag = dst_d.matches_one_of_tag(blocked_tag, nxc_tag);
     }
@@ -159,8 +161,6 @@ status_t jit_uni_dw_conv_fwd_kernel<isa, kernel_dt>::init_conf(
 
     jcp.t_pad = cd.padding[0][0];
     jcp.l_pad = cd.padding[0][1];
-    jcp.b_pad = cd.padding[1][0];
-    jcp.r_pad = cd.padding[1][1];
 
     jcp.stride_h = cd.strides[0];
     jcp.stride_w = cd.strides[1];
@@ -335,14 +335,19 @@ status_t jit_uni_dw_conv_bwd_data_kernel<isa, kernel_dt>::init_conf(
 
     jcp.t_pad = cd.padding[0][0];
     jcp.l_pad = cd.padding[0][1];
-    jcp.b_pad = cd.padding[1][0];
-    jcp.r_pad = cd.padding[1][1];
 
     jcp.stride_h = cd.strides[0];
     jcp.stride_w = cd.strides[1];
 
     jcp.dilate_h = cd.dilates[0];
     jcp.dilate_w = cd.dilates[1];
+
+    const int ext_kw = calculate_extended_filter_size(jcp.kw, jcp.dilate_w);
+    const int ext_kh = calculate_extended_filter_size(jcp.kh, jcp.dilate_h);
+    jcp.r_pad = calculate_end_padding(
+            jcp.l_pad, jcp.ow, jcp.iw, jcp.stride_w, ext_kw);
+    jcp.b_pad = calculate_end_padding(
+            jcp.t_pad, jcp.oh, jcp.ih, jcp.stride_h, ext_kh);
 
     jcp.ihp = jcp.ih + jcp.t_pad + jcp.b_pad;
     jcp.iwp = jcp.iw + jcp.l_pad + jcp.r_pad;
@@ -475,10 +480,7 @@ status_t jit_uni_dw_conv_bwd_weights_kernel<isa, kernel_dt>::init_conf(
     jcp.stride_w = cd.strides[1];
 
     jcp.t_pad = cd.padding[0][0];
-    jcp.b_pad = cd.padding[1][0];
-
     jcp.l_pad = cd.padding[0][1];
-    jcp.r_pad = cd.padding[1][1];
 
     jcp.dilate_h = cd.dilates[0];
     jcp.dilate_w = cd.dilates[1];
@@ -487,6 +489,15 @@ status_t jit_uni_dw_conv_bwd_weights_kernel<isa, kernel_dt>::init_conf(
     jcp.iwp = jcp.iw + jcp.l_pad + jcp.r_pad;
 
     jcp.with_bias = cd.diff_bias_desc.format_kind != format_kind::undef;
+
+    const int ext_kw = calculate_extended_filter_size(jcp.kw, jcp.dilate_w);
+    const int ext_kh = calculate_extended_filter_size(jcp.kh, jcp.dilate_h);
+    jcp.r_pad = nstl::max(0,
+            calculate_end_padding(
+                    jcp.l_pad, jcp.ow, jcp.iw, jcp.stride_w, ext_kw));
+    jcp.b_pad = nstl::max(0,
+            calculate_end_padding(
+                    jcp.t_pad, jcp.oh, jcp.ih, jcp.stride_h, ext_kh));
 
     auto dat_tag = one_of(isa, avx512_common, avx512_core) ? nChw16c : nChw8c;
     auto wei_tag = one_of(isa, avx512_common, avx512_core) ? Goihw16g : Goihw8g;

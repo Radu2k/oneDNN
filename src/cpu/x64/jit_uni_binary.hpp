@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -34,6 +34,9 @@ namespace impl {
 namespace cpu {
 namespace x64 {
 
+enum class op_t : unsigned;
+enum class bcast_t : unsigned;
+
 struct binary_kernel_t;
 
 template <data_type_t src_type>
@@ -58,7 +61,7 @@ struct jit_uni_binary_t : public primitive_t {
                     && set_default_params() == status::success
                     && !has_zero_dim_memory() && src0_md_ == dst_md_
                     && is_applicable()
-                    && attr()->has_default_values(sm::post_ops)
+                    && attr()->has_default_values(sm::post_ops | sm::scales)
                     && post_ops_ok(attr(), src_md(0))
                     && (elt_idx == -1
                             || IMPLICATION(!dst_md_.is_dense(),
@@ -66,6 +69,8 @@ struct jit_uni_binary_t : public primitive_t {
                                             eltwise_preserves_zero(
                                                     po.entry_[elt_idx]
                                                             .eltwise)))
+                    && IMPLICATION((!attr()->scales_.has_default_values()),
+                            check_scales_mask())
                     && IMPLICATION(!mayiuse(avx2),
                             src0_md_.consistent_with(src1_md_)
                                     || src0_md_.is_plain());
@@ -83,6 +88,49 @@ struct jit_uni_binary_t : public primitive_t {
             using namespace alg_kind;
             return utils::one_of(desc()->alg_kind, binary_add, binary_max,
                     binary_min, binary_mul, binary_sub);
+        }
+
+        bool check_scales_mask() const {
+            for (const auto &s : attr()->scales_.scales_) {
+                if (s.second.mask_ != 0) return false;
+            }
+            return true;
+        }
+
+        bool is_bcast_pattern(const dims_t &bcast_dims, const dim_t ndims,
+                const dim_t N_bcast, const dim_t C_bcast,
+                const dim_t W_bcast) const {
+            return bcast_dims[0] == N_bcast && bcast_dims[1] == C_bcast
+                    && bcast_dims[ndims - 1] == W_bcast;
+        }
+
+        bool is_bcast_pattern(const dims_t &bcast_dims, const dim_t N_bcast,
+                const dim_t C_bcast) const {
+            return bcast_dims[0] == N_bcast && bcast_dims[1] == C_bcast;
+        }
+
+        bool is_bcast_allowed(const int ndims) const {
+            // supported cases: NxCxDxHxW:{NxCx1x1x1,1xCx1x1x1,Nx1x1x1xW,
+            //                            1x1x1x1xW,1x1x1x1x1}
+            bool ok = true;
+            const auto &bcast_dims = broadcast_dims();
+            // check that SP (without W) dimensions are broadcasted
+            for (int d = 2; d < ndims - 1; ++d)
+                ok = ok && bcast_dims[d] == 1;
+            if (ndims > 2)
+                ok = ok
+                        && (is_bcast_pattern(bcast_dims, ndims, 0, 0, 1)
+                                || is_bcast_pattern(bcast_dims, ndims, 1, 0, 1)
+                                || is_bcast_pattern(bcast_dims, ndims, 0, 1, 0)
+                                || is_bcast_pattern(bcast_dims, ndims, 1, 1, 0)
+                                || is_bcast_pattern(
+                                        bcast_dims, ndims, 1, 1, 1));
+            else
+                ok = ok
+                        && (is_bcast_pattern(bcast_dims, 0, 0)
+                                || is_bcast_pattern(bcast_dims, 1, 0)
+                                || is_bcast_pattern(bcast_dims, 1, 1));
+            return ok;
         }
 
         bool is_applicable() {
@@ -108,13 +156,7 @@ struct jit_uni_binary_t : public primitive_t {
 
             // broadcast operation
             const auto ndims = src0_d.ndims();
-            ok = ndims >= 2;
-            // supported case: NxCxDxHxW:{NxCx1x1x1,1xCx1x1x1,1x1x1x1x1}
-            const auto &bcast_dims = broadcast_dims();
-            ok = ok && IMPLICATION(bcast_dims[0] == 0, bcast_dims[1] == 0);
-            for (int d = 2; d < ndims; ++d)
-                ok = ok && bcast_dims[d] == 1;
-            if (!ok) return false;
+            if (ndims < 2 || !is_bcast_allowed(ndims)) return false;
 
             if (src0_d.is_plain() && src1_d.is_plain()) {
                 const auto &bd0 = src0_d.blocking_desc();
@@ -149,6 +191,22 @@ struct jit_uni_binary_t : public primitive_t {
     ~jit_uni_binary_t();
 
     status_t init(engine_t *engine) override;
+
+    using data_t = typename prec_traits<src_type>::type;
+
+    void execute_no_bcast_strategy(const data_t *src0, const data_t *src1,
+            data_t *dst, const float *scale0, const float *scale1,
+            const std::vector<const void *> &post_ops_binary_rhs_arg_vec,
+            const bcast_t bcast_type) const;
+    void execute_bcast_per_c_strategy(const data_t *src0, const data_t *src1,
+            data_t *dst, const float *scale0, const float *scale1,
+            const std::vector<const void *> &post_ops_binary_rhs_arg_vec,
+            const op_t op_type, const bcast_t bcast_type,
+            const bool blocked_oc_tail) const;
+    void execute_bcast_per_w_strategy(const data_t *src0, const data_t *src1,
+            data_t *dst, const float *scale0, const float *scale1,
+            const std::vector<const void *> &post_ops_binary_rhs_arg_vec,
+            const op_t op_type, const bool blocked_oc_tail) const;
 
     status_t execute(const exec_ctx_t &ctx) const override;
 

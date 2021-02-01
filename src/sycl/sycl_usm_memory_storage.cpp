@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -35,13 +35,13 @@ status_t sycl_usm_memory_storage_t::map_data(
         void **mapped_ptr, stream_t *stream, size_t size) const {
     void *usm_ptr = this->usm_ptr(); // shadowing is bad
 
-    if (!usm_ptr || size == 0) {
-        *mapped_ptr = nullptr;
+    if (is_host_accessible()) {
+        *mapped_ptr = usm_ptr;
         return status::success;
     }
 
-    if (is_host_accessible()) {
-        *mapped_ptr = usm_ptr;
+    if (!usm_ptr || size == 0) {
+        *mapped_ptr = nullptr;
         return status::success;
     }
 

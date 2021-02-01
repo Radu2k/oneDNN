@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ namespace ocl {
 static status_t init_kernel_ctx_common(compute::kernel_ctx_t &kernel_ctx,
         const eltwise_conf_t &conf, const offsets_t &off,
         const eltwise_pd_t &pd) {
-    const memory_desc_wrapper data_d(pd.src_md());
+    const memory_desc_wrapper data_d(pd.desc()->data_desc);
 
     kernel_ctx.set_data_type(data_d.data_type());
     def_eltwise_alg_kinds(kernel_ctx);
@@ -49,7 +49,7 @@ static status_t init_kernel_ctx_common(compute::kernel_ctx_t &kernel_ctx,
 }
 
 status_t gen9_eltwise_fwd_t::pd_t::init_conf(engine_t *engine) {
-    const memory_desc_wrapper data_d(src_md());
+    const memory_desc_wrapper data_d(data_md());
     conf.with_zero_padding = data_d.nelems(false) != data_d.nelems(true);
     conf.vector_size = 8;
     return status::success;
@@ -62,8 +62,11 @@ status_t gen9_eltwise_fwd_t::pd_t::init_kernel_ctx(
 
 status_t gen9_eltwise_fwd_t::execute_forward_dense(
         const exec_ctx_t &ctx) const {
+    status_t status = status::success;
+
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
-    auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
+    auto &dst = CTX_OUT_CLEAN_STORAGE(DNNL_ARG_DST, status);
+    CHECK(status);
 
     const float alpha = pd()->desc()->alpha;
     const float beta = pd()->desc()->beta;
@@ -74,17 +77,17 @@ status_t gen9_eltwise_fwd_t::execute_forward_dense(
     arg_list.set(2, alpha);
     arg_list.set(3, beta);
 
-    const memory_desc_wrapper data_d(pd()->src_md());
+    const memory_desc_wrapper data_d(pd()->data_md());
     size_t lws = 256;
     size_t total_wi = utils::div_up(data_d.nelems(pd()->conf.with_zero_padding),
             pd()->conf.vector_size);
     compute::nd_range_t nd_range({utils::rnd_up(total_wi, lws)}, {lws});
 
-    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
+    status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
     if (!gpu_eltwise_fwd_pd_t::eltwise_preserves_zero(
                 pd()->desc()->alg_kind, alpha, beta)) {
-        ctx.memory(DNNL_ARG_DST)->zero_pad(ctx.stream());
+        ctx.zero_pad_output(DNNL_ARG_DST);
     }
 
     return status;
@@ -93,7 +96,7 @@ status_t gen9_eltwise_fwd_t::execute_forward_dense(
 status_t gen9_eltwise_bwd_t::pd_t::init_conf(engine_t *engine) {
     using namespace dnnl::impl::format_tag;
 
-    const memory_desc_wrapper data_d(src_md());
+    const memory_desc_wrapper data_d(data_md());
     const memory_desc_wrapper diff_data_d(diff_src_md());
     conf.with_zero_padding = data_d.nelems(false) != data_d.nelems(true);
     conf.vector_size = 8;
@@ -123,10 +126,13 @@ status_t gen9_eltwise_bwd_t::pd_t::init_kernel_ctx(
 
 status_t gen9_eltwise_bwd_t::execute_backward_dense(
         const exec_ctx_t &ctx) const {
+    status_t status = status::success;
+
     auto &src = pd()->use_dst() ? CTX_IN_STORAGE(DNNL_ARG_DST)
                                 : CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
-    auto &diff_src = CTX_OUT_STORAGE(DNNL_ARG_DIFF_SRC);
+    auto &diff_src = CTX_OUT_CLEAN_STORAGE(DNNL_ARG_DIFF_SRC, status);
+    CHECK(status);
 
     const float alpha = pd()->desc()->alpha;
     const float beta = pd()->desc()->beta;
@@ -138,17 +144,17 @@ status_t gen9_eltwise_bwd_t::execute_backward_dense(
     arg_list.set(3, alpha);
     arg_list.set(4, beta);
 
-    const memory_desc_wrapper data_d(pd()->src_md());
+    const memory_desc_wrapper data_d(pd()->data_md());
     size_t lws = 256;
     size_t total_wi = utils::div_up(data_d.nelems(pd()->conf.with_zero_padding),
             pd()->conf.vector_size);
     compute::nd_range_t nd_range({utils::rnd_up(total_wi, lws)}, {lws});
 
-    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
+    status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
     if (!gpu_eltwise_bwd_pd_t::eltwise_preserves_zero(
                 pd()->desc()->alg_kind, alpha, beta)) {
-        ctx.memory(DNNL_ARG_DIFF_SRC)->zero_pad(ctx.stream());
+        ctx.zero_pad_output(DNNL_ARG_DIFF_SRC);
     }
 
     return status;

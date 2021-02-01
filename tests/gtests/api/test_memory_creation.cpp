@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -61,7 +61,6 @@ protected:
 
         // mem0
         // Initially spoiled by putting non-zero values in padded area.
-        // The test will manually fix it later.
         auto mem0 = test::make_memory(md, eng);
 
         // `runtime`-aware buffer for future mem1
@@ -79,15 +78,8 @@ protected:
                 mem1_ph_ptr[i] = mem0_ptr[i];
         }
 
-        // mem1
-        // A `corrected` version of mem0 (i.e. padded area should be filled with
-        // zeros) and with a buffer taken from mem1_placeholder.
-
         auto mem1 = test::make_memory(md, eng, nullptr);
         mem1.set_data_handle(mem1_placeholder.get_data_handle());
-
-        check_zero_tail<data_t>(0, mem1); // Check, if mem1 is indeed corrected
-        check_zero_tail<data_t>(1, mem0); // Manually correct mem0
 
         // Map-unmap section
         {
@@ -136,11 +128,18 @@ auto cases_generic = ::testing::Values(params_t {{2, 15, 3, 2}, fmt::nChw16c},
         params_t {{2, 9, 3, 2}, fmt::OIhw2i8o4i},
         params_t {{2, 9, 3, 2, 4}, fmt::OIdhw8o4i},
         params_t {{2, 17, 9, 2}, fmt::gOIw8o4i},
+        params_t {{2, 9, 3}, fmt::OwI16o4i},
+        params_t {{2, 9, 3, 2}, fmt::OhwI16o4i},
+        params_t {{2, 15, 9, 3, 2}, fmt::OdhwI16o4i},
+        params_t {{2, 15, 9, 3}, fmt::gOwI16o4i},
+        params_t {{2, 15, 9, 3, 2}, fmt::gOhwI16o4i},
+        params_t {{3, 18, 9, 3, 2, 3}, fmt::gOdhwI16o4i},
         params_t {{3, 18, 9, 3, 2, 3}, fmt::gOIdhw4i16o4i},
         params_t {{2, 18, 8, 4, 2, 3}, fmt::gOIdhw2i8o4i},
         params_t {{1, 2, 9, 3, 3, 2}, fmt::gOIdhw4o4i},
         params_t {{2, 9, 3, 2}, fmt::OIhw16i16o4i},
         params_t {{2, 9, 3, 2}, fmt::OIhw16i16o2i},
+        params_t {{2, 9, 3, 2}, fmt::OIhw16o16i2o},
         params_t {{2, 9, 4, 3, 2}, fmt::OIdhw16i16o4i},
         params_t {{2, 9, 4, 3, 2}, fmt::OIdhw16i16o2i},
         params_t {{2, 9, 4, 3, 2}, fmt::gOihw16o},
@@ -169,6 +168,7 @@ auto cases_generic = ::testing::Values(params_t {{2, 15, 3, 2}, fmt::nChw16c},
         params_t {{15, 16, 16, 3}, fmt::Goiw8g},
         params_t {{2, 17, 9, 3, 2}, fmt::gOIhw16i16o4i},
         params_t {{2, 17, 9, 3, 2}, fmt::gOIhw16i16o2i},
+        params_t {{2, 17, 9, 3, 2}, fmt::gOIhw16o16i2o},
         params_t {{2, 15, 17, 9, 3, 2}, fmt::gOIdhw16i16o4i},
         params_t {{2, 15, 17, 9, 3, 2}, fmt::gOIdhw16i16o2i});
 } // namespace
@@ -249,10 +249,6 @@ TEST(memory_test_cpp, TestSetDataHandleCPU) {
     ASSERT_TRUE(data_md.data.format_kind == dnnl_blocked);
     ASSERT_TRUE(data_md.data.format_desc.blocking.inner_nblks == 1);
     ASSERT_TRUE(data_md.data.format_desc.blocking.inner_blks[0] == 16);
-    for (int h = 0; h < H; h++)
-        for (int w = 0; w < W; w++)
-            for (int c = C; c < 16; c++)
-                ASSERT_TRUE(p[h * W * 16 + w * 16 + c] == 0.0f);
 
     free(p);
 }

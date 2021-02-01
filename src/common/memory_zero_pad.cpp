@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2018-2020 Intel Corporation
+* Copyright 2018-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -290,15 +290,6 @@ status_t stream_t::zero_pad(const memory_t *memory, const exec_ctx_t &ctx) {
     return ::zero_pad(memory, ctx);
 }
 
-status_t memory_t::zero_pad(stream_t *stream) const {
-    if (stream == nullptr) {
-        engine_t *engine;
-        engine = memory_storage()->engine();
-        CHECK(engine->get_service_stream(stream));
-    }
-    return zero_pad(exec_ctx_t(stream));
-}
-
 status_t memory_t::zero_pad(const exec_ctx_t &ctx) const {
     memory_desc_wrapper mdw(md());
     const bool skip_zeroing = false || memory_storage()->is_null()
@@ -319,4 +310,13 @@ status_t memory_t::zero_pad(const exec_ctx_t &ctx) const {
         status = ::zero_pad(this, ctx);
 
     return status;
+}
+
+extern "C" dnnl_status_t DNNL_API dnnl_impl_zero_pad(
+        const memory_t *memory, stream_t *stream) {
+    if (memory == nullptr || stream == nullptr)
+        return status::invalid_arguments;
+    memory_arg_t mem_arg = {const_cast<memory_t *>(memory), true};
+    exec_args_t args = {{0, mem_arg}};
+    return memory->zero_pad(exec_ctx_t(stream, std::move(args)));
 }

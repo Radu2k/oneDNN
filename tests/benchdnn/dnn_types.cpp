@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2017-2020 Intel Corporation
+* Copyright 2017-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -313,12 +313,14 @@ static po_table_entry_t kind_table[] = {
         {pk_t::EXP_DST, "exp_dst", dnnl_eltwise_exp_use_dst_for_bwd},
         {pk_t::GELU_ERF, "gelu_erf", dnnl_eltwise_gelu_erf},
         {pk_t::GELU_TANH, "gelu_tanh", dnnl_eltwise_gelu_tanh},
+        {pk_t::HARDSWISH, "hardswish", dnnl_eltwise_hardswish},
         {pk_t::LINEAR, "linear", dnnl_eltwise_linear},
         {pk_t::LOG, "log", dnnl_eltwise_log},
         {pk_t::LOGISTIC, "logistic", dnnl_eltwise_logistic},
         {pk_t::LOGISTIC_DST, "logistic_dst",
                 dnnl_eltwise_logistic_use_dst_for_bwd},
         {pk_t::LOGSIGMOID, "logsigmoid", dnnl_eltwise_logsigmoid},
+        {pk_t::MISH, "mish", dnnl_eltwise_mish},
         {pk_t::POW, "pow", dnnl_eltwise_pow},
         {pk_t::RELU, "relu", dnnl_eltwise_relu},
         {pk_t::RELU_DST, "relu_dst", dnnl_eltwise_relu_use_dst_for_bwd},
@@ -671,8 +673,11 @@ std::ostream &operator<<(std::ostream &s, const attr_t &attr) {
 std::ostream &dump_global_params(std::ostream &s) {
     s << "--" << driver_name << " ";
     if (canonical) s << "--canonical=" << bool2str(canonical) << " ";
-    if (canonical || engine_tgt_kind != dnnl_cpu)
-        s << "--engine=" << engine_tgt_kind << " ";
+    if (canonical || engine_tgt_kind != dnnl_cpu) {
+        s << "--engine=" << engine_tgt_kind;
+        if (engine_index != 0) s << ":" << engine_index;
+        s << " ";
+    }
     if (canonical || fast_ref_gpu != true)
         s << "--fast-ref-gpu=" << bool2str(fast_ref_gpu) << " ";
     if (!skip_impl.empty()) s << "--skip-impl=" << skip_impl << " ";
@@ -1141,6 +1146,7 @@ float compute_eltwise_fwd(
         case pk_t::BRELU: return scale * bounded_relu_fwd(src, alpha);
         case pk_t::SRELU: return scale * soft_relu_fwd(src);
         case pk_t::LOGSIGMOID: return scale * logsigmoid_fwd(src);
+        case pk_t::MISH: return scale * mish_fwd(src);
         case pk_t::LOGISTIC: return scale * logistic_fwd(src);
         case pk_t::EXP: return scale * exp_fwd(src);
         case pk_t::GELU_TANH: return scale * gelu_tanh_fwd(src);
@@ -1151,6 +1157,7 @@ float compute_eltwise_fwd(
         case pk_t::POW: return scale * pow_fwd(src, alpha, beta);
         case pk_t::GELU_ERF: return scale * gelu_erf_fwd(src);
         case pk_t::ROUND: return scale * round_fwd(src);
+        case pk_t::HARDSWISH: return scale * hardswish_fwd(src);
         case pk_t::RELU_DST: return scale * relu_fwd(src, alpha);
         case pk_t::TANH_DST: return scale * tanh_fwd(src);
         case pk_t::ELU_DST: return scale * elu_fwd(src, alpha);
@@ -1179,6 +1186,7 @@ float compute_eltwise_bwd(
         case pk_t::BRELU: return bounded_relu_bwd(d_dst, src, alpha);
         case pk_t::SRELU: return soft_relu_bwd(d_dst, src);
         case pk_t::LOGSIGMOID: return logsigmoid_bwd(d_dst, src);
+        case pk_t::MISH: return mish_bwd(d_dst, src);
         case pk_t::LOGISTIC: return logistic_bwd(d_dst, src);
         case pk_t::EXP: return exp_bwd(d_dst, src);
         case pk_t::GELU_TANH: return gelu_tanh_bwd(d_dst, src);
@@ -1188,6 +1196,7 @@ float compute_eltwise_bwd(
         case pk_t::CLIP_V2: return clip_v2_bwd(d_dst, src, alpha, beta);
         case pk_t::POW: return pow_bwd(d_dst, src, alpha, beta);
         case pk_t::GELU_ERF: return gelu_erf_bwd(d_dst, src);
+        case pk_t::HARDSWISH: return hardswish_bwd(d_dst, src);
 
         case pk_t::RELU_DST: return relu_bwd_use_dst(d_dst, src, alpha);
         case pk_t::TANH_DST: return tanh_bwd_use_dst(d_dst, src);
@@ -1250,24 +1259,28 @@ void maybe_post_ops(const attr_t &attr, float &val, float sum_val,
     }
 }
 
-engine_t::engine_t(dnnl_engine_kind_t engine_kind) {
+engine_t::engine_t(dnnl_engine_kind_t engine_kind) : is_owner_(true) {
+    size_t idx = engine_kind == dnnl_cpu ? 0 : engine_index;
 #ifdef DNNL_WITH_SYCL
     if (engine_kind == dnnl_cpu) {
         static dnnl_engine_t inst = nullptr;
-        if (!inst) DNN_SAFE_V(dnnl_engine_create(&inst, engine_kind, 0));
+        if (!inst) DNN_SAFE_V(dnnl_engine_create(&inst, engine_kind, idx));
         engine_ = inst;
     } else if (engine_kind == dnnl_gpu) {
         static dnnl_engine_t inst = nullptr;
-        if (!inst) DNN_SAFE_V(dnnl_engine_create(&inst, engine_kind, 0));
+        if (!inst) DNN_SAFE_V(dnnl_engine_create(&inst, engine_kind, idx));
         engine_ = inst;
     } else
         assert(!"unsupported engine_kind");
 #else
-    DNN_SAFE_V(dnnl_engine_create(&engine_, engine_kind, 0));
+    DNN_SAFE_V(dnnl_engine_create(&engine_, engine_kind, idx));
 #endif
 }
 
+engine_t::engine_t(dnnl_engine_t engine) : engine_(engine), is_owner_(false) {}
+
 engine_t::~engine_t() {
+    if (!is_owner_) return;
 #ifdef DNNL_WITH_SYCL
     engine_ = nullptr;
 #else

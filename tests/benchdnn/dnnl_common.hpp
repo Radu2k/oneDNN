@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2017-2020 Intel Corporation
+* Copyright 2017-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -216,9 +216,19 @@ inline float maybe_saturate(dnnl_data_type_t dt, float value) {
 
 float round_to_nearest_representable(dnnl_data_type_t dt, float value);
 
-/* simplification */
 extern dnnl_engine_kind_t engine_tgt_kind;
+extern size_t engine_index;
 extern isa_hints_t hints;
+
+// Extended version of dnnl_sycl_interop_memory_kind_t enumeration.
+enum class sycl_memory_kind_ext_t {
+    usm, // Same as dnnl_sycl_interop_usm
+    buffer, // Same as dnnl_sycl_interop_buffer
+    usm_device, // USM allocated via malloc_device()
+    usm_shared, // USM allocated via malloc_shared()
+};
+
+extern sycl_memory_kind_ext_t sycl_memory_kind;
 
 void init_isa_settings();
 
@@ -333,11 +343,13 @@ int init_prim(dnnl_primitive_t *prim, const func_t &init_pd_func, prb_t *prb,
     return OK;
 }
 
-int execute_and_wait(dnnl_primitive_t prim, const args_t &args);
-
 typedef std::function<dnnl_status_t(
         const dnnl_stream_t &, const std::vector<dnnl_exec_arg_t> &)>
         perf_function_t;
+
+int execute_and_wait(perf_function_t &exec_func, const dnnl_engine_t &engine,
+        const args_t &args);
+int execute_and_wait(dnnl_primitive_t prim, const args_t &args);
 
 int measure_perf(benchdnn_timer_t &t, perf_function_t &perf_func, args_t &args);
 int measure_perf(benchdnn_timer_t &t, dnnl_primitive_t prim, args_t &args);
@@ -347,8 +359,6 @@ void maybe_prepare_runtime_scales(dnn_mem_t &scales_m, const attr_t &attr,
 
 void maybe_prepare_runtime_zero_points(dnn_mem_t &zero_points_m,
         const attr_t &attr, int arg, int64_t count, const int32_t *zero_points);
-void maybe_prepare_runtime_zero_points(
-        dnn_mem_t &zero_points_m, const attr_t &attr, int arg);
 
 bool check_md_consistency_with_tag(
         const dnnl_memory_desc_t &md, const std::string &tag);
@@ -359,6 +369,7 @@ void check_binary_post_ops(const attr_t &attr, res_t *res);
 
 bool is_cpu(const dnnl_engine_t &engine = get_test_engine());
 bool is_gpu(const dnnl_engine_t &engine = get_test_engine());
+bool is_sycl_engine(const dnnl_engine_t &engine = get_test_engine());
 bool is_nvidia_gpu(const dnnl_engine_t &engine = get_test_engine());
 bool is_nvidia_eltwise_ok(
         dir_t dir, attr_t::post_ops_t::kind_t alg, float alpha);
@@ -371,5 +382,7 @@ int init_md(dnnl_memory_desc_t *md, int ndims, const dnnl_dims_t dims,
         dnnl_data_type_t data_type, const std::string &tag);
 int check_mem_size(const dnnl_memory_desc_t &md);
 int check_mem_size(const_dnnl_primitive_desc_t const_pd);
+
+sycl_memory_kind_ext_t str2sycl_memory_kind(const char *str);
 
 #endif

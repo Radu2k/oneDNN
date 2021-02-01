@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2017-2020 Intel Corporation
+* Copyright 2017-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -214,11 +214,13 @@ struct attr_t {
             EXP_DST,
             GELU_ERF,
             GELU_TANH,
+            HARDSWISH,
             LINEAR,
             LOG,
             LOGISTIC,
             LOGISTIC_DST,
             LOGSIGMOID,
+            MISH,
             POW,
             RELU,
             RELU_DST,
@@ -469,12 +471,14 @@ private:
 
 struct engine_t {
     engine_t(dnnl_engine_kind_t engine_kind);
+    engine_t(dnnl_engine_t engine);
     ~engine_t();
     operator dnnl_engine_t() const { return engine_; }
 
 private:
     BENCHDNN_DISALLOW_COPY_AND_ASSIGN(engine_t);
     dnnl_engine_t engine_;
+    bool is_owner_;
 };
 
 struct stream_t {

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2017-2020 Intel Corporation
+* Copyright 2017-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -23,6 +23,9 @@
 
 #include "oneapi/dnnl/dnnl.h"
 
+#if DNNL_X64
+#include "tests/cpu_x64_isa_common.hpp"
+#endif
 #include "tests/test_thread.hpp"
 
 #include "compare.hpp"
@@ -186,6 +189,11 @@ inline int compare_dat(const prb_t *prb, data_kind_t kind, dnn_mem_t &mem_dt,
                 ok = dt >= BENCHDNN_S32_TO_F32_SAT_CONST && dt < f_max;
             above += 1;
             above_ok += ok;
+        } else if (fp == dt) {
+            // Quick check.
+            diff_norm.update(fp, dt);
+            in += 1;
+            in_ok += ok;
         } else {
             diff_norm.update(fp, dt);
             float trh = get_eps(prb, kind);
@@ -316,13 +324,14 @@ int compare_dst(const prb_t *prb, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp,
 
 int fill_src(
         const prb_t *prb, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *res) {
-    const bool need_extra_mem = mem_dt.dt() != mem_fp.dt();
+    const bool check_reorder
+            = (bench_mode & CORR) && (mem_dt.dt() != mem_fp.dt());
     dnn_mem_t extra_mem;
-    if (need_extra_mem) {
+    if (check_reorder) {
         extra_mem
                 = dnn_mem_t(mem_dt.md_, dnnl_f32, tag::abx, get_test_engine());
     }
-    dnn_mem_t &mem_00 = need_extra_mem ? extra_mem : mem_fp;
+    dnn_mem_t &mem_00 = check_reorder ? extra_mem : mem_fp;
 
     const auto &c = prb->cfg[SRC];
     const int range = c.f_max - c.f_min + 1;
@@ -343,7 +352,7 @@ int fill_src(
             });
 
     SAFE(mem_dt.reorder(mem_00), WARN);
-    if (need_extra_mem) {
+    if (check_reorder) {
         SAFE(mem_fp.reorder(mem_dt), WARN);
         SAFE(compare_src(prb, mem_fp, mem_00, res), WARN);
     }
@@ -358,8 +367,8 @@ int fill_wei(
             = prb->cfg[WEI].dt == dnnl_s8 && prb->cfg[SRC].dt == dnnl_s8;
     const bool is_def_zp = prb->attr.zero_points.is_def(DNNL_ARG_SRC);
     const bool diff_data_type = mem_dt.dt() != mem_fp.dt();
-    const bool check_reorder
-            = diff_data_type && !wino_s8 && !s8_s8 && is_def_zp;
+    const bool check_reorder = (bench_mode & CORR) && diff_data_type && !wino_s8
+            && !s8_s8 && is_def_zp;
 
     dnn_mem_t extra_mem;
     if (check_reorder) {
@@ -406,11 +415,12 @@ int fill_wei(
 
 int fill_bia(
         const prb_t *prb, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *res) {
-    const bool need_extra_mem = mem_dt.dt() != mem_fp.dt();
+    const bool check_reorder
+            = (bench_mode & CORR) && (mem_dt.dt() != mem_fp.dt());
     dnn_mem_t extra_mem;
-    if (need_extra_mem)
+    if (check_reorder)
         extra_mem = dnn_mem_t(mem_dt.md_, dnnl_f32, tag::x, get_test_engine());
-    dnn_mem_t &mem_00 = need_extra_mem ? extra_mem : mem_fp;
+    dnn_mem_t &mem_00 = check_reorder ? extra_mem : mem_fp;
 
     const size_t nelems = mem_00.nelems();
     if (nelems == 0) return OK;
@@ -428,7 +438,7 @@ int fill_bia(
     }
 
     SAFE(mem_dt.reorder(mem_00), WARN);
-    if (need_extra_mem) {
+    if (check_reorder) {
         SAFE(mem_fp.reorder(mem_dt), WARN);
         SAFE(compare_bia(prb, mem_fp, mem_00, res), WARN);
     }
@@ -438,14 +448,15 @@ int fill_bia(
 int fill_dst_with_params(const prb_t *prb, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp,
         dnnl_data_type_t dt, double sparsity, int min, int max, int base,
         int step, res_t *res) {
-    const bool need_extra_mem = mem_dt.dt() != mem_fp.dt();
+    const bool check_reorder
+            = (bench_mode & CORR) && (mem_dt.dt() != mem_fp.dt());
     dnn_mem_t extra_mem;
-    if (need_extra_mem) {
+    if (check_reorder) {
         extra_mem
                 = dnn_mem_t(mem_dt.md_, dnnl_f32, tag::abx, get_test_engine());
     }
 
-    dnn_mem_t &mem_00 = need_extra_mem ? extra_mem : mem_fp;
+    dnn_mem_t &mem_00 = check_reorder ? extra_mem : mem_fp;
     const int range = max - min + 1;
 
     dnnl::impl::parallel_nd(prb->mb, prb->oc, prb->od, prb->oh, prb->ow,
@@ -460,7 +471,7 @@ int fill_dst_with_params(const prb_t *prb, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp,
             });
 
     SAFE(mem_dt.reorder(mem_00), WARN);
-    if (need_extra_mem) {
+    if (check_reorder) {
         SAFE(mem_fp.reorder(mem_dt), WARN);
         SAFE(compare_dst(prb, mem_fp, mem_00, res), WARN);
     }
@@ -638,10 +649,11 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
         if (is_cpu()) {
 #ifdef DNNL_X64
             static auto isa = dnnl_get_effective_cpu_isa();
-            static bool has_avx512_common = isa >= dnnl_cpu_isa_avx512_mic
-                    && isa != dnnl_cpu_isa_avx2_vnni;
-            static bool has_avx512_bw = isa >= dnnl_cpu_isa_avx512_core
-                    && isa != dnnl_cpu_isa_avx2_vnni;
+            static bool has_avx512_bw
+                    = dnnl::is_superset(isa, dnnl_cpu_isa_avx512_core);
+            static bool has_avx512_common = has_avx512_bw
+                    || dnnl::is_superset(isa, dnnl_cpu_isa_avx512_mic);
+
             bool is_int8 = prb->cfg[WEI].dt == dnnl_s8;
 
             bool pad_ok_f32 = prb->pw <= 1 && prb->ph <= 1 && prb->pw_r <= 1
@@ -692,7 +704,9 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
         } else if (is_gpu()) {
             bool shape_ok = prb->ndims == 4 && prb->g == 1 && prb->kh == 3
                     && prb->kw == 3 && prb->sh == 1 && prb->sw == 1
-                    && prb->dh == 0 && prb->dw == 0;
+                    && prb->dh == 0 && prb->dw == 0 && prb->pw < prb->kw
+                    && prb->pw_r < prb->kw && prb->ph < prb->kh
+                    && prb->ph_r < prb->kh;
             if (!shape_ok) {
                 res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
             }

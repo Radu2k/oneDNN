@@ -1,6 +1,6 @@
 /*******************************************************************************
-* Copyright 2016-2020 Intel Corporation
-* Copyright 2020 FUJITSU LIMITED
+* Copyright 2016-2021 Intel Corporation
+* Copyright 2020-2021 FUJITSU LIMITED
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -94,6 +94,18 @@ private:
             + vreg_to_preserve * vreg_len_preserve;
 
 public:
+    enum {
+        _cmp_eq_oq = 0u,
+        _cmp_lt_os = 1u,
+        _cmp_le_os = 2u,
+        _cmp_neq_uq = 4u,
+        _cmp_nlt_us = 5u,
+        _cmp_nle_us = 6u,
+
+        _op_floor = 1u,
+        _op_mxcsr = 4u,
+    };
+
     const Xbyak_aarch64::WReg W_TMP_0 = w23;
     const Xbyak_aarch64::WReg W_TMP_1 = w24;
     const Xbyak_aarch64::WReg W_TMP_2 = w25;
@@ -114,6 +126,10 @@ public:
     const Xbyak_aarch64::PReg P_MSB_256 = p13;
     const Xbyak_aarch64::PReg P_MSB_384 = p14;
     const Xbyak_aarch64::PReg P_ALL_ONE = p15;
+
+    const std::vector<Xbyak_aarch64::XReg> x_tmp_vec
+            = {X_TMP_0, X_TMP_1, X_TMP_2, X_TMP_3, X_TMP_4};
+    const int x_tmp_vec_size = x_tmp_vec.size();
 
     const Xbyak_aarch64::XReg param1 = abi_param1;
     constexpr static size_t translator_stack_offset = 1024 * 128;
@@ -188,6 +204,42 @@ public:
     void L_aligned(Xbyak_aarch64::Label &label, int alignment = 16) {
         align(alignment);
         L(label);
+    }
+
+    template <typename TReg>
+    void uni_fdiv(const TReg &dst, const TReg &src, const TReg &src2) {
+        fdiv(dst, src, src2);
+    }
+
+    void uni_fdiv(const Xbyak_aarch64::VReg4S &dst,
+            const Xbyak_aarch64::VReg4S &src, const Xbyak_aarch64::VReg4S &src2,
+            const Xbyak_aarch64::VReg4S &tmp, const Xbyak_aarch64::PReg &pred) {
+        UNUSED(tmp);
+        UNUSED(pred);
+        fdiv(dst, src, src2);
+    }
+
+    template <typename TReg>
+    void uni_fdiv(const TReg &dst, const TReg &src, const TReg &src2,
+            const TReg &tmp, const Xbyak_aarch64::PReg &pred) {
+        uint32_t dstIdx = dst.getIdx();
+        uint32_t srcIdx = src.getIdx();
+        uint32_t src2Idx = src2.getIdx();
+        uint32_t tmpIdx = tmp.getIdx();
+
+        if (dstIdx == src2Idx) {
+            assert(tmpIdx != srcIdx && tmpIdx != src2Idx);
+
+            mov(Xbyak_aarch64::ZRegD(tmp.getIdx()),
+                    Xbyak_aarch64::ZRegD(src2.getIdx()));
+            mov(dst, pred / Xbyak_aarch64::T_m, src);
+            fdiv(dst, pred / Xbyak_aarch64::T_m, tmp);
+        } else if (dstIdx == srcIdx) {
+            fdiv(dst, pred / Xbyak_aarch64::T_m, src2);
+        } else {
+            mov(dst, P_ALL_ONE / Xbyak_aarch64::T_m, src);
+            fdiv(dst, pred / Xbyak_aarch64::T_m, src2);
+        }
     }
 
     void uni_fsub(const Xbyak_aarch64::VReg4S &v1,

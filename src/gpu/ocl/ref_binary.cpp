@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -58,14 +58,18 @@ status_t ref_binary_t::pd_t::init_conf(engine_t *engine) {
 
     auto &blk0 = src0_d.blocking_desc();
     auto &blk1 = src1_d.blocking_desc();
+    auto &blkd = dst_d.blocking_desc();
     bool is_16b_blk0 = (blk0.inner_nblks >= 1)
             && (blk0.inner_idxs[blk0.inner_nblks - 1] == 1)
             && (blk0.inner_blks[blk0.inner_nblks - 1] == 16);
     bool is_16b_blk1 = (blk1.inner_nblks >= 1)
             && (blk1.inner_idxs[blk1.inner_nblks - 1] == 1)
             && (blk1.inner_blks[blk1.inner_nblks - 1] == 16);
+    bool is_16b_blkd = (blkd.inner_nblks >= 1)
+            && (blkd.inner_idxs[blkd.inner_nblks - 1] == 1)
+            && (blkd.inner_blks[blkd.inner_nblks - 1] == 16);
 
-    if (!conf.is_tensor_op) {
+    if (is_16b_blkd && !conf.is_tensor_op) {
         // If: in case when both are blocked
         // Else: only src0 is blocked
         if (is_16b_blk0 && is_16b_blk1) {
@@ -141,9 +145,12 @@ status_t ref_binary_t::pd_t::init_kernel_ctx(
 
 status_t ref_binary_t::execute_ref(const exec_ctx_t &ctx) const {
 
+    status_t status = status::success;
+
     auto &src0 = CTX_IN_STORAGE(DNNL_ARG_SRC_0);
     auto &src1 = CTX_IN_STORAGE(DNNL_ARG_SRC_1);
-    auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
+    auto &dst = CTX_OUT_CLEAN_STORAGE(DNNL_ARG_DST, status);
+    CHECK(status);
 
     const auto &conf = pd()->conf;
 
@@ -163,7 +170,7 @@ status_t ref_binary_t::execute_ref(const exec_ctx_t &ctx) const {
 
     auto nd_range = conf.dispatch.nd_range();
 
-    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
+    status = parallel_for(ctx, nd_range, kernel_, arg_list);
     return status;
 }
 

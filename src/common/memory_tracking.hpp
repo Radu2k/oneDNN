@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2018-2020 Intel Corporation
+* Copyright 2018-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -159,8 +159,7 @@ enum {
     key_bnorm_tmp_diff_ss,
     key_bnorm_tmp_stats,
     key_bnorm_reduction,
-    key_brgemm_primitive_addr_a,
-    key_brgemm_primitive_addr_b,
+    key_brgemm_primitive_batch,
     key_brgemm_primitive_buffer,
     key_brgemm_primitive_buffer_a,
     key_brgemm_primitive_buffer_b,
@@ -182,12 +181,18 @@ enum {
     key_conv_cudnn_filter,
     key_conv_cudnn_temp,
     key_conv_dst_bf16_convert_wsp,
+    key_conv_brgemm_addr_a,
+    key_conv_brgemm_addr_b,
+    key_conv_brgemm_batch,
+    key_conv_brgemm_buffer,
+    key_conv_brgemm_inp_buffer,
+    key_conv_brgemm_inp_buffer_mask,
     key_conv_bwd_w_1st_bia_reorder,
     key_conv_bwd_w_1st_wei_reorder,
     key_conv_gemm_acc,
     key_conv_gemm_col,
     key_conv_gemm_imtr,
-    key_conv_gemm_zp_src_pad_comp,
+    key_conv_gemm_zp_src_comp,
     key_conv_int_dat_in_acc_dt,
     key_conv_padded_bias,
     key_conv_rtus_space,
@@ -200,6 +205,7 @@ enum {
     key_conv_wei_reduction,
     key_conv_wei_bia_reduction,
     key_conv_wei_bia_reduction_bctx,
+    key_conv_zero_point_pad,
     key_deconv_bias,
     key_deconv_sum,
     key_eltwise_diff_dst,

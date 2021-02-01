@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2018-2020 Intel Corporation
+* Copyright 2018-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -29,8 +29,16 @@
     (ctx.input(arg) ? *(ctx.input(arg)->memory_storage()) \
                     : dnnl::impl::memory_storage_t::empty_storage())
 
+// Returns destination memory which may not have been zero pad initialized.
 #define CTX_OUT_STORAGE(arg) \
     (ctx.output(arg) ? *(ctx.output(arg)->memory_storage()) \
+                     : dnnl::impl::memory_storage_t::empty_storage())
+
+// Returns destination memory which has been zero pad initialized. This macro
+// may result in a failure returned via the `status` input since zero pad
+// may fail.
+#define CTX_OUT_CLEAN_STORAGE(arg, status) \
+    (ctx.output(arg) ? *(ctx.output(arg)->memory_storage_clean(ctx, status)) \
                      : dnnl::impl::memory_storage_t::empty_storage())
 
 namespace dnnl {
@@ -71,9 +79,12 @@ struct exec_ctx_t {
     memory_t *output(int arg) const;
     memory_t *memory(int arg) const;
 
+    status_t zero_pad_output(int arg) const;
+
     void register_memory_mapping(void *handle, void *host_ptr);
 
-    void *host_ptr(int arg) const;
+    void *host_ptr(
+            int arg, bool do_zeropad = false, status_t *status = nullptr) const;
     void *host_ptr(const memory_storage_t *mem_storage) const;
 
     void *map_memory_storage(const memory_storage_t *storage, stream_t *stream,

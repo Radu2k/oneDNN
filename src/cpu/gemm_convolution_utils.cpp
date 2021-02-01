@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2020 Intel Corporation
+* Copyright 2016-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -22,7 +22,9 @@
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
 #include "cpu/gemm_convolution_utils.hpp"
+#if DNNL_X64
 #include "cpu/x64/injectors/jit_uni_postops_injector.hpp"
+#endif
 
 #include "cpu/platform.hpp"
 
@@ -38,6 +40,15 @@ using namespace dnnl::impl::status;
 using namespace dnnl::impl::utils;
 using namespace prop_kind;
 using namespace data_type;
+
+single_gemm_conv_chunk_desc_t::single_gemm_conv_chunk_desc_t(dim_t d_off,
+        dim_t d_size, dim_t h_off, dim_t h_size, dim_t w_off, dim_t w_size)
+    : d_off_(d_off)
+    , d_size_(d_size)
+    , h_off_(h_off)
+    , h_size_(h_size)
+    , w_off_(w_off)
+    , w_size_(w_size) {}
 
 namespace jit_gemm_convolution_utils {
 
@@ -1203,8 +1214,13 @@ status_t init_conf(conv_gemm_conf_t &jcp,
             ? (jcp.oc * jcp.ngroups * jcp.zp.src_pad_comp.d
                     * jcp.zp.src_pad_comp.h * jcp.zp.src_pad_comp.w)
             : 0u;
-    const size_t weights_size
-            = weights_d.size() + zp_src_pad_comp_size * sizeof(int32_t);
+    const size_t zp_src_comp_size = jcp.zp.src_is_common
+            ? utils::rnd_up(jcp.oc * jcp.ngroups,
+                    platform::get_cache_line_size() / sizeof(int))
+            : 0u;
+
+    const size_t weights_size = weights_d.size()
+            + (zp_src_comp_size + zp_src_pad_comp_size) * sizeof(int32_t);
 
     static constexpr size_t scratchpad_limit_by_absolute_value = (size_t)1
             << 30; // 1Gb
@@ -2094,9 +2110,10 @@ status_t init_conf(conv_gemm_conf_t &jcp,
             : 0;
     jcp.scale_idx_mult = (attr.output_scales_.mask_ == (1 << 1));
 
-    if (zp_src_with_padding)
-        scratchpad.book<int32_t>(
-                key_conv_gemm_zp_src_pad_comp, zp_src_pad_comp_size);
+    if (jcp.zp.src_exists) {
+        const auto size = zp_src_comp_size + zp_src_pad_comp_size;
+        if (size) scratchpad.book<int32_t>(key_conv_gemm_zp_src_comp, size);
+    }
 
     if (scratchpad.size() > scratchpad_limit) return status::unimplemented;
     return status::success;
@@ -2171,7 +2188,7 @@ bool post_ops_ok(const post_ops_t &post_ops, const memory_desc_wrapper *dst_d) {
     return x64::injector::post_ops_ok({x64::isa_all, {binary, eltwise, sum},
             post_ops, dst_d, sum_at_pos_0_only, sum_requires_scale_one});
 #endif
-    for (int i = 0; i < post_ops.entry_.size(); i++) {
+    for (size_t i = 0; i < post_ops.entry_.size(); i++) {
         const auto &post_op = post_ops.entry_[i];
         const bool sum_postop_present = post_op.is_sum();
         if (sum_postop_present && i > 0) return false;

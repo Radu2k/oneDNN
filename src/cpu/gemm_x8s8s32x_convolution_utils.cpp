@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -47,10 +47,10 @@ struct ref_pp_ker_t : pp_ker_t {
 
     void operator()(void *dst, const acc_data_t *acc, const char *bias,
             const float *scales, float sum_scale, float signed_scale, int g,
-            size_t start, size_t end, const int32_t *zp_src,
-            const int32_t *zp_dst, const int32_t *zp_src_comp,
+            size_t start, size_t end, const zero_point_call_params_t &zp,
             const void *post_ops_binary_rhs_arg_vec, const void *dst_orig,
-            const exec_ctx_t &ctx, const memory_desc_t &dst_md) const override;
+            const exec_ctx_t &ctx, const memory_desc_t &dst_md,
+            const single_gemm_conv_chunk_desc_t &chunk_desc) const override;
 
 private:
     std::unique_ptr<ref_post_ops_t> ref_post_ops_;
@@ -60,24 +60,24 @@ template <typename dst_data_t>
 void ref_pp_ker_t<dst_data_t>::operator()(void *void_dst, const acc_data_t *acc,
         const char *bias, const float *scales, float sum_scale,
         float signed_scale, int g, size_t start, size_t end,
-        const int32_t *zp_src, const int32_t *zp_dst,
-        const int32_t *zp_src_comp,
+        const zero_point_call_params_t &zp,
         const void * /* post_ops_binary_rhs_arg_vec */,
         const void * /* dst_orig */, const exec_ctx_t &ctx,
-        const memory_desc_t &dst_md) const {
+        const memory_desc_t &dst_md,
+        const single_gemm_conv_chunk_desc_t &chunk_desc) const {
 
     if (end <= start) return;
 
     assert(data_traits<dst_data_t>::data_type == jcp_.dst_data_type);
     dst_data_t *dst = (dst_data_t *)void_dst;
 
-    const auto dv_start = std::div(start, jcp_.oc);
-    const auto dv_end = std::div((end - 1), jcp_.oc);
+    const lldiv_t dv_start = std::div((long long)start, (long long)jcp_.oc);
+    const lldiv_t dv_end = std::div((long long)(end - 1), (long long)jcp_.oc);
     const size_t first_oc = dv_start.rem;
     const size_t last_oc = dv_end.rem;
     const size_t first_os = dv_start.quot;
     const size_t last_os = dv_end.quot;
-    const int32_t zp_dst_val = jcp_.zp.dst_exists ? *zp_dst : 0;
+    const int32_t zp_dst_val = jcp_.zp.dst_exists ? *(zp.dst) : 0;
 
     ref_post_ops_t::args_t args;
     args.ctx = &ctx;
@@ -90,14 +90,14 @@ void ref_pp_ker_t<dst_data_t>::operator()(void *void_dst, const acc_data_t *acc,
             const size_t acc_off = os * jcp_.oc + oc;
             const size_t dst_off = os * jcp_.dst_os_stride + oc;
 
-            float data = static_cast<float>(acc[acc_off]);
+            int32_t data_s32 = acc[acc_off];
+
             if (jcp_.zp.src_exists) {
                 const auto oc_offset = g * jcp_.oc + oc;
-                const int32_t &zp_src_val
-                        = jcp_.zp.src_is_common ? *zp_src : zp_src[oc_offset];
-                const int32_t &zp_src_comp_val = zp_src_comp[oc_offset];
-                data += static_cast<float>(zp_src_val * zp_src_comp_val);
+                data_s32 += zp.src_comp[oc_offset];
             }
+
+            float data = static_cast<float>(data_s32);
 
             if (jcp_.signed_input) data *= signed_scale;
 
@@ -155,6 +155,14 @@ bool post_ops_ok(const post_ops_t &post_ops, const memory_desc_wrapper *dst_d) {
 bool post_ops_ok(const post_ops_t &post_ops, const memory_desc_t *dst_d) {
     const auto dst_md = memory_desc_wrapper(dst_d);
     return post_ops_ok(post_ops, &dst_md);
+}
+
+bool mayiuse_jit_pp_kernel() noexcept {
+#if DNNL_X64
+    return x64::gemm_x8s8s32x_convolution_utils::mayiuse_jit_pp_kernel();
+#else
+    return false;
+#endif
 }
 
 } // namespace gemm_x8s8s32x_convolution_utils

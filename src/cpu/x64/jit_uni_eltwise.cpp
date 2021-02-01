@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2017-2020 Intel Corporation
+* Copyright 2017-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ struct jit_uni_eltwise_kernel : public jit_generator {
 protected:
     const eltwise_pd_t *pd_;
 
-    data_type_t data_type() const { return pd_->src_md()->data_type; }
+    data_type_t data_type() const { return pd_->desc()->data_desc.data_type; }
     bool is_bf16() const { return data_type() == data_type::bf16; }
     int dtype_size() const { return types::data_type_size(data_type()); }
 };
@@ -287,13 +287,13 @@ template <cpu_isa_t isa, data_type_t d_type>
 status_t jit_uni_eltwise_fwd_t<isa, d_type>::pd_t::init(engine_t *engine) {
     using namespace alg_kind;
 
-    const memory_desc_wrapper data_d(src_md());
+    const memory_desc_wrapper data_d(data_md());
 
-    bool ok = mayiuse(isa) && is_fwd() && src_md()->data_type == d_type
-            && IMPLICATION(src_md()->data_type == data_type::bf16,
+    bool ok = mayiuse(isa) && is_fwd() && data_md()->data_type == d_type
+            && IMPLICATION(data_md()->data_type == data_type::bf16,
                     mayiuse(avx512_core))
-            && !has_zero_dim_memory()
-            && data_d.is_dense(true)
+            && !has_zero_dim_memory() && data_d.is_dense(true)
+            && eltwise_injector::is_supported(isa, desc_.alg_kind)
             // refer to a comment in jit_uni_kernel why this is needed
             && IMPLICATION(!data_d.is_dense(), is_zero_preserved())
             && attr()->has_default_values();
@@ -316,10 +316,12 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::init(engine_t *engine) {
 template <cpu_isa_t isa, data_type_t d_type>
 status_t jit_uni_eltwise_fwd_t<isa, d_type>::execute(
         const exec_ctx_t &ctx) const {
+    status_t status = status::success;
     auto src = CTX_IN_MEM(const data_t *, DNNL_ARG_SRC);
-    auto dst = CTX_OUT_MEM(data_t *, DNNL_ARG_DST);
+    auto dst = CTX_OUT_CLEAN_MEM(data_t *, DNNL_ARG_DST, status);
+    CHECK(status);
 
-    const memory_desc_wrapper data_d(pd()->src_md());
+    const memory_desc_wrapper data_d(pd()->data_md());
     const auto nelems = data_d.nelems(true);
     const int simd_w = 64 / data_d.data_type_size();
 
@@ -349,15 +351,16 @@ template <cpu_isa_t isa, data_type_t d_type>
 status_t jit_uni_eltwise_bwd_t<isa, d_type>::pd_t::init(engine_t *engine) {
     using namespace alg_kind;
 
-    const memory_desc_wrapper data_d(src_md());
+    const memory_desc_wrapper data_d(data_md());
 
     bool ok = mayiuse(isa) && !is_fwd()
             && utils::everyone_is(
-                    d_type, src_md()->data_type, diff_src_md()->data_type)
-            && IMPLICATION(src_md()->data_type == data_type::bf16,
+                    d_type, data_md()->data_type, diff_src_md()->data_type)
+            && IMPLICATION(data_md()->data_type == data_type::bf16,
                     mayiuse(avx512_core))
             && !has_zero_dim_memory() && set_default_formats_common()
-            && data_d.is_dense(true)
+            && data_d.is_dense(true) && eltwise_injector::is_isa_supported(isa)
+            && eltwise_injector::is_alg_supported(desc_.alg_kind)
             // refer to a comment in jit_uni_kernel why this is needed
             && IMPLICATION(!data_d.is_dense(), is_zero_preserved())
             && data_d == memory_desc_wrapper(diff_dst_md())
@@ -381,12 +384,14 @@ status_t jit_uni_eltwise_bwd_t<isa, d_type>::init(engine_t *engine) {
 template <cpu_isa_t isa, data_type_t d_type>
 status_t jit_uni_eltwise_bwd_t<isa, d_type>::execute(
         const exec_ctx_t &ctx) const {
+    status_t status;
     auto src = pd()->use_dst() ? CTX_IN_MEM(const data_t *, DNNL_ARG_DST)
                                : CTX_IN_MEM(const data_t *, DNNL_ARG_SRC);
     auto diff_dst = CTX_IN_MEM(const data_t *, DNNL_ARG_DIFF_DST);
-    auto diff_src = CTX_OUT_MEM(data_t *, DNNL_ARG_DIFF_SRC);
+    auto diff_src = CTX_OUT_CLEAN_MEM(data_t *, DNNL_ARG_DIFF_SRC, status);
+    CHECK(status);
 
-    const memory_desc_wrapper data_d(pd()->src_md());
+    const memory_desc_wrapper data_d(pd()->data_md());
     const memory_desc_wrapper diff_data_d(pd()->diff_src_md());
     const auto nelems = data_d.nelems(true);
     const int simd_w = 64 / data_d.data_type_size();

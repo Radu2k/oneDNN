@@ -19,8 +19,9 @@ and *prelu-desc* is a problem descriptor. The canonical form is:
 ```
 where N and M are integer numbers.
 
-N describes source tensor dimensions and represents a 1D, 2D or 3D spatial
-problem with the following logical dimensions: N, C, D, H, W.
+N describes source tensor dimensions. This represents tensor with the
+following logical dimensions: N, C, D, H, W. Consider removing each `xN` from
+the end to specify fewer dimensions. PReLU supports 1D up to 5D tensors.
 
 M describes weights tensor dimensions containing alpha parameter for PReLU
 primitive and supports broadcast-semantics. Weights tensor can be used with
@@ -36,10 +37,10 @@ dimensions when applying a prelu operation.
 
 ## Examples
 
-Run the set of prelu primitive problems from `prelu/test_prelu_all`
+Run the set of prelu primitive problems from `inputs/prelu/shapes_ci`
 with the default settings:
 ``` sh
-    ./benchdnn --prelu --batch=test_prelu_all
+    ./benchdnn --prelu --batch=inputs/prelu/shapes_ci
 ```
 
 Run a specific prelu primitive problem:
@@ -54,5 +55,6 @@ Run a specific prelu primitive problem:
 ```
 
 More examples with different driver options can be found at
-inputs/prelu/test_prelu_all. Examples with different benchdnn options
-can be found at driver_conv.md.
+inputs/prelu/test_***. Examples with different problem descriptors can be found
+at inputs/prelu/shapes_***. Examples with different benchdnn common options can
+be found at driver_conv.md.

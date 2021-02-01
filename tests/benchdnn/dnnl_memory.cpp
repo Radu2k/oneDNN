@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -21,6 +21,10 @@
 #include <string>
 
 #include "oneapi/dnnl/dnnl.h"
+
+#ifdef DNNL_WITH_SYCL
+#include "oneapi/dnnl/dnnl_sycl.hpp"
+#endif
 
 #include "dnn_types.hpp"
 #include "dnnl_common.hpp"
@@ -107,13 +111,110 @@ int dnn_mem_t::reorder(const dnn_mem_t &rhs, const_dnnl_primitive_attr_t attr) {
     return execute_reorder(rhs, *this, attr);
 }
 
+int dnn_mem_t::initialize_memory_create_sycl(const handle_info_t &handle_info) {
+#ifdef DNNL_WITH_SYCL
+    if (is_nvidia_gpu(engine_)) {
+        // USM is not supported with Nvidia so ignore sycl_memory_kind and
+        // force SYCL buffers.
+        DNN_SAFE(dnnl_sycl_interop_memory_create(&m_, &md_, engine_,
+                         dnnl_sycl_interop_buffer, handle_info.ptr),
+                CRIT);
+        return OK;
+    }
+
+    if (handle_info.is_host_ptr) {
+        // Ignore sycl_memory_kind with host pointers and force USM.
+        DNN_SAFE(dnnl_sycl_interop_memory_create(&m_, &md_, engine_,
+                         dnnl_sycl_interop_usm, handle_info.ptr),
+                CRIT);
+        return OK;
+    }
+
+    switch (sycl_memory_kind) {
+        case sycl_memory_kind_ext_t::usm:
+            DNN_SAFE(dnnl_sycl_interop_memory_create(&m_, &md_, engine_,
+                             dnnl_sycl_interop_usm, handle_info.ptr),
+                    CRIT);
+            break;
+        case sycl_memory_kind_ext_t::buffer:
+            DNN_SAFE(dnnl_sycl_interop_memory_create(&m_, &md_, engine_,
+                             dnnl_sycl_interop_buffer, handle_info.ptr),
+                    CRIT);
+            break;
+        case sycl_memory_kind_ext_t::usm_device:
+        case sycl_memory_kind_ext_t::usm_shared: {
+            SAFE(handle_info.is_allocate() ? OK : FAIL, CRIT);
+            is_data_owner_ = true;
+            size_t sz = dnnl_memory_desc_get_size(&md_);
+            auto eng = dnnl::engine(engine_, true);
+            auto dev = dnnl::sycl_interop::get_device(eng);
+            auto ctx = dnnl::sycl_interop::get_context(eng);
+            if (sycl_memory_kind == sycl_memory_kind_ext_t::usm_device) {
+                data_ = cl::sycl::malloc_device(sz, dev, ctx);
+            } else {
+                data_ = cl::sycl::malloc_shared(sz, dev, ctx);
+            }
+            DNN_SAFE((sz > 0 && !data_) ? dnnl_out_of_memory : dnnl_success,
+                    CRIT);
+            DNN_SAFE(dnnl_sycl_interop_memory_create(
+                             &m_, &md_, engine_, dnnl_sycl_interop_usm, data_),
+                    CRIT);
+            break;
+        }
+        default: assert(!"not expected");
+    }
+#else
+    (void)handle_info;
+#endif
+    return OK;
+}
+
+int dnn_mem_t::initialize_memory_create(const handle_info_t &handle_info) {
+    bool is_sycl = is_sycl_engine(engine_);
+
+    if (handle_info.is_host_ptr) {
+        // Host pointer can be used with CPU memory only.
+        // XXX: assumption is that SYCL can work with native host pointers.
+        SAFE(is_cpu(engine_) ? OK : FAIL, CRIT);
+    }
+
+    if (is_cpu(engine_) && handle_info.is_allocate() && !is_sycl) {
+        // Allocate memory for native runtime directly.
+        is_data_owner_ = true;
+        const size_t alignment = 2 * 1024 * 1024;
+        size_t sz = dnnl_memory_desc_get_size(&md_);
+        data_ = zmalloc(sz, alignment);
+        DNN_SAFE(!data_ ? dnnl_out_of_memory : dnnl_success, CRIT);
+        DNN_SAFE(dnnl_memory_create(&m_, &md_, engine_, data_), CRIT);
+    } else if (is_sycl) {
+        SAFE(initialize_memory_create_sycl(handle_info), CRIT);
+    } else {
+        is_data_owner_ = false;
+        data_ = nullptr;
+        DNN_SAFE(dnnl_memory_create(&m_, &md_, engine_, handle_info.ptr), CRIT);
+    }
+    return OK;
+}
+
+int dnn_mem_t::cleanup_sycl() {
+#ifdef DNNL_WITH_SYCL
+    switch (sycl_memory_kind) {
+        case sycl_memory_kind_ext_t::usm_device:
+        case sycl_memory_kind_ext_t::usm_shared: {
+            auto eng = dnnl::engine(engine_, true);
+            auto ctx = dnnl::sycl_interop::get_context(eng);
+            cl::sycl::free(data_, ctx);
+            break;
+        }
+        default: break;
+    }
+#endif
+    return OK;
+}
+
 dnn_mem_t dnn_mem_t::create_from_host_ptr(
         const dnnl_memory_desc_t &md, dnnl_engine_t engine, void *host_ptr) {
-    // XXX: allows to construct CPU memory only.
-    assert(is_cpu(engine));
-
-    // XXX: assumption that SYCL works fine with native host pointers
-    return dnn_mem_t(md, engine, host_ptr);
+    return dnn_mem_t(md, engine, {true, host_ptr});
 }
 
 // Returns physical offset by logical one. Logical offset is represented by an

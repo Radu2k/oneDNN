@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -29,8 +29,7 @@ using namespace dnnl::impl;
 
 status_t dnnl_sycl_interop_stream_create(
         stream_t **stream, engine_t *engine, void *queue) {
-    bool args_ok = true && !utils::any_null(stream, engine, queue)
-            && engine->kind() == engine_kind::gpu;
+    bool args_ok = true && !utils::any_null(stream, engine, queue);
     if (!args_ok) return status::invalid_arguments;
 
     auto *sycl_engine

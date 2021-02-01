@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -97,13 +97,12 @@ struct gen9_wino_convolution_fwd_t : public gpu_primitive_t {
 
     status_t init(engine_t *engine) override {
         bool is_fused = pd()->conf.is_fused;
-        bool is_fused_6x3 = pd()->conf.wino_m == 6 && is_fused;
         bool is_nonfused_2x3 = pd()->conf.wino_m == 2 && !is_fused;
 
         std::vector<const char *> kernel_names;
-        if (is_fused_6x3) {
-            kernel_names.push_back("gen9_wino_conv_fwd_6x3");
-            kernel_names.push_back("gen9_wino_wei_transform_6x3");
+        if (is_fused) {
+            kernel_names.push_back("gen9_wino_conv_fwd");
+            kernel_names.push_back("gen9_wino_wei_transform");
         } else if (is_nonfused_2x3) {
             kernel_names.push_back("gen9_wino_conv_fwd_2x3");
             kernel_names.push_back("gen9_wino_wei_transform_2x3");

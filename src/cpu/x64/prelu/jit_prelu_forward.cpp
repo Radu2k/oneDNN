@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -100,9 +100,11 @@ status_t jit_prelu_fwd_t::init(engine_t *engine) {
 
 status_t jit_prelu_fwd_t::execute(const exec_ctx_t &ctx) const {
     using byte = unsigned char;
+    status_t status = status::success;
     const byte *const src = CTX_IN_MEM(const byte *, DNNL_ARG_SRC);
     const byte *const weights = CTX_IN_MEM(const byte *, DNNL_ARG_WEIGHTS);
-    byte *const dst = CTX_OUT_MEM(byte *, DNNL_ARG_DST);
+    byte *const dst = CTX_OUT_CLEAN_MEM(byte *, DNNL_ARG_DST, status);
+    CHECK(status);
     const memory_desc_wrapper src_d {pd()->src_md(0)};
     const auto dt_size = types::data_type_size(src_d.data_type());
     const auto kernel = kernel_.get();

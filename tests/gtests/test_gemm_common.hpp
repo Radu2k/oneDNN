@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2018-2020 Intel Corporation
+* Copyright 2018-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -32,8 +32,13 @@
 #include "oneapi/dnnl/dnnl_sycl.hpp"
 #endif
 
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+#include "oneapi/dnnl/dnnl_threadpool.hpp"
+#include "tests/test_thread.hpp"
+#endif
+
 #if DNNL_X64
-#include "src/cpu/x64/cpu_isa_traits.hpp"
+#include "tests/cpu_x64_isa_common.hpp"
 #endif
 
 #include <cstdint>
@@ -588,8 +593,15 @@ struct dnnl_gemm<float, float, float> {
         auto B = map_memory<float>(b_mem);
         auto C = map_memory<float>(c_mem);
 
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+        static auto *st = dnnl::testing::get_threadpool();
+        return static_cast<dnnl_status_t>(dnnl::threadpool_interop::sgemm(
+                p.transA, p.transB, p.M, p.N, p.K, p.alpha, A, p.lda, B, p.ldb,
+                p.beta, C, p.ldc, st));
+#else
         return dnnl_sgemm(p.transA, p.transB, p.M, p.N, p.K, p.alpha, A, p.lda,
                 B, p.ldb, p.beta, C, p.ldc);
+#endif
     }
 };
 
@@ -1010,15 +1022,14 @@ protected:
         SKIP_IF_CUDA(true, "Test not supported in CUDA backend");
 #endif
 
+#if DNNL_X64
         bool is_bf16bf16f32 = true
                 && data_traits<a_dt>::data_type == memory::data_type::bf16
                 && data_traits<b_dt>::data_type == memory::data_type::bf16
                 && data_traits<c_dt>::data_type == memory::data_type::f32;
 
-#if DNNL_X64
         SKIP_IF(is_bf16bf16f32 && get_test_engine_kind() == engine::kind::cpu
-                        && !impl::cpu::x64::mayiuse(
-                                impl::cpu::x64::avx512_core),
+                        && !dnnl::mayiuse(cpu_isa::avx512_core),
                 "Skip test for systems that do not support avx512_core.");
 #endif
 

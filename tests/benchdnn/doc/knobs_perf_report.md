@@ -62,6 +62,7 @@ Other problem specific options supported:
 | %flags%      | Bnorm, Lnorm, Reorder                                                 | Primitive flags
 | %group%      | Shuffle                                                               | Shuffle group
 | %impl%       | All                                                                   | Library implementation name for a given problem
+| %idx%        | All                                                                   | Test index
 | %mb%         | Problem desc based, Eltwise, Softmax                                  | Mini-batch value from user input. Prints `0` in case of input `--mb=0`
 | %name%       | Problem desc based                                                    | Problem name
 | %prb%        | All                                                                   | Canonical problem (options and descriptor in REPRO style)
@@ -109,7 +110,7 @@ Runs a set of inner products measuring performance with 6 seconds per problem
 dumping results with a standard performance template:
 ``` sh
     ./benchdnn --ip --mode=p --max-ms-per-prb=6000 \
-               --batch=inputs/ip/ip_all
+               --batch=inputs/ip/test_ip_all
 ```
 ```
 Output template: perf,%engine%,%name%,%prb%,%Gops%,%Gfreq%,%-time%,%-Gflops%,%0time%,%0Gflops%
@@ -120,7 +121,7 @@ Runs a set of inner products measuring performance and dumping results in
 CSV-style:
 ``` sh
     ./benchdnn --ip --mode=p --perf-template=csv \
-               --batch=inputs/ip/ip_all
+               --batch=inputs/ip/test_ip_all
 ```
 ```
 Output template: perf,%engine%,%name%,%dir%,%cfg%,%attr%,%DESC%,%Gops%,%Gfreq%,%-time%,%-Gflops%,%0time%,%0Gflops%
@@ -132,7 +133,7 @@ reporting descriptor, minimum time, and corresponding gigaFLOPS. Note: ',' is
 not a special symbol here; any other delimiter can be used:
 ``` sh
     ./benchdnn --ip --mode=p --perf-template=%prb%,%-time%,%-Gflops% \
-               --batch=inputs/ip/ip_all
+               --batch=inputs/ip/test_ip_all
 ```
 ```
 Output template: %prb%,%-time%,%-Gflops%

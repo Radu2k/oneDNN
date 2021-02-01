@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ static status_t init_conf_common(eltwise_conf_t &conf, offsets_t &off,
     alg_kind_t alg = pd->desc()->alg_kind;
     bool is_forward = utils::one_of(pd->desc()->prop_kind,
             prop_kind::forward_training, prop_kind::forward_inference);
-    const memory_desc_wrapper data_d(pd->src_md());
+    const memory_desc_wrapper data_d(pd->desc()->data_desc);
     const memory_desc_wrapper diff_data_d(
             is_forward ? &glob_zero_md : pd->diff_src_md());
 
@@ -109,8 +109,11 @@ status_t ref_eltwise_fwd_t::pd_t::init_kernel_ctx(
 
 status_t ref_eltwise_fwd_t::execute_forward_dense(const exec_ctx_t &ctx) const {
 
+    status_t status = status::success;
+
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
-    auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
+    auto &dst = CTX_OUT_CLEAN_STORAGE(DNNL_ARG_DST, status);
+    CHECK(status);
 
     const float alpha = pd()->desc()->alpha;
     const float beta = pd()->desc()->beta;
@@ -141,10 +144,13 @@ status_t ref_eltwise_bwd_t::pd_t::init_kernel_ctx(
 status_t ref_eltwise_bwd_t::execute_backward_dense(
         const exec_ctx_t &ctx) const {
 
+    status_t status = status::success;
+
     auto &src = pd()->use_dst() ? CTX_IN_STORAGE(DNNL_ARG_DST)
                                 : CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
-    auto &diff_src = CTX_OUT_STORAGE(DNNL_ARG_DIFF_SRC);
+    auto &diff_src = CTX_OUT_CLEAN_STORAGE(DNNL_ARG_DIFF_SRC, status);
+    CHECK(status);
 
     const float alpha = pd()->desc()->alpha;
     const float beta = pd()->desc()->beta;
@@ -159,7 +165,7 @@ status_t ref_eltwise_bwd_t::execute_backward_dense(
     arg_list.set(4, beta);
 
     auto nd_range = conf.dispatch.nd_range();
-    status_t status = parallel_for(ctx, nd_range, kernel_, arg_list);
+    status = parallel_for(ctx, nd_range, kernel_, arg_list);
 
     return status;
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 #include "src/common/dnnl_thread.hpp"
 
 #if DNNL_X64
-#include "src/cpu/x64/cpu_isa_traits.hpp"
+#include "tests/cpu_x64_isa_common.hpp"
 #endif
 
 namespace dnnl {
@@ -50,18 +50,20 @@ protected:
         input_int8.dat_dt = data_type::u8;
         input_int8.wei_dt = data_type::s8;
 
+#if DNNL_X64
         const bool is_cpu = get_test_engine_kind() == engine::kind::cpu;
         const bool is_gpu = get_test_engine_kind() == engine::kind::gpu;
-#if DNNL_X64
         static const auto isa = get_effective_cpu_isa();
-        input_f32.wino_supported = is_gpu
-                || (is_cpu && isa >= cpu_isa::avx512_mic
-                        && isa != cpu_isa::avx2_vnni);
+        static const bool has_avx512_common
+                = dnnl::is_superset(isa, cpu_isa::avx512_mic)
+                || dnnl::is_superset(isa, cpu_isa::avx512_core);
+        input_f32.wino_supported = is_gpu || (is_cpu && has_avx512_common);
         input_f16.wino_supported = is_gpu;
-        input_int8.wino_supported = is_cpu && isa >= cpu_isa::avx512_core
-                && isa != cpu_isa::avx2_vnni;
+        input_int8.wino_supported
+                = is_cpu && dnnl::is_superset(isa, cpu_isa::avx512_core);
         input_f32.backward_supported = is_cpu && impl::dnnl_thr_syncable();
 #elif DNNL_AARCH64 && DNNL_AARCH64_USE_ACL
+        const bool is_cpu = get_test_engine_kind() == engine::kind::cpu;
         input_f32.wino_supported = is_cpu;
 #endif
     }
@@ -117,7 +119,8 @@ TEST_F(wino_conv_test_t, TestLargePadding) {
                 algorithm::convolution_winograd, src_md, wei_md, dst_md, {1, 1},
                 {2, 2}, {2, 2});
 
-        bool large_pad_is_supported = is_nvidia_gpu(eng) ? true : false;
+        bool large_pad_is_supported
+                = (get_test_engine_kind() == engine::kind::gpu);
         if (input.wino_supported && large_pad_is_supported) {
             EXPECT_NO_THROW(
                     convolution_forward::primitive_desc(fwd_op_desc, eng));

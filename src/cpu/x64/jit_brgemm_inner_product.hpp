@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -84,9 +84,9 @@ struct brgemm_inner_product_fwd_t : public primitive_t {
 
             auto bia_dt = bias_md_.data_type;
             const bool is_bias_dt_ok = IMPLICATION(with_bias(),
-                    (is_int8 && one_of(bia_dt, f32, s32, s8, u8)
+                    (is_int8 && one_of(bia_dt, f32, s32, s8, u8))
                             || (src_dt == bf16 && one_of(bia_dt, f32, bf16))
-                            || everyone_is(f32, src_dt, bia_dt)));
+                            || everyone_is(f32, src_dt, bia_dt));
             bool ok = true && mayiuse(isa) && is_fwd() && is_bias_dt_ok
                     && check_attr() && !has_zero_dim_memory();
             if (!ok) return status::unimplemented;
@@ -115,7 +115,7 @@ struct brgemm_inner_product_fwd_t : public primitive_t {
                         vbeta, jbgp_.LDA, jbgp_.LDB, jbgp_.LDC, vM, vN, vK));
 
                 auto LDD = jbgp_.oc_without_padding;
-                CHECK(brgemm_desc_add_postops(
+                CHECK(brgemm_desc_set_postops(
                         &brg, attr(), jbgp_.dst_dt, LDD, jbgp_.bia_dt));
             }
 
@@ -219,7 +219,7 @@ struct brgemm_inner_product_bwd_data_t : public primitive_t {
 
                 auto dt_d = diff_src_type;
                 auto LDD = jbgp_.ic_without_padding;
-                CHECK(brgemm_desc_add_postops(
+                CHECK(brgemm_desc_set_postops(
                         &brg, attr(), dt_d, LDD, jbgp_.bia_dt));
             }
 

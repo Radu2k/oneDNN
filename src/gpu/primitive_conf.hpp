@@ -326,6 +326,7 @@ struct conv_conf_t {
     int wino_oc;
     int wino_ic_block;
     int wino_oc_block;
+    int vect_size;
     size_t U_gws_d[3], U_lws_d[3];
     size_t V_gws_d[3], V_lws_d[3];
     size_t M_gws_d[3], M_lws_d[3];
@@ -608,10 +609,8 @@ enum reorder_kernel_t {
     vectorize_last_dim,
     plain_to_ABxx8ayb,
     plain_xFxE_to_abcdef,
-    transpose8x8_a,
-    transpose8x8_b,
-    transpose16x16_a,
-    transpose16x16_b,
+    transpose8x8,
+    transpose16x16,
     reorder_nchw,
     unaligned_sizes
 };
@@ -915,6 +914,7 @@ inline void def_eltwise_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
     kernel_ctx.define_int("BOUNDED_RELU", alg_kind::eltwise_bounded_relu);
     kernel_ctx.define_int("SOFT_RELU", alg_kind::eltwise_soft_relu);
     kernel_ctx.define_int("LOGSIGMOID", alg_kind::eltwise_logsigmoid);
+    kernel_ctx.define_int("MISH", alg_kind::eltwise_mish);
     kernel_ctx.define_int("LOGISTIC", alg_kind::eltwise_logistic);
     kernel_ctx.define_int("TANH", alg_kind::eltwise_tanh);
     kernel_ctx.define_int("ELU", alg_kind::eltwise_elu);
@@ -930,6 +930,7 @@ inline void def_eltwise_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
     kernel_ctx.define_int("POW", alg_kind::eltwise_pow);
     kernel_ctx.define_int("GELU_ERF", alg_kind::eltwise_gelu_erf);
     kernel_ctx.define_int("ROUND", alg_kind::eltwise_round);
+    kernel_ctx.define_int("HARDSWISH", alg_kind::eltwise_hardswish);
 
     kernel_ctx.define_int("RELU_DST", alg_kind::eltwise_relu_use_dst_for_bwd);
     kernel_ctx.define_int(
@@ -1056,12 +1057,15 @@ inline void def_post_ops_cfg(
                 = "PO_" + std::to_string(idx) + "_BIN_ARG";
         add_po_defines(bin_arg_name, all_post_ops.entry_[idx], idx);
     }
-    post_ops_t::entry_t empty_po = post_ops_t::entry_t();
-    for (int idx = all_post_ops.len(); idx < 10;
-            ++idx, ++nof_supported_post_ops) {
-        const std::string bin_arg_name
-                = "PO_" + std::to_string(idx) + "_BIN_ARG";
-        add_po_defines(bin_arg_name, empty_po, idx);
+    // There should always be 0 or 10 postops, so add empty ones if needed
+    if (all_post_ops.len() > 0) {
+        post_ops_t::entry_t empty_po = post_ops_t::entry_t();
+        for (int idx = all_post_ops.len(); idx < 10;
+                ++idx, ++nof_supported_post_ops) {
+            const std::string bin_arg_name
+                    = "PO_" + std::to_string(idx) + "_BIN_ARG";
+            add_po_defines(bin_arg_name, empty_po, idx);
+        }
     }
 
     kernel_ctx.define_int("POST_OP_CHAIN_LENGTH", nof_supported_post_ops);
@@ -1108,9 +1112,12 @@ inline int append_post_ops_to_arg_list(const exec_ctx_t &ctx,
     for (int idx = 0; idx < all_post_ops.len(); ++idx) {
         set_arg_entry(all_post_ops.entry_[idx], idx);
     }
-    post_ops_t::entry_t empty_po = post_ops_t::entry_t();
-    for (int idx = all_post_ops.len(); idx < 10; ++idx) {
-        set_arg_entry(empty_po, 0);
+    // There should always be 0 or 10 postops, so add empty ones if needed
+    if (all_post_ops.len() > 0) {
+        post_ops_t::entry_t empty_po = post_ops_t::entry_t();
+        for (int idx = all_post_ops.len(); idx < 10; ++idx) {
+            set_arg_entry(empty_po, 0);
+        }
     }
     return post_op_idx;
 }

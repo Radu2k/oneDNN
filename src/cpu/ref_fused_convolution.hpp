@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -372,8 +372,7 @@ struct ref_fused_convolution_fwd_t : public primitive_t {
                 } else {
                     inout_memory.emplace_back(new memory_t(engine, &arg_info.md,
                             inout_buffer->get_sub_storage(arg_info.offset,
-                                    memory_desc_wrapper(arg_info.md).size()),
-                            false));
+                                    memory_desc_wrapper(arg_info.md).size())));
                     exec_args[arg_info.op_arg].mem = inout_memory.back().get();
                     exec_args[arg_info.op_arg].is_const = arg_info.is_const;
                 }

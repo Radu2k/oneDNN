@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2017-2020 Intel Corporation
+* Copyright 2017-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -262,6 +262,18 @@ inline U logsigmoid_bwd(T dd, T s) {
     return soft_relu_bwd(dd, -s);
 }
 
+template <typename T, typename U = typename utils::remove_reference<T>::type>
+inline U mish_fwd(T s) {
+    return s * tanh_fwd(soft_relu_fwd(s));
+}
+template <typename T, typename U = typename utils::remove_reference<T>::type>
+inline U mish_bwd(T dd, T s) {
+    const float tanh = tanh_fwd(soft_relu_fwd(s));
+    const float srelu_bwd = soft_relu_bwd(1.0f, s);
+    const float derivative = tanh + s * srelu_bwd * (1 - ::powf(tanh, 2.0f));
+    return dd * derivative;
+}
+
 template <typename T, typename A,
         typename U = typename utils::remove_reference<T>::type>
 inline U swish_fwd(T s, A alpha) {
@@ -362,7 +374,6 @@ inline U gelu_erf_fwd(T s) {
     float v = s * sqrt_2_over_2;
     return (U)(0.5f * s * (1.f + ::erff(v)));
 }
-
 template <typename T, typename U = typename utils::remove_reference<T>::type>
 inline U gelu_erf_bwd(T dd, T s) {
     const float two_over_sqrt_pi = 1.12837922573089599609375f;
@@ -370,6 +381,16 @@ inline U gelu_erf_bwd(T dd, T s) {
     float v = s * sqrt_2_over_2;
     return (U)(dd * 0.5f
             * (1.f + ::erff(v) + v * two_over_sqrt_pi * ::expf(-v * v)));
+}
+
+template <typename T, typename U = typename utils::remove_reference<T>::type>
+inline U hardswish_fwd(T s) {
+    return (s / 6.f) * bounded_relu_fwd(s + 3.f, 6.f);
+}
+template <typename T, typename U = typename utils::remove_reference<T>::type>
+inline U hardswish_bwd(T dd, T s) {
+    return (s < 3.f && s > -3.f ? dd * (2 * s + 3.f) / 6.f
+                                : s >= 3.f ? dd : 0.f);
 }
 
 inline bool is_eltwise_ok(
@@ -381,10 +402,10 @@ inline bool is_eltwise_ok(
             = one_of(alg, eltwise_relu, eltwise_tanh, eltwise_elu,
                       eltwise_square, eltwise_abs, eltwise_sqrt, eltwise_linear,
                       eltwise_bounded_relu, eltwise_soft_relu,
-                      eltwise_logsigmoid, eltwise_logistic, eltwise_exp,
-                      eltwise_gelu_tanh, eltwise_swish, eltwise_log,
-                      eltwise_clip, eltwise_clip_v2, eltwise_pow,
-                      eltwise_gelu_erf, eltwise_round)
+                      eltwise_logsigmoid, eltwise_mish, eltwise_logistic,
+                      eltwise_exp, eltwise_gelu_tanh, eltwise_hardswish,
+                      eltwise_swish, eltwise_log, eltwise_clip, eltwise_clip_v2,
+                      eltwise_pow, eltwise_gelu_erf, eltwise_round)
             && IMPLICATION(alg == eltwise_bounded_relu, alpha >= 0)
             && IMPLICATION(
                     one_of(alg, eltwise_clip, eltwise_clip_v2), beta >= alpha)
