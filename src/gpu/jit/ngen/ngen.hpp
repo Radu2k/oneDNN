@@ -289,7 +289,7 @@ private:
     void opJmpi(Opcode op, const InstructionModifier &mod, const RegData &dst, const RegData &src0, Label &jip);
 
     void opSync(Opcode op, SyncFunction fc, const InstructionModifier &mod);
-    void opSync(Opcode op, SyncFunction fc, const InstructionModifier &mod, const RegData &src0);
+    void opSync(Opcode op, SyncFunction fc, const InstructionModifier &mod, RegData src0);
     void opSync(Opcode op, SyncFunction fc, const InstructionModifier &mod, const Immediate &src0);
 
     void opNop(Opcode op);
@@ -1533,6 +1533,8 @@ template <typename... Targs> void mark(Targs&&... args) { ngen::BinaryCodeGenera
 template <typename... Targs> void comment(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::comment(std::forward<Targs>(args)...); } \
 template <typename... Targs> void setDefaultNoMask(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::setDefaultNoMask(std::forward<Targs>(args)...); } \
 template <typename... Targs> void setDefaultAutoSWSB(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::setDefaultAutoSWSB(std::forward<Targs>(args)...); } \
+bool getDefaultNoMask() { return ngen::BinaryCodeGenerator<hw>::getDefaultNoMask(); } \
+bool getDefaultAutoSWSB() { return ngen::BinaryCodeGenerator<hw>::getDefaultAutoSWSB(); } \
 NGEN_FORWARD_EXTRA \
 NGEN_FORWARD_OP_NAMES \
 NGEN_FORWARD_MIN_MAX \
@@ -2664,7 +2666,7 @@ void BinaryCodeGenerator<hw>::opSync(Opcode op, SyncFunction fc, const Instructi
 }
 
 template <HW hw>
-void BinaryCodeGenerator<hw>::opSync(Opcode op, SyncFunction fc, const InstructionModifier &mod, const RegData &src0)
+void BinaryCodeGenerator<hw>::opSync(Opcode op, SyncFunction fc, const InstructionModifier &mod, RegData src0)
 {
     typename EncodingTag12Dispatch<hw>::tag tag;
     if (hw < HW::Gen12LP)
@@ -2677,6 +2679,7 @@ void BinaryCodeGenerator<hw>::opSync(Opcode op, SyncFunction fc, const Instructi
 
     i.binary.dst = 0x1;
     if (!src0.isNull()) {
+        src0.setRegion(0, 1, 0);
         i.binary.src0 = encodeBinaryOperand12<false>(src0, tag).bits;
         i.binary.src0Type = getTypecode12(src0.getType());
     }

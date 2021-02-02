@@ -424,17 +424,19 @@ struct Instruction12 {
     constexpr Instruction12() : qword{0,0} {};
 
     // Decoding routines for auto-SWSB.
-    bool autoSWSB() const        { return (common.opcode & 0x80); }
-    SWSBInfo swsb() const        { return SWSBInfo12::createFromRaw(common.swsb).decode(opcode()); }
-    void setSWSB(SWSBInfo swsb)  { common.swsb = SWSBInfo12(swsb, opcode()).raw(); }
-    void clearAutoSWSB()         { common.opcode &= 0x7F; }
-    Opcode opcode() const        { return static_cast<Opcode>(common.opcode & 0x7F); }
-    SyncFunction syncFC() const  { return static_cast<SyncFunction>(binary.cmod); }
-    SharedFunction sfid() const  { return static_cast<SharedFunction>(send.sfid); }
-    bool eot() const             { return (opcode() == Opcode::send || opcode() == Opcode::sendc) && send.eot; }
-    bool predicated() const      { return !common.maskCtrl || (static_cast<PredCtrl>(common.predCtrl) != PredCtrl::None); }
-    bool atomic() const          { return common.atomicCtrl; }
-    unsigned dstTypecode() const { return binary.dstType; }
+    bool autoSWSB() const         { return (common.opcode & 0x80); }
+    SWSBInfo swsb() const         { return SWSBInfo12::createFromRaw(common.swsb).decode(opcode()); }
+    void setSWSB(SWSBInfo swsb)   { common.swsb = SWSBInfo12(swsb, opcode()).raw(); }
+    void clearAutoSWSB()          { common.opcode &= 0x7F; }
+    Opcode opcode() const         { return static_cast<Opcode>(common.opcode & 0x7F); }
+    SyncFunction syncFC() const   { return static_cast<SyncFunction>(binary.cmod); }
+    SharedFunction sfid() const   { return static_cast<SharedFunction>(send.sfid); }
+    bool eot() const              { return (opcode() == Opcode::send || opcode() == Opcode::sendc) && send.eot; }
+    bool predicated() const       { return !common.maskCtrl || (static_cast<PredCtrl>(common.predCtrl) != PredCtrl::None); }
+    bool atomic() const           { return common.atomicCtrl; }
+    unsigned dstTypecode() const  { return binary.dstType; }
+    unsigned src0Typecode() const { return srcTypecode(0); }
+    unsigned src1Typecode() const { return srcTypecode(1); }
     void shiftJIP(int32_t shift) { branches.jip += shift * sizeof(Instruction12); }
     void shiftUIP(int32_t shift) { branches.uip += shift * sizeof(Instruction12); }
 
@@ -452,6 +454,9 @@ struct Instruction12 {
         auto fc = static_cast<MathFunction>(binary.cmod);
         return (fc == MathFunction::invm || fc == MathFunction::rsqtm);
     }
+
+protected:
+    inline unsigned srcTypecode(int opNum) const;
 };
 
 static_assert(sizeof(Instruction12) == 16, "Internal error: Instruction12 has been padded by the compiler.");
@@ -982,6 +987,45 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
     rd.fixup(esize, DataType::invalid, opNum < 0, 2);
     region = DependencyRegion(hw, esize, rd);
     return true;
+}
+
+unsigned Instruction12::srcTypecode(int opNum) const
+{
+    auto op = opcode();
+
+    switch (op) {
+        case Opcode::nop_gen12:
+        case Opcode::illegal:
+        case Opcode::send:
+        case Opcode::sendc:
+        case Opcode::dp4a:
+            return 0;
+        case Opcode::dpas:
+        case Opcode::dpasw:
+            // This method is only used for checking for long pipe types.
+            return 0;
+        case Opcode::add3:
+        case Opcode::bfn:
+        case Opcode::bfe_gen12:
+        case Opcode::bfi2_gen12:
+        case Opcode::csel_gen12:
+        case Opcode::mad:
+        case Opcode::madm: // ternary
+            switch (opNum) {
+                case 0: return ternary.src0Type | (ternary.execType << 3);
+                case 1: return ternary.src1Type | (ternary.execType << 3);
+                case 2: return ternary.src2Type | (ternary.execType << 3);
+                default: return 0;
+            }
+        default: { // unary/binary
+            switch (opNum) {
+                case 0: return binary.src0Type;
+                case 1: return binary.src1Type;
+            }
+        }
+    }
+
+    return 0;
 }
 
 bool Instruction12::getImm32(uint32_t &imm) const
