@@ -142,8 +142,7 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     attr_info_ = attr_info_t::create(attr());
 
     if (attr_info()->with_eltwise)
-        ok &= jit_eltwise_injector_f32<gpu_gen12hp>::is_supported(
-                attr_info()->eltwise_alg);
+        ok &= jit_eltwise_injector_f32_is_supported(attr_info()->eltwise_alg);
 
     if (!ok) return status::unimplemented;
 

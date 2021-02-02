@@ -96,7 +96,8 @@ public:
             ok &= (tile_n == 32 || tile_n == 48);
             ok &= !(tile_n > 32 && global_3x_buf);
 
-            if (have_post_op()) ok &= injector_t::is_supported(post_op);
+            if (have_post_op())
+                ok &= jit_eltwise_injector_f32_is_supported(post_op);
             return ok;
         }
 
