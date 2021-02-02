@@ -55,8 +55,7 @@ AccessType get_access_type(char c) {
         default: assert(!"Unknown access type.");
         case 'b': return AccessType::Block;
         case 's': return AccessType::Scattered;
-        case 'u': return AccessType::SurfaceScattered;
-        case 'm': return AccessType::MediaBlock;
+        case 'u': return AccessType::ChannelScattered;
     }
 }
 
@@ -84,9 +83,7 @@ status_t gen_gemm_kernel_t::complete_strategy() {
 
     problem_.nonuniformWGs = false;
     problem_.fused = (hw_ >= HW::Gen12LP);
-    strategy_.emulate.emulate64
-            = (hw_ == HW::Gen11 || hw_ == HW::Gen12LP || hw_ == HW::Gen12p7);
-    strategy_.emulate.emulateDWxDW = (hw_ >= HW::Gen12LP);
+    strategy_.emulate = EmulationStrategy(hw_);
     strategy_.checkAdd32 = strategy_.emulate.emulate64;
     strategy_.spf = !problem_.fused;
 
