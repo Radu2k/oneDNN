@@ -220,7 +220,9 @@ struct AsmInstruction {
     bool predicated() const     { return !mod.isWrEn() || (mod.getPredCtrl() != PredCtrl::None); }
     bool atomic() const         { return mod.isAtomic(); }
 
-    inline unsigned dstTypecode() const;
+    inline unsigned dstTypecode()  const { return getTypecode(dst); }
+    inline unsigned src0Typecode() const { return getTypecode(src[0]); }
+    inline unsigned src1Typecode() const { return getTypecode(src[1]); }
     inline autoswsb::DestinationMask destinations(int &jip, int &uip) const;
     inline bool getOperandRegion(autoswsb::DependencyRegion &region, int opNum) const;
 
@@ -243,6 +245,9 @@ struct AsmInstruction {
             return false;
     }
     bool getSendDesc(MessageDescriptor &desc) const { return getImm32(desc.all, 3); }
+
+protected:
+    static inline unsigned getTypecode(const AsmOperand &op);
 };
 
 AsmInstruction::AsmInstruction(const autoswsb::SyncInsertion &si)
@@ -260,13 +265,13 @@ AsmInstruction::AsmInstruction(const autoswsb::SyncInsertion &si)
         src[0] = NullRegister();
 }
 
-unsigned AsmInstruction::dstTypecode() const
+unsigned AsmInstruction::getTypecode(const AsmOperand &op)
 {
     DataType dt = DataType::invalid;
 
-    switch (dst.type) {
-        case AsmOperand::Type::reg:  dt = dst.reg.getType(); break;
-        case AsmOperand::Type::ereg: dt = dst.ereg.getType(); break;
+    switch (op.type) {
+        case AsmOperand::Type::reg:  dt = op.reg.getType(); break;
+        case AsmOperand::Type::ereg: dt = op.ereg.getType(); break;
         default: break;
     }
 
@@ -1379,6 +1384,20 @@ private:
         void bar(const InstructionModifier &mod = InstructionModifier()) {
             this->operator()(SyncFunction::bar, mod);
         }
+#if NGEN_GEN12P8
+        void bar(const InstructionModifier &mod, uint32_t src0) {
+            this->operator()(SyncFunction::bar, mod, src0);
+        }
+        void bar(const InstructionModifier &mod, const RegData &src0) {
+            this->operator()(SyncFunction::bar, mod, src0);
+        }
+        void bar(uint32_t src0) {
+            this->operator()(SyncFunction::bar, InstructionModifier(), src0);
+        }
+        void bar(const RegData &src0) {
+            this->operator()(SyncFunction::bar, InstructionModifier(), src0);
+        }
+#endif
         void host(const InstructionModifier &mod = InstructionModifier()) {
             this->operator()(SyncFunction::host, mod);
         }
@@ -1716,7 +1735,13 @@ void AsmCodeGenerator::outX(std::ostream &out, const AsmInstruction &i, int line
             if (isGen12) ddst = dsrc[0] = dsrc[1] = dsrc[2] = PrintDetail::sub;
             break;
         case Opcode::sync:
-            if (isGen12) dsrc[0] = PrintDetail::sub_no_type;
+            if (isGen12) {
+                if (i.src[0].type == AsmOperand::Type::reg)
+                    dsrc[0] = PrintDetail::sub;
+                else
+                    dsrc[0] = PrintDetail::sub_no_type;
+            }
+            break;
         default: break;
     }
 

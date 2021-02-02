@@ -185,6 +185,10 @@ class unsupported_instruction : public std::runtime_error {
 public:
     unsupported_instruction() : std::runtime_error("Instruction is not supported by the chosen hardware") {}
 };
+class unsupported_message : public std::runtime_error {
+public:
+    unsupported_message() : std::runtime_error("Message is not supported by the chosen hardware") {}
+};
 class iga_align16_exception : public std::runtime_error {
 public:
     iga_align16_exception() : std::runtime_error("Align16 not supported by the IGA assembler; use binary output") {}
@@ -2006,6 +2010,14 @@ public:
 // e.g. ctrl = getBFNCtrl([](uint8_t a, uint8_t b, uint8_t c) { return (a & b) | (c & ~b); });
 template <typename F>
 inline uint8_t getBFNCtrl(F func) { return func(0xAA, 0xCC, 0xF0); }
+
+#if NGEN_GEN12P8
+enum class BarrierType : uint8_t {
+    ProducerConsumer = 0,
+    Producer = 1,
+    Consumer = 2,
+};
+#endif
 
 /********************************************************************/
 /* HDC sends                                                        */

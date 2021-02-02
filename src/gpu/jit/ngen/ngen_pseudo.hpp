@@ -380,7 +380,48 @@ void barriersignal(const InstructionModifier &mod, const GRF &temp, const GRF &r
     barriermsg(mod, temp);
 }
 
+void barriersignal(const InstructionModifier &mod, const GRF &temp, uint32_t threadCount, const GRF &r0_info = r0)
+{
+#if NGEN_GEN12P7
+    if (hardware >= HW::Gen12p7)
+        mov(1 | NoMask, temp.ud(2), (threadCount << 24) | (threadCount << 16));
+    else
+#endif
+    {
+        and_(8 | NoMask, temp.ud(), r0_info.ud(2), uint32_t((hardware >= HW::Gen11) ? 0x7F000000 : 0x8F000000));
+        mov(1 | NoMask, temp.ub(9), 0x80 | (threadCount & 0x7F));
+    }
+    barriermsg(mod, temp);
+}
+
 void barriersignal(const GRF &temp, const GRF &r0_info = r0) { barriersignal(InstructionModifier(), temp, r0_info); }
+void barriersignal(const GRF &temp, uint32_t threadCount, const GRF &r0_info = r0) { barriersignal(InstructionModifier(), temp, threadCount, r0_info); }
+
+#if NGEN_GEN12P8
+void barriersignal(const InstructionModifier &mod, uint32_t barrierID, const GRF &temp, const GRF &r0_info = r0)
+{
+#ifdef NGEN_SAFE
+    if (hardware != HW::Gen12p8)
+        throw unsupported_message();
+#endif
+    mov(1 | NoMask, temp.uw(4), uint8_t(barrierID));
+    mov(2 | NoMask, temp.ub(10)(1), r0_info.ub(11)(0));
+    barriermsg(mod, temp);
+}
+
+void barriersignal(const InstructionModifier &mod, uint32_t barrierID, const GRF &temp, BarrierType barrierType, uint32_t producers, uint32_t consumers)
+{
+#ifdef NGEN_SAFE
+    if (hardware != HW::Gen12p8)
+        throw unsupported_message();
+#endif
+    mov(1 | NoMask, temp.ud(2), (barrierID & 0xFF) | (static_cast<uint32_t>(barrierType) << 14) | ((producers & 0xFF) << 16) | ((consumers & 0xFF) << 24));
+    barriermsg(mod, temp);
+}
+
+void barriersignal(uint32_t barrierID, const GRF &temp, const GRF &r0_info = r0) { barriersignal(InstructionModifier(), barrierID, temp, r0_info); }
+void barriersignal(uint32_t barrierID, const GRF &temp, BarrierType barrierType, uint32_t producers, uint32_t consumers) { barriersignal(InstructionModifier(), barrierID, temp, barrierType, producers, consumers); }
+#endif
 
 void barrierwait()
 {
@@ -390,9 +431,10 @@ void barrierwait()
         wait(NoMask, n0[0]);
 }
 
-void barrier(const GRF &temp, const GRF &r0_info = r0)
+template <typename... Targs>
+void barrier(const Targs &...barrierArgs)
 {
-    barriersignal(temp, r0_info);
+    barriersignal(barrierArgs...);
     barrierwait();
 }
 

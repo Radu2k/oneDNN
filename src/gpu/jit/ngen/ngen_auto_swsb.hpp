@@ -296,6 +296,7 @@ inline GeneralizedPipe getPipe(HW hw, const Instruction &insn, bool checkOOO = t
 
     // For SWSB purposes, Gen12LP has a single in-order pipe.
     // Otherwise, in-order pipe determined by destination type.
+    // Exception: if there are any long operands, it's a long pipe instruction.
     if (hw >= HW::Gen12HP) {
         auto dt = insn.dstTypecode();
 #if NGEN_GEN12P8 && !NGEN_PVC_A
@@ -309,6 +310,13 @@ inline GeneralizedPipe getPipe(HW hw, const Instruction &insn, bool checkOOO = t
             mask |= PipeMaskF;
         else
             mask |= PipeMaskI;
+
+        if (!(mask & PipeMaskL)) {
+            if ((insn.src0Typecode() & lmask) == lmask)
+                mask = PipeMaskL;
+            else if ((insn.src1Typecode() & lmask) == lmask)
+                mask = PipeMaskL;
+        }
     } else
         mask = PipeMaskA;
     return mask;
@@ -994,9 +1002,9 @@ inline bool getSWSBDependencies(HW hw, const Instruction &insn, Dependency<false
 
     if (swsb.hasDist()) {
         auto pipe = swsb.getPipe();
-        consume.depPipe = (hw == HW::Gen12LP) ? PipeMaskA :
-                      (pipe == Pipe::Default) ? getPipe(hw, insn).inOrderPipe()
-                                              : toMask(pipe);
+        consume.depPipe =     (hw == HW::Gen12LP) ? PipeMaskA :
+                          (pipe == Pipe::Default) ? getPipe(hw, insn).inOrderPipe()
+                                                  : toMask(pipe);
         if (consume.depPipe) {      // if is here to ignore default pipe deps for OOO instructions.
             consume.dist = swsb.parts.dist;
             autoSWSB = false;
