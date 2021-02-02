@@ -124,8 +124,8 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
                     if (++bin_cnt > 1) return false;
                 }
                 if (po.entry_[i].is_eltwise()) {
-                    if (!jit_eltwise_injector_f32<ngen::HW::Gen12HP>::
-                                    is_supported(po.entry_[i].eltwise.alg))
+                    if (!jit_eltwise_injector_f32_is_supported(
+                                po.entry_[i].eltwise.alg))
                         return false;
                 }
             }

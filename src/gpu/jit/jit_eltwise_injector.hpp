@@ -1,18 +1,18 @@
 /*******************************************************************************
- * Copyright 2020-2021 Intel Corporation
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *******************************************************************************/
+* Copyright 2020-2021 Intel Corporation
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*******************************************************************************/
 
 #ifndef GPU_JIT_JIT_ELTWISE_INJECTOR_HPP
 #define GPU_JIT_JIT_ELTWISE_INJECTOR_HPP
@@ -28,6 +28,12 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
+inline bool jit_eltwise_injector_f32_is_supported(alg_kind_t alg) {
+    using namespace alg_kind;
+    return utils::one_of(alg, eltwise_relu, eltwise_square, eltwise_abs,
+            eltwise_round, eltwise_linear, eltwise_clip, eltwise_gelu_tanh);
+}
+
 template <gpu_gen_t hw>
 struct jit_eltwise_injector_f32 {
     jit_eltwise_injector_f32(jit_generator<hw> *host, alg_kind_t alg,
@@ -42,14 +48,8 @@ struct jit_eltwise_injector_f32 {
         , h(host)
         , scratch_(scratch) {
 
-        assert(is_supported(alg_));
+        assert(jit_eltwise_injector_f32_is_supported(alg_));
         assert(scratch_.isEmpty() || (scratch_.getLen() >= min_scratch_regs()));
-    }
-
-    static bool is_supported(alg_kind_t alg) {
-        using namespace alg_kind;
-        return utils::one_of(alg, eltwise_relu, eltwise_square, eltwise_abs,
-                eltwise_round, eltwise_linear, eltwise_clip, eltwise_gelu_tanh);
     }
 
     int min_scratch_regs();
