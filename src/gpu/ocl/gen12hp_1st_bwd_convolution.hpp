@@ -60,8 +60,8 @@ struct gen12hp_1st_convolution_bwd_weights_t : public gpu_primitive_t {
             bool ok = set_default_alg_kind(alg_kind::convolution_direct)
                     && this->desc()->prop_kind == backward_weights
                     && this->desc()->alg_kind == alg_kind::convolution_direct
-                    && utils::one_of(
-                            this->desc()->diff_weights_desc.data_type, bf16)
+                    && utils::one_of(this->desc()->diff_weights_desc.data_type,
+                            bf16, f32)
                     && utils::one_of(this->desc()->src_desc.data_type, bf16)
                     && utils::one_of(
                             this->desc()->diff_dst_desc.data_type, bf16)

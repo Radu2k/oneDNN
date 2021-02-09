@@ -31,25 +31,23 @@
 #define HAS_PAD_W (PW != 0 || PW_R != 0)
 
 #define BLOCK_READ_SRC(ptr, dst, lim, off) \
-    short8 temp; \
-    int back = 0; \
-    temp[0] = ptr[SW * 8 + SW * sglid + back]; \
-    temp[1] = ptr[SW * 8 + SW * sglid + 1 + back]; \
-    if (SW * ow + SW * 8 * 2 <= IW) { \
-        slm_s[PW + SW * 8 + ow * SW + SW * sglid] = temp[0]; \
-        if (SW == 2) { \
-            slm_s[PW + SW * 8 + ow * SW + SW * sglid + 1] = temp[1]; \
-        } \
-    } else if (IW % OW_BLOCK != 0 && SW * ow + SW * 8 + SW * sglid < IW) { \
-        slm_s[PW + SW * 8 + ow * SW + SW * sglid] = temp[0]; \
-        if (SW == 2 && SW * ow + SW * 8 + SW * sglid + 1 < IW) { \
-            slm_s[PW + SW * 8 + ow * SW + SW * sglid + 1] = temp[1]; \
-        } \
+    short8 temp = cvt_f32_to_bf16(1); \
+    temp[0] = ptr[SW * 8 + SW * sglid - PW]; \
+    temp[1] = ptr[SW * 8 + SW * sglid + 1 - PW]; \
+    slm_s[SW * sglid] = slm_s[SW * sglid + 8 * SW]; \
+    if (SW == 2) slm_s[SW * sglid + 1] = slm_s[SW * sglid + 8 * SW + 1]; \
+    if (SW * ow + SW * 8 + SW * sglid >= IW + PW) { \
+        temp[0] = cvt_f32_to_bf16(0); \
     } \
-    temp[0] = slm_s[SW * ow + SW * sglid + back]; \
-    temp[1] = slm_s[SW * ow + SW * sglid + 1 + back]; \
-    temp[2] = slm_s[SW * ow + SW * sglid + SW * 8 + back]; \
-    temp[3] = slm_s[SW * ow + SW * sglid + SW * 8 + 1 + back]; \
+    if (SW == 2 && SW * ow + SW * 8 + SW * sglid + 1 >= IW + PW) { \
+        temp[1] = cvt_f32_to_bf16(0); \
+    } \
+    slm_s[SW * 8 + SW * sglid] = temp[0]; \
+    slm_s[SW * 8 + SW * sglid + 1] = temp[1]; \
+    temp[0] = slm_s[SW * sglid]; \
+    temp[1] = slm_s[SW * sglid + 1]; \
+    temp[2] = slm_s[SW * sglid + SW * 8]; \
+    temp[3] = slm_s[SW * sglid + SW * 8 + 1]; \
     for (int ctr = 0; ctr < lim / 2; ctr++) { \
 \
         if (SW == 2) { \
@@ -155,25 +153,11 @@ gen12hp_1st_conv_bwd_weights(__global SRC_DATA_T *src,
     float8 blockC11 = 0.0f;
 
     __local ushort slm_oc[16 * OC_BLOCK];
-    const int padded_iw = SW * OW + PW
+    const int padded_iw = SW * 2 * OW_BLOCK
             + 24; // 24 is zero filled tail should have minimum size of SW*8
     //slm src size = row size * 4 subgroups per work group
     __local ushort slm_src[4 * padded_iw];
     __local ushort *slm_s = &slm_src[(lid_0 / 8) * padded_iw];
-
-    for (int i = 0; i < PW; i++) {
-        slm_s[i] = cvt_f32_to_bf16(0);
-    }
-
-    intel_sub_group_block_write_us(
-            slm_s + (SW * OW / OW_BLOCK) * OW_BLOCK + PW, cvt_f32_to_bf16(0));
-    intel_sub_group_block_write_us(
-            slm_s + (SW * OW / OW_BLOCK) * OW_BLOCK + PW + 8,
-            cvt_f32_to_bf16(0));
-    intel_sub_group_block_write_us(
-            slm_s + (SW * OW / OW_BLOCK) * OW_BLOCK + PW + 16,
-            cvt_f32_to_bf16(0));
-    barrier(CLK_LOCAL_MEM_FENCE);
 
     for (int omb = mb; omb < mb_end; omb++) {
         const __global DST_DATA_T *diff_dst1_
@@ -198,17 +182,29 @@ gen12hp_1st_conv_bwd_weights(__global SRC_DATA_T *src,
                 int id = od * SD - PD + kd * (1 + DD);
                 int ih = oh * SH - PH + kh * (1 + DH);
                 __global SRC_DATA_T *src1 = src + (id)*IH * IW * IC_BLOCK
-                        + (ih)*IW * IC_BLOCK + ic * ID * IH * IW * MB_BLOCK;
+                        + (ih)*IW * IC_BLOCK + ic * ID * IH * IW * MB_BLOCK
+                        + ow_beg * SW;
 
+                intel_sub_group_block_write_us(
+                        slm_s + SW * OW_BLOCK, cvt_f32_to_bf16(0));
+                intel_sub_group_block_write_us(
+                        slm_s + SW * OW_BLOCK + 8, cvt_f32_to_bf16(0));
+                intel_sub_group_block_write_us(
+                        slm_s + SW * OW_BLOCK + 16, cvt_f32_to_bf16(0));
+                if (ow_beg > 0 && sglid < PW) {
+                    slm_s[8 * SW + sglid] = src1[sglid - PW];
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
 #if IW <= 8 * SW
                 if (ow_beg * SW + SW * sglid < IW)
 #endif
-                    slm_s[PW + SW * sglid] = src1[SW * sglid];
+                    slm_s[PW + 8 * SW + SW * sglid] = src1[SW * sglid];
                 if (SW == 2) {
 #if IW <= 8 * SW
                     if (ow_beg * SW + SW * sglid + 1 < IW)
 #endif
-                        slm_s[PW + SW * sglid + 1] = src1[SW * sglid + 1];
+                        slm_s[PW + 8 * SW + SW * sglid + 1]
+                                = src1[SW * sglid + 1];
                 }
 
                 for (int ow = ow_beg; ow < min(ow_beg + OWB, OW);
