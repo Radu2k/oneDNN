@@ -328,20 +328,22 @@ void gen12hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
         // Half-precision C must be upconverted to single precision separately (no hf/f mixed mode support in Gen12HP).
         // Similarly integer C must be upconverted if alpha or beta float.
         auto old_type = cfg.c_type;
-        if ((float_update && one_of(cfg.c_type, DataType::d, DataType::ud))
-                || (cfg.c_type == DataType::hf)) {
-            for (int jj = 0; jj < 4; jj++) {
-                for (int ii = 0; ii < (cfg.tile_m / 8); ii += 2) {
-                    auto old_c = get_load_reg(cfg.c_type, ii, jj);
-                    auto old_f = get_load_reg(cur_acc_type, ii, jj);
-                    mov(16, old_f, old_c);
+        if (!beta0) {
+            if ((float_update && one_of(cfg.c_type, DataType::d, DataType::ud))
+                    || (cfg.c_type == DataType::hf)) {
+                for (int jj = 0; jj < 4; jj++) {
+                    for (int ii = 0; ii < (cfg.tile_m / 8); ii += 2) {
+                        auto old_c = get_load_reg(cfg.c_type, ii, jj);
+                        auto old_f = get_load_reg(cur_acc_type, ii, jj);
+                        mov(16, old_f, old_c);
+                    }
                 }
+                old_type = cur_acc_type;
             }
-            old_type = cur_acc_type;
         }
 
         // Non-packed bfloat16 must also be upconverted. Can't use mov for this.
-        if (!c_align16 && (cfg.c_type == DataType::bf)) {
+        if (!beta0 && !c_align16 && (cfg.c_type == DataType::bf)) {
             for (int jj = 0; jj < 4; jj++) {
                 for (int ii = 0; ii < (cfg.tile_m / 8); ii += 2) {
                     auto old_ud = get_load_reg(DataType::ud, ii, jj);
