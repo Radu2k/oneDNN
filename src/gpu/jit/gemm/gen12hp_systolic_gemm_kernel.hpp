@@ -99,6 +99,11 @@ public:
             if (have_post_op()) ok &= injector_t::is_supported(post_op);
             return ok;
         }
+
+        template <typename T>
+        T &cast() {
+            return *reinterpret_cast<T *>(this);
+        }
     };
 
     static constexpr size_t unroll_k_bytes = 32;

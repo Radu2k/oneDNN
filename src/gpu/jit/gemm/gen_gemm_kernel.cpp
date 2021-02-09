@@ -417,27 +417,27 @@ struct kernel_table_t {
 };
 
 const kernel_table_t gen9_f32_nocopy_nn_table[] = {
-    {{8,  4 }, { 0,  0}, {256, 0}},
-    {{16, 8 }, { 0,  0}, {0,   0}},
-    {{16, 16}, { 0,  0}, {0,   0}},
-    {{32, 16}, {-1, -1}, {0,   0}},
+    {{8,  4 }, { 0,  0}, {256, 0}, {}},
+    {{16, 8 }, { 0,  0}, {0,   0}, {}},
+    {{16, 16}, { 0,  0}, {0,   0}, {}},
+    {{32, 16}, {-1, -1}, {0,   0}, {}},
 };
 
 const kernel_table_t gen9_f32_nocopy_nt_table[] = {
-    {{8,  8 }, { 0,  0}, {512, 0}},
-    {{16, 16}, { 0,  0}, {0,   0}},
-    {{32, 16}, {-1, -1}, {0,   0}}
+    {{8,  8 }, { 0,  0}, {512, 0}, {}},
+    {{16, 16}, { 0,  0}, {0,   0}, {}},
+    {{32, 16}, {-1, -1}, {0,   0}, {}}
 };
 
 const kernel_table_t gen9_f32_nocopy_tn_table[] = {
-    {{8,  4 }, {16, 32}, {0, 0}},
-    {{8,  8 }, { 0,  0}, {0, 0}},
-    {{16, 8 }, { 0,  0}, {0, 0}},
-    {{16, 16}, {-1, -1}, {0, 0}}
+    {{8,  4 }, {16, 32}, {0, 0}, {}},
+    {{8,  8 }, { 0,  0}, {0, 0}, {}},
+    {{16, 8 }, { 0,  0}, {0, 0}, {}},
+    {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen9_f32_nocopy_tt_table[] = {
-    {{16, 32}, {-1, -1}, {0, 0}}
+    {{16, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t *gen9_f32_nocopy_tables[2][2] = {
@@ -446,19 +446,19 @@ const kernel_table_t *gen9_f32_nocopy_tables[2][2] = {
 };
 
 const kernel_table_t gen9_f16_nocopy_nn_table[] = {
-    {{32, 32}, {-1, -1}, {0, 0}}
+    {{32, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen9_f16_nocopy_nt_table[] = {
-    {{32, 32}, {-1, -1}, {0, 0}}
+    {{32, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen9_f16_nocopy_tn_table[] = {
-    {{16, 16}, {-1, -1}, {0, 0}}
+    {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen9_f16_nocopy_tt_table[] = {
-    {{32, 32}, {-1, -1}, {0, 0}}
+    {{32, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t *gen9_f16_nocopy_tables[2][2] = {
@@ -467,19 +467,19 @@ const kernel_table_t *gen9_f16_nocopy_tables[2][2] = {
 };
 
 const kernel_table_t gen9_x8_nocopy_nn_table[] = {
-    {{32, 16}, {-1, -1}, {0, 0}}
+    {{32, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen9_x8_nocopy_nt_table[] = {
-    {{32, 16}, {-1, -1}, {0, 0}}
+    {{32, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen9_x8_nocopy_tn_table[] = {
-    {{16, 16}, {-1, -1}, {0, 0}}
+    {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen9_x8_nocopy_tt_table[] = {
-    {{16, 32}, {-1, -1}, {0, 0}}
+    {{16, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t *gen9_x8_nocopy_tables[2][2] = {
@@ -493,28 +493,28 @@ const kernel_table_t *gen9_bf16_nocopy_tables[2][2] = {
 };
 
 const kernel_table_t gen12lp_f32_nocopy_nn_table[] = {
-    {{8,  4 }, { 0,  0}, {0, 0}},
-    {{8,  8 }, { 0,  0}, {0, 0}},
-    {{16, 8 }, { 0,  0}, {0, 0}},
-    {{32, 8 }, { 0,  0}, {0, 0}},
-    {{32, 12}, {-1, -1}, {0, 0}}
+    {{8,  4 }, { 0,  0}, {0, 0}, {}},
+    {{8,  8 }, { 0,  0}, {0, 0}, {}},
+    {{16, 8 }, { 0,  0}, {0, 0}, {}},
+    {{32, 8 }, { 0,  0}, {0, 0}, {}},
+    {{32, 12}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12lp_f32_nocopy_nt_table[] = {
-    {{8,  4 }, { 0,  0}, {0, 0}},
-    {{8,  8 }, { 0,  0}, {0, 0}},
-    {{16, 16}, { 0,  0}, {0, 0}},
-    {{32, 16}, {-1, -1}, {0, 0}}
+    {{8,  4 }, { 0,  0}, {0, 0}, {}},
+    {{8,  8 }, { 0,  0}, {0, 0}, {}},
+    {{16, 16}, { 0,  0}, {0, 0}, {}},
+    {{32, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12lp_f32_nocopy_tn_table[] = {
-    {{8,  4 }, { 0,  0}, {0, 0}},
-    {{16, 8 }, { 0,  0}, {0, 0}},
-    {{16, 16}, {-1, -1}, {0, 0}}
+    {{8,  4 }, { 0,  0}, {0, 0}, {}},
+    {{16, 8 }, { 0,  0}, {0, 0}, {}},
+    {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12lp_f32_nocopy_tt_table[] = {
-    {{12, 32}, {-1, -1}, {0, 0}}
+    {{12, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t *gen12lp_f32_nocopy_tables[2][2] = {
@@ -523,19 +523,19 @@ const kernel_table_t *gen12lp_f32_nocopy_tables[2][2] = {
 };
 
 const kernel_table_t gen12lp_f16_nocopy_nn_table[] = {
-    {{32, 32}, {-1, -1}, {0, 0}}
+    {{32, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12lp_f16_nocopy_nt_table[] = {
-    {{32, 32}, {-1, -1}, {0, 0}}
+    {{32, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12lp_f16_nocopy_tn_table[] = {
-    {{32, 16}, {-1, -1}, {0, 0}}
+    {{32, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12lp_f16_nocopy_tt_table[] = {
-    {{32, 32}, {-1, -1}, {0, 0}}
+    {{32, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t *gen12lp_f16_nocopy_tables[2][2] = {
@@ -544,19 +544,19 @@ const kernel_table_t *gen12lp_f16_nocopy_tables[2][2] = {
 };
 
 const kernel_table_t gen12lp_x8_nocopy_nn_table[] = {
-    {{32, 16}, {-1, -1}, {0, 0}}
+    {{32, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12lp_x8_nocopy_nt_table[] = {
-    {{16, 32}, {-1, -1}, {0, 0}}
+    {{16, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12lp_x8_nocopy_tn_table[] = {
-    {{16, 16}, {-1, -1}, {0, 0}}
+    {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12lp_x8_nocopy_tt_table[] = {
-    {{16, 32}, {-1, -1}, {0, 0}}
+    {{16, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t *gen12lp_x8_nocopy_tables[2][2] = {
@@ -575,16 +575,16 @@ const kernel_table_t gen12hp_f16_nocopy_nn_table[] = {
 };
 
 const kernel_table_t gen12hp_f16_nocopy_nt_table[] = {
-    {{32, 32}, {-1, -1}, {0, 0}}
+    {{32, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12hp_f16_nocopy_tn_table[] = {
-    {{16,  8}, {32, 32}, {32, 32}},
-    {{16, 16}, {-1, -1}, {0,   0}}
+    {{16,  8}, {32, 32}, {32, 32}, {}},
+    {{16, 16}, {-1, -1}, {0,   0}, {}}
 };
 
 const kernel_table_t gen12hp_f16_nocopy_tt_table[] = {
-    {{32, 32}, {-1, -1}, {0, 0}}
+    {{32, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t *gen12hp_f16_nocopy_tables[2][2] = {
@@ -593,21 +593,21 @@ const kernel_table_t *gen12hp_f16_nocopy_tables[2][2] = {
 };
 
 const kernel_table_t gen12hp_f32_nocopy_nn_table[] = {
-    {{16, 8}, { 0,  0}, {0, 0}},
-    {{32, 8}, { 0,  0}, {0, 0}},
-    {{64, 8}, {-1, -1}, {0, 0}}
+    {{16, 8}, { 0,  0}, {0, 0}, {}},
+    {{32, 8}, { 0,  0}, {0, 0}, {}},
+    {{64, 8}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12hp_f32_nocopy_nt_table[] = {
-    {{32, 16}, {-1, -1}, {0, 0}}
+    {{32, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12hp_f32_nocopy_tn_table[] = {
-    {{16, 16}, {-1, -1}, {0, 0}}
+    {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12hp_f32_nocopy_tt_table[] = {
-    {{8, 64}, {-1, -1}, {0, 0}}
+    {{8, 64}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t *gen12hp_f32_nocopy_tables[2][2] = {
@@ -621,19 +621,19 @@ const kernel_table_t *gen12hp_x8_nocopy_tables[2][2] = {
 };
 
 const kernel_table_t gen12hp_bf16_nocopy_nn_table[] = {
-    {{32, 8}, {-1, -1}, {0, 0}}
+    {{32, 8}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12hp_bf16_nocopy_nt_table[] = {
-    {{16, 16}, {-1, -1}, {0, 0}}
+    {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12hp_bf16_nocopy_tn_table[] = {
-    {{32, 8}, {-1, -1}, {0, 0}}
+    {{32, 8}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t gen12hp_bf16_nocopy_tt_table[] = {
-    {{8, 32}, {-1, -1}, {0, 0}}
+    {{8, 32}, {-1, -1}, {0, 0}, {}}
 };
 
 const kernel_table_t *gen12hp_bf16_nocopy_tables[2][2] = {

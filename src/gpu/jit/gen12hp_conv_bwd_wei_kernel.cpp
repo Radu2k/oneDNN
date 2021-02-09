@@ -215,7 +215,6 @@ public:
         auto bia_bf16_hdr = ra.alloc();
 
         auto w_off = ra.alloc();
-        auto w_stride = ra.alloc();
 
         auto w_f32_off = ra.alloc();
         auto b_f32_off = ra.alloc();
@@ -855,7 +854,7 @@ public:
 
         for (int i = 0; i < 4; ++i)
             ra.claim(c[i]);
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < 2; ++i)
             ra.claim(a[i]);
         for (int i = 0; i < 1; ++i)
             ra.claim(b[i]);
@@ -1588,8 +1587,6 @@ status_t gen12hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
     }
 
     kernels.resize(3);
-
-    status_t status = status::success;
 
     CHECK(primitive->create_kernel(engine, &kernels[0], *jit_gen_wei_init));
     CHECK(primitive->create_kernel(engine, &kernels[1], *jit_gen_convolution));

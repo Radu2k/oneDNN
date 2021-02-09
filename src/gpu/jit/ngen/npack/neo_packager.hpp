@@ -210,7 +210,7 @@ inline HW getBinaryArch(const std::vector<uint8_t> &binary)
 
     // DG2 identifies as Gen12HP. Check whether EOT goes to TS (Gen12HP) or gateway (DG2+).
     using b14 = std::array<uint8_t, 14>;
-    b14 gtwyEOT = {3, 0x80, 4, 0, 0, 0, 0xC, 0x7F, 0x20, 0x30, 0, 0, 0, 0};
+    b14 gtwyEOT = {{3, 0x80, 4, 0, 0, 0, 0xC, 0x7F, 0x20, 0x30, 0, 0, 0, 0}};
     if (hw == HW::Gen12HP) for (size_t i = 0; i < binary.size() - 0x10; i++) {
         if (binary[i] == 0x31 && *(b14 *)(binary.data() + i + 2) == gtwyEOT) {
             hw = HW::Gen12p7;

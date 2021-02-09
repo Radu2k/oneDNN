@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -62,9 +62,9 @@ public:
         , width_(width)
         , to_type_(to_type)
         , from_type_(from_type)
-        , from_stride_(from_stride)
+        , to_bytes_(getBytes(to_type))
         , from_bytes_(getBytes(from_type))
-        , to_bytes_(getBytes(to_type)) {
+        , from_stride_(from_stride) {
         assert(width % 8 == 0);
     }
 
@@ -1600,7 +1600,7 @@ public:
             return;
         }
 
-        uint32_t m, p;
+        uint32_t m = 0, p;
         e_idiv_magicgu(y, m, p);
 
         auto _x = ra.alloc().ud();

@@ -220,15 +220,15 @@ status_t gen12hp_convolution_data_common_init_conf(engine_t *engine,
     }
 
     if (src_mdw.format_kind() != format_kind::any
-            && src_mdw.matches_one_of_tag(src_tag) == format_kind::undef)
+            && src_mdw.matches_one_of_tag(src_tag) == format_tag::undef)
         return status::unimplemented;
 
     if (wei_mdw.format_kind() != format_kind::any
-            && wei_mdw.matches_one_of_tag(wei_tag) == format_kind::undef)
+            && wei_mdw.matches_one_of_tag(wei_tag) == format_tag::undef)
         return status::unimplemented;
 
     if (dst_mdw.format_kind() != format_kind::any
-            && dst_mdw.matches_one_of_tag(dst_tag) == format_kind::undef)
+            && dst_mdw.matches_one_of_tag(dst_tag) == format_tag::undef)
         return status::unimplemented;
 
     conf.src_tag = src_tag;
@@ -377,15 +377,15 @@ status_t gen12hp_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
             : utils::pick(conf.ndims - 3, OIw16o16i, OIhw16o16i, OIdhw16o16i);
 
     if (src_mdw.format_kind() != format_kind::any
-            && src_mdw.matches_one_of_tag(src_tag) == format_kind::undef)
+            && src_mdw.matches_one_of_tag(src_tag) == format_tag::undef)
         return status::unimplemented;
 
     if (wei_mdw.format_kind() != format_kind::any
-            && wei_mdw.matches_one_of_tag(wei_tag) == format_kind::undef)
+            && wei_mdw.matches_one_of_tag(wei_tag) == format_tag::undef)
         return status::unimplemented;
 
     if (dst_mdw.format_kind() != format_kind::any
-            && dst_mdw.matches_one_of_tag(dst_tag) == format_kind::undef)
+            && dst_mdw.matches_one_of_tag(dst_tag) == format_tag::undef)
         return status::unimplemented;
 
     conf.src_tag = src_tag;

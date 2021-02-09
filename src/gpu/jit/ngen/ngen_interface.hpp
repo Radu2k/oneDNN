@@ -375,7 +375,7 @@ void InterfaceHandler::finalize()
     if (needLocalSize && !needNonuniformWGs)
         for (int dim = 0; dim < 3; dim++)
             assignments.push_back({localSizeArgs[dim], DataType::ud, ExternalArgumentType::Hidden,
-                                   GRF(getCrossthreadBase()).ud(dim + 3), -1});
+                                   GRF(getCrossthreadBase()).ud(dim + 3), -1, -1});
 
     finalized = true;
 }

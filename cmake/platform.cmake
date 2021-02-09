@@ -242,6 +242,8 @@ elseif(UNIX OR MINGW)
         endif()
         # suppress warning on assumptions made regarding overflow (#146)
         append(CMAKE_CCXX_NOWARN_FLAGS "-Wno-strict-overflow")
+        # suppress false positive warnings about uninitialized variables
+        append(CMAKE_CCXX_NOWARN_FLAGS "-Wno-maybe-uninitialized")
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
         set(DEF_ARCH_OPT_FLAGS "-xSSE4.1")
         # workaround for Intel Compiler that produces error caused

@@ -254,7 +254,7 @@ std::vector<uint8_t> ELFCodeGenerator<hw>::getBinary()
 
     binary.resize(szELF + szMetadata + szKernel);
 
-    (void *) new(binary.data()) ZebinELF(szKernelName, szMetadata, szKernel);
+    (void) new(binary.data()) ZebinELF(szKernelName, szMetadata, szKernel);
     std::memcpy(&binary[ZebinELF::kernelNameOffset()], interface_.getExternalName().c_str(), szKernelName);
     std::memcpy(&binary[szELF], metadata.c_str(), metadata.size());
     std::memcpy(&binary[szELF + szMetadata], kernel.data(), kernel.size());

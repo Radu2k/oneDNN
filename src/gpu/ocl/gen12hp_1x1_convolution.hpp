@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -118,7 +118,7 @@ struct gen12hp_1x1_convolution_fwd_t : public gpu_primitive_t {
         memory_desc_t scales_md_;
     };
 
-    status_t init(engine_t *engine) {
+    status_t init(engine_t *engine) override {
         const char *kernel_name = "gen12hp_1x1_conv_fwd";
 
         compute::kernel_ctx_t kernel_ctx;

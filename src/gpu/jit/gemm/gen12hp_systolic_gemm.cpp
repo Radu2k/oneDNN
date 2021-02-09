@@ -232,8 +232,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
                                 = gen12hp_systolic_gemm_kernel_t<gpu_gen12p7>;
                         cfg_copy.emulate64 = true;
                         auto kernel = kernel_12p7_t(
-                                reinterpret_cast<kernel_12p7_t::config_t &>(
-                                        cfg_copy));
+                                cfg_copy.cast<kernel_12p7_t::config_t>());
 
                         create_kernel(engine,
                                 &kernel_[first_k_block][last_k_block], kernel);
@@ -552,7 +551,6 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     auto b_type = pd()->desc()->b_type();
     auto c_type = pd()->desc()->c_type();
     auto bias_type = pd()->desc()->bias_type();
-    auto co_type = c_type;
 
     auto m = pd()->desc()->m();
     auto n = pd()->desc()->n();
@@ -605,7 +603,6 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     } else if (pd()->with_bias()) {
         off_co0 = bias.offset() / types::data_type_size(bias_type);
         co = &bias;
-        co_type = bias_type;
     }
 
     int64_t block_m = 0, block_n = 0, block_k = 0;
