@@ -189,9 +189,9 @@ void jit_eltwise_injector_f32<hw>::gelu_tanh_compute_fwd(
         case 1: h->mul(simd, a, a, k); break;
         case 2: h->mad(simd, a, r, a, r); break;
         case 3: h->mul(simd, a, a, -2 * sqrt_2_over_pi * log2e); break;
-        case 4: h->eexp(simd, a, a); break;
+        case 4: h->exp(simd, a, a); break;
         case 5: h->add(simd, a, a, 1.0f); break;
-        case 6: h->einv(simd, a, a); break;
+        case 6: h->inv(simd, a, a); break;
         case 7: h->mul(simd, r, a, r); break;
         default: assert(!"invalid phase");
     }
@@ -293,9 +293,9 @@ void jit_eltwise_injector_f32<hw>::gelu_tanh_compute_bwd(
         case 4: h->mad(simd, b, r, b, r); break;
         case 5: h->mul(simd, a, a, -2 * sqrt_2_over_pi * log2e); break;
         case 6: h->mul(simd, b, b, 2 * sqrt_2_over_pi); break;
-        case 7: h->eexp(simd, a, a); break;
+        case 7: h->exp(simd, a, a); break;
         case 8: h->add(simd, r, a, 1.0f); break;
-        case 9: h->einv(simd, r, r); break;
+        case 9: h->inv(simd, r, r); break;
         case 10: h->mul(simd, a, a, r); break;
         case 11: h->mul(simd, a, a, b); break;
         case 12: h->add(simd, a, a, 1.0f); break;

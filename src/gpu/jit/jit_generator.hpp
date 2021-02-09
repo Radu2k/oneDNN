@@ -125,17 +125,6 @@ public:
     void dbg_alloc(cl_context context);
     void *dbg_memory() const { return dbg_memory_.get(); }
 #endif
-
-    void emath(ngen::MathFunction fc, int simd, ngen::GRF dst, ngen::GRF src) {
-        for (; simd > 0; simd -= 8, dst++, src++)
-            this->math(nstl::min(simd, 8), fc, dst, src);
-    }
-    void eexp(int simd, const ngen::GRF &dst, const ngen::GRF &src) {
-        emath(ngen::MathFunction::exp, simd, dst, src);
-    }
-    void einv(int simd, const ngen::GRF &dst, const ngen::GRF &src) {
-        emath(ngen::MathFunction::inv, simd, dst, src);
-    }
 };
 
 #ifdef CL_VERSION_2_0
