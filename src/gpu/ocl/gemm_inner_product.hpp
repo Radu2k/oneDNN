@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -224,8 +224,8 @@ struct gemm_inner_product_bwd_weights_t : public gpu_primitive_t {
             bool ok = this->desc()->prop_kind == backward_weights
                     && set_default_params() == status::success
                     && !has_zero_dim_memory()
-                    && utils::one_of(weights_md()->data_type, f32, bf16)
-                    && utils::one_of(diff_src_md()->data_type, f32, bf16)
+                    && utils::one_of(diff_weights_md()->data_type, f32, bf16)
+                    && utils::one_of(src_md()->data_type, f32, bf16)
                     && utils::one_of(diff_dst_md()->data_type, f32, bf16)
                     && attr()->has_default_values()
                     && dense_consistency_check(
@@ -281,6 +281,8 @@ struct gemm_inner_product_bwd_weights_t : public gpu_primitive_t {
             compute::kernel_ctx_t kernel_ctx;
 
             kernel_ctx.set_data_type(pd()->src_md()->data_type);
+            def_data_type(
+                    kernel_ctx, pd()->diff_weights_md(1)->data_type, "BIA");
             kernel_ctx.define_int("MB", pd()->MB());
             kernel_ctx.define_int("OC", pd()->OC());
 
