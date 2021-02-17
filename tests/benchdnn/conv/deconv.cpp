@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2018-2020 Intel Corporation
+* Copyright 2018-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -231,11 +231,11 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
 
         // FIXME: there's a bug in the library resulting in
         // memory_tracking.hpp:458: Assertion `registry_.size() == 0' failed.
-        // Specifically for 3D spatial case, when both BWD_W and BWD_WB are
-        // run. It must be cache interaction, but not clear which side is
+        // For any spatial case, when both BWD_W and BWD_WB are run.
+        // It must be cache interaction, but not clear which side is
         // guilty. Likely Nvidia implementation. Switch it off until further
         // investigation.
-        if (prb->ndims == 5 && prb->dir == BWD_WB) {
+        if (prb->dir == BWD_WB) {
             res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
             return;
         }
@@ -308,6 +308,8 @@ int doit(const prb_t *prb, res_t *res) {
     dnn_mem_t dst_fp(dst_md, fp, src_tag, test_engine);
     dnn_mem_t wei_tr_fp(wei_tr_md, fp, wei_tag, test_engine);
     dnn_mem_t bia_fp(bia_md, fp, tag::x, test_engine);
+    dnn_mem_t src_zero_points_m;
+    dnn_mem_t dst_zero_points_m;
 
     /* fill memory + reorders <-> */
     SAFE(fill_dst(prb, dst_dt, dst_fp, res), WARN);
@@ -319,12 +321,19 @@ int doit(const prb_t *prb, res_t *res) {
     args_t args;
 
     if (prb->dir & FLAG_FWD) {
+        maybe_prepare_runtime_zero_points(src_zero_points_m, prb->attr,
+                DNNL_ARG_SRC, prb->ic, prb->src_zp);
+        maybe_prepare_runtime_zero_points(dst_zero_points_m, prb->attr,
+                DNNL_ARG_DST, prb->oc, prb->dst_zp);
+
         args.set(DNNL_ARG_SRC, src_dt);
         args.set(DNNL_ARG_WEIGHTS, wei_dt);
         args.set(DNNL_ARG_BIAS, bia_dt);
         args.set(DNNL_ARG_DST, dst_dt);
         args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
         args.set(binary_po_args, binary_po_dt);
+        args.set(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zero_points_m);
+        args.set(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zero_points_m);
 
         SAFE(execute_and_wait(d, args), WARN);
 

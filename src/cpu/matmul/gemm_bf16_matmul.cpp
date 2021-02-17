@@ -30,6 +30,7 @@
 
 #include "cpu/gemm/gemm.hpp"
 
+#include "cpu/binary_injector_utils.hpp"
 #include "cpu/matmul/gemm_bf16_matmul.hpp"
 #include "cpu/matmul/matmul_utils.hpp"
 
@@ -81,19 +82,12 @@ status_t gemm_bf16_matmul_t<dst_type>::pd_t::check_and_configure_attributes() {
 
     auto check_attr_post_ops = [&]() -> bool {
         using namespace primitive_kind;
-
-        bool gemm_applies_output_scales = params_.gemm_applies_output_scales_;
-        auto check_sum = [=](const post_ops_t &p, int idx) -> bool {
-            return p.contain(sum, idx) && gemm_applies_output_scales;
-        };
-
-        const auto &p = attr()->post_ops_;
-        switch (p.len()) {
-            case 0: return true;
-            case 1: return check_sum(p, 0) || p.contain(eltwise, 0);
-            case 2: return check_sum(p, 0) && p.contain(eltwise, 1);
-            default: return false;
+        const auto &post_ops = attr()->post_ops_;
+        if (IMPLICATION(post_ops.contain(sum, 0),
+                    params_.gemm_applies_output_scales_)) {
+            return cpu::inner_product_utils::post_ops_ok(post_ops, dst_md());
         }
+        return false;
     };
 
     // check basic attributes
@@ -136,6 +130,9 @@ status_t gemm_bf16_matmul_t<dst_type>::execute_ref(
     auto weights = CTX_IN_MEM(const weights_data_t *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const char *, DNNL_ARG_BIAS);
     auto dst = CTX_OUT_MEM(dst_data_t *, DNNL_ARG_DST);
+    const auto post_ops_binary_rhs_arg_vec
+            = binary_injector_utils::prepare_binary_args(
+                    this->pd()->attr()->post_ops_, ctx);
 
     DEFINE_SCALES_BUFFER(scales);
 
@@ -171,7 +168,7 @@ status_t gemm_bf16_matmul_t<dst_type>::execute_ref(
     bool need_free_acc = false;
     if (acc == nullptr) {
         acc = (acc_data_t *)malloc(sizeof(acc_data_t) * acc_stride
-                        * (can_fuse_src_batch_dims
+                        * ((can_fuse_src_batch_dims || batch == 1)
                                         ? 1
                                         : (dim_t)dnnl_get_max_threads()),
                 64);
@@ -190,7 +187,7 @@ status_t gemm_bf16_matmul_t<dst_type>::execute_ref(
                 = utils::get_dims_mask(dst_d.dims(), src_d.dims(), ndims);
         const int wei_mask
                 = utils::get_dims_mask(dst_d.dims(), weights_d.dims(), ndims);
-        const int bia_dt_size = !pd()->with_bias()
+        const size_t bia_dt_size = !pd()->with_bias()
                 ? 0
                 : types::data_type_size(pd()->weights_md(1)->data_type);
         const size_t work_amount = (size_t)batch * M * N;
@@ -262,9 +259,13 @@ status_t gemm_bf16_matmul_t<dst_type>::execute_ref(
                             = params.get_post_processing_scales(scales);
 
                     (*pp_kernel_)(curr_dst, curr_acc,
-                            bias + (i_work % N) * bia_dt_size, pp_scales, 0,
-                            gemm_M * gemm_N, static_cast<size_t>(gemm_N), ldc,
-                            nullptr, nullptr, nullptr, ctx, *pd()->dst_md());
+                            bias
+                                    + static_cast<ptrdiff_t>(i_work % N)
+                                            * bia_dt_size,
+                            pp_scales, 0, gemm_M * gemm_N,
+                            static_cast<size_t>(gemm_N), ldc, nullptr,
+                            post_ops_binary_rhs_arg_vec.data(), dst, ctx,
+                            *pd()->dst_md());
                 }
                 i_work += gemm_M * gemm_N;
             }
@@ -285,7 +286,8 @@ status_t gemm_bf16_matmul_t<dst_type>::execute_ref(
                 size_t start {}, end {};
                 balance211((size_t)(M * N), nthr, ithr, start, end);
                 (*pp_kernel_)(dst, acc, bias, pp_scales, start, end, (size_t)N,
-                        ldc, nullptr, nullptr, nullptr, ctx, *pd()->dst_md());
+                        ldc, nullptr, post_ops_binary_rhs_arg_vec.data(), dst,
+                        ctx, *pd()->dst_md());
             });
         }
     }

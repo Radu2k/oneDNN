@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 #include "primitive_cache.hpp"
 #include "c_types_map.hpp"
+#include "primitive_desc.hpp"
 #include "rw_mutex.hpp"
 
 #include <list>
@@ -97,7 +98,9 @@ lru_primitive_cache_t::value_t lru_primitive_cache_t::get_or_add(
 }
 
 void lru_primitive_cache_t::add(const key_t &key, const value_t &value) {
-    if (cache_list_.size() >= capacity_) {
+    // std::list::size() method has linear complexity. Check the primitive cache
+    // size using std::unordered_map::size();
+    if (cache_mapper_.size() == capacity_) {
         // Evict the least recently used entry
         evict(1);
     }
@@ -137,6 +140,31 @@ void lru_primitive_cache_t::remove_if_invalidated(const key_t &key) {
     cache_mapper_.erase(it);
     assert(cache_list_.size() == cache_mapper_.size());
     unlock_write();
+}
+
+void lru_primitive_cache_t::update_entry(
+        const key_t &key, const primitive_desc_t *pd) {
+    utils::lock_write_t lock_w(rw_mutex());
+    auto it = cache_mapper_.find(key);
+
+    // There is nothing to do in two cases:
+    // 1. The requested entry is not in the cache because it has been evicted
+    //    by another thread
+    // 2. After the requested entry had been evicted it was inserted again
+    //    by another thread
+    if (it == cache_mapper_.end() || it->first.thread_id() != key.thread_id())
+        return;
+
+    const auto *op_desc = pd->op_desc();
+    const auto *attr = pd->attr();
+
+    // Update key in cache_mapper_
+    it->first.op_desc_ = op_desc;
+    it->first.attr_ = attr;
+
+    // Update key in cache_list_
+    it->second->first.op_desc_ = op_desc;
+    it->second->first.attr_ = attr;
 }
 
 // Evicts n the least recently used entries

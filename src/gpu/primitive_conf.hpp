@@ -247,8 +247,11 @@ enum conv_version_t {
     ver_unused,
     ver_1stconv,
     ver_16mb16c,
+    ver_32mb32c,
+    ver_32c,
     ver_8ow16c,
     ver_nhwc,
+    ver_nchw,
     ver_mb_block,
     ver_ow_block,
 
@@ -280,7 +283,8 @@ struct conv_conf_t {
     size_t wei_block;
     int icb;
     int ocb;
-    int osp_chunk, oh_chunk, mb_chunk, mb_block, slm_ic;
+    int osp_chunk, mb_chunk, mb_block, slm_ic;
+    int iw_tail;
     int mb_blk_wg;
     int max_blk_wg, ic_blk_wg, oc_blk_wg;
     int ic_blk_sg, oc_blk_sg;
@@ -556,6 +560,7 @@ struct binary_conf_t {
     bool is_min;
     bool is_div;
     bool is_sub;
+    bool is_ge;
     bool is_tensor_op;
     compute::dispatch_t dispatch;
     int dim0[MAX_NDIMS];
@@ -906,6 +911,7 @@ inline void def_binary_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
     kernel_ctx.define_int("BINARY_MAX", alg_kind::binary_max);
     kernel_ctx.define_int("BINARY_DIV", alg_kind::binary_div);
     kernel_ctx.define_int("BINARY_SUB", alg_kind::binary_sub);
+    kernel_ctx.define_int("BINARY_GE", alg_kind::binary_ge);
 }
 
 inline void def_eltwise_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {

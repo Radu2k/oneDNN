@@ -899,6 +899,7 @@ status_t jit_uni_i8i8_pooling_fwd_t<isa>::execute_forward(
                 p.dst_safe_access = dst_safe_access;
                 (*ker_)(&p);
             });
+    return status::success;
 }
 
 // Explicit instantiation only for supported <isa> values.

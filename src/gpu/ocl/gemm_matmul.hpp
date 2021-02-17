@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ struct gemm_matmul_t : public gpu_primitive_t {
         pd_t(const pd_t &other)
             : gpu_matmul_pd_t(other), gemm_pd_(other.gemm_pd_->clone()) {}
 
-        DECLARE_COMMON_PD_T("ocl:gemm:any", gemm_matmul_t);
+        DECLARE_COMMON_PD_T(gemm_pd_->name(), gemm_matmul_t);
 
         status_t init(engine_t *engine) {
             using namespace data_type;
