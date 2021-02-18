@@ -26,13 +26,15 @@
 
 #include "cpu/aarch64/cpu_isa_traits.hpp"
 
-#include "cpu/aarch64/jit_utils/jit_utils.hpp"
+#include "cpu/jit_utils/jit_utils.hpp"
 
 #define STRUCT_ALIGN(al, ...) __VA_ARGS__ __attribute__((__aligned__(al)))
 
 #define DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_name) \
     const char *name() const override { return STRINGIFY(jit_name); } \
     const char *source_file() const override { return __FILE__; }
+
+static const size_t CSIZE = sizeof(uint32_t);
 
 namespace dnnl {
 namespace impl {
@@ -45,12 +47,6 @@ namespace {
 typedef enum {
     MAX_CODE_SIZE = 256 * 1024,
 } max_code_size_t;
-
-// TODO: move this somewhere else? Although this is only used by jit kernels
-// (Roma)
-static inline int float2int(float x) {
-    return utils::bit_cast<int>(x);
-}
 
 // Callee-saved registers
 constexpr Xbyak_aarch64::Operand::Code abi_save_gpr_regs[]
@@ -206,6 +202,10 @@ public:
         L(label);
     }
 
+    void uni_clear(const Xbyak_aarch64::VReg &dst) { eor(dst.b, dst.b, dst.b); }
+
+    void uni_clear(const Xbyak_aarch64::ZReg &dst) { eor(dst.d, dst.d, dst.d); }
+
     template <typename TReg>
     void uni_fdiv(const TReg &dst, const TReg &src, const TReg &src2) {
         fdiv(dst, src, src2);
@@ -230,8 +230,7 @@ public:
         if (dstIdx == src2Idx) {
             assert(tmpIdx != srcIdx && tmpIdx != src2Idx);
 
-            mov(Xbyak_aarch64::ZRegD(tmp.getIdx()),
-                    Xbyak_aarch64::ZRegD(src2.getIdx()));
+            mov(Xbyak_aarch64::ZRegD(tmpIdx), Xbyak_aarch64::ZRegD(src2Idx));
             mov(dst, pred / Xbyak_aarch64::T_m, src);
             fdiv(dst, pred / Xbyak_aarch64::T_m, tmp);
         } else if (dstIdx == srcIdx) {
@@ -264,6 +263,26 @@ public:
         eor(Xbyak_aarch64::ZRegD(z1.getIdx()),
                 Xbyak_aarch64::ZRegD(z2.getIdx()),
                 Xbyak_aarch64::ZRegD(z3.getIdx()));
+    }
+
+    void uni_ldr(
+            const Xbyak_aarch64::VReg &dst, const Xbyak_aarch64::XReg &addr) {
+        ldr(Xbyak_aarch64::QReg(dst.getIdx()), ptr(addr));
+    }
+
+    void uni_ldr(
+            const Xbyak_aarch64::ZReg &dst, const Xbyak_aarch64::XReg &addr) {
+        ldr(dst, ptr(addr));
+    }
+
+    void uni_str(
+            const Xbyak_aarch64::VReg &src, const Xbyak_aarch64::XReg &addr) {
+        str(Xbyak_aarch64::QReg(src.getIdx()), ptr(addr));
+    }
+
+    void uni_str(
+            const Xbyak_aarch64::ZReg &src, const Xbyak_aarch64::XReg &addr) {
+        str(src, ptr(addr));
     }
 
     /*
@@ -371,7 +390,7 @@ private:
         if (!is_initialized()) return nullptr;
         const uint8_t *code
                 = reinterpret_cast<const uint8_t *>(CodeGenerator::getCode());
-        register_jit_code(code, getSize());
+        register_jit_code(code, getSize() * CSIZE);
         return code;
     }
 

@@ -643,6 +643,16 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
             {prb->cfg[SRC].dt, prb->cfg[WEI].dt, prb->cfg[DST].dt}, prb->dir,
             res);
     if (res->state == SKIPPED) return;
+    // GPU only case
+    bool is_f32_wei = prb->cfg[WEI].dt == dnnl_f32;
+    bool is_f32_src = prb->cfg[SRC].dt == dnnl_f32;
+    bool is_int8_dst = prb->cfg[DST].dt == dnnl_s8;
+    const bool f32_s8_conv = is_f32_src && is_f32_wei && is_int8_dst;
+
+    if (is_cpu() && f32_s8_conv) {
+        res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
+        return;
+    }
 
     // Winograd implementation limitations.
     if (prb->alg == WINO) {
@@ -710,6 +720,15 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
             if (!shape_ok) {
                 res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
             }
+
+            const auto stag = normalize_tag(prb->stag, prb->ndims);
+            const bool stag_is_axb
+                    = stag == normalize_tag(tag::axb, prb->ndims);
+            bool is_axb_ok = (prb->ic % 16 == 0) && (prb->oc % 16 == 0);
+            if (stag_is_axb && !is_axb_ok) {
+                res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
+            }
+
             return;
         } else {
             assert(!"Unknown Engine");
@@ -753,7 +772,7 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
         const bool dtag_is_axb = dtag == normalize_tag(tag::axb, prb->ndims);
         const bool tag_ok = !((prb->dir & FLAG_BWD) && dtag_is_axb);
         // TODO: specified wtag (even for supported formats) is not working?
-        if (!pad_ok || !out_ok || !post_ops_ok || !tag_ok) {
+        if (!pad_ok || !out_ok || !post_ops_ok || !tag_ok || f32_s8_conv) {
             res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
             return;
         }

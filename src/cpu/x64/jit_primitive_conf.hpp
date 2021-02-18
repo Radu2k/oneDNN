@@ -186,9 +186,12 @@ struct jit_conv_conf_t {
     float wei_adj_scale;
     // zero-point compensation
     bool src_zero_point;
+    int zp_pbuff_size;
     bool dst_zero_point;
     bool zp_src_is_common; // common, otherwise (TODO) per-channel
     bool req_zero_point_buffer; // used for calculating padding compensation
+    bool zp_pbuff_outer_compute; // indicates if zp_bbuff is computed in
+    // a separate parallel region
     int ow_pad, oh_pad; // output elements with padding & filter overlap
 
     //output elements requiring zero-point padding compensation
@@ -823,6 +826,38 @@ struct jit_brgemm_conv_conf_t {
     int max_vpad;
 
     bool wei_plain;
+};
+
+struct jit_shuffle_conf_t {
+    unsigned ndims = 0;
+
+    unsigned mb = 0, c = 0, d = 0, h = 0, w = 0, sp = 0;
+
+    unsigned stride_mb = 0;
+    unsigned blk_size = 0;
+    unsigned group_size = 0;
+    unsigned axis = 0;
+    unsigned axis_size = 0;
+    unsigned simd_tail = 0;
+    unsigned simd_w = 0;
+
+    jit_memory_tag_kind_t tag_kind = jit_memory_tag_kind_t::undef;
+    data_type_t data_type = data_type::undef;
+    size_t dt_size = 0;
+    unsigned el_size_of_indices = 0;
+    dim_t c_split_size = 0;
+    dim_t sp_split_size = 0;
+
+    cpu_isa_t isa = isa_any;
+};
+
+struct jit_shuffle_call_s {
+    const void *src = nullptr;
+    void *dst = nullptr;
+    const void *input_off_ptr = nullptr;
+
+    dim_t cb_loop_size
+            = 0; // number of loop iterations over corresponding C batches
 };
 
 } // namespace x64

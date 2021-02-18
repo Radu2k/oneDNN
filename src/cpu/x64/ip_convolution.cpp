@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,28 +14,31 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef CPU_X64_JIT_UTILS_LINUX_PERF_LINUX_PERF_HPP
-#define CPU_X64_JIT_UTILS_LINUX_PERF_LINUX_PERF_HPP
+#include <utility>
 
-#ifdef __linux__
-#include <cstddef>
+#include "cpu/x64/ip_convolution.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace cpu {
 namespace x64 {
-namespace jit_utils {
 
-void linux_perf_jitdump_record_code_load(
-        const void *code, size_t code_size, const char *code_name);
+status_t ip_convolution_fwd_t::execute(const exec_ctx_t &ctx) const {
+    using namespace memory_tracking::names;
 
-void linux_perf_perfmap_record_code_load(
-        const void *code, size_t code_size, const char *code_name);
-} // namespace jit_utils
+    exec_args_t ip_args = ctx.args();
+
+    exec_ctx_t conv_ctx(ctx, std::move(ip_args));
+
+    nested_scratchpad_t ns(ctx, key_nested, ip_p_);
+    conv_ctx.set_scratchpad_grantor(ns.grantor());
+
+    return ip_p_->execute(conv_ctx);
+}
+
 } // namespace x64
 } // namespace cpu
 } // namespace impl
 } // namespace dnnl
-#endif
 
-#endif
+// vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

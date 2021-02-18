@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -179,7 +179,8 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
     }
 
     if (is_nvidia_gpu()) {
-        const bool alg_ok = !(prb->alg == alg_t::DIV || prb->alg == alg_t::SUB);
+        const bool alg_ok = !(prb->alg == alg_t::DIV || prb->alg == alg_t::SUB
+                || prb->alg == alg_t::GE);
         const bool dt_ok = prb->sdt[0] == prb->sdt[1];
         const bool diff_dt_ok = dt_ok
                 && IMPLICATION(
@@ -264,6 +265,9 @@ int doit(const prb_t *prb, res_t *res) {
         };
         cmp.set_driver_check_function(binary_add_check);
 
+        const bool is_ge = prb->alg == alg_t::GE
+                || prb->attr.post_ops.find(alg_t::GE) >= 0;
+        if (is_ge) cmp.set_zero_trust_percent(100.f);
         SAFE(cmp.compare(dst_fp, dst_dt, prb->attr, res), WARN);
     }
 

@@ -30,6 +30,7 @@
 
 #include "cpu/gemm/gemm.hpp"
 
+#include "cpu/binary_injector_utils.hpp"
 #include "cpu/matmul/gemm_x8s8s32x_matmul.hpp"
 #include "cpu/matmul/matmul_utils.hpp"
 
@@ -74,13 +75,8 @@ status_t gemm_x8s8s32x_matmul_t<src_type, weights_type, dst_type>::pd_t::init(
 
     auto check_attr_post_ops = [&]() -> bool {
         using namespace primitive_kind;
-        const auto &p = attr()->post_ops_;
-        switch (p.len()) {
-            case 0: return true;
-            case 1: return p.contain(sum, 0) || p.contain(eltwise, 0);
-            case 2: return p.contain(sum, 0) && p.contain(eltwise, 1);
-            default: return false;
-        }
+        const auto &post_ops = attr()->post_ops_;
+        return cpu::inner_product_utils::post_ops_ok(post_ops, dst_md());
     };
 
     bool ok = src_md()->data_type == src_type
@@ -157,6 +153,9 @@ status_t gemm_x8s8s32x_matmul_t<src_type, weights_type, dst_type>::execute_ref(
     auto weights = CTX_IN_MEM(const weights_data_t *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const char *, DNNL_ARG_BIAS);
     auto dst = CTX_OUT_MEM(dst_data_t *, DNNL_ARG_DST);
+    const auto post_ops_binary_rhs_arg_vec
+            = binary_injector_utils::prepare_binary_args(
+                    this->pd()->attr()->post_ops_, ctx);
 
     DEFINE_SCALES_BUFFER(scales);
     DEFINE_ZERO_POINT_VALUE(src_zero_point, DNNL_ARG_SRC);
@@ -208,7 +207,7 @@ status_t gemm_x8s8s32x_matmul_t<src_type, weights_type, dst_type>::execute_ref(
     bool need_free_acc = false;
     if (acc == nullptr) {
         acc = (acc_data_t *)malloc(sizeof(acc_data_t) * acc_stride
-                        * (can_fuse_src_batch_dims
+                        * ((can_fuse_src_batch_dims || batch == 1)
                                         ? 1
                                         : (dim_t)dnnl_get_max_threads()),
                 64);
@@ -228,7 +227,7 @@ status_t gemm_x8s8s32x_matmul_t<src_type, weights_type, dst_type>::execute_ref(
                 = utils::get_dims_mask(dst_d.dims(), src_d.dims(), ndims);
         const int wei_mask
                 = utils::get_dims_mask(dst_d.dims(), weights_d.dims(), ndims);
-        const int bia_dt_size = !pd()->with_bias()
+        const size_t bia_dt_size = !pd()->with_bias()
                 ? 0
                 : types::data_type_size(pd()->weights_md(1)->data_type);
         const size_t work_amount = (size_t)batch * M * N;
@@ -321,9 +320,13 @@ status_t gemm_x8s8s32x_matmul_t<src_type, weights_type, dst_type>::execute_ref(
 
                 if (postops_in_matmul) {
                     (*pp_kernel_)(curr_dst, curr_acc,
-                            bias + (i_work % N) * bia_dt_size, scales, 0,
-                            gemm_M * gemm_N, static_cast<size_t>(gemm_N), ldc,
-                            &dst_zero_point_f32, nullptr, nullptr, ctx,
+                            bias
+                                    + static_cast<ptrdiff_t>(i_work % N)
+                                            * bia_dt_size,
+                            scales, 0, gemm_M * gemm_N,
+                            static_cast<size_t>(gemm_N), ldc,
+                            &dst_zero_point_f32,
+                            post_ops_binary_rhs_arg_vec.data(), dst, ctx,
                             *pd()->dst_md());
                 }
                 i_work += gemm_M * gemm_N;
@@ -363,7 +366,8 @@ status_t gemm_x8s8s32x_matmul_t<src_type, weights_type, dst_type>::execute_ref(
                 size_t start {}, end {};
                 balance211((size_t)(M * N), nthr, ithr, start, end);
                 (*pp_kernel_)(dst, acc, bias, scales, start, end, (size_t)N,
-                        ldc, &dst_zero_point_f32, nullptr, nullptr, ctx,
+                        ldc, &dst_zero_point_f32,
+                        post_ops_binary_rhs_arg_vec.data(), dst, ctx,
                         *pd()->dst_md());
             });
         }

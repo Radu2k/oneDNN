@@ -92,9 +92,9 @@ status_t gen9_wino_convolution_fwd_t::pd_t::init_conf() {
     conf.ic = utils::rnd_up(conf.ic_without_padding, 16);
     conf.oc = utils::rnd_up(conf.oc_without_padding, 16);
 
-    const bool is_wino_shape = conf.kh == 3 && conf.kw == 3 && conf.ngroups == 1
-            && conf.stride_h == 1 && conf.stride_w == 1 && conf.dilate_h == 0
-            && conf.dilate_w == 0 && conf.l_pad < conf.kw
+    const bool is_wino_shape = conf.ndims == 4 && conf.kh == 3 && conf.kw == 3
+            && conf.ngroups == 1 && conf.stride_h == 1 && conf.stride_w == 1
+            && conf.dilate_h == 0 && conf.dilate_w == 0 && conf.l_pad < conf.kw
             && conf.r_pad < conf.kw && conf.t_pad < conf.kh
             && conf.b_pad < conf.kh;
     if (!is_wino_shape) return status::unimplemented;
@@ -102,7 +102,18 @@ status_t gen9_wino_convolution_fwd_t::pd_t::init_conf() {
     const bool is_16oc = conf.oc % 16 == 0;
     const bool is_16ic = conf.ic % 16 == 0;
 
-    if ((is_16oc && is_16ic)) {
+    if (src_mdw.matches_one_of_tag(nhwc)
+            && (dst_mdw.matches_one_of_tag(nhwc)
+                    || dst_mdw.format_kind() == format_kind::any)) {
+        // Technically this implementation currently requires ic is a multiple
+        // of VTRANS_BLOCK = 4. This condition was not implemented yet due to no
+        // known use case, and small IC is expected to have poor performance
+        // because of extra work created by the current blocking.
+        if (conf.ic_without_padding % 16 != 0
+                || conf.oc_without_padding % 16 != 0)
+            return status::unimplemented;
+        conf.ver = ver_nhwc;
+    } else if ((is_16oc && is_16ic)) {
         conf.ver = (conf.mb % 16 == 0) ? ver_16mb16c : ver_8ow16c;
     } else {
         return status::unimplemented;
@@ -176,22 +187,19 @@ status_t gen9_wino_convolution_fwd_t::pd_t::init_conf() {
 
     switch (conf.ver) {
         case ver_16mb16c:
-            src_tag = utils::pick(
-                    conf.ndims - 3, NCw16n16c, NChw16n16c, NCdhw16n16c);
-            dst_tag = utils::pick(
-                    conf.ndims - 3, NCw16n16c, NChw16n16c, NCdhw16n16c);
-            wei_tag = (conf.with_groups ? utils::pick(conf.ndims - 3,
-                               gIOw16i16o, gIOhw16i16o, gIOdhw16i16o)
-                                        : utils::pick(conf.ndims - 3, IOw16i16o,
-                                                IOhw16i16o, IOdhw16i16o));
+            src_tag = NChw16n16c;
+            dst_tag = NChw16n16c;
+            wei_tag = conf.with_groups ? gOIhw16i16o : OIhw16i16o;
             break;
         case ver_8ow16c:
-            src_tag = utils::pick(conf.ndims - 3, nCw16c, nChw16c, nCdhw16c);
-            dst_tag = utils::pick(conf.ndims - 3, nCw16c, nChw16c, nCdhw16c);
-            wei_tag = (conf.with_groups ? utils::pick(conf.ndims - 3,
-                               gIOw16i16o, gIOhw16i16o, gIOdhw16i16o)
-                                        : utils::pick(conf.ndims - 3, IOw16i16o,
-                                                IOhw16i16o, IOdhw16i16o));
+            src_tag = nChw16c;
+            dst_tag = nChw16c;
+            wei_tag = conf.with_groups ? gOIhw16i16o : OIhw16i16o;
+            break;
+        case ver_nhwc:
+            src_tag = nhwc;
+            dst_tag = nhwc;
+            wei_tag = conf.with_groups ? gOIhw16i16o : OIhw16i16o;
             break;
         default: return status::unimplemented;
     }
@@ -248,11 +256,14 @@ status_t gen9_wino_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("G", conf.ngroups);
     kernel_ctx.define_int("MB", conf.mb);
     kernel_ctx.define_int("IC", conf.ic);
+    kernel_ctx.define_int("ID", conf.id);
     kernel_ctx.define_int("IH", conf.ih);
     kernel_ctx.define_int("IW", conf.iw);
     kernel_ctx.define_int("OC", conf.oc);
+    kernel_ctx.define_int("OD", conf.od);
     kernel_ctx.define_int("OH", conf.oh);
     kernel_ctx.define_int("OW", conf.ow);
+    kernel_ctx.define_int("KD", conf.kd);
     kernel_ctx.define_int("KH", conf.kh);
     kernel_ctx.define_int("KW", conf.kw);
     kernel_ctx.define_int("PH", conf.t_pad);
@@ -284,19 +295,21 @@ status_t gen9_wino_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("VER_8OW16C", conf.ver == ver_8ow16c);
     kernel_ctx.define_int("VER_16MB16C", conf.ver == ver_16mb16c);
 
-    kernel_ctx.define_int("SRC_16N16C",
-            utils::one_of(conf.src_tag, NCw16n16c, NChw16n16c, NCdhw16n16c));
+    kernel_ctx.define_int("SRC_NHWC", utils::one_of(conf.src_tag, nhwc));
     kernel_ctx.define_int(
-            "SRC_W16C", utils::one_of(conf.src_tag, nCw16c, nChw16c, nCdhw16c));
+            "SRC_16N16C", utils::one_of(conf.src_tag, NChw16n16c));
+    kernel_ctx.define_int("SRC_W16C", utils::one_of(conf.src_tag, nChw16c));
 
-    kernel_ctx.define_int("WEI_16I16O",
-            utils::one_of(conf.wei_tag, gIOw16i16o, gIOhw16i16o, gIOdhw16i16o,
-                    IOw16i16o, IOhw16i16o, IOdhw16i16o));
-
-    kernel_ctx.define_int("DST_16N16C",
-            utils::one_of(conf.dst_tag, NCw16n16c, NChw16n16c, NCdhw16n16c));
     kernel_ctx.define_int(
-            "DST_W16C", utils::one_of(conf.dst_tag, nCw16c, nChw16c, nCdhw16c));
+            "WEI_16I16O", utils::one_of(conf.wei_tag, gOIhw16i16o, OIhw16i16o));
+    kernel_ctx.define_int("WEI_16I16O_FLIPPED",
+            utils::one_of(conf.wei_tag, gIOhw16i16o, IOhw16i16o));
+
+    kernel_ctx.define_int("DST_NHWC", utils::one_of(conf.src_tag, nhwc));
+    kernel_ctx.define_int(
+            "DST_16N16C", utils::one_of(conf.dst_tag, NChw16n16c));
+    kernel_ctx.define_int("DST_W16C", utils::one_of(conf.dst_tag, nChw16c));
+
     kernel_ctx.define_int("WITH_BIAS", conf.with_bias);
 
     def_attr_info(kernel_ctx, conf.attr_info);
