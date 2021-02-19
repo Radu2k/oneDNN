@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -33,9 +33,14 @@ int Bundle::first_reg(HW hw) const
     case HW::Gen11:
         return (bundle0 << 8) | (bank0 << 1);
     case HW::Gen12LP:
+#if NGEN_GEN12P8
+    case HW::Gen12p8:
+#endif
         return (bundle0 << 1) | bank0;
     case HW::Gen12HP:
+#if NGEN_GEN12P7
     case HW::Gen12p7:
+#endif
         return (bundle0 << 2) | (bank0 << 1);
     default:
         return 0;
@@ -49,7 +54,9 @@ int Bundle::group_size(HW hw) const
     else switch (hw) {
     case HW::Gen11:
     case HW::Gen12HP:
+#if NGEN_GEN12P7
     case HW::Gen12p7:
+#endif
         return 2;
     default:
         return 1;
@@ -69,8 +76,14 @@ int Bundle::stride(HW hw) const
     case HW::Gen12LP:
         return 16;
     case HW::Gen12HP:
+#if NGEN_GEN12P7
     case HW::Gen12p7:
+#endif
         return 64;
+#if NGEN_GEN12P8
+    case HW::Gen12p8:
+        return 32;
+#endif
     default:
         return 128;
     }
@@ -97,10 +110,18 @@ int64_t Bundle::reg_mask(HW hw, int offset) const
         if (bank_id != any)                             base_mask &= 0x5555555555555555;
         return base_mask << (bank0 + (bundle0 << 1));
     case HW::Gen12HP:
+#if NGEN_GEN12P7
     case HW::Gen12p7:
+#endif
         if (bundle_id != any)                           base_mask  = 0x000000000000000F;
         if (bank_id != any)                             base_mask &= 0x3333333333333333;
         return base_mask << ((bank0 << 1) + (bundle0 << 2));
+#if NGEN_GEN12P8
+    case HW::Gen12p8:
+        if (bundle_id != any)                           base_mask  = 0x0000000300000003;
+        if (bank_id != any)                             base_mask &= 0x5555555555555555;
+        return base_mask << (bank0 + (bundle0 << 1));
+#endif
     default:
         return -1;
     }
@@ -119,8 +140,14 @@ Bundle Bundle::locate(HW hw, RegData reg)
         case HW::Gen12LP:
             return Bundle(base & 1, (base >> 1) & 7);
         case HW::Gen12HP:
+#if NGEN_GEN12P7
         case HW::Gen12p7:
+#endif
             return Bundle((base >> 1) & 1, (base >> 2) & 0xF);
+#if NGEN_GEN12P8
+        case HW::Gen12p8:
+            return Bundle(base & 1, (base >> 1) & 0xF);
+#endif
         default:
             return Bundle();
     }
@@ -132,12 +159,13 @@ Bundle Bundle::locate(HW hw, RegData reg)
 
 void RegisterAllocator::init()
 {
+    fullSubMask = (1u << (GRF::bytes(hw) >> 2)) - 1;
     for (int r = 0; r < max_regs; r++)
-        free_sub[r] = 0xFF;
+        free_sub[r] = fullSubMask;
     for (int r_whole = 0; r_whole < (max_regs >> 3); r_whole++)
         free_whole[r_whole] = 0xFF;
 
-    free_flag = 0xF;
+    free_flag = (1u << FlagRegister::subcount(hw)) - 1;
     reg_count = max_regs;
 
     if (hw < HW::Gen12HP)
@@ -198,7 +226,7 @@ void RegisterAllocator::release(GRF reg)
 {
     int r = reg.getBase();
 
-    free_sub[r] = 0xFF;
+    free_sub[r] = fullSubMask;
     free_whole[r >> 3] |= (1 << (r & 7));
 }
 
@@ -215,7 +243,7 @@ void RegisterAllocator::release(Subregister subreg)
     int o = (subreg.getByteOffset()) >> 2;
 
     free_sub[r] |= (1 << (o + dw)) - (1 << o);
-    if (free_sub[r] == 0xFF)
+    if (free_sub[r] == fullSubMask)
         free_whole[r >> 3] |= (1 << (r & 7));
 }
 
@@ -311,8 +339,12 @@ Subregister RegisterAllocator::try_alloc_sub(DataType type, Bundle bundle)
     int r_alloc, o_alloc;
 
     auto find_alloc_sub = [&,bundle,dwords](bool search_full_grf) -> bool {
+#if NGEN_GEN12P8
+        static const uint16_t alloc_patterns[4] = {0b1111111111111111, 0b0101010101010101, 0, 0b0001000100010001};
+#else
         static const uint8_t alloc_patterns[4] = {0b11111111, 0b01010101, 0, 0b00010001};
-        uint8_t alloc_pattern = alloc_patterns[dwords - 1];
+#endif
+        uint8_t alloc_pattern = alloc_patterns[(dwords - 1) & 3];
         int64_t *free_whole64 = (int64_t *) free_whole;
 
         for (int rchunk = 0; rchunk < (max_regs >> 6); rchunk++) {
@@ -324,7 +356,7 @@ Subregister RegisterAllocator::try_alloc_sub(DataType type, Bundle bundle)
                 int r = rr + (rchunk << 6);
                 free &= ~(int64_t(1) << rr);
 
-                if (search_full_grf || free_sub[r] != 0xFF) {
+                if (search_full_grf || free_sub[r] != fullSubMask) {
                     int subfree = free_sub[r];
                     for (int dw = 1; dw < dwords; dw++)
                         subfree &= (subfree >> dw);
@@ -368,7 +400,7 @@ FlagRegister RegisterAllocator::try_alloc_flag()
 void RegisterAllocator::dump(std::ostream &str)
 {
     str << "\n// Flag registers: ";
-    for (int r = 0; r < 4; r++)
+    for (int r = 0; r < FlagRegister::subcount(hw); r++)
         str << char((free_flag & (1 << r)) ? '.' : 'x');
 
     for (int r = 0; r < reg_count; r++) {
@@ -381,22 +413,24 @@ void RegisterAllocator::dump(std::ostream &str)
         if (!(r & 0xF))  str << ' ';
         if (!(r & 0x3))  str << ' ';
 
-        switch (free_sub[r]) {
-            case 0x00: str << 'x'; break;
-            case 0xFF: str << '.'; break;
-            default:   str << '/'; break;
-        }
+        if (free_sub[r] == 0x00)             str << 'x';
+        else if (free_sub[r] == fullSubMask) str << '.';
+        else                                 str << '/';
     }
 
     str << "\n//\n";
 
     for (int r = 0; r < max_regs; r++) {
         int rr = r >> 3, rb = 1 << (r & 7);
-        if ((free_sub[r] == 0xFF) != bool(free_whole[rr] & rb))
+        if ((free_sub[r] == fullSubMask) != bool(free_whole[rr] & rb))
             str << "// Inconsistent bitmaps at r" << r << std::endl;
-        if (free_sub[r] != 0x00 && free_sub[r] != 0xFF) {
+        if (free_sub[r] != 0x00 && free_sub[r] != fullSubMask) {
             str << "//  r" << std::setw(3) << r << "   ";
+#if NGEN_GEN12P8
+            for (int s = 0; s < (GRF::bytes(hw) >> 2); s++)
+#else
             for (int s = 0; s < 8; s++)
+#endif
                 str << char((free_sub[r] & (1 << s)) ? '.' : 'x');
             str << std::endl;
         }

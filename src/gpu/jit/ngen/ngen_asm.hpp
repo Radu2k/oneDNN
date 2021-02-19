@@ -17,6 +17,14 @@
 #ifndef NGEN_ASM_HPP
 #define NGEN_ASM_HPP
 
+#ifndef NGEN_GEN12P7
+#define NGEN_GEN12P7 1
+#endif
+
+#ifndef NGEN_GEN12P8
+#define NGEN_GEN12P8 1
+#endif
+
 #include <array>
 #include <cstdint>
 #include <sstream>
@@ -206,8 +214,8 @@ struct AsmInstruction {
     void setSWSB(SWSBInfo swsb) { mod.setSWSB(swsb); }
     void clearAutoSWSB()        { mod.setAutoSWSB(false); }
     Opcode opcode() const       { return op; }
-    SyncFunction syncFC() const { return static_cast<SyncFunction>(ext); }
-    SharedFunction sfid() const { return static_cast<SharedFunction>(ext); }
+    SyncFunction syncFC() const { return static_cast<SyncFunction>(ext & 0xF); }
+    SharedFunction sfid() const { return static_cast<SharedFunction>(ext & 0xF); }
     bool eot() const            { return mod.isEOT(); }
     bool predicated() const     { return !mod.isWrEn() || (mod.getPredCtrl() != PredCtrl::None); }
     bool atomic() const         { return mod.isAtomic(); }
@@ -299,6 +307,7 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
     using namespace autoswsb;
     const AsmOperand &operand = (opNum < 0) ? dst : src[opNum];
     RegData rd;
+    auto hw = region.hw;
 
     switch (operand.type) {
         case AsmOperand::Type::reg:  rd = operand.reg; break;
@@ -318,10 +327,19 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
                 MessageDescriptor desc;
                 desc.all = static_cast<uint64_t>(src[3].imm);
                 len = (opNum < 0) ? desc.parts.responseLen : desc.parts.messageLen;
+#if NGEN_GEN12P8
+                if (len == 31) len++;       // 32 GRF responses are encoded as 31. Conservatively use the higher value.
+#endif
             } else
                 len = -1;
         } else if (opNum == 1) {
-            if (src[2].type == AsmOperand::Type::imm) {
+            bool exdescImm = (src[2].type == AsmOperand::Type::imm);
+#if NGEN_GEN12P7
+            if (exdescImm && (hw >= HW::Gen12p7))
+                len = ext >> 8;
+            else
+#endif
+            if (exdescImm) {
                 ExtendedMessageDescriptor exdesc;
                 exdesc.all = static_cast<uint64_t>(src[2].imm);
                 len = exdesc.parts.extMessageLen;
@@ -333,7 +351,7 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
         else if (len == -1)
             region = DependencyRegion();
         else
-            region = DependencyRegion(GRFRange(rd.getBase(), len));
+            region = DependencyRegion(hw, GRFRange(rd.getBase(), len));
     } else if (op == Opcode::dpas || op == Opcode::dpasw) {
         unsigned sdepth = ext >> 8;
         unsigned rcount = ext & 0xFF;
@@ -350,9 +368,9 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
             default: return false;
         }
 
-        region = DependencyRegion(GRFRange(operand.reg.getBase(), len));
+        region = DependencyRegion(hw, GRFRange(operand.reg.getBase(), len));
     } else
-        region = DependencyRegion(mod.getExecSize(), rd);
+        region = DependencyRegion(hw, mod.getExecSize(), rd);
 
     return true;
 }
@@ -366,7 +384,7 @@ private:
 #include "ngen_compiler_fix.hpp"
 public:
     AsmCodeGenerator(HW hardware_) : hardware(hardware_), isGen12(hardware_ >= HW::Gen12LP),
-            defaultOutput{nullptr}, sync{this} {
+            defaultOutput{nullptr}, sync{this}, load{this}, store{this}, atomic{this} {
         _workaround_();
         streamStack.push_back(new InstructionStream());
     }
@@ -469,10 +487,17 @@ private:
     void opSend(Opcode op, const InstructionModifier &mod, SharedFunction sf, RegData dst, RegData src0, S1 src1, ED exdesc, D desc) {
         auto &i = streamStack.back()->append(op, static_cast<uint8_t>(sf), mod | defaultModifier, dst, src0, src1, exdesc, desc, &labelManager);
         if (i.src[2].type == AsmOperand::Type::imm) {
-            if (isGen12)
-                i.src[2].imm = uint32_t(static_cast<uint64_t>(i.src[2].imm) & ~0x2F);
-            else
-                i.src[2].imm = uint32_t(static_cast<uint64_t>(i.src[2].imm) | static_cast<uint8_t>(sf));
+            uint32_t exdesc = static_cast<uint64_t>(i.src[2].imm);
+            if (isGen12) {
+#if NGEN_GEN12P7
+                if (hardware >= HW::Gen12p7) {
+                    i.ext |= 0x80 | (((exdesc >> 6) & 0x1F) << 8);
+                    i.src[2].imm = uint32_t(exdesc & ~0x7EF);
+                } else
+#endif
+                i.src[2].imm = uint32_t(exdesc & ~0x2F);
+            } else
+                i.src[2].imm = uint32_t(exdesc | static_cast<uint8_t>(sf));
         }
     }
     void opDpas(Opcode op, const InstructionModifier &mod, int sdepth, int rcount, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
@@ -500,6 +525,8 @@ protected:
     // Configuration.
     void setDefaultNoMask(bool def = true)          { defaultModifier.setWrEn(def); }
     void setDefaultAutoSWSB(bool def = true)        { defaultModifier.setAutoSWSB(def); }
+    bool getDefaultNoMask() const                   { return defaultModifier.isWrEn(); }
+    bool getDefaultAutoSWSB() const                 { return defaultModifier.isAutoSWSB(); }
 
     // Stream handling.
     void pushStream()                               { pushStream(new InstructionStream()); }
@@ -546,6 +573,10 @@ protected:
         opX(Opcode::add3, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
+    void add3(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
+        opX(Opcode::add3, getDataType<DT>(), mod, dst, src0, src1, src2);
+    }
+    template <typename DT = void>
     void and_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
         opX(isGen12 ? Opcode::and_gen12 : Opcode::and_, getDataType<DT>(), mod, dst, src0, src1);
     }
@@ -584,6 +615,18 @@ protected:
         opX(isGen12 ? Opcode::bfe_gen12 : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
+    void bfe(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const RegData &src2) {
+        opX(isGen12 ? Opcode::bfe_gen12 : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
+    }
+    template <typename DT = void>
+    void bfe(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const Immediate &src2) {
+        opX(isGen12 ? Opcode::bfe_gen12 : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
+    }
+    template <typename DT = void>
+    void bfe(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
+        opX(isGen12 ? Opcode::bfe_gen12 : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
+    }
+    template <typename DT = void>
     void bfi1(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
         opX(isGen12 ? Opcode::bfi1_gen12 : Opcode::bfi1, getDataType<DT>(), mod, dst, src0, src1);
     }
@@ -604,6 +647,10 @@ protected:
         opX(isGen12 ? Opcode::bfi2_gen12 : Opcode::bfi2, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
+    void bfi2(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
+        opX(isGen12 ? Opcode::bfi2_gen12 : Opcode::bfi2, getDataType<DT>(), mod, dst, src0, src1, src2);
+    }
+    template <typename DT = void>
     void bfn(const InstructionModifier &mod, uint8_t ctrl, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
         opX(Opcode::bfn, getDataType<DT>(), mod, dst, src0, src1, src2, ctrl);
     }
@@ -613,6 +660,10 @@ protected:
     }
     template <typename DT = void>
     void bfn(const InstructionModifier &mod, uint8_t ctrl, const RegData &dst, const RegData &src0, const RegData &src1, const Immediate &src2) {
+        opX(Opcode::bfn, getDataType<DT>(), mod, dst, src0, src1, src2, ctrl);
+    }
+    template <typename DT = void>
+    void bfn(const InstructionModifier &mod, uint8_t ctrl, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
         opX(Opcode::bfn, getDataType<DT>(), mod, dst, src0, src1, src2, ctrl);
     }
     template <typename DT = void>
@@ -680,6 +731,18 @@ protected:
     void csel(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
         opX(isGen12 ? Opcode::csel_gen12 : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
+    template <typename DT = void>
+    void csel(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const RegData &src2) {
+        opX(isGen12 ? Opcode::csel_gen12 : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
+    }
+    template <typename DT = void>
+    void csel(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const Immediate &src2) {
+        opX(isGen12 ? Opcode::csel_gen12 : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
+    }
+    template <typename DT = void>
+    void csel(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
+        opX(isGen12 ? Opcode::csel_gen12 : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
+    }
     void cont(const InstructionModifier &mod, Label &jip, Label &uip) {
         (void) jip.getID(labelManager);
         (void) uip.getID(labelManager);
@@ -719,6 +782,10 @@ protected:
     }
     template <typename DT = void>
     void dp4a(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const Immediate &src2) {
+        opX(Opcode::dp4a, getDataType<DT>(), mod, dst, src0, src1, src2);
+    }
+    template <typename DT = void>
+    void dp4a(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
         opX(Opcode::dp4a, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     void dpas(const InstructionModifier &mod, uint8_t sdepth, uint8_t rcount, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
@@ -844,25 +911,41 @@ protected:
     }
     template <typename DT = void>
     void mach(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
+#if NGEN_GEN12P8
+        opX(Opcode::mach, getDataType<DT>(), (hardware >= HW::Gen12p8) ? mod : (mod | AccWrEn), dst, src0, src1);
+#else
         opX(Opcode::mach, getDataType<DT>(), mod | AccWrEn, dst, src0, src1);
+#endif
     }
     template <typename DT = void>
     void mach(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
+#if NGEN_GEN12P8
+        opX(Opcode::mach, getDataType<DT>(), (hardware >= HW::Gen12p8) ? mod : (mod | AccWrEn), dst, src0, src1);
+#else
         opX(Opcode::mach, getDataType<DT>(), mod | AccWrEn, dst, src0, src1);
+#endif
     }
     template <typename DT = void>
     void macl(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
 #ifdef NGEN_SAFE
         if (hardware < HW::Gen10) unsupported();
 #endif
+#if NGEN_GEN12P8
+        opX((hardware >= HW::Gen12p8) ? Opcode::macl : Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
+#else
         opX(Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
+#endif
     }
     template <typename DT = void>
     void macl(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
 #ifdef NGEN_SAFE
         if (hardware < HW::Gen10) unsupported();
 #endif
+#if NGEN_GEN12P8
+        opX((hardware >= HW::Gen12p8) ? Opcode::macl : Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
+#else
         opX(Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
+#endif
     }
     template <typename DT = void>
     void mad(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
@@ -878,6 +961,10 @@ protected:
     }
     template <typename DT = void>
     void mad(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const Immediate &src2) {
+        opX(Opcode::mad, getDataType<DT>(), mod, dst, src0, src1, src2);
+    }
+    template <typename DT = void>
+    void mad(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
         opX(Opcode::mad, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
@@ -979,11 +1066,11 @@ protected:
 #endif
     template <typename DT = void>
     void or_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::or_gen12 : Opcode:: or_ , getDataType<DT>(), mod, dst, src0, src1);
+        opX(isGen12 ? Opcode::or_gen12 : Opcode::or_, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void or_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::or_gen12 : Opcode:: or_ , getDataType<DT>(), mod, dst, src0, src1);
+        opX(isGen12 ? Opcode::or_gen12 : Opcode::or_, getDataType<DT>(), mod, dst, src0, src1);
     }
 #ifndef NGEN_NO_OP_NAMES
     template <typename DT = void>
@@ -1188,6 +1275,16 @@ protected:
     void smov(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
         opX(isGen12 ? Opcode::smov_gen12 : Opcode::smov, getDataType<DT>(), mod, dst, src0, src1);
     }
+#if NGEN_GEN12P8
+    template <typename DT = void>
+    void srnd(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
+        opX(Opcode::srnd, getDataType<DT>(), mod, dst, src0, src1);
+    }
+    template <typename DT = void>
+    void srnd(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
+        opX(Opcode::srnd, getDataType<DT>(), mod, dst, src0, src1);
+    }
+#endif
     template <typename DT = void>
     void subb(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
         opX(Opcode::subb, getDataType<DT>(), mod | AccWrEn, dst, src0, src1);
@@ -1243,6 +1340,12 @@ private:
         void operator()(SyncFunction fc, const InstructionModifier &mod, int src0) {
             parent.opSync(Opcode::sync, fc, mod, Immediate::ud(src0));
         }
+        void allrd() {
+            allrd(null);
+        }
+        void allrd(const InstructionModifier &mod) {
+            allrd(mod, null);
+        }
         void allrd(const RegData &src0) {
             allrd(InstructionModifier(), src0);
         }
@@ -1254,6 +1357,12 @@ private:
         }
         void allrd(const InstructionModifier &mod, uint32_t src0) {
             this->operator()(SyncFunction::allrd, mod, src0);
+        }
+        void allwr() {
+            allwr(null);
+        }
+        void allwr(const InstructionModifier &mod) {
+            allwr(mod, null);
         }
         void allwr(const RegData &src0) {
             allwr(InstructionModifier(), src0);
@@ -1279,6 +1388,210 @@ private:
     };
 public:
     Sync sync;
+
+private:
+    struct Load {
+        AsmCodeGenerator &parent;
+
+        Load(AsmCodeGenerator *parent_) : parent(*parent_) {}
+
+        template <typename DataSpec>
+        void operator()(const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const RegData &addr)
+        {
+            MessageDescriptor desc;
+            ExtendedMessageDescriptor exdesc;
+
+            encodeLoadDescriptors(parent.hardware, desc, exdesc, mod, dst, spec, base, addr);
+            parent.send(mod, dst, addr, exdesc.all, desc.all);
+        }
+
+#if NGEN_GEN12P7
+        template <typename DataSpec>
+        void operator()(const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const GRFDisp &addr)
+        {
+            MessageDescriptor desc;
+            ExtendedMessageDescriptor exdesc;
+
+            encodeLoadDescriptors(parent.hardware, desc, exdesc, mod, dst, spec, base, addr);
+            parent.send(mod, dst, addr.getBase(), exdesc.all, desc.all);
+        }
+
+        template <typename DataSpec>
+        void operator()(SharedFunction sfid, const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const GRFDisp &addr)
+        {
+            MessageDescriptor desc;
+            ExtendedMessageDescriptor exdesc;
+
+            exdesc.parts.sfid = static_cast<unsigned>(sfid);
+            encodeLoadDescriptors(parent.hardware, desc, exdesc, mod, dst, spec, base, addr);
+            exdesc.parts.sfid = static_cast<unsigned>(sfid);
+            parent.send(mod, dst, addr.getBase(), exdesc.all, desc.all);
+        }
+
+        void ugm(const InstructionModifier &mod, const RegData &dst, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr)
+        {
+            this->operator()(SharedFunction::ugm, mod, dst, spec, base, addr);
+        }
+        void ugml(const InstructionModifier &mod, const RegData &dst, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr)
+        {
+            this->operator()(SharedFunction::ugml, mod, dst, spec, base, addr);
+        }
+        void tgm(const InstructionModifier &mod, const RegData &dst, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr)
+        {
+            this->operator()(SharedFunction::tgm, mod, dst, spec, base, addr);
+        }
+        void slm(const InstructionModifier &mod, const RegData &dst, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr)
+        {
+            this->operator()(SharedFunction::slm, mod, dst, spec, base, addr);
+        }
+#endif
+    };
+
+    struct Store {
+        AsmCodeGenerator &parent;
+
+        Store(AsmCodeGenerator *parent_) : parent(*parent_) {}
+
+        template <typename DataSpec>
+        void operator()(const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const RegData &addr, const RegData &data)
+        {
+            MessageDescriptor desc;
+            ExtendedMessageDescriptor exdesc;
+
+            encodeStoreDescriptors(parent.hardware, desc, exdesc, mod, spec, base, addr);
+            parent.sends(mod, NullRegister(), addr, data, exdesc.all, desc.all);
+        }
+
+#if NGEN_GEN12P7
+        template <typename DataSpec>
+        void operator()(const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const GRFDisp &addr, const RegData &data)
+        {
+            MessageDescriptor desc;
+            ExtendedMessageDescriptor exdesc;
+
+            encodeStoreDescriptors(parent.hardware, desc, exdesc, mod, spec, base, addr);
+            parent.sends(mod, NullRegister(), addr.getBase(), data, exdesc.all, desc.all);
+        }
+
+        template <typename DataSpec>
+        void operator()(SharedFunction sfid, const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const GRFDisp &addr, const RegData &data)
+        {
+            MessageDescriptor desc;
+            ExtendedMessageDescriptor exdesc;
+
+            exdesc.parts.sfid = static_cast<unsigned>(sfid);
+            encodeStoreDescriptors(parent.hardware, desc, exdesc, mod, spec, base, addr);
+            exdesc.parts.sfid = static_cast<unsigned>(sfid);
+            parent.sends(mod, NullRegister(), addr.getBase(), data, exdesc.all, desc.all);
+        }
+
+        void ugm(const InstructionModifier &mod, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data)
+        {
+            this->operator()(SharedFunction::ugm, mod, spec, base, addr, data);
+        }
+        void ugml(const InstructionModifier &mod, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data)
+        {
+            this->operator()(SharedFunction::ugml, mod, spec, base, addr, data);
+        }
+        void tgm(const InstructionModifier &mod, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data)
+        {
+            this->operator()(SharedFunction::tgm, mod, spec, base, addr, data);
+        }
+        void slm(const InstructionModifier &mod, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data)
+        {
+            this->operator()(SharedFunction::slm, mod, spec, base, addr, data);
+        }
+#endif
+    };
+
+    struct Atomic {
+        AsmCodeGenerator &parent;
+
+        Atomic(AsmCodeGenerator *parent_) : parent(*parent_) {}
+
+        template <typename DataSpec>
+        void operator()(AtomicOp op, const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const RegData &addr, const RegData &data = NullRegister())
+        {
+            MessageDescriptor desc;
+            ExtendedMessageDescriptor exdesc;
+
+            encodeAtomicDescriptors(parent.hardware, desc, exdesc, op, mod, dst, spec, base, addr);
+            if (data.isNull())
+                parent.send(mod, dst, addr, exdesc.all, desc.all);
+            else
+                parent.sends(mod, dst, addr, data, exdesc.all, desc.all);
+        }
+        template <typename DataSpec>
+        void operator()(AtomicOp op, const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const RegData &addr, const RegData &data = NullRegister())
+        {
+            (*this)(op, mod, NullRegister(), spec, base, addr, data);
+        }
+
+#if NGEN_GEN12P7
+        template <typename DataSpec>
+        void operator()(AtomicOp op, const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
+        {
+            MessageDescriptor desc;
+            ExtendedMessageDescriptor exdesc;
+
+            encodeAtomicDescriptors(parent.hardware, desc, exdesc, op, mod, dst, spec, base, addr);
+            parent.sends(mod, dst, addr.getBase(), data, exdesc.all, desc.all);
+        }
+        template <typename DataSpec>
+        void operator()(AtomicOp op, const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
+        {
+            (*this)(op, mod, NullRegister(), spec, base, addr, data);
+        }
+        template <typename DataSpec>
+        void operator()(SharedFunction sfid, AtomicOp op, const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const GRFDisp &addr, const RegData &data)
+        {
+            MessageDescriptor desc;
+            ExtendedMessageDescriptor exdesc;
+
+            exdesc.parts.sfid = static_cast<unsigned>(sfid);
+            encodeAtomicDescriptors(parent.hardware, desc, exdesc, op, mod, dst, spec, base, addr);
+            exdesc.parts.sfid = static_cast<unsigned>(sfid);
+            parent.sends(mod, dst, addr.getBase(), data, exdesc.all, desc.all);
+        }
+
+        void ugm(AtomicOp op, const InstructionModifier &mod, const RegData &dst, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
+        {
+            this->operator()(SharedFunction::ugm, op, mod, dst, spec, base, addr, data);
+        }
+        void ugm(AtomicOp op, const InstructionModifier &mod, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
+        {
+            this->operator()(SharedFunction::ugm, op, mod, NullRegister(), spec, base, addr, data);
+        }
+        void ugml(AtomicOp op, const InstructionModifier &mod, const RegData &dst, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
+        {
+            this->operator()(SharedFunction::ugml, op, mod, dst, spec, base, addr, data);
+        }
+        void ugml(AtomicOp op, const InstructionModifier &mod, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
+        {
+            this->operator()(SharedFunction::ugml, op, mod, NullRegister(), spec, base, addr, data);
+        }
+        void tgm(AtomicOp op, const InstructionModifier &mod, const RegData &dst, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
+        {
+            this->operator()(SharedFunction::tgm, op, mod, dst, spec, base, addr, data);
+        }
+        void tgm(AtomicOp op, const InstructionModifier &mod, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
+        {
+            this->operator()(SharedFunction::tgm, op, mod, NullRegister(), spec, base, addr, data);
+        }
+        void slm(AtomicOp op, const InstructionModifier &mod, const RegData &dst, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
+        {
+            this->operator()(SharedFunction::slm, op, mod, dst, spec, base, addr, data);
+        }
+        void slm(AtomicOp op, const InstructionModifier &mod, DataSpec12p7 spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
+        {
+            this->operator()(SharedFunction::slm, op, mod, NullRegister(), spec, base, addr, data);
+        }
+#endif
+    };
+public:
+    Load load;
+    Store store;
+    Atomic atomic;
 
     inline void mark(Label &label)          { streamStack.back()->mark(label, labelManager); }
 
@@ -1417,7 +1730,12 @@ void AsmCodeGenerator::outX(std::ostream &out, const AsmInstruction &i, int line
 
     i.dst.outputText(out, ddst, labelManager); out << '\t';
     for (int n = 0; n < 4; n++) {
-        i.src[n].outputText(out, dsrc[n], labelManager); out << '\t';
+        i.src[n].outputText(out, dsrc[n], labelManager);
+#if NGEN_GEN12P7
+        if (hardware >= HW::Gen12p7 && n == 1 && (i.op == Opcode::send || i.op == Opcode::sendc) && (i.ext & 0x80))
+            out << ':' << (i.ext >> 8);
+#endif
+        out << '\t';
     }
 
     outMods(out, i.mod, i.op, ModPlacementType::Post);
@@ -1438,9 +1756,9 @@ void AsmCodeGenerator::outExt(std::ostream &out, const AsmInstruction &i)
 
     if (isGen12) switch (i.opcode()) {
         case Opcode::send:
-        case Opcode::sends:     out << '.' << getMnemonic(static_cast<SharedFunction>(i.ext), hardware); break;
-        case Opcode::sync:      out << '.' << static_cast<SyncFunction>(i.ext);                          break;
-        case Opcode::bfn:       out << ".0x" << std::hex << i.ext << std::dec;                           break;
+        case Opcode::sends:     out << '.' << getMnemonic(static_cast<SharedFunction>(i.ext & 0xF), hardware); break;
+        case Opcode::sync:      out << '.' << static_cast<SyncFunction>(i.ext);                                break;
+        case Opcode::bfn:       out << ".0x" << std::hex << i.ext << std::dec;                                 break;
         case Opcode::dpas:
         case Opcode::dpasw: {
             int sdepth = i.ext >> 8;
@@ -1500,18 +1818,18 @@ void AsmCodeGenerator::outMods(std::ostream &out,const InstructionModifier &mod,
             };
 
             SWSBInfo swsb = mod.getSWSB();
-            if (swsb.hasSB()) {
-                SBInfo sb = swsb.sb();
-                startPostMod(); out << '$' << sb.getID();
-                if (sb.isSrc()) out << ".src";
-                if (sb.isDst() || (!isVariableLatency(op) && (swsb.dist() > 0)))
-                    out << ".dst";
+            if (swsb.hasToken()) {
+                startPostMod(); out << '$' << swsb.parts.token;
+                if (swsb.parts.src && !swsb.parts.dst) out << ".src";
+                if (swsb.parts.dst && !swsb.parts.src) out << ".dst";
             }
-            if (swsb.dist() > 0) {
+            if (swsb.hasDist()) {
                 startPostMod();
-                if (hardware > HW::Gen12LP || !swsb.hasSB())
-                    out << swsb.pipe(op);
-                out << '@' << swsb.dist();
+                if (hardware > HW::Gen12LP && (op == Opcode::send || op == Opcode::sendc) && swsb.getPipe() == Pipe::Default)
+                    out << Pipe::A;
+                else if (hardware > HW::Gen12LP || !swsb.hasToken())
+                    out << swsb.getPipe();
+                out << '@' << swsb.parts.dist;
             }
 
             if (mod.isAlign16())                                          printPostMod("Align16");

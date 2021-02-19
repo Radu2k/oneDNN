@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -73,6 +73,9 @@ static constexpr_reg SpecialAccumulatorRegister nomme = SpecialAccumulatorRegist
 static constexpr_reg SpecialAccumulatorRegister noacc = nomme;
 static constexpr_reg FlagRegister f0{0}, f1{1};
 static constexpr_reg FlagRegister f0_0{0,0}, f0_1{0,1}, f1_0{1,0}, f1_1{1,1};
+#if NGEN_GEN12P8
+static constexpr_reg FlagRegister f2{2}, f3{3};
+#endif
 static constexpr_reg ChannelEnableRegister ce0{0};
 static constexpr_reg StackPointerRegister sp{0};
 static constexpr_reg StateRegister sr0{0}, sr1{1};
@@ -81,8 +84,13 @@ static constexpr_reg NotificationRegister n0{0};
 static constexpr_reg InstructionPointerRegister ip{};
 static constexpr_reg ThreadDependencyRegister tdr0{0};
 static constexpr_reg PerformanceRegister tm0{0};
+static constexpr_reg PerformanceRegister tm1{1};
+static constexpr_reg PerformanceRegister tm2{2};
+static constexpr_reg PerformanceRegister tm3{3};
+static constexpr_reg PerformanceRegister tm4{4};
 static constexpr_reg PerformanceRegister pm0{0,3}, tp0{0,4};
 static constexpr_reg DebugRegister dbg0{0};
+static constexpr_reg FlowControlRegister fc0{0}, fc1{1}, fc2{2}, fc3{3};
 
 static constexpr_reg InstructionModifier NoDDClr = InstructionModifier::createNoDDClr();
 static constexpr_reg InstructionModifier NoDDChk = InstructionModifier::createNoDDChk();
@@ -117,6 +125,10 @@ static constexpr_reg PredCtrl any16h = PredCtrl::any16h;
 static constexpr_reg PredCtrl all16h = PredCtrl::all16h;
 static constexpr_reg PredCtrl any32h = PredCtrl::any32h;
 static constexpr_reg PredCtrl all32h = PredCtrl::all32h;
+#if NGEN_GEN12P8
+static constexpr_reg PredCtrl any = PredCtrl::any;
+static constexpr_reg PredCtrl all = PredCtrl::all;
+#endif
 
 static constexpr_reg InstructionModifier x_repl = InstructionModifier{PredCtrl::x};
 static constexpr_reg InstructionModifier y_repl = InstructionModifier{PredCtrl::y};
@@ -150,6 +162,10 @@ static inline InstructionModifier M(int off) { return ExecutionOffset(off); }
 
 static constexpr_reg SBID sb0{0}, sb1{1}, sb2{2}, sb3{3}, sb4{4}, sb5{5}, sb6{6}, sb7{7};
 static constexpr_reg SBID sb8{8}, sb9{9}, sb10{10}, sb11{11}, sb12{12}, sb13{13}, sb14{14}, sb15{15};
+#if NGEN_GEN12P8
+static constexpr_reg SBID sb16{16}, sb17{17}, sb18{18}, sb19{19}, sb20{20}, sb21{21}, sb22{22}, sb23{23};
+static constexpr_reg SBID sb24{24}, sb25{25}, sb26{16}, sb27{27}, sb28{28}, sb29{29}, sb30{30}, sb31{31};
+#endif
 
 static constexpr_reg AddressBase A32 = AddressBase::createA32(true);
 static constexpr_reg AddressBase A32NC = AddressBase::createA32(false);
@@ -160,3 +176,59 @@ static constexpr_reg AddressBase SLM = AddressBase::createSLM();
 static inline AddressBase Surface(uint8_t index) { return AddressBase::createBTS(index); }
 static inline AddressBase CC(uint8_t index) { return AddressBase::createCC(index); }
 static inline AddressBase SC(uint8_t index) { return AddressBase::createSC(index); }
+
+#if NGEN_GEN12P7
+static inline AddressBase BTI(uint8_t index) { return AddressBase::createBTS(index); }
+static inline AddressBase SS(uint32_t index) { return AddressBase::createSS(index); }
+static inline AddressBase BSS(uint32_t index) { return AddressBase::createBSS(index); }
+
+static constexpr_reg DataSpec12p7 D8{DPDataSize12p7::D8};
+static constexpr_reg DataSpec12p7 D16{DPDataSize12p7::D16};
+static constexpr_reg DataSpec12p7 D32{DPDataSize12p7::D32};
+static constexpr_reg DataSpec12p7 D64{DPDataSize12p7::D64};
+static constexpr_reg DataSpec12p7 D8U32{DPDataSize12p7::D8U32};
+static constexpr_reg DataSpec12p7 D16U32{DPDataSize12p7::D16U32};
+
+static constexpr_reg DataSpec12p7 D8T = DataSpec12p7(DPDataSize12p7::D8) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 D16T = DataSpec12p7(DPDataSize12p7::D16) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 D32T = DataSpec12p7(DPDataSize12p7::D32) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 D64T = DataSpec12p7(DPDataSize12p7::D64) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 D8U32T = DataSpec12p7(DPDataSize12p7::D8U32) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 D16U32T = DataSpec12p7(DPDataSize12p7::D16U32) | DataSpec12p7::createTranspose();
+
+static constexpr_reg DataSpec12p7 V1 = DataSpec12p7::createV(1,0);
+static constexpr_reg DataSpec12p7 V2 = DataSpec12p7::createV(2,1);
+static constexpr_reg DataSpec12p7 V3 = DataSpec12p7::createV(3,2);
+static constexpr_reg DataSpec12p7 V4 = DataSpec12p7::createV(4,3);
+static constexpr_reg DataSpec12p7 V8 = DataSpec12p7::createV(8,4);
+static constexpr_reg DataSpec12p7 V16 = DataSpec12p7::createV(16,5);
+static constexpr_reg DataSpec12p7 V32 = DataSpec12p7::createV(32,6);
+static constexpr_reg DataSpec12p7 V64 = DataSpec12p7::createV(64,7);
+
+static constexpr_reg DataSpec12p7 V1T = DataSpec12p7::createV(1,0) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 V2T = DataSpec12p7::createV(2,1) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 V3T = DataSpec12p7::createV(3,2) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 V4T = DataSpec12p7::createV(4,3) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 V8T = DataSpec12p7::createV(8,4) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 V16T = DataSpec12p7::createV(16,5) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 V32T = DataSpec12p7::createV(32,6) | DataSpec12p7::createTranspose();
+static constexpr_reg DataSpec12p7 V64T = DataSpec12p7::createV(64,7) | DataSpec12p7::createTranspose();
+
+static constexpr_reg DataSpec12p7 transpose = DataSpec12p7::createTranspose();
+#if NGEN_GEN12P8
+static constexpr_reg DataSpec12p7 vnni = DataSpec12p7::createVNNI();
+#endif
+
+static constexpr_reg CacheSettings12p7 L1UC_L3UC = CacheSettings12p7::L1UC_L3UC;
+static constexpr_reg CacheSettings12p7 L1UC_L3C  = CacheSettings12p7::L1UC_L3C;
+static constexpr_reg CacheSettings12p7 L1C_L3UC  = CacheSettings12p7::L1C_L3UC;
+static constexpr_reg CacheSettings12p7 L1C_L3C   = CacheSettings12p7::L1C_L3C;
+static constexpr_reg CacheSettings12p7 L1S_L3UC  = CacheSettings12p7::L1S_L3UC;
+static constexpr_reg CacheSettings12p7 L1S_L3C   = CacheSettings12p7::L1S_L3C;
+static constexpr_reg CacheSettings12p7 L1IAR_L3C = CacheSettings12p7::L1IAR_L3C;
+static constexpr_reg CacheSettings12p7 L1UC_L3WB = CacheSettings12p7::L1UC_L3WB;
+static constexpr_reg CacheSettings12p7 L1WT_L3UC = CacheSettings12p7::L1WT_L3UC;
+static constexpr_reg CacheSettings12p7 L1WT_L3WB = CacheSettings12p7::L1WT_L3WB;
+static constexpr_reg CacheSettings12p7 L1S_L3WB  = CacheSettings12p7::L1S_L3WB;
+static constexpr_reg CacheSettings12p7 L1WB_L3WB = CacheSettings12p7::L1WB_L3WB;
+#endif /* NGEN_GEN12P7 */

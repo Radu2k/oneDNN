@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -15,12 +15,13 @@
 *******************************************************************************/
 
 /*
- * When compiling nGEN in C++11 or C++14 mode; \
-PREFIX constexpr ngen::GRF this header file should be
+ * When compiling nGEN in C++11 or C++14 mode, this header file should be
  *  #include'd exactly once in your source code.
  */
 
 #if (defined(NGEN_CPP11) || defined(NGEN_CPP14)) && !defined(NGEN_GLOBAL_REGS)
+
+#include "ngen.hpp"
 
 #define NGEN_REGISTER_DECL_MAIN(CG, PREFIX) \
 PREFIX constexpr ngen::IndirectRegisterFrame CG::indirect; \
@@ -191,9 +192,17 @@ PREFIX constexpr ngen::NotificationRegister CG::n0; \
 PREFIX constexpr ngen::InstructionPointerRegister CG::ip; \
 PREFIX constexpr ngen::ThreadDependencyRegister CG::tdr0; \
 PREFIX constexpr ngen::PerformanceRegister CG::tm0; \
+PREFIX constexpr ngen::PerformanceRegister CG::tm1; \
+PREFIX constexpr ngen::PerformanceRegister CG::tm2; \
+PREFIX constexpr ngen::PerformanceRegister CG::tm3; \
+PREFIX constexpr ngen::PerformanceRegister CG::tm4; \
 PREFIX constexpr ngen::PerformanceRegister CG::pm0; \
 PREFIX constexpr ngen::PerformanceRegister CG::tp0; \
 PREFIX constexpr ngen::DebugRegister CG::dbg0; \
+PREFIX constexpr ngen::FlowControlRegister CG::fc0; \
+PREFIX constexpr ngen::FlowControlRegister CG::fc1; \
+PREFIX constexpr ngen::FlowControlRegister CG::fc2; \
+PREFIX constexpr ngen::FlowControlRegister CG::fc3; \
 \
 PREFIX constexpr ngen::InstructionModifier CG::NoDDClr; \
 PREFIX constexpr ngen::InstructionModifier CG::NoDDChk; \
@@ -273,7 +282,7 @@ PREFIX constexpr ngen::AddressBase CG::A64; \
 PREFIX constexpr ngen::AddressBase CG::A64NC; \
 PREFIX constexpr ngen::AddressBase CG::SLM; \
 
-#define NGEN_REGISTER_DECL_EXTRA(CG,PREFIX) \
+#define NGEN_REGISTER_DECL_EXTRA1(CG,PREFIX) \
 PREFIX constexpr ngen::GRF CG::r128; \
 PREFIX constexpr ngen::GRF CG::r129; \
 PREFIX constexpr ngen::GRF CG::r130; \
@@ -403,17 +412,94 @@ PREFIX constexpr ngen::GRF CG::r253; \
 PREFIX constexpr ngen::GRF CG::r254; \
 PREFIX constexpr ngen::GRF CG::r255;
 
-#ifdef NGEN_SHORT_NAMES
-#define NGEN_REGISTER_DECL(CG,PREFIX) \
-NGEN_REGISTER_DECL_MAIN(CG,PREFIX) \
-NGEN_REGISTER_DECL_EXTRA(CG,PREFIX) \
+#if !NGEN_GEN12P7
+#define NGEN_REGISTER_DECL_EXTRA2(CG,PREFIX)
+#else
+#define NGEN_REGISTER_DECL_EXTRA2(CG,PREFIX) \
+PREFIX constexpr ngen::DataSpec12p7 CG::D8; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D16; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D32; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D64; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D8U32; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D16U32; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D8T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D16T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D32T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D64T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D8U32T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::D16U32T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V1; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V2; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V3; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V4; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V8; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V16; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V32; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V64; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V1T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V2T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V3T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V4T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V8T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V16T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V32T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::V64T; \
+PREFIX constexpr ngen::DataSpec12p7 CG::transpose; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1UC_L3UC; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1UC_L3C; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1C_L3UC; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1C_L3C; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1S_L3UC; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1S_L3C; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1IAR_L3C; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1UC_L3WB; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1WT_L3UC; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1WT_L3WB; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1S_L3WB; \
+PREFIX constexpr ngen::CacheSettings12p7 CG::L1WB_L3WB;
+#endif
+
+#if !NGEN_GEN12P8
+#define NGEN_REGISTER_DECL_EXTRA3(CG,PREFIX)
+#else
+#define NGEN_REGISTER_DECL_EXTRA3(CG,PREFIX) \
+PREFIX constexpr ngen::PredCtrl CG::any; \
+PREFIX constexpr ngen::PredCtrl CG::all; \
+PREFIX constexpr ngen::FlagRegister CG::f2; \
+PREFIX constexpr ngen::FlagRegister CG::f3; \
+PREFIX constexpr ngen::SBID CG::sb16; \
+PREFIX constexpr ngen::SBID CG::sb17; \
+PREFIX constexpr ngen::SBID CG::sb18; \
+PREFIX constexpr ngen::SBID CG::sb19; \
+PREFIX constexpr ngen::SBID CG::sb20; \
+PREFIX constexpr ngen::SBID CG::sb21; \
+PREFIX constexpr ngen::SBID CG::sb22; \
+PREFIX constexpr ngen::SBID CG::sb23; \
+PREFIX constexpr ngen::SBID CG::sb24; \
+PREFIX constexpr ngen::SBID CG::sb25; \
+PREFIX constexpr ngen::SBID CG::sb26; \
+PREFIX constexpr ngen::SBID CG::sb27; \
+PREFIX constexpr ngen::SBID CG::sb28; \
+PREFIX constexpr ngen::SBID CG::sb29; \
+PREFIX constexpr ngen::SBID CG::sb30; \
+PREFIX constexpr ngen::SBID CG::sb31; \
+PREFIX constexpr ngen::DataSpec12p7 CG::vnni;
+#endif
+
+#ifndef NGEN_SHORT_NAMES
+#define NGEN_REGISTER_DECL_EXTRA4(CG,PREFIX)
+#else
+#define NGEN_REGISTER_DECL_EXTRA4(CG,PREFIX) \
 PREFIX constexpr const ngen::IndirectRegisterFrame &CG::r; \
 PREFIX constexpr const ngen::InstructionModifier &CG::W;
-#else
+#endif
+
 #define NGEN_REGISTER_DECL(CG,PREFIX) \
 NGEN_REGISTER_DECL_MAIN(CG,PREFIX) \
-NGEN_REGISTER_DECL_EXTRA(CG,PREFIX)
-#endif
+NGEN_REGISTER_DECL_EXTRA1(CG,PREFIX) \
+NGEN_REGISTER_DECL_EXTRA2(CG,PREFIX) \
+NGEN_REGISTER_DECL_EXTRA3(CG,PREFIX) \
+NGEN_REGISTER_DECL_EXTRA4(CG,PREFIX)
 
 #include "ngen.hpp"
 NGEN_REGISTER_DECL(ngen::BinaryCodeGenerator<hw>, template <ngen::HW hw>)
@@ -428,6 +514,11 @@ template class ngen::BinaryCodeGenerator<ngen::HW::Gen10>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen11>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen12LP>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen12HP>;
+#if NGEN_GEN12P7
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen12p7>;
+#endif
+#if NGEN_GEN12P8
+template class ngen::BinaryCodeGenerator<ngen::HW::Gen12p8>;
+#endif
 
 #endif /* (defined(NGEN_CPP11) || defined(NGEN_CPP14)) && !defined(NGEN_GLOBAL_REGS) */

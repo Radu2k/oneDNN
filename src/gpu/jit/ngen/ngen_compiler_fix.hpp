@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -116,9 +116,17 @@ void _workaround_() {
     (void) ip.getBase();
     (void) tdr0.getBase();
     (void) tm0.getBase();
+    (void) tm1.getBase();
+    (void) tm2.getBase();
+    (void) tm3.getBase();
+    (void) tm4.getBase();
     (void) pm0.getBase();
     (void) tp0.getBase();
     (void) dbg0.getBase();
+    (void) fc0.getBase();
+    (void) fc1.getBase();
+    (void) fc2.getBase();
+    (void) fc3.getBase();
 
     (void) NoDDClr.getAll();
     (void) NoDDChk.getAll();
@@ -161,14 +169,40 @@ void _workaround_() {
     (void) M24.getAll();
     (void) M28.getAll();
 
-    (void) SBInfo(sb0).getID();  (void) SBInfo(sb1).getID();  (void) SBInfo(sb2).getID();  (void) SBInfo(sb3).getID();
-    (void) SBInfo(sb4).getID();  (void) SBInfo(sb5).getID();  (void) SBInfo(sb6).getID();  (void) SBInfo(sb7).getID();
-    (void) SBInfo(sb8).getID();  (void) SBInfo(sb9).getID();  (void) SBInfo(sb10).getID(); (void) SBInfo(sb11).getID();
-    (void) SBInfo(sb12).getID(); (void) SBInfo(sb13).getID(); (void) SBInfo(sb14).getID(); (void) SBInfo(sb15).getID();
+    (void) SWSBInfo(sb0).hasDist();  (void) SWSBInfo(sb1).hasDist();  (void) SWSBInfo(sb2).hasDist();  (void) SWSBInfo(sb3).hasDist();
+    (void) SWSBInfo(sb4).hasDist();  (void) SWSBInfo(sb5).hasDist();  (void) SWSBInfo(sb6).hasDist();  (void) SWSBInfo(sb7).hasDist();
+    (void) SWSBInfo(sb8).hasDist();  (void) SWSBInfo(sb9).hasDist();  (void) SWSBInfo(sb10).hasDist(); (void) SWSBInfo(sb11).hasDist();
+    (void) SWSBInfo(sb12).hasDist(); (void) SWSBInfo(sb13).hasDist(); (void) SWSBInfo(sb14).hasDist(); (void) SWSBInfo(sb15).hasDist();
+#if NGEN_GEN12P8
+    (void) SWSBInfo(sb16).hasDist(); (void) SWSBInfo(sb17).hasDist(); (void) SWSBInfo(sb18).hasDist(); (void) SWSBInfo(sb19).hasDist();
+    (void) SWSBInfo(sb20).hasDist(); (void) SWSBInfo(sb21).hasDist(); (void) SWSBInfo(sb22).hasDist(); (void) SWSBInfo(sb23).hasDist();
+    (void) SWSBInfo(sb24).hasDist(); (void) SWSBInfo(sb25).hasDist(); (void) SWSBInfo(sb26).hasDist(); (void) SWSBInfo(sb27).hasDist();
+    (void) SWSBInfo(sb28).hasDist(); (void) SWSBInfo(sb29).hasDist(); (void) SWSBInfo(sb30).hasDist(); (void) SWSBInfo(sb31).hasDist();
+#endif
 
     (void) A32.getModel();
     (void) A32NC.getModel();
     (void) A64.getModel();
     (void) A64NC.getModel();
     (void) SLM.getModel();
+#if NGEN_GEN12P7
+    (void) D8.desc;     (void) D8T.desc;
+    (void) D16.desc;    (void) D16T.desc;
+    (void) D32.desc;    (void) D32T.desc;
+    (void) D64.desc;    (void) D64T.desc;
+    (void) D8U32.desc;  (void) D8U32T.desc;
+    (void) D16U32.desc; (void) D16U32T.desc;
+    (void) V1.desc;     (void) V1T.desc;
+    (void) V2.desc;     (void) V2T.desc;
+    (void) V3.desc;     (void) V3T.desc;
+    (void) V4.desc;     (void) V4T.desc;
+    (void) V8.desc;     (void) V8T.desc;
+    (void) V16.desc;    (void) V16T.desc;
+    (void) V32.desc;    (void) V32T.desc;
+    (void) V64.desc;    (void) V64T.desc;
+    (void) transpose.desc;
+#endif
+#if NGEN_GEN12P8
+    (void) vnni.desc;
+#endif
 }

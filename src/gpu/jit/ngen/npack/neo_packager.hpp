@@ -172,7 +172,12 @@ inline HW decodeGfxCoreFamily(GfxCoreFamily family)
         case GfxCoreFamily::Gen11LP:  return HW::Gen11;
         case GfxCoreFamily::Gen12:    return HW::Gen12HP;
         case GfxCoreFamily::Gen12LP:  return HW::Gen12LP;
+#if NGEN_GEN12P7
         case GfxCoreFamily::Gen12p7:  return HW::Gen12p7;
+#endif
+#if NGEN_GEN12P8
+        case GfxCoreFamily::Gen12p8:  return HW::Gen12p8;
+#endif
         default:                      return HW::Unknown;
     }
 }
@@ -185,7 +190,12 @@ inline GfxCoreFamily encodeGfxCoreFamily(HW hw)
         case HW::Gen11:   return GfxCoreFamily::Gen11LP;
         case HW::Gen12HP: return GfxCoreFamily::Gen12;
         case HW::Gen12LP: return GfxCoreFamily::Gen12LP;
+#if NGEN_GEN12P7
         case HW::Gen12p7: return GfxCoreFamily::Gen12p7;
+#endif
+#if NGEN_GEN12P8
+        case HW::Gen12p8: return GfxCoreFamily::Gen12p8;
+#endif
         default:          return GfxCoreFamily::Unknown;
     }
 }
@@ -197,7 +207,12 @@ inline HW decodeProductFamily(ProductFamily family)
     if (family >= ProductFamily::ICL && family < ProductFamily::TGLLP) return HW::Gen11;
     if (family >= ProductFamily::TGLLP && family <= ProductFamily::DG1) return HW::Gen12LP;
     if (family == ProductFamily::TGLHP) return HW::Gen12HP;
+#if NGEN_GEN12P7
     if (family == ProductFamily::DG2) return HW::Gen12p7;
+#endif
+#if NGEN_GEN12P8
+    if (family == ProductFamily::PVC) return HW::Gen12p8;
+#endif
     return HW::Unknown;
 }
 
@@ -208,15 +223,17 @@ inline HW getBinaryArch(const std::vector<uint8_t> &binary)
     findDeviceBinary(binary, nullptr, &pheader, nullptr);
     auto hw = decodeGfxCoreFamily(pheader->Device);
 
+#if NGEN_GEN12P7
     // DG2 identifies as Gen12HP. Check whether EOT goes to TS (Gen12HP) or gateway (DG2+).
     using b14 = std::array<uint8_t, 14>;
-    b14 gtwyEOT = {{3, 0x80, 4, 0, 0, 0, 0xC, 0x7F, 0x20, 0x30, 0, 0, 0, 0}};
+    b14 gtwyEOT{{3, 0x80, 4, 0, 0, 0, 0xC, 0x7F, 0x20, 0x30, 0, 0, 0, 0}};
     if (hw == HW::Gen12HP) for (size_t i = 0; i < binary.size() - 0x10; i++) {
         if (binary[i] == 0x31 && *(b14 *)(binary.data() + i + 2) == gtwyEOT) {
             hw = HW::Gen12p7;
             break;
         }
     }
+#endif
     return hw;
 }
 

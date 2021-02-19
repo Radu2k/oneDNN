@@ -340,8 +340,12 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
 
 // Thread spawner messages.
 void threadend(const InstructionModifier &mod, const RegData &r0_info) {
+#if NGEN_GEN12P7
     auto sf = (hardware <= HW::Gen12HP) ? SharedFunction::ts
                                         : SharedFunction::gtwy;
+#else
+    auto sf = SharedFunction::ts;
+#endif
     uint32_t exdesc = 0x20 | (static_cast<int>(sf) & 0xF);
     send(8 | EOT | mod | NoMask, null, r0_info, exdesc, 0x2000010);
 }
@@ -359,10 +363,12 @@ void barriermsg(const GRF &header) { barriermsg(InstructionModifier(), header); 
 
 void barriersignal(const InstructionModifier &mod, const GRF &temp, const GRF &r0_info = r0)
 {
-    if (hardware == HW::Gen12p7) {
+#if NGEN_GEN12P7
+    if (hardware >= HW::Gen12p7) {
         mov(1 | NoMask, temp.hf(4), Immediate::hf(0));
         mov(2 | NoMask, temp.ub(10)(1), r0_info.ub(11)(0));
     } else
+#endif
     and_(8 | NoMask, temp.ud(), r0_info.ud(2), uint32_t((hardware >= HW::Gen11) ? 0x7F000000 : 0x8F000000));
     barriermsg(mod, temp);
 }
@@ -383,57 +389,19 @@ void barrier(const GRF &temp, const GRF &r0_info = r0)
     barrierwait();
 }
 
-// Data port messages.
-template <typename DataSpec>
-void load(const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const RegData &addr)
-{
-    MessageDescriptor desc;
-    ExtendedMessageDescriptor exdesc;
-
-    encodeLoadDescriptors(desc, exdesc, mod, spec, base);
-    send(mod, dst, addr, exdesc.all, desc.all);
-}
-
-template <typename DataSpec>
-void store(const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const RegData &addr, const RegData &data)
-{
-    MessageDescriptor desc;
-    ExtendedMessageDescriptor exdesc;
-
-    encodeStoreDescriptors(desc, exdesc, mod, spec, base);
-    sends(mod, NullRegister(), addr, data, exdesc.all, desc.all);
-}
-
-// For write-only atomics, dest is null; for unary atomics, data is null.
-template <typename DataSpec>
-void atomic(AtomicOp op, const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const RegData &addr, const RegData &data = NullRegister())
-{
-    MessageDescriptor desc;
-    ExtendedMessageDescriptor exdesc;
-
-    encodeAtomicDescriptors(desc, exdesc, op, mod, dst, spec, base);
-    if (data.isNull())
-        send(mod, dst, addr, exdesc.all, desc.all);
-    else
-        sends(mod, dst, addr, data, exdesc.all, desc.all);
-}
-
-template <typename DataSpec>
-void atomic(AtomicOp op, const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const RegData &addr, const RegData &data = NullRegister())
-{
-    atomic(op, mod, NullRegister(), spec, base, addr, data);
-}
-
 // Global memory fence.
 void memfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
+#if NGEN_GEN12P7
     if (hardware <= HW::Gen12HP) {
         const uint32_t exdesc = static_cast<int>(SharedFunction::dc0) & 0xF;
         send(8 | mod | NoMask, dst, header, exdesc, 0x219E000);
-    } else {
-        const uint32_t exdesc = static_cast<int>(SharedFunction::ugm) & 0xF;
-        send(1 | mod | NoMask, dst, header, exdesc, 0x214031F);
-    }
+    } else
+        send(1 | mod | NoMask, SharedFunction::ugm, dst, header, null, 0, 0x214031F);
+#else
+    const uint32_t exdesc = static_cast<int>(SharedFunction::dc0) & 0xF;
+    send(8 | mod | NoMask, dst, header, exdesc, 0x219E000);
+#endif
 }
 
 void memfence(const RegData &dst, const RegData &header = GRF(0)) { memfence(InstructionModifier(), dst, header); }
@@ -441,13 +409,16 @@ void memfence(const RegData &dst, const RegData &header = GRF(0)) { memfence(Ins
 // SLM-only memory fence.
 void slmfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
+#if NGEN_GEN12P7
     if (hardware <= HW::Gen12HP) {
         const uint32_t exdesc = static_cast<int>(SharedFunction::dc0) & 0xF;
         send(8 | mod | NoMask, dst, header, exdesc, 0x219E0FE);
-    } else {
-        const uint32_t exdesc = static_cast<int>(SharedFunction::slm) & 0xF;
-        send(1 | mod | NoMask, dst, header, exdesc, 0x210011F);
-    }
+    } else
+        send(1 | mod | NoMask, SharedFunction::slm, dst, header, null, 0, 0x210011F);
+#else
+    const uint32_t exdesc = static_cast<int>(SharedFunction::dc0) & 0xF;
+    send(8 | mod | NoMask, dst, header, exdesc, 0x219E0FE);
+#endif
 }
 
 void slmfence(const RegData &dst, const RegData &header = GRF(0)) { slmfence(InstructionModifier(), dst, header); }
@@ -456,7 +427,13 @@ void slmfence(const RegData &dst, const RegData &header = GRF(0)) { slmfence(Ins
 void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127), int paddedSize = 0)
 {
     if (hardware >= HW::Gen12HP) {
+        const int grfSize = GRF::bytes(hardware);
+        const int grfOW = grfSize / 16;
+#if NGEN_GEN12P8
+        int simdGRFs = (simd > 16 && grfSize < 64) ? 2 : 1;
+#else
         int simdGRFs = (simd > 16) ? 2 : 1;
+#endif
         int insns = 0;
 
         if (dims > 0) {
@@ -466,13 +443,13 @@ void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127)
             mov<uint32_t>(8, temp, uint16_t(0));
             and_<uint32_t>(1, temp[2], r0[0], uint32_t(~0x1F));
             and_<uint16_t>(1, temp[0], r0[4], uint16_t(0xFF));
-            add<uint32_t>(1, temp[2], temp[2], uint16_t(argGRFs * 0x20));
-            mad<uint32_t>(1, temp[2], temp[2], temp.uw(0), uint16_t(0x60));
-            load(8, r1, aligned_block_oword(simdGRFs * ((dims == 1) ? 2 : 4)), A32NC, temp);
+            add<uint32_t>(1, temp[2], temp[2], uint16_t(argGRFs * grfSize));
+            mad<uint32_t>(1, temp[2], temp[2], temp.uw(0), uint16_t(3 * simdGRFs * grfSize));
+            load(8, r1, aligned_block_oword(simdGRFs * ((dims == 1) ? 1 : 2) * grfOW), A32NC, temp);
             insns += 6;
             if (dims == 3) {
-                add<uint32_t>(1, temp[2], temp[2], uint16_t(0x40));
-                load(8, GRF(1 + 2 * simdGRFs), aligned_block_oword(2 * simdGRFs), A32NC, temp);
+                add<uint32_t>(1, temp[2], temp[2], uint16_t(2 * simdGRFs * grfSize));
+                load(8, GRF(1 + 2 * simdGRFs), aligned_block_oword(grfOW * simdGRFs), A32NC, temp);
                 insns += 2;
             }
 
@@ -505,11 +482,11 @@ void loadargs(const GRF &base, int argGRFs, const GRF &temp = GRF(127))
             and_<uint32_t>(1, temp[2], r0[0], uint32_t(~0x1F));
             while (argGRFs > 0) {
                 int nload = std::min(utils::rounddown_pow2(argGRFs), 4);
-                load(8, dst, aligned_block_oword(2 * nload), A32NC, temp);
+                load(8, dst, aligned_block_oword(GRF::bytes(hardware) * nload / 16), A32NC, temp);
                 argGRFs -= nload;
                 dst += nload;
                 if (argGRFs > 0)
-                    add<uint32_t>(1, temp[2], temp[2], uint32_t(0x20 * nload));
+                    add<uint32_t>(1, temp[2], temp[2], uint32_t(GRF::bytes(hardware) * nload));
             }
 
             defaultModifier = dmSave;

@@ -53,7 +53,7 @@ class InterfaceHandler
     template <HW hw> friend class L0CodeGenerator;
 
 public:
-    InterfaceHandler(HW hw_) : hw(hw_) {}
+    InterfaceHandler(HW hw_) : hw(hw_), simd(GRF::bytes(hw_) >> 2) {}
 
     inline void externalName(const std::string &name)   { kernelName = name; }
 
@@ -69,6 +69,7 @@ public:
     inline Subregister getLocalSize(int dim) const;
 
     const std::string &getExternalName() const           { return kernelName; }
+    int getSIMD() const                                  { return simd; }
 
     void require32BitBuffers()                           { allow64BitBuffers = false; }
     void requireBarrier()                                { barrierCount = 1; }
@@ -140,6 +141,11 @@ protected:
     int crossthreadGRFs = 0;
     inline int getCrossthreadGRFs() const;
     inline GRF getCrossthreadBase(bool effective = true) const;
+#if NGEN_GEN12P7
+    int grfsPerLID() const { return (simd > 16 && GRF::bytes(hw) < 64) ? 2 : 1; }
+#else
+    int grfsPerLID() const { return (simd > 16) ? 2 : 1; }
+#endif
 };
 
 using NEOInterfaceHandler = InterfaceHandler;
@@ -215,10 +221,7 @@ GRF InterfaceHandler::getLocalID(int dim) const
     if (dim > needLocalID) throw unknown_argument_exception();
 #endif
 
-    if (simd > 16)
-        return GRF(1 + (dim << 1)).uw();
-    else
-        return GRF(1 + dim).uw();
+    return GRF(1 + dim * grfsPerLID()).uw();
 }
 
 void InterfaceHandler::requireType(DataType type)
@@ -318,9 +321,10 @@ void InterfaceHandler::finalize()
     static const std::string localSizeArgs[3] = {"__local_size0", "__local_size1", "__local_size2"};
     static const std::string scratchSizeArg = "__scratch_size";
 
-    GRF base = getCrossthreadBase() + 1;
-    int offset = 0;
+    GRF base = getCrossthreadBase();
+    int offset = 32;
     int nextSurface = 0;
+    const int grfSize = GRF::bytes(hw);
 
     auto assignArgsOfType = [&](ExternalArgumentType exttype) {
         for (auto &assignment : assignments) {
@@ -331,14 +335,14 @@ void InterfaceHandler::finalize()
 
             if (assignment.name == localSizeArgs[0]) {
                 // Move to next GRF if local size arguments won't fit in this one.
-                if (offset > 0x20 - (3 * 4)) {
+                if (offset > grfSize - (3 * 4)) {
                     offset = 0;
                     base++;
                 }
             }
 
             offset = (offset + size - 1) & -size;
-            if (offset >= 0x20) {
+            if (offset >= grfSize) {
                 offset = 0;
                 base++;
             }
@@ -385,7 +389,7 @@ GRF InterfaceHandler::getCrossthreadBase(bool effective) const
     if (!needLocalID)
         return GRF((!effective || (hw >= HW::Gen12HP)) ? 1 : 2);
     else
-        return GRF((simd <= 16) ? 4 : 7);
+        return GRF(1 + 3 * grfsPerLID());
 }
 
 int InterfaceHandler::getCrossthreadGRFs() const
@@ -407,8 +411,13 @@ void InterfaceHandler::generatePrologue(CodeGenerator &generator, const GRF &tem
 #else
     if (needLocalID)
         generator.loadlid(getCrossthreadGRFs(), needLocalID, simd, temp, 12*16);
+#if NGEN_GEN12P8
+    if (hw >= HW::Gen12p8)
+        generator.loadargs(getCrossthreadBase(), getCrossthreadGRFs(), temp);
+    else
+#endif
     if (getCrossthreadGRFs() > 1)
-        generator.loadargs(getCrossthreadBase() + 1, getCrossthreadGRFs() - 1, temp);
+        generator.loadargs(getCrossthreadBase().advance(1), getCrossthreadGRFs() - 1, temp);
 #endif
 }
 
@@ -521,7 +530,7 @@ std::string InterfaceHandler::generateZeInfo() const
     md << "    per_thread_payload_arguments : \n";
 
     if (needLocalID) {
-        auto localIDBytes = (simd == 32) ? 32 : 16;
+        auto localIDBytes = grfsPerLID() * GRF::bytes(hw);
         localIDBytes *= sizeof(short);
         localIDBytes *= 3; // runtime currently supports 0 or 3 localId channels in per thread data
         md << "      - arg_type : local_id\n"

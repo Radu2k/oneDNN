@@ -17,6 +17,14 @@
 #ifndef NGEN_LEVEL_ZERO_HPP
 #define NGEN_LEVEL_ZERO_HPP
 
+#ifndef NGEN_GEN12P7
+#define NGEN_GEN12P7 1
+#endif
+
+#ifndef NGEN_GEN12P8
+#define NGEN_GEN12P8 1
+#endif
+
 #include <ze_api.h>
 
 #include <sstream>

@@ -40,7 +40,12 @@ enum class GfxCoreFamily : uint32_t {
     Gen11LP = 16,
     Gen12 = 17,
     Gen12LP = 18,
+#if NGEN_GEN12P7
     Gen12p7 = 0xC07,
+#endif
+#if NGEN_GEN12P8
+    Gen12p8 = 0xC08,
+#endif
 };
 
 enum class ProductFamily : uint32_t {
@@ -51,7 +56,12 @@ enum class ProductFamily : uint32_t {
     TGLLP = 0x22,
     DG1 = 1210,
     TGLHP = 1250,
+#if NGEN_GEN12P7
     DG2 = 1270,
+#endif
+#if NGEN_GEN12P8
+    PVC = 1280,
+#endif
 };
 
 typedef struct
