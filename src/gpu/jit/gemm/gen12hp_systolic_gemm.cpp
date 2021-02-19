@@ -67,8 +67,11 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     if (d->m() < 32 && d->k() < 32) return status::unimplemented;
     if (d->n() < 32 && d->k() < 32) return status::unimplemented;
 
+    bool is_bf16_with_bias
+            = d->c_type() == bf16 && with_bias() && d->bias_type() == bf16;
+
     // Use FMA for small/medium sizes
-    if (utils::one_of(d->c_type(), bf16, f16, s32)) {
+    if (utils::one_of(d->c_type(), bf16, f16, s32) && !is_bf16_with_bias) {
         const nocopy_table_t *all_tables[3] = {gen12hp_f16_nocopy_table,
                 gen12hp_bf16_nocopy_table, gen12hp_x8x8s32_nocopy_table};
         const int type_idx
