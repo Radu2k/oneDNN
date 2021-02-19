@@ -22,11 +22,13 @@
 
 #include "common/c_types_map.hpp"
 #include "common/gemm_utils.hpp"
+#include "common/utils.hpp"
 #include "gpu/compute/compute.hpp"
 #include "gpu/compute/kernel.hpp"
 #include "gpu/gemm/gpu_gemm.hpp"
 #include "gpu/gpu_gemm_pd.hpp"
 #include "gpu/jit/gemm/gen_gemm_kernel.hpp"
+#include "gpu/primitive_conf.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -53,7 +55,6 @@ struct gen_gemm_t : public gpu_gemm_t {
 
             // LIMITATIONS:
             // - runtime dims are not supported
-            // - bias only supported for f32
             bool ok = true;
 
             auto attr_skip_mask = smask_t::oscale | smask_t::post_ops;
@@ -94,18 +95,24 @@ struct gen_gemm_t : public gpu_gemm_t {
                             d->a_desc.dims[0] == d->b_desc.dims[0])
                     && !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m(), d->n(),
                             d->k(), d->lda(), d->ldb(), d->ldc(), d->batch())
-                    && IMPLICATION(d->c_type() != f32,
-                            d->bias_type() == data_type::undef)
-                    && IMPLICATION(with_bias(),
-                            (d->bias_type() == d->c_type())
+                    && IMPLICATION(with_bias() && d->c_type() == bf16,
+                            d->bias_type() == f32
+                                    && utils::one_of(
+                                            bias_cmask(), 0, 1 << 0, 1 << 1))
+                    && IMPLICATION(with_bias() && d->c_type() != bf16,
+                            d->bias_type() == d->c_type()
                                     && utils::one_of(
                                             bias_cmask(), 0, 1 << 0, 1 << 1))
                     && compute_engine->mayiuse_ngen_kernels()
                     && attr()->has_default_values(attr_skip_mask)
                     && attr()->output_scales_.mask_ == 0
-                    && attr()->post_ops_.len() <= 1
+                    && attr()->post_ops_.len() <= 2
                     && IMPLICATION(attr()->post_ops_.len() == 1,
-                            attr()->post_ops_.find(sum) != -1);
+                            attr()->post_ops_.find(eltwise) != -1
+                                    || attr()->post_ops_.find(sum) != -1)
+                    && IMPLICATION(attr()->post_ops_.len() == 2,
+                            attr()->post_ops_.find(sum) == 0
+                                    || attr()->post_ops_.find(eltwise) == 1);
 
             if (!ok) return status::unimplemented;
 
@@ -116,17 +123,24 @@ struct gen_gemm_t : public gpu_gemm_t {
             ok &= utils::one_of(arch_, arch_t::gen9, arch_t::gen12lp,
                     arch_t::gen12hp, arch_t::gen12p7);
 
+            attr_info_ = attr_info_t::create(attr());
+
+            bool is_gen12hp_plus = arch_ >= arch_t::gen12hp;
             // int8 not enabled on Gen12HP+ for now. bf16 only enabled on Gen12HP+.
-            ok &= IMPLICATION(arch_ >= arch_t::gen12hp,
+            ok &= IMPLICATION(is_gen12hp_plus,
                     utils::one_of(d->c_type(), f16, bf16, f32));
-            ok &= IMPLICATION(d->c_type() == bf16, arch_ >= arch_t::gen12hp);
+            ok &= IMPLICATION(d->c_type() == bf16, is_gen12hp_plus);
 
             if (!ok) return status::unimplemented;
 
             eu_count_ = dev_info->eu_count();
             hw_threads_ = dev_info->hw_threads();
 
-            attr_info_ = attr_info_t::create(attr());
+            ok &= IMPLICATION(with_eltwise(),
+                    jit_eltwise_injector_f32_is_supported(
+                            attr_info()->eltwise_alg));
+
+            if (!ok) return status::unimplemented;
 
             return status::success;
         }
@@ -139,13 +153,17 @@ struct gen_gemm_t : public gpu_gemm_t {
             return !attr()->zero_points_.has_default_values(DNNL_ARG_DST);
         }
 
-        bool with_eltwise() const { return false; }
+        bool with_eltwise() const {
+            return attr_info()->eltwise_alg != alg_kind::undef;
+        }
 
-        float eltwise_alpha() const { return 1.0f; }
+        alg_kind_t eltwise_alg() const { return attr_info()->eltwise_alg; }
 
-        float eltwise_beta() const { return 0.0f; }
+        float eltwise_alpha() const { return attr_info()->eltwise_alpha; }
 
-        float eltwise_scale() const { return 1.0f; }
+        float eltwise_beta() const { return attr_info()->eltwise_beta; }
+
+        float eltwise_scale() const { return attr_info()->eltwise_scale; }
 
         float alpha() const { return attr()->output_scales_.scales_[0]; }
 
@@ -171,6 +189,8 @@ struct gen_gemm_t : public gpu_gemm_t {
             return (desc()->a_type() == data_type::f16 && desc()->m() == 1
                     && desc()->ldc() == 1 && check_lda);
         }
+
+        const attr_info_t *attr_info() const { return &attr_info_; }
 
         size_t dyn_offset_a = 0;
         size_t dyn_offset_b = 0;
@@ -205,6 +225,10 @@ struct gen_gemm_t : public gpu_gemm_t {
         auto a_type = pd()->desc()->a_type();
         auto b_type = pd()->desc()->b_type();
         auto c_type = pd()->desc()->c_type();
+        auto eltwise_alg = pd()->eltwise_alg();
+        auto eltwise_alpha = pd()->eltwise_alpha();
+        auto eltwise_beta = pd()->eltwise_beta();
+        auto eltwise_scale = pd()->eltwise_scale();
 
         kernel_t::choose_unrolls(pd()->arch_, pd()->hw_threads_, transa, transb,
                 a_type, b_type, c_type, m, n, pd()->desc()->k(), batch,
@@ -213,7 +237,8 @@ struct gen_gemm_t : public gpu_gemm_t {
         kernel_t kernel;
 
         auto status = kernel.init(pd()->arch_, batched, transa, transb,
-                pd()->with_c_offset(), pd()->with_bias(), a_type, b_type,
+                pd()->with_c_offset(), pd()->with_bias(), eltwise_alg,
+                eltwise_alpha, eltwise_beta, eltwise_scale, a_type, b_type,
                 c_type, unroll_m, unroll_n, tag);
         if (status != status::success) return status;
 
@@ -234,8 +259,7 @@ private:
             int64_t offset_c, int32_t offset_co, int32_t lda, int32_t ldb,
             int32_t ldc, int32_t m, int32_t n, int32_t k, float alpha,
             float beta, int16_t ao, int16_t bo, int32_t cmask,
-            bool last_k_block, float eltwise_alpha, float eltwise_beta,
-            float eltwise_scale, int32_t batch, int32_t stride_a,
+            bool last_k_block, int32_t batch, int32_t stride_a,
             int32_t stride_b, int32_t stride_c) const;
 
     compute::kernel_t nocopy_kernel_;
