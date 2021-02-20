@@ -1556,7 +1556,7 @@ public:
     uint32_t to_sbid_mask(std::initializer_list<SBID> sbids) const {
         uint32_t mask = 0;
         for (auto &sb : sbids)
-            mask |= (1 << sb.set.getID());
+            mask |= (1 << sb.getID());
         return mask;
     }
 
@@ -3165,7 +3165,7 @@ void nw_read_region_t::read_and_reorder() {
 
     auto get_sbid = [&](int idx) {
         idx = (idx + 1) % 16;
-        if (idx >= (int)host->gmem_b_sbid().set.getID())
+        if (idx >= (int)host->gmem_b_sbid().getID())
             return SBID((idx + 1) % 16);
         return SBID(idx);
     };

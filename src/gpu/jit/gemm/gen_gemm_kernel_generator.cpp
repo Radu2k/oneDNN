@@ -2285,10 +2285,10 @@ void gemm_kernel_generator_t<hw>::loadLoadStoreDescriptors(bool load,
             Subregister t1 = state.ra.alloc_sub<uint32_t>();
             Subregister t2 = state.ra.alloc_sub<uint32_t>();
 
-            encodeLoadDescriptors(descLoad, exdescLoad, block.simdSize,
-                    surface_dword(ChannelMask::rgba), atype.base);
-            encodeStoreDescriptors(descStore, exdescStore, block.simdSize,
-                    surface_dword(ChannelMask::rgba), atype.base);
+            encodeLoadDescriptors(hw, descLoad, exdescLoad, block.simdSize, r0,
+                    surface_dword(ChannelMask::rgba), atype.base, null);
+            encodeStoreDescriptors(hw, descStore, exdescStore, block.simdSize,
+                    surface_dword(ChannelMask::rgba), atype.base, null);
             descLoad.surface.cmask = 0; //
             descStore.surface.cmask = 0; // Fields to fill in.
             exdescStore.parts.extMessageLen = 0; //
@@ -2532,29 +2532,30 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
         case AccessType::Scattered:
         case AccessType::SurfaceScattered:
             if (hasNativeAtomicAdd(hw, T.real(), atype)) {
-                for (int eoff = 0, hoff = 0, soff = 0; eoff < block.simdSize;
-                        eoff += simd, hoff += hsize, soff += nregReal) {
+                auto curSrc = src;
+                for (int eoff = 0, hoff = 0; eoff < block.simdSize;
+                        eoff += simd, hoff += hsize, curSrc += nregReal) {
                     auto mod = simd | maskMod | ExecutionOffset(eoff);
                     switch (T.real()) {
                         case Type::f32:
                             atomic(AtomicOp::fadd, mod, scattered_dword(),
-                                    atype.base, addr[hoff], src + soff);
+                                    atype.base, addr[hoff], curSrc);
                             break;
                         case Type::u64:
                         case Type::s64:
                             atomic(AtomicOp::add, mod, scattered_qword(),
-                                    atype.base, addr[hoff], src + soff);
+                                    atype.base, addr[hoff], curSrc);
                             break;
                         case Type::u32:
                         case Type::s32:
                             atomic(AtomicOp::add, mod, scattered_dword(),
-                                    atype.base, addr[hoff], src + soff);
+                                    atype.base, addr[hoff], curSrc);
                             break;
                         case Type::u16:
                         case Type::s16:
                             if (hw < HW::Gen12LP) hw_unsupported();
                             atomic(AtomicOp::add, mod, scattered_word(),
-                                    atype.base, addr[hoff], src + soff);
+                                    atype.base, addr[hoff], curSrc);
                             break;
                         default: stub();
                     }
@@ -2589,7 +2590,8 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
 
                 // Save off high half of data when emulating SIMD16.
                 if (block.simdSize > simd)
-                    mov<uint32_t>(nregReal * 8, rOld + nreg, rOld + nregReal);
+                    mov<uint32_t>(nregReal * 8, rOld.advance(nreg),
+                            rOld.advance(nregReal));
 
                 if (block.hasMask()) {
                     if_(16 | getPhysicalFlag(block.flag, state), labelMask);
@@ -2650,9 +2652,9 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
                                     : jmpi(1 | flagToDo | any16h,
                                             labelCmpXchgLoop);
 
-                    rOld = rOld + 2 * nregReal;
-                    rNew = rNew + 2 * nregReal;
-                    curSrc = curSrc + nregReal;
+                    rOld += 2 * nregReal;
+                    rNew += 2 * nregReal;
+                    curSrc += nregReal;
                 }
 
                 if (block.hasMask()) {

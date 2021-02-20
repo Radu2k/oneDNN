@@ -292,7 +292,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
         // Get register in accumulated C submatrix at offset (ii*8, jj).
         auto get_acc_reg = [&](DataType dt, int ii, int jj) {
             auto acc_base = c_regs[interleave(j0)];
-            return (acc_base + (jj + ii * acc_stride)).retype(dt);
+            return acc_base.advance(jj + ii * acc_stride).retype(dt);
         };
 
         // Load C block ahead of time for next loop, and check for loop exit.
@@ -452,8 +452,8 @@ void gen12hp_systolic_gemm_kernel_t<hw>::store_c(
         // 4x4 transpose of 8x1 blocks, downconverting if necessary.
         for (int ii = 0; ii < (cfg.tile_m / 8); ii++) {
             for (int jj = 0; jj < 4; jj++) {
-                GRF a_reg = acc + (jj + ii * acc_stride);
-                a_reg = a_reg.retype(cfg.acc_type);
+                GRF a_reg = acc.advance(jj + ii * acc_stride)
+                                    .retype(cfg.acc_type);
                 auto dreg = get_store_reg(ii, jj);
 
                 if (a_reg.getType() == dreg.getType()) {
@@ -759,8 +759,8 @@ void gen12hp_systolic_gemm_kernel_t<hw>::add_c_bias(bias_t c_bias) {
                     } else {
                         // No region support on FPU pipe.
                         add(8, a_reg, a_reg, uoffset[ii].sub(0, cur_type)(1));
-                        add(8, a_reg + 1, a_reg + 1,
-                                uoffset[ii].sub(0, cur_type)(1));
+                        a_reg++;
+                        add(8, a_reg, a_reg, uoffset[ii].sub(0, cur_type)(1));
                     }
                     break;
                 case bias_t::column:
@@ -770,7 +770,8 @@ void gen12hp_systolic_gemm_kernel_t<hw>::add_c_bias(bias_t c_bias) {
                     } else {
                         add(8, a_reg, a_reg,
                                 uoffset[j >> 3].sub(j & 7, cur_type)(0));
-                        add(8, a_reg + 1, a_reg + 1,
+                        a_reg++;
+                        add(8, a_reg, a_reg,
                                 uoffset[j >> 3].sub((j + 1) & 7, cur_type)(0));
                     }
                     break;
