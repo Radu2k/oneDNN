@@ -93,8 +93,6 @@ status_t gen12hp_1st_convolution_bwd_weights_t::pd_t::init_conf(
 
     bwd_w_compute_block_sizes(conf, engine);
 
-    if (conf.owb < conf.ow) return status::unimplemented;
-
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
     const bool is_gen12hp = compute_engine->is_gen12hp();
     const bool has_non_uniform_wg
