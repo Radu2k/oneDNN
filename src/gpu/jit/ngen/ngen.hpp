@@ -100,6 +100,9 @@ class BinaryCodeGenerator
 {
     friend class ELFCodeGenerator<hw>;
 
+public:
+    static constexpr HW hardware = hw;
+
 protected:
     class InstructionStream {
         friend class BinaryCodeGenerator;
@@ -188,7 +191,6 @@ protected:
         const Instruction &operator[](size_t index) const { return *reinterpret_cast<Instruction *>(&code[index * 2]); }
     };
 
-    static constexpr HW hardware = hw;
     static constexpr bool isGen12 = (hw >= HW::Gen12LP);
 
     Label _labelLocalIDsLoaded;
@@ -1512,6 +1514,7 @@ template <typename DT = void, typename... Targs> void fdiv_ieee(Targs&&... args)
 template <typename DT = void, typename... Targs> void inv_ieee(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::template inv_ieee<DT>(std::forward<Targs>(args)...); } \
 template <typename DT = void, typename... Targs> void sqt_ieee(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::template sqt_ieee<DT>(std::forward<Targs>(args)...); } \
 template <typename... Targs> void threadend(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::threadend(std::forward<Targs>(args)...); } \
+template <typename... Targs> void barrierheader(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::barrierheader(std::forward<Targs>(args)...); } \
 template <typename... Targs> void barriermsg(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::barriermsg(std::forward<Targs>(args)...); } \
 template <typename... Targs> void barriersignal(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::barriersignal(std::forward<Targs>(args)...); } \
 template <typename... Targs> void barrierwait(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::barrierwait(std::forward<Targs>(args)...); } \

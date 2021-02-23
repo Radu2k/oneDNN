@@ -361,15 +361,22 @@ void barriermsg(const InstructionModifier &mod, const GRF &header)
 
 void barriermsg(const GRF &header) { barriermsg(InstructionModifier(), header); }
 
-void barriersignal(const InstructionModifier &mod, const GRF &temp, const GRF &r0_info = r0)
-{
+// prepare barrier header
+void barrierheader(const GRF &header, const GRF &r0_info = r0) {
 #if NGEN_GEN12P7
     if (hardware >= HW::Gen12p7) {
-        mov(1 | NoMask, temp.hf(4), Immediate::hf(0));
-        mov(2 | NoMask, temp.ub(10)(1), r0_info.ub(11)(0));
+        mov(1 | NoMask, header.hf(4), Immediate::hf(0));
+        mov(2 | NoMask, header.ub(10)(1), r0_info.ub(11)(0));
     } else
 #endif
-    and_(8 | NoMask, temp.ud(), r0_info.ud(2), uint32_t((hardware >= HW::Gen11) ? 0x7F000000 : 0x8F000000));
+    {
+        and_(8 | NoMask, header.ud(), r0_info.ud(2), uint32_t((hardware >= HW::Gen11) ? 0x7F000000 : 0x8F000000));
+    }
+}
+
+void barriersignal(const InstructionModifier &mod, const GRF &temp, const GRF &r0_info = r0)
+{
+    barrierheader(temp, r0_info);
     barriermsg(mod, temp);
 }
 
