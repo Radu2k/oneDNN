@@ -30,6 +30,8 @@
 #include "gpu/jit/ngen_type_bridge.hpp"
 #include "gpu/ocl/ocl_gpu_kernel.hpp"
 
+#include "gpu/jit/gemm/emulation.hpp"
+
 namespace dnnl {
 namespace impl {
 namespace gpu {
@@ -50,14 +52,16 @@ const bool enable_smem_write = true;
 
 const bool enable_barrier = true;
 
+template <gpu_gen_t hw>
 class gen12hp_conv_data_kernel_t;
 
 // Convert registers between data types.
 // to_stride is always assumed to be 1.
+template <gpu_gen_t hw>
 class convertor_t {
 public:
-    convertor_t(gen12hp_conv_data_kernel_t *host, int width, DataType to_type,
-            DataType from_type, int from_stride = 1)
+    convertor_t(gen12hp_conv_data_kernel_t<hw> *host, int width,
+            DataType to_type, DataType from_type, int from_stride = 1)
         : host_(host)
         , width_(width)
         , to_type_(to_type)
@@ -120,7 +124,7 @@ private:
         return grf[(new_off % 32) / sub.getBytes()];
     }
 
-    gen12hp_conv_data_kernel_t *host_;
+    gen12hp_conv_data_kernel_t<hw> *host_;
 
     int width_;
     DataType to_type_;
@@ -133,17 +137,19 @@ private:
 };
 
 // Represents an (mb_len x w_len) region to read.
+template <gpu_gen_t hw>
 class nw_read_region_t {
 public:
-    nw_read_region_t(gen12hp_conv_data_kernel_t *host, int mb_len, int w_val,
-            int w_shift, int w_len)
+    nw_read_region_t(gen12hp_conv_data_kernel_t<hw> *host, int mb_len,
+            int w_val, int w_shift, int w_len)
         : host(host)
         , mb_len(mb_len)
         , w_val(w_val)
         , w_shift(w_shift)
         , w_len(w_len) {}
 
-    nw_read_region_t(gen12hp_conv_data_kernel_t *host, int mb_len, int w_len)
+    nw_read_region_t(
+            gen12hp_conv_data_kernel_t<hw> *host, int mb_len, int w_len)
         : host(host)
         , mb_len(mb_len)
         , w_val(INT_MAX)
@@ -154,7 +160,7 @@ public:
 
     void read_and_reorder();
 
-    gen12hp_conv_data_kernel_t *host;
+    gen12hp_conv_data_kernel_t<hw> *host;
 
     int mb_len;
     int w_val;
@@ -437,13 +443,15 @@ int loop_iterator_t::id_update() const {
     return next_id - cur_id;
 }
 
-class gen12hp_conv_data_kernel_t : public jit_generator<HW::Gen12HP> {
+template <gpu_gen_t hw>
+class gen12hp_conv_data_kernel_t : public jit_generator<hw> {
 public:
-    friend class convertor_t;
-    friend class nw_read_region_t;
+    NGEN_FORWARD_OPENCL(hw);
+    friend class convertor_t<hw>;
+    friend class nw_read_region_t<hw>;
 
     gen12hp_conv_data_kernel_t(const conv_conf_t &conf)
-        : conf(conf), attr_info(conf.attr_info), ra(HW::Gen12HP) {
+        : conf(conf), attr_info(conf.attr_info), ra(hw) {
 
         src_type = convert_dnnl_type_to_ngen(conf.src_data_type);
         wei_type = convert_dnnl_type_to_ngen(conf.weights_data_type);
@@ -579,6 +587,8 @@ public:
 
         finalizeInterface();
 
+        emu_strategy = EmulationStrategy(hw);
+
         setDefaultNoMask();
         enable_auto_swsb();
         prologue();
@@ -657,7 +667,7 @@ public:
         or_(1, cr0, cr0, uint16_t(0x1480));
 
         // Header for signal.
-        and_(8, signal_header.ud(), r0.ud(2), uint32_t(0x7F000000));
+        barrierheader(signal_header);
 
         // ithr0 = get_local_id(0) / 8    [0, oc_group - 1]
         shr<uint32_t>(1, ithr0, local_id_0.uw(0), 3);
@@ -671,7 +681,7 @@ public:
         init_b_slm_off();
 
         if (conf.ver == ver_v2) {
-            // Boundary conditions: sp[idx] <= sp_bound[idx].
+            // Boundary conditions: sp_load[idx] <= sp_bound[idx].
             // Forward (any stride) and backward (unit stride):
             //   [0]   iw_load <= IW - 1
             //   [1]  -iw_load <= 0
@@ -681,7 +691,7 @@ public:
             //   [5]  -id_load <= 0
             if (check_src_load) {
                 for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++)
-                    mov(8, sp[i], 0);
+                    mov(8, sp_load[i], 0);
                 mov(8, sp_bound, 0);
                 mov(1, sp_bound[0], conf.iw - 1);
                 if (has_h) mov(1, sp_bound[2], conf.ih - 1);
@@ -747,9 +757,9 @@ public:
 
             if (check_src_load) {
                 for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
-                    mov(1, sp[i][1], -iw_load[i]);
-                    if (has_h) mov(1, sp[i][3], -ih_load[i]);
-                    if (has_d) mov(1, sp[i][5], -id_load[i]);
+                    mov(1, sp_load[i][1], -iw_load[i]);
+                    if (has_h) mov(1, sp_load[i][3], -ih_load[i]);
+                    if (has_d) mov(1, sp_load[i][5], -id_load[i]);
                 }
             }
         }
@@ -934,10 +944,10 @@ public:
             if (check_src_load) sp_bound = ra.alloc().w();
 
             for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
-                sp[i] = _sp[i].w();
-                if (has_d) id_load[i] = sp[i][4];
-                if (has_h) ih_load[i] = sp[i][2];
-                iw_load[i] = sp[i][0];
+                sp_load[i] = _sp[i].w();
+                if (has_d) id_load[i] = sp_load[i][4];
+                if (has_h) ih_load[i] = sp_load[i][2];
+                iw_load[i] = sp_load[i][0];
             }
 
             if (is_bwd && has_non_unit_stride) {
@@ -963,6 +973,11 @@ public:
         if (is_1st) {
             assert(A.getLen() >= mb_read01);
             A_tmp_reorder = A;
+        }
+
+        if (emu_strategy.emulate64) {
+            emu_state.temp[0] = ra.alloc();
+            emu_state.temp[1] = ra.alloc();
         }
     }
 
@@ -1033,9 +1048,9 @@ public:
         for (int i = 0; i < C.getLen(); i += 2)
             mov<float>(16, C[i], 0.0f);
 
-        mov(1, src_off_ic,
+        emov(1, src_off_ic,
                 is_src_off_64_bit ? src_off_init0 : src_off_init0.d(0));
-        add(1, wei_header[0].uq(0), wei_off_init, wei_ptr);
+        eadd(1, wei_header[0].uq(0), wei_off_init, wei_ptr);
 
         // To complete all OOO writes.
         sync(SyncFunction::allwr);
@@ -1060,7 +1075,10 @@ public:
         Label kd_loop;
         Label kd_skip;
         if (has_d) {
-            mov(1 | src_off_dep, src_off_kd, src_off_ic);
+            sync(SyncFunction::nop, src_off_dep);
+            enable_auto_swsb();
+            emov(1, src_off_kd, src_off_ic);
+            disable_auto_swsb();
             mov(1, kd, 0);
             mov(1, id, id_load0);
 
@@ -1070,15 +1088,19 @@ public:
             if (check_src_d) {
                 cmp(1 | lt | f1[0] | SWSB(1), id, conf.id);
                 cmp(1 | f1[0] | ge, id, 0);
+
+                enable_auto_swsb();
                 if (is_1st) {
                     // OIx8o2i or OIx8o4i.
-                    add(1 | ~f1[0], wei_header[0].uq(0), wei_header[0].uq(0),
+                    eadd(1 | ~f1[0], wei_header[0].uq(0), wei_header[0].uq(0),
                             conf.kh * conf.kw * 32);
                 } else {
                     // OIx4o8i8o2i or OIx4o8i8o4i.
-                    add(1 | ~f1[0], wei_header[0].uq(0), wei_header[0].uq(0),
+                    eadd(1 | ~f1[0], wei_header[0].uq(0), wei_header[0].uq(0),
                             conf.kh * conf.kw * 32 * 32);
                 }
+                disable_auto_swsb();
+
                 jmpi(1 | ~f1[0], kd_skip);
             }
         }
@@ -1086,7 +1108,10 @@ public:
         Label kh_loop;
         Label kh_skip;
         if (has_h) {
-            mov(1 | src_off_dep, src_off_kh, has_d ? src_off_kd : src_off_ic);
+            sync(SyncFunction::nop, src_off_dep);
+            enable_auto_swsb();
+            emov(1, src_off_kh, has_d ? src_off_kd : src_off_ic);
+            disable_auto_swsb();
             mov(1, kh, 0);
             mov(1, ih, ih_load0);
 
@@ -1096,21 +1121,28 @@ public:
             if (check_src_h) {
                 cmp(1 | lt | f1[0] | SWSB(1), ih, conf.ih);
                 cmp(1 | f1[0] | ge, ih, 0);
+
+                enable_auto_swsb();
                 if (is_1st) {
                     // OIx8o2i or OIx8o4i.
-                    add(1 | ~f1[0], wei_header[0].uq(0), wei_header[0].uq(0),
+                    eadd(1 | ~f1[0], wei_header[0].uq(0), wei_header[0].uq(0),
                             conf.kw * 32);
                 } else {
                     // OIx4o8i8o2i or OIx4o8i8o4i.
-                    add(1 | ~f1[0], wei_header[0].uq(0), wei_header[0].uq(0),
+                    eadd(1 | ~f1[0], wei_header[0].uq(0), wei_header[0].uq(0),
                             conf.kw * 32 * 32);
                 }
+                disable_auto_swsb();
+
                 jmpi(1 | ~f1[0], kh_skip);
             }
         }
 
-        mov(1 | src_off_dep, src_off_kw,
+        sync(SyncFunction::nop, src_off_dep);
+        enable_auto_swsb();
+        emov(1, src_off_kw,
                 has_h ? src_off_kh : has_d ? src_off_kd : src_off_ic);
+        disable_auto_swsb();
 
         Label kw_loop;
         if (do_kw_loop) {
@@ -1132,8 +1164,11 @@ public:
 
         if (do_kw_loop) {
             // Advance kw = kw + 1.
-            add(1, src_off_kw, src_off_kw,
+            enable_auto_swsb();
+            eadd(1, src_off_kw, src_off_kw,
                     -pad_sign * (1 + conf.dilate_w) * mb_block * 32);
+            disable_auto_swsb();
+
             add(1, kw, kw, 1);
             add(1, iw, iw, -pad_sign * (1 + conf.dilate_w));
             cmp(8 | lt | f0[0] | SWSB(2), kw, conf.kw);
@@ -1146,16 +1181,20 @@ public:
             // Advance kh = kh + 1.
             add(1, kh, kh, 1);
             add(1, ih, ih, -pad_sign * (1 + conf.dilate_h));
+
+            enable_auto_swsb();
             if (is_1st) {
                 // NCx4n2c or NCx4n4c.
-                add(1, src_off_kh, src_off_kh,
+                eadd(1, src_off_kh, src_off_kh,
                         (1 + conf.dilate_h) * conf.iw * 4 * 4);
             } else {
                 // NCx<mb_block>n16c or NCx<mb_block>n32c.
-                add(1, src_off_kh, src_off_kh,
+                eadd(1, src_off_kh, src_off_kh,
                         -pad_sign * (1 + conf.dilate_h) * conf.iw * mb_block
                                 * 32);
             }
+            disable_auto_swsb();
+
             cmp(8 | lt | f0[0] | SWSB(2), kh, conf.kh);
             while_(8 | f0[0], kh_loop);
         }
@@ -1166,16 +1205,20 @@ public:
             // Advance kd = kd + 1.
             add(1, kd, kd, 1);
             add(1, id, id, -pad_sign * (1 + conf.dilate_d));
+
+            enable_auto_swsb();
             if (is_1st) {
                 // NCx4n2c or NCx4n4c.
-                add(1, src_off_kd, src_off_kd,
+                eadd(1, src_off_kd, src_off_kd,
                         (1 + conf.dilate_d) * conf.ih * conf.iw * 4 * 4);
             } else {
                 // NCx<mb_block>n16c or NCx<mb_block>n32c.
-                add(1, src_off_kd, src_off_kd,
+                eadd(1, src_off_kd, src_off_kd,
                         -pad_sign * (1 + conf.dilate_d) * conf.ih * conf.iw
                                 * mb_block * 32);
             }
+            disable_auto_swsb();
+
             cmp(8 | lt | f0[0] | SWSB(2), kd, conf.kd);
             while_(8 | f0[0], kd_loop);
         }
@@ -1183,15 +1226,19 @@ public:
         if (do_ic_loop) {
             // Advance ic_bytes.
             add(1, ic_bytes, ic_bytes, conf.ic_block * src_size);
+
+            enable_auto_swsb();
             if (is_1st) {
                 // NCx4n2c or NCx4n4c.
-                add(1, src_off_ic, src_off_ic,
+                eadd(1, src_off_ic, src_off_ic,
                         conf.id * conf.ih * conf.iw * 4 * 4);
             } else {
                 // NCx<mb_block>n16c or NCx<mb_block>n32c.
-                add(1, src_off_ic, src_off_ic,
+                eadd(1, src_off_ic, src_off_ic,
                         conf.id * conf.ih * conf.iw * mb_block * 32);
             }
+            disable_auto_swsb();
+
             cmp(8 | lt | f0[0] | SWSB(1), ic_bytes, ic_bytes_padded);
             while_(8 | f0[0], ic_loop);
         }
@@ -1244,12 +1291,12 @@ public:
 
         for (int i = 0, idx = 0; i < (is_4x2_tg ? 2 : 1); i++) {
             for (int j = 0; j < src_regs_per_thr; j += regs_per_read) {
-                add(1, src_header[idx].uq(0), src_ptr, src_off_init[i]);
+                eadd(1, src_header[idx].uq(0), src_ptr, src_off_init[i]);
                 idx++;
             }
         }
         for (int i = 0; i < wei_header.getLen(); i++)
-            add(1, wei_header[i].uq(0), wei_ptr, wei_off_init);
+            eadd(1, wei_header[i].uq(0), wei_ptr, wei_off_init);
 
         // Set up source offsets for global reads and SLM writes.
         {
@@ -1257,11 +1304,11 @@ public:
             for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
                 for (int j = 0; j < src_regs_per_thr; j += regs_per_read) {
                     int off = j * 32;
-                    add(1, src_header[idx].uq(0), src_header[idx].uq(0), off);
+                    eadd(1, src_header[idx].uq(0), src_header[idx].uq(0), off);
 
                     int slm_off = j * 32;
                     if (i == 1) slm_off += 2 * slm_desc.a_block_size;
-                    add(1, a_slm_wr[idx].ud(2), a_slm_off_wr_init,
+                    eadd(1, a_slm_wr[idx].ud(2), a_slm_off_wr_init,
                             slm_off / 16);
 
                     idx++;
@@ -1274,9 +1321,9 @@ public:
             int idx = 0;
             for (int j = 0; j < wei_regs_per_thr; j += regs_per_read) {
                 int off = j * 32;
-                add(1, wei_header[idx].uq(0), wei_header[idx].uq(0), off);
+                eadd(1, wei_header[idx].uq(0), wei_header[idx].uq(0), off);
                 int slm_off = off;
-                add(1, b_slm_wr[idx].ud(2), b_slm_off_wr_init, slm_off / 16);
+                eadd(1, b_slm_wr[idx].ud(2), b_slm_off_wr_init, slm_off / 16);
                 idx++;
             }
         }
@@ -1377,9 +1424,9 @@ public:
         auto compute_off = [&](Subregister &off) {
             mov(1, off, 0);
             if (has_d)
-                e_mad(off, od_tmp, conf.ih * conf.iw * conf.mb_block * 32);
-            if (has_h) e_mad(off, oh_tmp, conf.iw * conf.mb_block * 32);
-            e_mad(off, ow_tmp, conf.mb_block * 32);
+                emad(off, od_tmp, conf.ih * conf.iw * conf.mb_block * 32);
+            if (has_h) emad(off, oh_tmp, conf.iw * conf.mb_block * 32);
+            emad(off, ow_tmp, conf.mb_block * 32);
         };
 
         auto get_src_upd = [&](int i, int idx) {
@@ -1631,56 +1678,36 @@ public:
         ra.safeRelease(_qot);
     }
 
-    void e_mul(const Subregister &dst, const Subregister &src1, int src2) {
-        auto tmp = ra.alloc_sub<int64_t>();
-
+    void emad(const Subregister &dst, const Subregister &src0, int src1) {
         assert(is_auto_swsb);
 
-        bool dst_is_64_bit
-                = utils::one_of(dst.getType(), DataType::q, DataType::uq);
-        bool src1_is_16_bit
-                = utils::one_of(src1.getType(), DataType::w, DataType::uw);
-        bool src2_is_16_bit = src2 >= std::numeric_limits<int16_t>::min()
-                && src2 <= std::numeric_limits<uint16_t>::max();
-        bool use_64_bit_mul = (dst_is_64_bit || !src2_is_16_bit);
+        bool is_src0_w
+                = utils::one_of(src0.getType(), DataType::w, DataType::uw);
+        bool is_src1_w = src1 >= std::numeric_limits<int16_t>::min()
+                && src1 <= std::numeric_limits<uint16_t>::max();
+        bool is_dst_d = utils::one_of(dst.getType(), DataType::d, DataType::ud);
 
-        // QWord MUL requires DWord operands.
-        auto _src1 = (use_64_bit_mul && src1_is_16_bit)
-                ? ra.alloc_sub<int32_t>()
-                : src1;
-        if (_src1 != src1) mov(1, _src1, src1);
+        auto tmp = tmp0.retype(dst.getType())[0];
 
-        if (dst_is_64_bit) {
-            mul(1, dst, _src1, src2);
-            return;
-        }
-
-        if (src2_is_16_bit) {
-            mul(1, dst, _src1, src2);
-            return;
-        }
-
-        mul(1, tmp.q(0), _src1, src2);
-        mov(1, dst, tmp.reinterpret(0, dst.getType()));
-
-        ra.safeRelease(tmp);
-        if (src1 != _src1) ra.safeRelease(_src1);
-    }
-
-    void e_mad(const Subregister &dst, const Subregister &src1, int src2) {
-        assert(is_auto_swsb);
-
-        bool dst_is_32_bit
-                = utils::one_of(dst.getType(), DataType::d, DataType::ud);
-        if (dst_is_32_bit) {
-            if (src2 >= std::numeric_limits<int16_t>::min()
-                    && src2 <= std::numeric_limits<uint16_t>::max()) {
-                mad(1, dst, dst, src1, src2);
-                return;
+        if (is_dst_d) {
+            if (is_src1_w) {
+                mad(1, dst, dst, src0, src1);
+            } else if (is_src0_w) {
+                mov(1, tmp.d(), int32_t(src1));
+                mad(1, dst, dst, tmp0, src0);
+            } else {
+                emul(1, tmp, src0, src1);
+                add(1, dst, dst, tmp);
             }
+        } else {
+            if (is_src0_w && !is_src1_w) {
+                mov(1, tmp.d(), int32_t(src1));
+                emul(1, tmp, tmp.d(), src0);
+            } else {
+                emul(1, tmp, src0, src1);
+            }
+            eadd(1, dst, dst, tmp);
         }
-        e_mul(tmp0.q(0), src1, src2);
-        add(1, dst, dst, tmp0.retype(dst.getType()));
     }
 
     // Initializes SLM read/write offsets for A in owords.
@@ -1757,44 +1784,46 @@ public:
         assert(conf.ver == ver_v1);
 
         // (mb / 4) * (IC / 4) * ID * IH * IW * 4 * 4
-        e_mul(src_off_init0, mb, conf.id * conf.ih * conf.iw * ic_bytes_padded);
+        emul(1, src_off_init0, mb,
+                conf.id * conf.ih * conf.iw * ic_bytes_padded);
 
         if (has_d) {
             // id * IH * IW * 4 * 4
-            e_mad(src_off_init0, id_load0, conf.ih * conf.iw * 4 * 4);
+            emad(src_off_init0, id_load0, conf.ih * conf.iw * 4 * 4);
         }
 
         if (has_h) {
             // ih * IW * 4 * 4
-            e_mad(src_off_init0, ih_load0, conf.iw * 4 * 4);
+            emad(src_off_init0, ih_load0, conf.iw * 4 * 4);
         }
 
         // iw * 4 * 4
-        e_mad(src_off_init0, iw_load0, 4 * 4);
+        emad(src_off_init0, iw_load0, 4 * 4);
     }
 
     // Initializes src offset in bytes for TG for Xn32c (Xn16c) layout.
     void init_src_off_tg_Xn32c() {
         // (mb / MB_BLOCK) * (IC / 32) * ID * IH * IW * MB_BLOCK * 32
-        e_mul(src_off_init0, mb, conf.id * conf.ih * conf.iw * ic_bytes_padded);
+        emul(1, src_off_init0, mb,
+                conf.id * conf.ih * conf.iw * ic_bytes_padded);
 
         if (conf.ver == ver_v2 && is_4x2_tg)
-            mov(1, src_off_init1, src_off_init0);
+            emov(1, src_off_init1, src_off_init0);
 
         for (int i = 0; i < (conf.ver == ver_v2 && is_4x2_tg ? 2 : 1); i++) {
             if (has_d) {
                 // id * IH * IW * MB_BLOCK * 32
-                e_mad(src_off_init[i], id_load[i],
+                emad(src_off_init[i], id_load[i],
                         conf.ih * conf.iw * mb_block * 32);
             }
 
             if (has_h) {
                 // ih * IW * MB_BLOCK * 32
-                e_mad(src_off_init[i], ih_load[i], conf.iw * mb_block * 32);
+                emad(src_off_init[i], ih_load[i], conf.iw * mb_block * 32);
             }
 
             // iw * MB_BLOCK * 32
-            e_mad(src_off_init[i], iw_load[i], mb_block * 32);
+            emad(src_off_init[i], iw_load[i], mb_block * 32);
         }
     }
 
@@ -1802,20 +1831,20 @@ public:
         // Initialize thread read offsets for source.
         if (is_1st) {
             assert(conf.ver == ver_v1);
-            mul(1, tmp0.uq(0), ithr0,
+            emul(1, tmp0.uq(0), ithr0,
                     mb_read01 * conf.id * conf.ih * conf.iw * 4 * src_size);
             if (conf.oc_group == 4) {
                 cmp(1 | eq | f0[0], ithr0, 3);
-                add(1 | f0[0], tmp0.uq(0), tmp0.uq(0),
+                eadd(1 | f0[0], tmp0.uq(0), tmp0.uq(0),
                         -(mb_read01 - mb_read23) * conf.id * conf.ih * conf.iw
                                 * 4 * src_size);
             }
 
-            add(1, src_off_init0, src_off_init0, tmp0.d(0));
+            eadd(1, src_off_init0, src_off_init0, tmp0.d(0));
         } else {
             for (int i = 0; i < (conf.ver == ver_v2 && is_4x2_tg ? 2 : 1);
                     i++) {
-                e_mad(src_off_init[i], ithr1, mb_block * 32 / 4);
+                emad(src_off_init[i], ithr1, mb_block * 32 / 4);
             }
         }
     }
@@ -1823,7 +1852,7 @@ public:
     void init_wei_off_tg() {
         // OIx4o8i8o4i: (oc / 32) * (IC / 32) * KH * KW * 32 * 32
         // OIx8o4i:     (oc / 8) * (IC / 4) * KH * KW * 8 * 4
-        e_mul(wei_off_init, oc_tg,
+        emul(1, wei_off_init, oc_tg,
                 ic_bytes_padded * conf.kd * conf.kh * conf.kw);
     }
 
@@ -1831,15 +1860,15 @@ public:
         // Initialize thread read offset for weights.
         if (is_1st) {
             // OIx8o2i or OIx8o4i.
-            e_mad(wei_off_init, ithr0,
+            emad(wei_off_init, ithr0,
                     conf.kd * conf.kh * conf.kw * 32 * 4 * wei_size);
-            e_mad(wei_off_init, ithr1,
+            emad(wei_off_init, ithr1,
                     conf.kd * conf.kh * conf.kw * 8 * 4 * wei_size);
         } else {
             // OIx4o8i8o2i or OIx4o8i8o4i.
-            e_mad(wei_off_init, ithr0,
+            emad(wei_off_init, ithr0,
                     ic_bytes_padded * conf.kd * conf.kh * conf.kw * 32);
-            e_mad(wei_off_init, ithr1, 256);
+            emad(wei_off_init, ithr1, 256);
         }
     }
 
@@ -1863,9 +1892,10 @@ public:
                 : SWSB<int32_t>(do_kw_loop ? 3 : 1);
 
         for (int i = 0; i < src_header.getLen(); i++) {
-            InstructionModifier mod
-                    = (i == 0) ? src_off_dep : InstructionModifier();
-            add(1 | mod, src_header[i].uq(0), src_ptr, src_off_kw);
+            if (i == 0) sync(SyncFunction::nop, src_off_dep);
+            enable_auto_swsb();
+            eadd(1, src_header[i].uq(0), src_ptr, src_off_kw);
+            disable_auto_swsb();
         }
 
         gmem2reg_weights();
@@ -1880,8 +1910,12 @@ public:
     // Loads source from global memory.
     void gmem2reg_source(int A_block_regs) {
         int src_load_iters = (conf.oc_group == 4 ? 1 : 2);
+
+        enable_auto_swsb();
         if (A_block_regs > 8)
-            add(1, src_header[1].uq(0), src_header[1].uq(0), 256);
+            eadd(1, src_header[1].uq(0), src_header[1].uq(0), 256);
+        disable_auto_swsb();
+
         for (int iter = 0; iter < src_load_iters; iter++) {
             int ithr = iter * conf.oc_group;
             Label src_skip, src_end;
@@ -1895,13 +1929,13 @@ public:
                 // - (iw + ithr) / SW < IW
                 // - (iw + ithr) / SW >= 0
                 if (is_bwd) {
-                    cmp(8 | lt | f1[0], iw, conf.iw * conf.stride_w - ithr);
-                    cmp(8 | f1[0] | ge, iw, -ithr);
+                    cmp(16 | lt | f1[0], iw, conf.iw * conf.stride_w - ithr);
+                    cmp(16 | f1[0] | ge, iw, -ithr);
                 } else {
-                    cmp(8 | lt | f1[0], iw, conf.iw - ithr * conf.stride_w);
-                    cmp(8 | f1[0] | ge, iw, -ithr * conf.stride_w);
+                    cmp(16 | lt | f1[0], iw, conf.iw - ithr * conf.stride_w);
+                    cmp(16 | f1[0] | ge, iw, -ithr * conf.stride_w);
                 }
-                if_(8 | f1[0], src_skip, src_end);
+                if_(16 | f1[0], src_skip, src_end);
             }
             load(16 | SWSB(gmem_a_sbid(iter, 0), 1), A_tmp[iter * A_block_regs],
                     block_hword(8), A64, src_header[0]);
@@ -1911,23 +1945,27 @@ public:
                         block_hword(A_block_regs - 8), A64, src_header[1]);
             }
             if (check_src_load) {
-                else_(8, src_end, src_end);
+                else_(16, src_end, src_end);
                 mark(src_skip);
                 for (int i = 0; i < A_block_regs; i += 2) {
                     mov<float>(16 | gmem_a_sbid(iter, i).src,
                             A_tmp[iter * A_block_regs + i], 0.0f);
                 }
                 mark(src_end);
-                endif(8);
+                endif(16);
             }
 
             if (iter + 1 < src_load_iters) {
-                add(1 | gmem_a_sbid(iter, 0).src, src_header[0].uq(0),
-                        src_header[0].uq(0), 2 * conf.stride_w * mb_block * 32);
-                if (A_block_regs > 8)
-                    add(1 | gmem_a_sbid(iter, 8).src, src_header[1].uq(0),
-                            src_header[1].uq(0),
+                enable_auto_swsb();
+                sync(SyncFunction::nop, gmem_a_sbid(iter, 0).src);
+                eadd(1, src_header[0].uq(0), src_header[0].uq(0),
+                        2 * conf.stride_w * mb_block * 32);
+                if (A_block_regs > 8) {
+                    sync(SyncFunction::nop, gmem_a_sbid(iter, 8).src);
+                    eadd(1, src_header[1].uq(0), src_header[1].uq(0),
                             2 * conf.stride_w * mb_block * 32);
+                }
+                disable_auto_swsb();
             }
         }
     }
@@ -1957,7 +1995,7 @@ public:
             if (mb_case == 1) mark(mb_tail_label);
 
             // Handle cases for different W read lengths.
-            nw_read_region_t *no_w_pad = nullptr;
+            nw_read_region_t<hw> *no_w_pad = nullptr;
             for (auto &r : nw_read_regions) {
                 if (r.mb_len != mb_len) continue;
                 if (!r.with_w_padding()) {
@@ -2000,13 +2038,15 @@ public:
             // - When (conf.oc % 32) != 0: some threads read out-of-bounds
             load(16 | SWSB(gmem_b_sbid(), 1), B_tmp[0], block_hword(8), A64,
                     wei_header[0]);
+
+            sync(SyncFunction::nop, gmem_b_sbid().src);
+            enable_auto_swsb();
             if (is_1st) {
-                add(1 | gmem_b_sbid().src, wei_header[0].uq(0),
-                        wei_header[0].uq(0), conf.kw * 32);
+                eadd(1, wei_header[0].uq(0), wei_header[0].uq(0), conf.kw * 32);
             } else {
-                add(1 | gmem_b_sbid().src, wei_header[0].uq(0),
-                        wei_header[0].uq(0), 32 * 32);
+                eadd(1, wei_header[0].uq(0), wei_header[0].uq(0), 32 * 32);
             }
+            disable_auto_swsb();
         }
         if (oc_padded != oc_tg_padded) {
             mark(wei_skip);
@@ -2044,7 +2084,7 @@ public:
                     auto dep = SWSB(it.iter >= gmem_nbuf
                                     ? std::min(7, ab_reads + 1)
                                     : 1);
-                    cmp(8 | le | sp_check_flags[i] | dep, sp[i], sp_bound);
+                    cmp(8 | le | sp_check_flags[i] | dep, sp_load[i], sp_bound);
                 }
             }
         }
@@ -2072,18 +2112,21 @@ public:
                                 0.0f);
                     }
                 }
+
+                enable_auto_swsb();
                 if (is_bwd && has_non_unit_stride) {
                     // Use run time offset update.
                     int kdhw_idx = it.kdhw_index();
                     auto src_off_upd_reg
                             = src_off_upd[i][kdhw_idx / 8].d(kdhw_idx % 8);
-                    add(1 | sbid.src, src_header[idx].uq(0),
-                            src_header[idx].uq(0), src_off_upd_reg);
+                    eadd(1, src_header[idx].uq(0), src_header[idx].uq(0),
+                            src_off_upd_reg);
                 } else {
                     // Use JIT time offset update.
-                    add(1 | sbid.src, src_header[idx].uq(0),
-                            src_header[idx].uq(0), src_update);
+                    eadd(1, src_header[idx].uq(0), src_header[idx].uq(0),
+                            src_update);
                 }
+                disable_auto_swsb();
 
                 idx++;
                 reg_off += hwords;
@@ -2096,7 +2139,7 @@ public:
             int ih_upd = it.ih_update();
             int id_upd = it.id_update();
             for (int i = 0; i < (is_4x2_tg ? 2 : 1); i++) {
-                add(8 | SWSB(1), sp[i], sp[i],
+                add(8 | SWSB(1), sp_load[i], sp_load[i],
                         Immediate::v(iw_upd, -iw_upd, ih_upd, -ih_upd, id_upd,
                                 -id_upd, 0, 0));
             }
@@ -2112,8 +2155,11 @@ public:
                     ab_reads * it.gmem_buf_write() + a_reads + idx);
             load(16 | SWSB(sbid, 2), B_tmp[reg_off], block_hword(8), A64,
                     wei_header[idx]);
-            add(1 | sbid.src, wei_header[idx].uq(0), wei_header[idx].uq(0),
-                    wei_update);
+
+            sync(SyncFunction::nop, sbid.src);
+            enable_auto_swsb();
+            eadd(1, wei_header[idx].uq(0), wei_header[idx].uq(0), wei_update);
+            disable_auto_swsb();
 
             idx++;
             reg_off += 8;
@@ -2324,8 +2370,8 @@ public:
         if (!enable_smem_write) return;
         assert(!is_auto_swsb);
 
-        mad(1, b_slm_wr[0].d(2), b_slm_off_wr_init, slm_buf_load,
-                uint16_t(slm_desc.b_buf_size / 16));
+        mad(1 | gmem_b_sbid().src, b_slm_wr[0].d(2), b_slm_off_wr_init,
+                slm_buf_load, uint16_t(slm_desc.b_buf_size / 16));
 
         if (is_1st) {
             // Set 8o4i block to zero for kw = 7.
@@ -2531,7 +2577,7 @@ public:
     void convert_C_old() {
         if (!attr_info.with_sum) return;
 
-        convertor_t cvt(this, 128 / dst_size, DataType::f, sum_type);
+        convertor_t<hw> cvt(this, 128 / dst_size, DataType::f, sum_type);
         cvt.convert(C_old_cvt[0].f(0), C_old[0].sub(0, sum_type), ra);
 
         if (C_old_cvt != C_old) ra.safeRelease(C_old);
@@ -2612,9 +2658,8 @@ public:
                     }
                     break;
                 case primitive_kind::eltwise: {
-                    jit_eltwise_injector_f32<HW::Gen12HP> inj(this,
-                            e.eltwise.alg, e.eltwise.alpha, e.eltwise.beta,
-                            e.eltwise.scale);
+                    jit_eltwise_injector_f32<hw> inj(this, e.eltwise.alg,
+                            e.eltwise.alpha, e.eltwise.beta, e.eltwise.scale);
                     auto scratch = ra.alloc_range(inj.preferred_scratch_regs());
                     inj.set_scratch(scratch);
                     inj.prepare();
@@ -2633,7 +2678,7 @@ public:
 
     void convert_C_to_dst(const GRFRange &C_tmp, int mb_idx, int mb_step,
             int oc_idx, int oc_step) {
-        convertor_t cvt(this, 128 / dst_size, dst_type, post_op_type);
+        convertor_t<hw> cvt(this, 128 / dst_size, dst_type, post_op_type);
         cvt.convert(C_tmp[0].retype(dst_type)[0],
                 C_dense[0].retype(post_op_type)[0], ra);
     }
@@ -2726,7 +2771,7 @@ public:
         UNUSED(oc_idx);
         if (!conf.with_bias) return;
 
-        convertor_t cvt(this, oc_step, DataType::f, bia_type, 4 / bia_size);
+        convertor_t<hw> cvt(this, oc_step, DataType::f, bia_type, 4 / bia_size);
         cvt.convert(bia[0].f(0), bia[0].retype(bia_type)[0], ra);
     }
 
@@ -2776,33 +2821,29 @@ public:
 
         // Compute destination offset.
         // (mb / MB_BLOCK) * (OC / dst_oc_block) * OD * OH * OW * MB_BLOCK * dst_oc_block
-        mul(1, dst_off_init, mb,
+        emul(1, dst_off_init, mb,
                 conf.od * conf.oh * conf.ow
                         * utils::rnd_up(conf.oc, dst_oc_block));
 
         // (oc / 32) * OD * OH * OW * MB_BLOCK * 32
-        mul(1, tmp0.uq(0), oc, conf.od * conf.oh * conf.ow * mb_block);
-        add(1, dst_off_init.ud(0), dst_off_init.ud(0), tmp0.d(0));
+        emad(dst_off_init, oc, conf.od * conf.oh * conf.ow * mb_block);
 
         if (has_d) {
             // od * OH * OW * mb_block * dst_oc_block
-            mul(1, tmp0.uq(0), od, conf.oh * conf.ow * mb_block * dst_oc_block);
-            add(1, dst_off_init.ud(0), dst_off_init.ud(0), tmp0.d(0));
+            emad(dst_off_init, od, conf.oh * conf.ow * mb_block * dst_oc_block);
         }
 
         if (has_h) {
             // oh * OW * mb_block * dst_oc_block
-            mul(1, tmp0.uq(0), oh, conf.ow * mb_block * dst_oc_block);
-            add(1, dst_off_init.ud(0), dst_off_init.ud(0), tmp0.d(0));
+            emad(dst_off_init, oh, conf.ow * mb_block * dst_oc_block);
         }
 
         // ow * mb_block * dst_oc_block
-        mad(1, dst_off_init.ud(0), dst_off_init.ud(0), ow,
-                uint16_t(mb_block * dst_oc_block));
+        emad(dst_off_init, ow, uint16_t(mb_block * dst_oc_block));
 
         // Convert offset from elements to bytes.
-        shl(1, dst_off_init, dst_off_init, ngen::utils::log2(dst_size));
-        add(1, dst_off_init, dst_off_init, dst_ptr);
+        eshl(1, dst_off_init, dst_off_init, ngen::utils::log2(dst_size));
+        eadd(1, dst_off_init, dst_off_init, dst_ptr);
 
         int oc_step = (acc_type == DataType::f) ? 16 : 32;
         int mb_step = 128 / (oc_step * dst_size);
@@ -2872,7 +2913,7 @@ public:
             load_per_oc_oscales(oc_idx, oc_step);
             load_per_oc_binary(oc_idx, oc_step);
 
-            add(1, dst_header.uq(0), dst_off_init,
+            eadd(1, dst_header.uq(0), dst_off_init,
                     oc_idx * conf.od * conf.oh * conf.ow * mb_block * dst_size);
 
             convert_bias(oc_idx, oc_step);
@@ -2881,7 +2922,7 @@ public:
                 // Update and write 128 bytes.
                 read_update_write_dst_range(mb_idx, mb_step, oc_idx, oc_step);
                 if (mb_idx + mb_step < mb_block)
-                    add(1, dst_header.uq(0), dst_header.uq(0), 128);
+                    eadd(1, dst_header.uq(0), dst_header.uq(0), 128);
             }
             if (check_oc) {
                 mark(skip_oc);
@@ -2924,7 +2965,7 @@ public:
     bool is_1st;
 
     // Used for 1st convolution only.
-    std::vector<nw_read_region_t> nw_read_regions;
+    std::vector<nw_read_region_t<hw>> nw_read_regions;
 
     bool check_src_d;
     bool check_src_h;
@@ -3019,7 +3060,7 @@ public:
 
     // For loop_v2.
     GRFRange _sp;
-    GRF sp[2];
+    GRF sp_load[2];
     GRF sp_bound;
     FlagRegister sp_check_flags[2];
 
@@ -3089,9 +3130,62 @@ public:
 
     // 256 registers.
     RegisterAllocator ra;
+
+    // 64-bit emulation registers
+    EmulationStrategy emu_strategy;
+    EmulationState emu_state;
+
+    friend struct EmulationImplementation;
+    template <typename DT = void>
+    void emov(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::RegData src0) {
+        EmulationImplementation::emov<DT>(*this, mod, dst, src0, emu_strategy);
+    }
+    template <typename DT = void>
+    void emov(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::Immediate src0) {
+        EmulationImplementation::emov<DT>(*this, mod, dst, src0, emu_strategy);
+    }
+    template <typename DT = void>
+    void eadd(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, const ngen::RegData &src1) {
+        EmulationImplementation::eadd<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void eadd(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, ngen::Immediate src1) {
+        EmulationImplementation::eadd<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, const ngen::RegData &src1) {
+        EmulationImplementation::emul<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, ngen::Immediate src1) {
+        EmulationImplementation::emul<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void eshl(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::RegData src0, uint16_t src1) {
+        EmulationImplementation::eshl<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void eshr(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::RegData src0, uint16_t src1) {
+        EmulationImplementation::eshr<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
 };
 
-void convertor_t::convert_impl(
+template <gpu_gen_t hw>
+void convertor_t<hw>::convert_impl(
         int simd, int off, Subregister to, Subregister from, int phase) {
     assert(utils::one_of(simd, 8, 16));
 
@@ -3152,7 +3246,8 @@ void convertor_t::convert_impl(
     if (phase == 0) host_->mov(simd, to(1), from(from_stride_));
 }
 
-void nw_read_region_t::read_and_reorder() {
+template <gpu_gen_t hw>
+void nw_read_region_t<hw>::read_and_reorder() {
     if (w_len == 0) return;
 
     auto &conf = host->conf;
@@ -3177,7 +3272,9 @@ void nw_read_region_t::read_and_reorder() {
     for (int i = 2; i >= 0; i--) {
         int len = (1 << i);
         if ((w_len & len) == 0) continue;
-        host->add(1, header[i].uq(0), header[i].uq(0), off);
+        host->enable_auto_swsb();
+        host->eadd(1, header[i].uq(0), header[i].uq(0), off);
+        host->disable_auto_swsb();
         off += (1 << i) * 16;
         reads++;
     }
@@ -3202,8 +3299,10 @@ void nw_read_region_t::read_and_reorder() {
             for (int i = 2; i >= 0; i--) {
                 int len = (1 << i);
                 if ((w_len & len) == 0) continue;
-                host->add(1 | sbids[i].src, header[i].uq(0), header[i].uq(0),
+                host->enable_auto_swsb();
+                host->eadd(1, header[i].uq(0), header[i].uq(0),
                         conf.id * conf.ih * conf.iw * 4 * 4 * host->src_size);
+                host->disable_auto_swsb();
             }
         }
     }
@@ -3231,8 +3330,26 @@ void nw_read_region_t::read_and_reorder() {
 status_t gen12hp_conv_data_create_kernel(const conv_conf_t &conf,
         compute::kernel_t *kernel, gpu_primitive_t *primitive,
         engine_t *engine) {
-    gen12hp_conv_data_kernel_t ngen_kernel(conf);
-    return primitive->create_kernel(engine, kernel, ngen_kernel);
+    using namespace compute;
+
+    std::unique_ptr<jit::jit_generator_base> jit_gen_convolution;
+
+    auto compute_engine = utils::downcast<compute_engine_t *>(engine);
+    auto device_info = compute_engine->device_info();
+
+    switch (device_info->gpu_arch()) {
+        case gpu_arch_t::gen12hp:
+            jit_gen_convolution.reset(
+                    new gen12hp_conv_data_kernel_t<gpu_gen12hp>(conf));
+            break;
+        case gpu_arch_t::gen12p7:
+            jit_gen_convolution.reset(
+                    new gen12hp_conv_data_kernel_t<gpu_gen12p7>(conf));
+            break;
+        default: return status::runtime_error;
+    }
+
+    return primitive->create_kernel(engine, kernel, *jit_gen_convolution);
 }
 
 } // namespace jit
