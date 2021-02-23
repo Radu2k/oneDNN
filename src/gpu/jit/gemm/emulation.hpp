@@ -24,11 +24,22 @@ namespace gpu {
 namespace jit {
 
 struct EmulationStrategy {
-    bool emulate64 = false; // Emulate 64-bit arithmetic (required for GenXLP)
-    bool emulateDWxDW
-            = false; // Emulate DW x DW -> DW multiplication (required for Gen12)
-    bool emulate64_add32
-            = false; // Use 32-bit adds for 64-bit arithmetic, assuming no 2^32 boundaries crossed.
+    // Emulate 64-bit arithmetic (required for GenXLP)
+    bool emulate64 = false;
+    // Emulate DW x DW -> DW multiplication (required for Gen12)
+    bool emulateDWxDW = false;
+    // Use 32-bit adds for 64-bit arithmetic, assuming no 2^32 boundaries crossed.
+    bool emulate64_add32 = false;
+
+    EmulationStrategy() = default;
+    EmulationStrategy(ngen::HW hw_) : EmulationStrategy() {
+        if (hw_ == ngen::HW::Gen11 || hw_ == ngen::HW::Gen12LP
+                || hw_ == ngen::HW::Gen12p7)
+            emulate64 = true;
+        if (hw_ == ngen::HW::Gen11
+                || (hw_ >= ngen::HW::Gen12LP && hw_ <= ngen::HW::Gen12p7))
+            emulateDWxDW = true;
+    }
 };
 
 struct EmulationState {
@@ -63,6 +74,13 @@ struct EmulationImplementation {
         using namespace ngen;
         using dnnl::impl::utils::one_of;
         return one_of(op.getType(), DataType::d, DataType::ud);
+    }
+
+    template <typename O>
+    static bool isW(const O &op) {
+        using namespace ngen;
+        using dnnl::impl::utils::one_of;
+        return one_of(op.getType(), DataType::w, DataType::uw);
     }
 
     template <typename T1, typename T2>
@@ -147,6 +165,8 @@ struct EmulationImplementation {
 
     static ngen::RegData lowWord(ngen::RegData in) {
         using namespace ngen;
+        if (isW(in)) return in;
+
         auto outLo = in;
         outLo.setRegion(in.getVS() * 2, in.getWidth(), in.getHS() * 2);
         outLo.setOffset(in.getOffset() * 2);
@@ -156,7 +176,7 @@ struct EmulationImplementation {
     }
 
     static ngen::Immediate lowWord(const ngen::Immediate &in) {
-        return uint16_t(static_cast<uint64_t>(in));
+        return uint16_t(static_cast<uint64_t>(in) & 0xffff);
     }
 
     static bool isUnitStride(const ngen::RegData &rd) {
@@ -476,8 +496,10 @@ struct EmulationImplementation {
 
         bool dstD = isDW(dst);
         bool dstQ = isQW(dst);
+        bool s0W = isW(src0);
         bool s0D = isDW(src0);
         bool s0Q = isQW(src0);
+        bool s1W = isW(src1);
         bool s1D = isDW(src1);
         bool s1Q = isQW(src1);
 
@@ -485,57 +507,49 @@ struct EmulationImplementation {
         bool s1Signed = isSigned(src1.getType());
         auto mulHiType = (s0Signed || s1Signed) ? DataType::d : DataType::ud;
 
-        const auto &temp = state.temp;
+        if (mod.getExecSize() != 1) stub();
 
-        if (s0Q || s1Q)
+        if (s0Q || s1Q) {
             stub();
-        else if (dstQ && s0D && s1D && strategy.emulate64) {
+        } else if (dstQ && s0W && s1W) {
             RegData dstLo, dstHi;
-
             splitToDW(dst, dstLo, dstHi);
-            auto acc = g.acc0.ud();
+
+            g.mul(mod, dstLo, src0, src1);
 
             dstHi.setType(mulHiType);
+            dstLo.setType(mulHiType);
 
-            RegData subDstLo = dstLo, subDstHi = dstHi;
-            bool copyDstLo = false, copyDstHi = false;
-            if ((dstHi.getOffset() != 0)
-                    || ((mod.getExecSize() > 1) && !isUnitStride(dstHi))) {
-                copyDstHi = true;
-                subDstHi = temp[0].retype(dstHi.getType());
-            }
-            if ((dstLo.getOffset() & 3)
-                    || ((mod.getExecSize() > 1) && !isUnitStride(dstLo))) {
-                copyDstLo = true;
-                subDstLo = temp[1].retype(dstLo.getType());
-            }
+            if (s0Signed || s1Signed)
+                g.asr(mod, dstHi, dstLo, 31);
+            else
+                g.mov(mod, dstHi, 0);
+        } else if (dstQ && s0W && s1D) {
+            stub(); // not supported
+        } else if (dstQ && s0D && (s1W || (s1D && strategy.emulate64))) {
+            RegData dstLo, dstHi;
+            splitToDW(dst, dstLo, dstHi);
+
+            auto acc = g.acc0.retype(mulHiType)[dstLo.getOffset()];
 
             g.mul(mod, acc, src0, lowWord(src1));
-            g.mach(mod, subDstHi, src0, src1);
-            g.mov(mod, subDstLo, acc);
-            if (copyDstHi) g.mov(mod, dstHi, subDstHi);
-            if (copyDstLo) g.mov(mod, dstLo, subDstLo);
+            if (s1D)
+                g.mach(mod, dstLo, src0, src1);
+            else
+                g.mach(mod, dstLo, src0, int32_t(0));
+            g.mov(mod, dstHi, dstLo);
+            g.mov(mod, dstLo, acc);
         } else if (dstD && s0D && s1D && strategy.emulateDWxDW) {
-            // Emulate with mul/mach sequence. Or on Gen10+, mul/macl.
-            if (s0Signed != s1Signed) src1.setType(src0.getType());
-
-            auto acc = g.acc0.ud();
-            RegData subDst = dst;
-            bool copyDst = false;
-            if ((dst.getOffset() > 0)
-                    || ((mod.getExecSize() > 1) && !isUnitStride(dst))) {
-                copyDst = true;
-                subDst = temp[0].retype(dst.getType());
-            }
+            auto acc = g.acc0.retype(mulHiType)[dst.getOffset()];
+            auto dummy = g.null.retype(mulHiType)[dst.getOffset()];
 
             g.mul(mod, acc, src0, lowWord(src1));
-            if (g.hardware < HW::Gen10) {
-                g.mach(mod, g.null.retype(mulHiType), src0, src1);
-                g.mov(mod, subDst, acc);
-            } else
-                g.macl(mod, subDst, src0, src1);
-
-            if (copyDst) g.mov(mod, dst, subDst);
+            if (g.hardware >= HW::Gen11 && g.hardware <= HW::Gen12p7) {
+                g.macl(mod, dst, src0, src1);
+            } else {
+                g.mach(mod, dummy, src0, src1);
+                g.mov(mod, dst, acc);
+            }
         } else
             g.mul(mod, dst, src0, src1);
     }
@@ -579,6 +593,11 @@ struct EmulationImplementation {
         bool dstQ = isQW(dst);
         bool s0Q = isQW(src0);
 
+        if (src1 == 0) {
+            emov<DT, Generator>(g, mod, dst, src0, strategy);
+            return;
+        }
+
         if (dstQ && strategy.emulate64) {
             if (src1 >= 32) stub();
 
@@ -619,6 +638,11 @@ struct EmulationImplementation {
 
         bool dstQ = isQW(dst);
         bool s0Q = isQW(src0);
+
+        if (src1 == 0) {
+            emov<DT, Generator>(g, mod, dst, src0, strategy);
+            return;
+        }
 
         if (dstQ && strategy.emulate64) {
             if (src1 >= 32) stub();
