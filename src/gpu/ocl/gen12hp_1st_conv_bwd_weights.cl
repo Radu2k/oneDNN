@@ -32,22 +32,24 @@
 
 #define BLOCK_READ_SRC(ptr, dst, lim, off) \
     short8 temp = cvt_f32_to_bf16(1); \
-    temp[0] = ptr[SW * 8 + SW * sglid - PW]; \
-    temp[1] = ptr[SW * 8 + SW * sglid + 1 - PW]; \
-    slm_s[SW * sglid] = slm_s[SW * sglid + 8 * SW]; \
-    if (SW == 2) slm_s[SW * sglid + 1] = slm_s[SW * sglid + 8 * SW + 1]; \
-    if (SW * ow + SW * 8 + SW * sglid >= IW + PW) { \
+    temp[0] = ptr[SW * SUB_GROUP_SIZE + SW * sglid - PW]; \
+    temp[1] = ptr[SW * SUB_GROUP_SIZE + SW * sglid + 1 - PW]; \
+    slm_s[SW * sglid] = slm_s[SW * sglid + SUB_GROUP_SIZE * SW]; \
+    if (SW == 2) \
+        slm_s[SW * sglid + 1] = slm_s[SW * sglid + SUB_GROUP_SIZE * SW + 1]; \
+    if (SW * ow + SW * SUB_GROUP_SIZE + SW * sglid >= IW + PW) { \
         temp[0] = cvt_f32_to_bf16(0); \
     } \
-    if (SW == 2 && SW * ow + SW * 8 + SW * sglid + 1 >= IW + PW) { \
+    if (SW == 2 \
+            && SW * ow + SW * SUB_GROUP_SIZE + SW * sglid + 1 >= IW + PW) { \
         temp[1] = cvt_f32_to_bf16(0); \
     } \
-    slm_s[SW * 8 + SW * sglid] = temp[0]; \
-    slm_s[SW * 8 + SW * sglid + 1] = temp[1]; \
+    slm_s[SW * SUB_GROUP_SIZE + SW * sglid] = temp[0]; \
+    slm_s[SW * SUB_GROUP_SIZE + SW * sglid + 1] = temp[1]; \
     temp[0] = slm_s[SW * sglid]; \
     temp[1] = slm_s[SW * sglid + 1]; \
-    temp[2] = slm_s[SW * sglid + SW * 8]; \
-    temp[3] = slm_s[SW * sglid + SW * 8 + 1]; \
+    temp[2] = slm_s[SW * sglid + SW * SUB_GROUP_SIZE]; \
+    temp[3] = slm_s[SW * sglid + SW * SUB_GROUP_SIZE + 1]; \
     for (int ctr = 0; ctr < lim / 2; ctr++) { \
 \
         if (SW == 2) { \
@@ -64,15 +66,15 @@
     }
 
 #define BLOCK_READ_DST8(ptr, dst, off, lim) \
-    dst.s01234567 \
-            = as_short8(intel_sub_group_block_read_us8(ptr + off + 0 * 16));
+    dst.s01234567 = as_short8(intel_sub_group_block_read_us8(ptr + off));
 
 #define BLOCK_READ_SLM8(ptr, dst, off) \
-    if (ow + 8 <= OW) { \
+    if (ow + OW_BLOCK <= OW) { \
         dst.s02468ace = as_short8(intel_sub_group_block_read_us8(ptr)); \
     } else { \
-        for (int i = 0; i < OW % 8; i++) \
-            dst[2 * i] = as_short(intel_sub_group_block_read_us(ptr + 8 * i)); \
+        for (int i = 0; i < OW % OW_BLOCK; i++) \
+            dst[2 * i] = as_short( \
+                    intel_sub_group_block_read_us(ptr + SUB_GROUP_SIZE * i)); \
     }
 
 #if BWD_WEIGHTS == 1
@@ -95,7 +97,7 @@ gen12hp_1st_conv_bwd_weights(__global SRC_DATA_T *src,
     const int lid_0 = get_local_id(0);
     const int glid_2 = get_global_id(2);
 
-    const int ksp = glid_1 * 32 + 8 * (lid_0 / 8);
+    const int ksp = glid_1 * LWS_0 + SUB_GROUP_SIZE * (lid_0 / SUB_GROUP_SIZE);
 
 #if CASE_3D
     const int kd = ksp / (KWB * KH * IC);
@@ -138,7 +140,7 @@ gen12hp_1st_conv_bwd_weights(__global SRC_DATA_T *src,
 
     src += mb * IC * G * ID * IH * IW + g * IC * ID * IH * IW * MB_BLOCK;
 
-    const int lchan = ((lid_0 / 8) % 2);
+    const int lchan = ((lid_0 / SUB_GROUP_SIZE) % 2);
     diff_dst += oc * OD * OH * OW * OC_BLOCK * MB_BLOCK
             + g * OC * OD * OH * OW * MB_BLOCK;
 
@@ -157,7 +159,7 @@ gen12hp_1st_conv_bwd_weights(__global SRC_DATA_T *src,
             + 24; // 24 is zero filled tail should have minimum size of SW*8
     //slm src size = row size * 4 subgroups per work group
     __local ushort slm_src[4 * padded_iw];
-    __local ushort *slm_s = &slm_src[(lid_0 / 8) * padded_iw];
+    __local ushort *slm_s = &slm_src[(lid_0 / SUB_GROUP_SIZE) * padded_iw];
 
     for (int omb = mb; omb < mb_end; omb++) {
         const __global DST_DATA_T *diff_dst1_
@@ -188,22 +190,25 @@ gen12hp_1st_conv_bwd_weights(__global SRC_DATA_T *src,
                 intel_sub_group_block_write_us(
                         slm_s + SW * OW_BLOCK, cvt_f32_to_bf16(0));
                 intel_sub_group_block_write_us(
-                        slm_s + SW * OW_BLOCK + 8, cvt_f32_to_bf16(0));
+                        slm_s + SW * OW_BLOCK + SUB_GROUP_SIZE,
+                        cvt_f32_to_bf16(0));
                 intel_sub_group_block_write_us(
-                        slm_s + SW * OW_BLOCK + 16, cvt_f32_to_bf16(0));
+                        slm_s + SW * OW_BLOCK + 2 * SUB_GROUP_SIZE,
+                        cvt_f32_to_bf16(0));
                 if (ow_beg > 0 && sglid < PW) {
-                    slm_s[8 * SW + sglid] = src1[sglid - PW];
+                    slm_s[SUB_GROUP_SIZE * SW + sglid] = src1[sglid - PW];
                 }
                 barrier(CLK_LOCAL_MEM_FENCE);
-#if IW <= 8 * SW
+#if IW <= SUB_GROUP_SIZE * SW
                 if (ow_beg * SW + SW * sglid < IW)
 #endif
-                    slm_s[PW + 8 * SW + SW * sglid] = src1[SW * sglid];
+                    slm_s[PW + SUB_GROUP_SIZE * SW + SW * sglid]
+                            = src1[SW * sglid];
                 if (SW == 2) {
-#if IW <= 8 * SW
+#if IW <= SUB_GROUP_SIZE * SW
                     if (ow_beg * SW + SW * sglid + 1 < IW)
 #endif
-                        slm_s[PW + 8 * SW + SW * sglid + 1]
+                        slm_s[PW + SUB_GROUP_SIZE * SW + SW * sglid + 1]
                                 = src1[SW * sglid + 1];
                 }
 
@@ -220,20 +225,30 @@ gen12hp_1st_conv_bwd_weights(__global SRC_DATA_T *src,
                         BLOCK_READ_SRC(src1, blockA, (KW + KW % 2), 0)
                     }
 
-                    const __global DST_DATA_T *diff_dst2_
-                            = diff_dst1 + (ow + 0) * OC_BLOCK + lchan * 16 * 4;
+                    const __global DST_DATA_T *diff_dst2_ = diff_dst1
+                            + (ow + 0) * OC_BLOCK
+                            + lchan * OC_BLOCK * (OW_BLOCK / 2);
                     BLOCK_READ_DST8(diff_dst2_, blockB, 0, 0);
 #if WITH_BIAS == 1
                     for (int i = 0; i < OW_LOOP_BLOCK / 2; i++) {
-                        bias_loc += cvt_bf16_to_f32(blockB[2 * i]);
-                        bias_loc2 += cvt_bf16_to_f32(blockB[2 * i + 1]);
+#if OW % OW_BLOCK != 0
+                        if (ow + lchan * (OW_LOOP_BLOCK / 2) + i < OW) {
+#endif
+                            bias_loc += cvt_bf16_to_f32(blockB[2 * i]);
+                            bias_loc2 += cvt_bf16_to_f32(blockB[2 * i + 1]);
+#if OW % OW_BLOCK != 0
+                        }
+#endif
                     }
 #endif
-                    intel_sub_group_block_write_us4(
-                            slm_oc + (oc % 2) * 16 * 8 + lchan * 4 * 8,
+                    intel_sub_group_block_write_us4(slm_oc
+                                    + (oc % 2) * OW_BLOCK * 2 * (OC_BLOCK / 2)
+                                    + lchan * (OW_BLOCK / 2) * (OC_BLOCK / 2),
                             as_ushort4(blockB.s0246));
-                    intel_sub_group_block_write_us4(
-                            slm_oc + (oc % 2) * 16 * 8 + 8 * 8 + lchan * 4 * 8,
+                    intel_sub_group_block_write_us4(slm_oc
+                                    + (oc % 2) * OW_BLOCK * 2 * (OC_BLOCK / 2)
+                                    + OW_BLOCK * (OC_BLOCK / 2)
+                                    + lchan * (OW_BLOCK / 2) * (OC_BLOCK / 2),
                             as_ushort4(blockB.s1357));
 
                     barrier(CLK_LOCAL_MEM_FENCE);
@@ -242,13 +257,16 @@ gen12hp_1st_conv_bwd_weights(__global SRC_DATA_T *src,
                     BLOCK_READ_SLM8(slm_oc, blockB, 0);
                     blockC00 = mmad8x8_bf16(
                             as_uint8(blockA), as_int8(blockB), blockC00);
-                    BLOCK_READ_SLM8(slm_oc + OW_BLOCK * 8, blockB, 0);
+                    BLOCK_READ_SLM8(
+                            slm_oc + OW_BLOCK * (OC_BLOCK / 2), blockB, 0);
                     blockC01 = mmad8x8_bf16(
                             as_uint8(blockA), as_int8(blockB), blockC01);
-                    BLOCK_READ_SLM8(slm_oc + 2 * OW_BLOCK * 8, blockB, 0);
+                    BLOCK_READ_SLM8(
+                            slm_oc + 2 * OW_BLOCK * (OC_BLOCK / 2), blockB, 0);
                     blockC10 = mmad8x8_bf16(
                             as_uint8(blockA), as_int8(blockB), blockC10);
-                    BLOCK_READ_SLM8(slm_oc + 3 * OW_BLOCK * 8, blockB, 0);
+                    BLOCK_READ_SLM8(
+                            slm_oc + 3 * OW_BLOCK * (OC_BLOCK / 2), blockB, 0);
                     blockC11 = mmad8x8_bf16(
                             as_uint8(blockA), as_int8(blockB), blockC11);
                 }
