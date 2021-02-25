@@ -17,6 +17,7 @@
 #include "gpu/gpu_impl_list.hpp"
 
 #include "gpu/jit/binary_format.hpp"
+#include "gpu/jit/conv/gen_convolution.hpp"
 #include "gpu/jit/gemm/gen12hp_systolic_gemm.hpp"
 #include "gpu/jit/gemm/gen_gemm.hpp"
 #include "gpu/jit/gen12hp_convolution.hpp"
@@ -84,6 +85,7 @@ const pd_create_f gpu_impl_list[] = {
         INSTANCE(ocl::ref_deconvolution_bwd_weights_t),
 
         // Convolution
+        INSTANCE(jit::gen_convolution_fwd_t),
         INSTANCE(jit::gen12hp_convolution_fwd_t),
         INSTANCE(jit::gen12hp_convolution_bwd_data_t),
         INSTANCE(jit::gen12hp_convolution_bwd_weights_t),
