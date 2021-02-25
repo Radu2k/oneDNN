@@ -232,36 +232,6 @@ extern sycl_memory_kind_ext_t sycl_memory_kind;
 
 void init_isa_settings();
 
-#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
-#include "dnnl_threadpool_iface.hpp"
-// XXX: cannot include dnnl_thread.hpp because of conflicting macro
-// definitions
-namespace dnnl {
-namespace impl {
-namespace threadpool_utils {
-threadpool_iface *get_active_threadpool();
-}
-} // namespace impl
-} // namespace dnnl
-#endif
-
-inline int create_dnnl_stream(
-        dnnl_stream_t *stream, dnnl_engine_t engine, unsigned flags) {
-    dnnl_engine_kind_t engine_kind;
-    DNN_SAFE(dnnl_engine_get_kind(engine, &engine_kind), CRIT);
-
-#if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    if (engine_kind == dnnl_cpu) {
-        SAFE_V(dnnl_threadpool_interop_stream_create(stream, engine,
-                dnnl::impl::threadpool_utils::get_active_threadpool()));
-        return OK;
-    }
-#endif
-
-    DNN_SAFE(dnnl_stream_create(stream, engine, flags), CRIT);
-    return OK;
-}
-
 inline const char *query_impl_info(const_dnnl_primitive_desc_t pd) {
     const char *str;
     dnnl_primitive_desc_query(pd, dnnl_query_impl_info_str, 0, &str);
