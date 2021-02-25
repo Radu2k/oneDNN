@@ -293,14 +293,14 @@ struct MaskInfo {
         } variable;
         struct {
             uint8_t isFixed : 1; // = true (fixed mask)
-            uint8_t : 7;
+            uint8_t _ : 7;
             uint8_t rsize; // Maximum remainder value.
             uint16_t value; // Mask value.
         } fixed;
         uint32_t raw;
     };
 
-    MaskInfo() : fixed {true, 0, 0xFFFF} {}
+    MaskInfo() : fixed {true, 0, 0, 0xFFFF} {}
 
     bool operator!() const { return fixed.isFixed && fixed.value == 0xFFFF; }
     operator bool() const { return !!*this; }
