@@ -33,8 +33,6 @@ using half = dnnl::impl::float16_t;
 #define NGEN_HALF_TYPE
 
 #include "../ngen/ngen_opencl.hpp"
-
-#include "../ngen/ngen_interface.hpp"
 #include "../ngen/ngen_register_allocator.hpp"
 
 #include "gpu/jit/gemm/emulation.hpp"
