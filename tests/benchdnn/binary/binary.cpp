@@ -116,12 +116,11 @@ static int init_pd(dnnl_engine_t engine, const prb_t *prb,
 
     attr_args_t attr_args;
     attr_args.prepare_binary_post_op_mds(prb->attr, prb->ndims[0], dst_dims);
-    auto dnnl_attr = create_dnnl_attr(prb->attr, attr_args);
+    auto dnnl_attr = make_benchdnn_dnnl_wrapper(
+            create_dnnl_attr(prb->attr, attr_args));
 
     dnnl_status_t init_status
             = dnnl_primitive_desc_create(&bpd, &bd, dnnl_attr, engine, nullptr);
-
-    dnnl_primitive_attr_destroy(dnnl_attr);
 
     if (init_status == dnnl_unimplemented)
         return res->state = UNIMPLEMENTED, OK;
@@ -179,8 +178,11 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
     }
 
     if (is_nvidia_gpu()) {
-        const bool alg_ok = !(prb->alg == alg_t::DIV || prb->alg == alg_t::SUB
-                || prb->alg == alg_t::GE);
+        const std::vector<alg_t> supported_algs
+                = {alg_t::ADD, alg_t::MUL, alg_t::MIN, alg_t::MAX};
+        const bool alg_ok
+                = std::any_of(supported_algs.cbegin(), supported_algs.cend(),
+                        [&](const alg_t alg) { return prb->alg == alg; });
         const bool dt_ok = prb->sdt[0] == prb->sdt[1];
         const bool diff_dt_ok = dt_ok
                 && IMPLICATION(
@@ -198,15 +200,14 @@ int doit(const prb_t *prb, res_t *res) {
     check_known_skipped_case(prb, res);
     if (res->state == SKIPPED) return OK;
 
-    dnnl_primitive_t b {};
-    SAFE(init_prim(&b, init_pd, prb, res), WARN);
+    benchdnn_dnnl_wrapper_t<dnnl_primitive_t> prim;
+    SAFE(init_prim(prim, init_pd, prb, res), WARN);
     if (res->state == SKIPPED || res->state == UNIMPLEMENTED) return OK;
 
     const_dnnl_primitive_desc_t const_pd;
-    DNN_SAFE(dnnl_primitive_get_primitive_desc(b, &const_pd), CRIT);
+    DNN_SAFE(dnnl_primitive_get_primitive_desc(prim, &const_pd), CRIT);
 
     if (check_mem_size(const_pd) != OK) {
-        DNN_SAFE_V(dnnl_primitive_destroy(b));
         return res->state = SKIPPED, res->reason = NOT_ENOUGH_RAM, OK;
     }
 
@@ -251,7 +252,7 @@ int doit(const prb_t *prb, res_t *res) {
     args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
     args.set(binary_po_args, binary_po_dt);
 
-    SAFE(execute_and_wait(b, args), WARN);
+    SAFE(execute_and_wait(prim, args), WARN);
 
     if (bench_mode & CORR) {
         compute_ref(prb, src0_fp, src1_fp, binary_po_fp, dst_fp);
@@ -265,17 +266,19 @@ int doit(const prb_t *prb, res_t *res) {
         };
         cmp.set_driver_check_function(binary_add_check);
 
-        const bool is_ge = prb->alg == alg_t::GE
-                || prb->attr.post_ops.find(alg_t::GE) >= 0;
-        if (is_ge) cmp.set_zero_trust_percent(100.f);
+        const std::vector<alg_t> cmp_alg = {alg_t::GE, alg_t::GT, alg_t::LE,
+                alg_t::LT, alg_t::EQ, alg_t::NE};
+        const bool is_cmp = std::any_of(
+                cmp_alg.cbegin(), cmp_alg.cend(), [&](const alg_t alg) {
+                    return (prb->alg == alg)
+                            || prb->attr.post_ops.find(alg) >= 0;
+                });
+
+        if (is_cmp) cmp.set_zero_trust_percent(100.f);
         SAFE(cmp.compare(dst_fp, dst_dt, prb->attr, res), WARN);
     }
 
-    measure_perf(res->timer, b, args);
-
-    DNN_SAFE_V(dnnl_primitive_destroy(b));
-
-    return OK;
+    return measure_perf(res->timer, prim, args);
 }
 
 } // namespace binary

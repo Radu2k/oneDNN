@@ -43,7 +43,7 @@ float round_to_nearest_representable(dnnl_data_type_t dt, float value) {
         case dnnl_s32:
         case dnnl_s8:
         case dnnl_u8: value = maybe_saturate(dt, value); break;
-        default: SAFE_V(FAIL);
+        default: SAFE(FAIL, CRIT);
     }
 
     return value;
@@ -302,11 +302,11 @@ void check_known_skipped_case_common(
     }
 }
 
-// Binary MAX, MIN and GE post-ops may return different results for different
-// backends when NaN is one of inputs. Depending on its position and
-// implementation, either first or second operand may be returned. There isn't a
-// single standard, thus, marking such cases as SKIPPED with KNOWN_LIMITATION
-// reason.
+// Binary MAX, MIN and comparison operations post-ops may return different
+// results for different backends when NaN is one of inputs. Depending on its
+// position and implementation, either first or second operand may be returned.
+// There isn't a single standard, thus, marking such cases as SKIPPED with
+// KNOWN_LIMITATION reason.
 void check_binary_post_ops(const attr_t &attr, res_t *res) {
     if (attr.is_def()) return;
 
@@ -316,8 +316,10 @@ void check_binary_post_ops(const attr_t &attr, res_t *res) {
         for (int idx = 0; idx < po.len(); ++idx) {
             const auto &e = po.entry[idx];
             if (!e.is_binary_kind()) continue;
-            if (e.kind == pk_t::MAX || e.kind == pk_t::MIN
-                    || e.kind == pk_t::GE) {
+            if (e.kind == pk_t::MAX || e.kind == pk_t::MIN || e.kind == pk_t::GE
+                    || e.kind == pk_t::GT || e.kind == pk_t::LE
+                    || e.kind == pk_t::LT || e.kind == pk_t::EQ
+                    || e.kind == pk_t::NE) {
                 res->state = SKIPPED, res->reason = KNOWN_LIMITATION;
                 break;
             }

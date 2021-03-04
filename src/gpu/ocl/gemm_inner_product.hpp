@@ -248,7 +248,7 @@ struct gemm_inner_product_bwd_weights_t : public gpu_primitive_t {
             bool gemm_ok = false;
             gemm_ok = status::success
                     == create_gemm_pd(gemm_pd_, engine, &a_md, &b_md, &c_md,
-                            &glob_zero_md, c_md.data_type, attr());
+                            &glob_zero_md, desc()->accum_data_type, attr());
 
             if (!gemm_ok) return status::unimplemented;
             init_scratchpad();

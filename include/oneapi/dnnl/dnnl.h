@@ -1019,6 +1019,12 @@ int DNNL_API dnnl_memory_desc_equal(
 size_t DNNL_API dnnl_memory_desc_get_size(
         const dnnl_memory_desc_t *memory_desc);
 
+/// Returns the size of data type.
+///
+/// @param data_type Data type.
+/// @returns The number of bytes occupied by data type.
+size_t DNNL_API dnnl_data_type_size(dnnl_data_type_t data_type);
+
 /// Creates a memory object.
 ///
 /// Unless @p handle is equal to DNNL_MEMORY_NONE, the constructed memory
@@ -1237,7 +1243,8 @@ dnnl_status_t DNNL_API dnnl_sum_primitive_desc_create(
 /// @param binary_desc Output descriptor for a binary primitive.
 /// @param alg_kind Algorithm kind. Valid values are #dnnl_binary_add,
 ///     #dnnl_binary_mul, #dnnl_binary_max, #dnnl_binary_min, #dnnl_binary_div,
-///     #dnnl_binary_sub and #dnnl_binary_ge.
+///     #dnnl_binary_sub, #dnnl_binary_ge, #dnnl_binary_gt, #dnnl_binary_le,
+///     #dnnl_binary_lt, #dnnl_binary_eq and #dnnl_binary_ne.
 /// @param src0_desc Source 0 memory descriptor.
 /// @param src1_desc Source 1 memory descriptor.
 /// @param dst_desc Destination memory descriptor.

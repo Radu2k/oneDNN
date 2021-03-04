@@ -190,7 +190,7 @@ int attr_t::get_default_mask(policy_t policy) {
         case PER_DIM_01: return (1 << 0) + (1 << 1);
         case PER_TENSOR: return (1 << DNNL_MAX_NDIMS) - 1;
         case COMMON: return 0;
-        default: SAFE_V(FAIL); return 0;
+        default: SAFE(FAIL, CRIT); return 0;
     }
 }
 
@@ -337,10 +337,12 @@ static po_table_entry_t kind_table[] = {
         // binary
         {pk_t::BINARY_START, "binary_undef", dnnl_alg_kind_undef},
         {pk_t::ADD, "add", dnnl_binary_add},
-        {pk_t::DIV, "div", dnnl_binary_div}, {pk_t::GE, "ge", dnnl_binary_ge},
+        {pk_t::DIV, "div", dnnl_binary_div}, {pk_t::EQ, "eq", dnnl_binary_eq},
+        {pk_t::GE, "ge", dnnl_binary_ge}, {pk_t::GT, "gt", dnnl_binary_gt},
+        {pk_t::LE, "le", dnnl_binary_le}, {pk_t::LT, "lt", dnnl_binary_lt},
         {pk_t::MAX, "max", dnnl_binary_max},
         {pk_t::MIN, "min", dnnl_binary_min},
-        {pk_t::MUL, "mul", dnnl_binary_mul},
+        {pk_t::MUL, "mul", dnnl_binary_mul}, {pk_t::NE, "ne", dnnl_binary_ne},
         {pk_t::SUB, "sub", dnnl_binary_sub},
         {pk_t::BINARY_END, "binary_undef", dnnl_alg_kind_undef},
         // guard entry
@@ -1230,6 +1232,16 @@ float compute_binary(pk_t kind, float src0, float src1) {
         return src0 - src1;
     } else if (kind == pk_t::GE) {
         return src0 >= src1;
+    } else if (kind == pk_t::GT) {
+        return src0 > src1;
+    } else if (kind == pk_t::LE) {
+        return src0 <= src1;
+    } else if (kind == pk_t::LT) {
+        return src0 < src1;
+    } else if (kind == pk_t::EQ) {
+        return src0 == src1;
+    } else if (kind == pk_t::NE) {
+        return src0 != src1;
     } else {
         assert(!"operation not supported!");
     }
@@ -1264,6 +1276,10 @@ void maybe_post_ops(const attr_t &attr, float &val, float sum_val,
 engine_t::engine_t(dnnl_engine_kind_t engine_kind) : is_owner_(true) {
     size_t idx = engine_kind == dnnl_cpu ? 0 : engine_index;
 #ifdef DNNL_WITH_SYCL
+    // We need two static objects for CPU and GPU since we rely on CPU a lot
+    // when testing GPU. Otherwise, service reorder would fail due to inability
+    // create memory from host_ptr since static object would be initialized as
+    // GPU engine firstly.
     if (engine_kind == dnnl_cpu) {
         static dnnl_engine_t inst = nullptr;
         if (!inst) DNN_SAFE_V(dnnl_engine_create(&inst, engine_kind, idx));
