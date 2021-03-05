@@ -561,6 +561,11 @@ struct binary_conf_t {
     bool is_div;
     bool is_sub;
     bool is_ge;
+    bool is_gt;
+    bool is_le;
+    bool is_lt;
+    bool is_eq;
+    bool is_ne;
     bool is_tensor_op;
     compute::dispatch_t dispatch;
     int dim0[MAX_NDIMS];
@@ -617,7 +622,8 @@ enum reorder_kernel_t {
     transpose8x8,
     transpose16x16,
     reorder_nchw,
-    unaligned_sizes
+    unaligned_sizes,
+    reorder_alt
 };
 struct reorder_conf_t {
     bool has_padding;
@@ -912,6 +918,11 @@ inline void def_binary_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
     kernel_ctx.define_int("BINARY_DIV", alg_kind::binary_div);
     kernel_ctx.define_int("BINARY_SUB", alg_kind::binary_sub);
     kernel_ctx.define_int("BINARY_GE", alg_kind::binary_ge);
+    kernel_ctx.define_int("BINARY_GT", alg_kind::binary_gt);
+    kernel_ctx.define_int("BINARY_LE", alg_kind::binary_le);
+    kernel_ctx.define_int("BINARY_LT", alg_kind::binary_lt);
+    kernel_ctx.define_int("BINARY_EQ", alg_kind::binary_eq);
+    kernel_ctx.define_int("BINARY_NE", alg_kind::binary_ne);
 }
 
 inline void def_eltwise_alg_kinds(compute::kernel_ctx_t &kernel_ctx) {
@@ -1063,15 +1074,12 @@ inline void def_post_ops_cfg(
                 = "PO_" + std::to_string(idx) + "_BIN_ARG";
         add_po_defines(bin_arg_name, all_post_ops.entry_[idx], idx);
     }
-    // There should always be 0 or 10 postops, so add empty ones if needed
-    if (all_post_ops.len() > 0) {
-        post_ops_t::entry_t empty_po = post_ops_t::entry_t();
-        for (int idx = all_post_ops.len(); idx < 10;
-                ++idx, ++nof_supported_post_ops) {
-            const std::string bin_arg_name
-                    = "PO_" + std::to_string(idx) + "_BIN_ARG";
-            add_po_defines(bin_arg_name, empty_po, idx);
-        }
+    post_ops_t::entry_t empty_po = post_ops_t::entry_t();
+    for (int idx = all_post_ops.len(); idx < 10;
+            ++idx, ++nof_supported_post_ops) {
+        const std::string bin_arg_name
+                = "PO_" + std::to_string(idx) + "_BIN_ARG";
+        add_po_defines(bin_arg_name, empty_po, idx);
     }
 
     kernel_ctx.define_int("POST_OP_CHAIN_LENGTH", nof_supported_post_ops);
@@ -1118,12 +1126,9 @@ inline int append_post_ops_to_arg_list(const exec_ctx_t &ctx,
     for (int idx = 0; idx < all_post_ops.len(); ++idx) {
         set_arg_entry(all_post_ops.entry_[idx], idx);
     }
-    // There should always be 0 or 10 postops, so add empty ones if needed
-    if (all_post_ops.len() > 0) {
-        post_ops_t::entry_t empty_po = post_ops_t::entry_t();
-        for (int idx = all_post_ops.len(); idx < 10; ++idx) {
-            set_arg_entry(empty_po, 0);
-        }
+    post_ops_t::entry_t empty_po = post_ops_t::entry_t();
+    for (int idx = all_post_ops.len(); idx < 10; ++idx) {
+        set_arg_entry(empty_po, 0);
     }
     return post_op_idx;
 }

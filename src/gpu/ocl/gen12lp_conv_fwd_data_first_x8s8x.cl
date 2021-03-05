@@ -121,10 +121,10 @@ conv_fwd_first_x8s8x(const __global uchar *src, const __global char *wei,
     /* WORK WITH SLM */
     const bool left_tail = iw < 0 || iw >= IW;
     const bool left_nozero_tail = sub_group_id == 0 && iw >= 0;
-    const bool right_tail = (iw + PW + OW_SLM_TAIL >= IW) && (iw + PW < IW);
+    const bool right_tail = (iw + PW + SLM_TAIL >= IW) && (iw + PW < IW);
     const bool empty = (iw + PW >= IW);
     const bool right_nozero_tail
-            = sp == (LWS_1 - 1) && (iw + PW + OW_SLM_TAIL < IW);
+            = sp == (LWS_1 - 1) && (iw + PW + SLM_TAIL < IW);
 
     /* KD */
 #if KD > 1
@@ -154,7 +154,7 @@ conv_fwd_first_x8s8x(const __global uchar *src, const __global char *wei,
             }
 #endif
 
-#if SLM_WORKING_GROUPS < OW_NCHUNK || OW != OWX
+#if SLM_NCHUNK < OW_NCHUNK || OW != OWX
             if (iw + PW < IW) {
 #endif
 #if OW_NCHUNK > LWS_1
@@ -196,13 +196,13 @@ conv_fwd_first_x8s8x(const __global uchar *src, const __global char *wei,
                     }
 #endif
 
-#if OW_SLM_TAIL != OW_BLOCK * SW
+#if SLM_TAIL != OW_BLOCK * SW
                     /* Copy last block to SLM */
                     if (right_tail) {
-                        __attribute__((opencl_unroll_hint)) for (int i = 0; i
-                                                                 < OW_SLM_TAIL;
+                        __attribute__((opencl_unroll_hint)) for (int i = 0;
+                                                                 i < SLM_TAIL;
                                                                  i += 8) {
-                            if (i + sub_local_id < OW_SLM_TAIL) {
+                            if (i + sub_local_id < SLM_TAIL) {
 
 #if NCHW == 1
                                 GET_INT_BLOCK(S_part, i + sub_local_id, src,
@@ -250,26 +250,26 @@ conv_fwd_first_x8s8x(const __global uchar *src, const __global char *wei,
     }
 #endif
 
-#if OW_SLM_TAIL != OW_BLOCK * SW
+#if SLM_TAIL != OW_BLOCK * SW
                     }
 #endif
 
 #if OW_NCHUNK > LWS_1
                 }
 #endif
-#if SLM_WORKING_GROUPS < OW_NCHUNK || OW != OWX
+#if SLM_NCHUNK < OW_NCHUNK || OW != OWX
             }
 #endif
             /* right tail */
 #if ZERO_TAIL > 0
             if (right_tail) {
-                for (int i = OW_SLM_TAIL;
-                        i < SW * OW_BLOCK + (KW - 1) * (1 + DW); i += 8) {
+                for (int i = SLM_TAIL; i < SW * OW_BLOCK + (KW - 1) * (1 + DW);
+                        i += 8) {
                     if (i + sub_local_id < SW * OW_BLOCK + (KW - 1) * (1 + DW))
                         S_part[i + sub_local_id] = 0;
                 }
             }
-#if SLM_WORKING_GROUPS < OW_NCHUNK || OW != OWX
+#if SLM_NCHUNK < OW_NCHUNK || OW != OWX
             if (empty) {
                 for (int i = 0; i < SW * OW_BLOCK + (KW - 1) * (1 + DW);
                         i += 8) {

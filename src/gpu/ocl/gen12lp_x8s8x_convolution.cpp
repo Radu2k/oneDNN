@@ -26,6 +26,17 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
+bool is_nhwc(const memory_desc_wrapper &src_mdw,
+        const memory_desc_wrapper &dst_mdw) {
+    using namespace format_tag;
+    const bool is_src_nhwc
+            = src_mdw.matches_one_of_tag(nwc, nhwc, ndhwc) != format_tag::undef;
+    const bool is_dst_nhwc
+            = dst_mdw.matches_one_of_tag(nwc, nhwc, ndhwc) != format_tag::undef;
+    const bool is_nhwc = is_src_nhwc || is_dst_nhwc;
+    return is_nhwc;
+}
+
 status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_conf() {
     using namespace format_tag;
 
@@ -64,15 +75,11 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_conf() {
 
     set_default_conf(conf, cd, *src, *wei, *dst, *bia, *attr());
 
-    const bool is_src_nhwc
-            = src_mdw.matches_one_of_tag(nwc, nhwc, ndhwc) != format_tag::undef;
-    const bool is_dst_nhwc
-            = dst_mdw.matches_one_of_tag(nwc, nhwc, ndhwc) != format_tag::undef;
-    const bool is_nhwc = is_src_nhwc || is_dst_nhwc;
     const bool is_1stconv = conf.ic_without_padding <= 4 && !conf.is_depthwise;
 
-    conf.is_nhwc = is_nhwc;
-    conf.is_dst_nhwc = is_dst_nhwc;
+    conf.is_nhwc = is_nhwc(src_mdw, dst_mdw);
+    conf.is_dst_nhwc
+            = dst_mdw.matches_one_of_tag(nwc, nhwc, ndhwc) != format_tag::undef;
     // TODO: Add group convolution support in NHWC kernel.
     if (!conf.is_depthwise && conf.with_groups && conf.ngroups > 1
             && (conf.oc % 32 != 0 || conf.ic % 32 != 0))
@@ -82,20 +89,17 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_conf() {
     conf.src_data_type = src_mdw.data_type();
 
     conf.oc_block = 32;
+    conf.ic_block = 32;
+    conf.mb_block = 1;
+    conf.ow_block = 1;
 
     if (conf.is_nhwc) {
         conf.ver = ver_nhwc;
         if (conf.is_depthwise) {
-            conf.sub_group_size = 16;
-            conf.ic_block = 32;
             if (!(conf.kw <= 4 && conf.stride_w <= 2 && conf.dilate_w == 0
                         && conf.l_pad < 4)) {
                 conf.mb_block = 32;
-                conf.ow_block = 1;
             } else {
-                conf.mb_block = 1;
-                conf.ow_block = 1;
-
                 int off = conf.kw == 4 ? 1 : 0;
                 if (conf.ow < 15 - off) {
                     conf.ow_block = conf.ow;
@@ -106,79 +110,67 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_conf() {
                     }
                 }
             }
+
+            int ow_nchunk = utils::div_up(conf.ow, conf.ow_block);
+
+            conf.sub_group_size = 16;
+
             conf.lws_d[0] = 16;
             conf.lws_d[1] = 1;
             conf.lws_d[2] = 1;
 
             conf.gws_d[0] = utils::div_up(conf.ngroups, 32) * conf.lws_d[0];
-            conf.gws_d[1]
-                    = conf.od * conf.oh * utils::div_up(conf.ow, conf.ow_block);
+            conf.gws_d[1] = conf.od * conf.oh * ow_nchunk;
             conf.gws_d[2]
                     = utils::div_up(conf.mb, utils::div_up(conf.mb_block, 4));
         } else {
-            conf.sub_group_size = 8;
-            int ow_group = 1;
-            int ow_nchunk;
-
-            conf.mb_block = 1;
-            conf.nchunk = utils::div_up(conf.oc * conf.ngroups, conf.oc_block);
+            if (!is_1stconv) {
+                conf.ow_block
+                        = (conf.mb * conf.oc * conf.oh * conf.ow < 49 * 1024)
+                        ? 4
+                        : 8;
+            } else { // 1st conv
+                conf.ic_block = 4;
+                conf.ow_block = (conf.kw * conf.kh <= 49 && conf.ow % 16 < 8)
+                        ? 16
+                        : 12;
+                if (conf.mb == 8 || conf.mb % 16 == 0) { conf.mb_block = 32; }
+            }
 
             int max_oc = 4;
             int oc_group = utils::max_div(
                     utils::div_up(conf.oc, conf.oc_block), max_oc);
             int max_subgroups = 32;
             int max_ow_group = max_subgroups / oc_group;
+            int ow_nchunk = utils::div_up(conf.ow, conf.ow_block);
+            int ow_group = utils::max_div(ow_nchunk, max_ow_group);
 
-            if (!is_1stconv) {
-                conf.ic_block = 32;
-
-                conf.ow_block
-                        = (conf.mb * conf.oc * conf.oh * conf.ow < 49 * 1024)
-                        ? 4
-                        : 8;
-                ow_nchunk = utils::div_up(conf.ow, conf.ow_block);
-                ow_group = utils::max_div(ow_nchunk, max_ow_group);
-            } else { // 1st
-                conf.ic_block = 4;
-                conf.ow_block = (conf.kw * conf.kh <= 49 && conf.ow % 16 < 8)
-                        ? 16
-                        : 12;
-                ow_nchunk = utils::div_up(conf.ow, conf.ow_block);
-                ow_group = utils::max_div(ow_nchunk, max_ow_group);
-                if (conf.mb == 8 || conf.mb % 16 == 0) { conf.mb_block = 32; }
-            }
+            conf.sub_group_size = 8;
+            conf.nchunk = utils::div_up(conf.oc * conf.ngroups, conf.oc_block);
+            conf.src_slm_size = conf.ic_block / 4
+                    * (ow_group * conf.stride_w * conf.ow_block
+                            + (conf.kw - 1) * (1 + conf.dilate_w));
 
             conf.lws_d[0] = 8 * oc_group;
             conf.lws_d[1] = ow_group;
             conf.lws_d[2] = 1;
 
-            conf.src_slm_size = conf.ic_block / 4
-                    * (conf.lws_d[1] * conf.stride_w * conf.ow_block
-                            + (conf.kw - 1) * (1 + conf.dilate_w));
-
             conf.gws_d[0] = utils::rnd_up(conf.nchunk * 8, conf.lws_d[0]);
-            conf.gws_d[1] = conf.od * conf.oh
-                    * utils::rnd_up(utils::div_up(conf.ow, conf.ow_block),
-                            conf.lws_d[1]);
+            conf.gws_d[1]
+                    = conf.od * conf.oh * utils::rnd_up(ow_nchunk, ow_group);
             conf.gws_d[2] = is_1stconv
                     ? conf.mb
                     : utils::div_up(conf.mb, utils::div_up(conf.mb_block, 2));
         }
 
     } else if (conf.is_depthwise) {
-        conf.sub_group_size = 16;
-        conf.ic_block = 32;
-
         if (conf.mb == 8 || conf.mb % 16 == 0
                 || !(conf.kw <= 4 && conf.stride_w <= 2 && conf.dilate_w == 0
                         && conf.l_pad < 4)) {
             conf.ver = ver_mb_block;
             conf.mb_block = 32;
-            conf.ow_block = 1;
         } else {
             conf.ver = ver_ow_block;
-            conf.mb_block = 1;
-            conf.ow_block = 1;
             int off = conf.kw == 4 ? 1 : 0;
             if (conf.ow < 15 - off) {
                 conf.ow_block = conf.ow;
@@ -190,6 +182,8 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_conf() {
             }
         }
 
+        conf.sub_group_size = 16;
+
         conf.lws_d[0] = 16;
         conf.lws_d[1] = 1;
         conf.lws_d[2] = 1;
@@ -200,35 +194,32 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_conf() {
         conf.gws_d[2] = utils::div_up(conf.mb, utils::div_up(conf.mb_block, 4));
 
     } else {
-        conf.sub_group_size = 8;
-        int ow_group = 1;
-        int ow_nchunk;
-
         if (conf.mb == 8 || conf.mb % 16 == 0) {
             conf.ver = ver_mb_block;
             conf.mb_block = 32;
         } else {
             conf.ver = ver_ow_block;
-            conf.mb_block = 1;
         }
         if (conf.ic <= 4) conf.ver = ver_1stconv;
-
-        conf.nchunk = utils::div_up(conf.oc * conf.ngroups, conf.oc_block);
 
         int max_oc = 4;
         int oc_group
                 = utils::max_div(utils::div_up(conf.oc, conf.oc_block), max_oc);
         int max_subgroups = 32;
         int max_ow_group = max_subgroups / oc_group;
+        int ow_group = 1;
+        int ow_nchunk = 1;
+
+        conf.sub_group_size = 8;
+        conf.nchunk = utils::div_up(conf.oc * conf.ngroups, conf.oc_block);
+
         switch (conf.ver) {
             case ver_mb_block:
                 oc_group = 1;
-                conf.ic_block = 32;
                 conf.ow_block = 1;
                 ow_group = 1;
                 break;
             case ver_ow_block:
-                conf.ic_block = 32;
                 conf.ow_block
                         = (conf.mb * conf.oc * conf.oh * conf.ow < 49 * 1024)
                         ? 4
@@ -246,19 +237,20 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_conf() {
                 break;
         }
 
+        conf.src_slm_size = conf.ic_block / 4
+                * (ow_group * conf.stride_w * conf.ow_block
+                        + (conf.kw - 1) * (1 + conf.dilate_w));
+
         conf.lws_d[0] = 8 * oc_group;
         conf.lws_d[1] = ow_group;
         conf.lws_d[2] = 1;
 
-        conf.src_slm_size = conf.ic_block / 4
-                * (conf.lws_d[1] * conf.stride_w * conf.ow_block
-                        + (conf.kw - 1) * (1 + conf.dilate_w) + conf.l_pad);
-
         conf.gws_d[0] = utils::rnd_up(conf.nchunk * 8, conf.lws_d[0]);
         conf.gws_d[1] = conf.od * conf.oh
                 * utils::rnd_up(
-                        utils::div_up(conf.ow, conf.ow_block), conf.lws_d[1]);
+                        utils::div_up(conf.ow, conf.ow_block), ow_group);
         conf.gws_d[2] = utils::div_up(conf.mb, utils::div_up(conf.mb_block, 2));
+
         if (conf.ver == ver_1stconv) {
             conf.gws_d[2] = conf.mb;
             // Save opportunity to use this implementation with nchw formats,
@@ -308,7 +300,6 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_conf() {
         }
 
     } else {
-
         if (conf.mb_block == 32) {
             src_tag = utils::pick(
                     ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
@@ -324,6 +315,7 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_conf() {
                     ? utils::pick(ndims - 3, ncw, nchw, ncdhw)
                     : utils::pick(ndims - 3, nCw4c, nChw4c, nCdhw4c);
         }
+
         if (conf.is_depthwise) {
             wei_tag = utils::pick(ndims - 3, Goiw32g, Goihw32g, Goidhw32g);
         } else {
@@ -360,6 +352,24 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_conf() {
 
 status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_kernel_ctx(
         compute::kernel_ctx_t &kernel_ctx) const {
+    int owx = nstl::max(
+            1, utils::div_up(conf.iw + 2 * conf.l_pad, conf.stride_w));
+    int ow_block_with_stride = conf.stride_w * conf.ow_block;
+    int iw_with_l_pad = conf.iw + conf.l_pad;
+    int iw_len = iw_with_l_pad < ow_block_with_stride + conf.kw - 1
+            ? iw_with_l_pad - ow_block_with_stride
+            : iw_with_l_pad % ow_block_with_stride;
+    int iw_tail
+            = iw_len < (conf.kw - 1) ? ow_block_with_stride + iw_len : iw_len;
+    int ow_tail = conf.ow % conf.ow_block;
+    int iw_nchunk = utils::div_up(conf.iw, ow_block_with_stride);
+    int ow_nchunk = utils::div_up(conf.ow, conf.ow_block);
+    int min_w_nchunk = nstl::min(ow_nchunk, iw_nchunk);
+    int slm_tail
+            = conf.iw - (conf.stride_w * conf.ow_block * (min_w_nchunk - 1));
+    int zero_tail = utils::rnd_up(conf.ow, conf.ow_block) * conf.stride_w
+            - conf.iw + (conf.kw - 1) * (1 + conf.dilate_w) - conf.l_pad;
+
     kernel_ctx.define_int("NCHW", conf.is_nchw);
     kernel_ctx.define_int("DST_NHWC", conf.is_dst_nhwc);
     kernel_ctx.define_int("G", conf.ngroups);
@@ -384,61 +394,36 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("DD", conf.dilate_d);
     kernel_ctx.define_int("DH", conf.dilate_h);
     kernel_ctx.define_int("DW", conf.dilate_w);
-
-    kernel_ctx.define_int("OW_PADDED",
-            utils::rnd_up(
-                    utils::div_up(conf.ow, conf.ow_block), conf.lws_d[1]));
-    kernel_ctx.define_int("G_PADDED",
-            utils::div_up(conf.ngroups, conf.oc_block) * conf.oc_block);
-
-    int ow = nstl::max(
-            1, utils::div_up(conf.iw + 2 * conf.l_pad, conf.stride_w));
-    kernel_ctx.define_int("OWX", ow);
-    kernel_ctx.define_int("OWB", utils::div_up(conf.ow, conf.ow_block));
-
     kernel_ctx.define_int("MB_BLOCK", conf.mb_block);
     kernel_ctx.define_int("OC_BLOCK", conf.oc_block);
     kernel_ctx.define_int("IC_BLOCK", conf.ic_block);
     kernel_ctx.define_int("OW_BLOCK", conf.ow_block);
-
-    kernel_ctx.define_int("OC_GROUP", utils::div_up(conf.lws_d[0], 8));
-    kernel_ctx.define_int("MB_GROUP", 1);
-    kernel_ctx.define_int("SP_GROUP", conf.lws_d[1]);
-    kernel_ctx.define_int("OW_NCHUNK", utils::div_up(conf.ow, conf.ow_block));
-    kernel_ctx.define_int("OC_NCHUNK", utils::div_up(conf.oc, conf.oc_block));
-    kernel_ctx.define_int("IC_NCHUNK", utils::div_up(conf.ic, conf.ic_block));
-
-    kernel_ctx.define_int("SLM_WORKING_GROUPS",
-            nstl::min(utils::div_up(conf.ow, conf.ow_block),
-                    utils::div_up(conf.iw, conf.ow_block * conf.stride_w)));
-
-    int divx
-            = conf.iw + conf.l_pad < conf.stride_w * conf.ow_block + conf.kw - 1
-            ? conf.iw + conf.l_pad - conf.ow_block * conf.stride_w
-            : (conf.iw + conf.l_pad) % (conf.stride_w * conf.ow_block);
-    kernel_ctx.define_int("OW_TAIL", conf.ow % conf.ow_block);
-    kernel_ctx.define_int("IW_TAIL",
-            divx < conf.kw - 1 ? conf.stride_w * conf.ow_block + divx : divx);
-    kernel_ctx.define_int("OW_SLM_TAIL",
-            conf.iw
-                    - conf.stride_w * conf.ow_block
-                            * (nstl::min(utils::div_up(conf.ow, conf.ow_block),
-                                       utils::div_up(conf.iw,
-                                               conf.ow_block * conf.stride_w))
-                                    - 1));
-    kernel_ctx.define_int("ZERO_TAIL",
-            utils::rnd_up(conf.ow, conf.ow_block) * conf.stride_w - conf.iw
-                    + (conf.kw - 1) * (1 + conf.dilate_w) - conf.l_pad);
-
     kernel_ctx.define_int("SRC_SLM_SIZE", conf.src_slm_size);
-
-    kernel_ctx.define_int("WITH_BIAS", conf.with_bias);
-    def_attr_info(kernel_ctx, conf.attr_info);
-
     kernel_ctx.define_int("SUB_GROUP_SIZE", conf.sub_group_size);
+    kernel_ctx.define_int("WITH_BIAS", conf.with_bias);
     kernel_ctx.define_int("LWS_0", conf.lws_d[0]);
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);
     kernel_ctx.define_int("LWS_2", conf.lws_d[2]);
+
+    kernel_ctx.define_int("OW_TAIL", ow_tail);
+    kernel_ctx.define_int("IW_TAIL", iw_tail);
+    kernel_ctx.define_int("SLM_TAIL", slm_tail);
+    kernel_ctx.define_int("ZERO_TAIL", zero_tail);
+
+    kernel_ctx.define_int("OW_PADDED", utils::rnd_up(ow_nchunk, conf.lws_d[1]));
+    kernel_ctx.define_int("G_PADDED",
+            utils::div_up(conf.ngroups, conf.oc_block) * conf.oc_block);
+
+    kernel_ctx.define_int("MB_GROUP", 1);
+    kernel_ctx.define_int("SP_GROUP", conf.lws_d[1]);
+    kernel_ctx.define_int("OC_GROUP", utils::div_up(conf.lws_d[0], 8));
+
+    kernel_ctx.define_int("OC_NCHUNK", utils::div_up(conf.oc, conf.oc_block));
+    kernel_ctx.define_int("IC_NCHUNK", utils::div_up(conf.ic, conf.ic_block));
+    kernel_ctx.define_int("OW_NCHUNK", ow_nchunk);
+    kernel_ctx.define_int("SLM_NCHUNK", min_w_nchunk);
+    kernel_ctx.define_int("OWB", ow_nchunk);
+    kernel_ctx.define_int("OWX", owx);
 
     if (conf.is_depthwise)
         kernel_ctx.define_int("WEI_32G", 1);
@@ -446,6 +431,7 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_kernel_ctx(
         kernel_ctx.define_int("WEI_4O8I8O4I", 1);
 
     kernel_ctx.set_data_type(conf.dst_data_type);
+
     def_data_type(kernel_ctx, conf.src_data_type, "SRC");
     def_data_type(kernel_ctx, conf.dst_data_type, "DST");
     def_data_type(kernel_ctx,
@@ -453,6 +439,8 @@ status_t gen12lp_x8s8x_convolution_fwd_t::pd_t::init_kernel_ctx(
                     ? conf.dst_data_type
                     : conf.attr_info.sum_data_type,
             "SUM");
+
+    def_attr_info(kernel_ctx, conf.attr_info);
 
     kernel_ctx.add_option("-Dcl_intel_subgroups_char");
     kernel_ctx.add_option("-Dcl_intel_subgroups_long");
@@ -572,25 +560,30 @@ status_t gen12lp_x8s8x_convolution_bwd_data_t::pd_t::init_conf() {
     set_default_conf(conf, cd, *diff_src_md(), *weights_md(), *diff_dst_md(),
             *weights_md(1), *attr());
 
+    conf.is_nhwc = is_nhwc(src_mdw, dst_mdw);
+
     if (conf.with_groups && conf.ngroups > 1
             && (conf.oc % 32 != 0 || conf.ic % 32 != 0))
         return status::unimplemented;
 
-    if (conf.mb == 8 || conf.mb % 16 == 0) {
-        conf.ver = ver_mb_block;
-        conf.mb_block = 32;
-    } else {
-        conf.ver = ver_ow_block;
-        conf.mb_block = 1;
+    if (!conf.is_nhwc) {
+        if (conf.mb == 8 || conf.mb % 16 == 0) {
+            conf.ver = ver_mb_block;
+        } else {
+            conf.ver = ver_ow_block;
+        }
     }
-    conf.sub_group_size = 8;
+
     conf.oc_block = 32;
     conf.ic_block = 32;
     conf.iw_block = 1;
+
+    conf.sub_group_size = 8;
     conf.nchunk = utils::div_up(conf.ic * conf.ngroups, conf.ic_block);
     int ic_group = nstl::min(conf.nchunk, 2);
 
-    if (conf.ver == ver_ow_block) {
+    if (conf.ver == ver_ow_block || conf.is_nhwc) {
+        conf.mb_block = 1;
         int max_ic = 4;
         ic_group
                 = utils::max_div(utils::div_up(conf.ic, conf.ic_block), max_ic);
@@ -611,10 +604,10 @@ status_t gen12lp_x8s8x_convolution_bwd_data_t::pd_t::init_conf() {
         conf.lws_d[2] = 1;
 
         conf.gws_d[0] = utils::rnd_up(conf.nchunk * 8, conf.lws_d[0]);
-        conf.gws_d[1]
-                = conf.id * conf.ih * utils::div_up(conf.iw, conf.iw_block);
+        conf.gws_d[1] = conf.id * conf.ih * iw_nchunk;
         conf.gws_d[2] = utils::div_up(conf.mb, utils::div_up(conf.mb_block, 2));
     } else { //ver_mb_block
+        conf.mb_block = 32;
         conf.lws_d[0] = 8 * ic_group;
         conf.lws_d[1] = 8;
         conf.lws_d[2] = 1;
@@ -628,12 +621,20 @@ status_t gen12lp_x8s8x_convolution_bwd_data_t::pd_t::init_conf() {
 
     format_tag_t src_tag, dst_tag, wei_tag;
 
-    src_tag = (conf.ver == ver_ow_block)
-            ? utils::pick(conf.ndims - 3, nCw32c, nChw32c, nCdhw32c)
-            : utils::pick(conf.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
-    dst_tag = (conf.ver == ver_ow_block)
-            ? utils::pick(conf.ndims - 3, nCw32c, nChw32c, nCdhw32c)
-            : utils::pick(conf.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+    if (conf.is_nhwc) {
+        src_tag = utils::pick(conf.ndims - 3, nwc, nhwc, ndhwc);
+        dst_tag = utils::pick(conf.ndims - 3, nwc, nhwc, ndhwc);
+    } else {
+        src_tag = (conf.ver == ver_ow_block)
+                ? utils::pick(conf.ndims - 3, nCw32c, nChw32c, nCdhw32c)
+                : utils::pick(
+                        conf.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+        dst_tag = (conf.ver == ver_ow_block)
+                ? utils::pick(conf.ndims - 3, nCw32c, nChw32c, nCdhw32c)
+                : utils::pick(
+                        conf.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
+    }
+
     wei_tag = conf.with_groups ? utils::pick(conf.ndims - 3, gIOw4i8o8i4o,
                       gIOhw4i8o8i4o, gIOdhw4i8o8i4o)
                                : utils::pick(conf.ndims - 3, IOw4i8o8i4o,
@@ -708,6 +709,8 @@ status_t gen12lp_x8s8x_convolution_bwd_data_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("LWS_0", conf.lws_d[0]);
     kernel_ctx.define_int("LWS_1", conf.lws_d[1]);
     kernel_ctx.define_int("LWS_2", conf.lws_d[2]);
+
+    kernel_ctx.define_int("IS_NHWC", conf.is_nhwc);
 
     kernel_ctx.set_data_type(conf.dst_data_type);
     def_data_type(kernel_ctx, conf.src_data_type, "SRC");

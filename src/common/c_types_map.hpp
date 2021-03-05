@@ -121,6 +121,11 @@ const alg_kind_t binary_min = dnnl_binary_min;
 const alg_kind_t binary_div = dnnl_binary_div;
 const alg_kind_t binary_sub = dnnl_binary_sub;
 const alg_kind_t binary_ge = dnnl_binary_ge;
+const alg_kind_t binary_gt = dnnl_binary_gt;
+const alg_kind_t binary_le = dnnl_binary_le;
+const alg_kind_t binary_lt = dnnl_binary_lt;
+const alg_kind_t binary_eq = dnnl_binary_eq;
+const alg_kind_t binary_ne = dnnl_binary_ne;
 const alg_kind_t resampling_nearest = dnnl_resampling_nearest;
 const alg_kind_t resampling_linear = dnnl_resampling_linear;
 const alg_kind_t reduction_max = dnnl_reduction_max;
@@ -1147,7 +1152,6 @@ struct op_desc_t {
         convolution_desc_t convolution;
         deconvolution_desc_t deconvolution;
         shuffle_desc_t shuffle;
-        pooling_desc_t pooling;
         pooling_v2_desc_t pooling_v2;
         prelu_desc_t prelu;
         eltwise_desc_t eltwise;
@@ -1179,7 +1183,6 @@ struct op_desc_t {
 
     DECL_CTOR_AND_CONVERTERS(convolution_desc_t);
     DECL_CTOR_AND_CONVERTERS(shuffle_desc_t);
-    DECL_CTOR_AND_CONVERTERS(pooling_desc_t);
     DECL_CTOR_AND_CONVERTERS(pooling_v2_desc_t);
     DECL_CTOR_AND_CONVERTERS(prelu_desc_t);
     DECL_CTOR_AND_CONVERTERS(eltwise_desc_t);

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2018-2020 Intel Corporation
+* Copyright 2018-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -32,12 +32,13 @@
 #include "rnn/rnn.hpp"
 #include "rnn/rnn_aux.hpp"
 
-#define COMPARE_DAT(rc, kind, a, lay) \
+#define COMPARE_DAT(kind, a, lay) \
     do { \
         dnn_mem_t CONCAT2(a, _dt_plain)( \
                 CONCAT2(a, _dt), fp, lay, test_engine); \
-        (rc) |= compare_dat( \
-                prb, kind, CONCAT2(a, _dt_plain), CONCAT2(a, _fp), res, true); \
+        SAFE(compare_dat(prb, kind, CONCAT2(a, _dt_plain), CONCAT2(a, _fp), \
+                     res, true), \
+                WARN); \
     } while (0)
 
 // Using hidden attr API for testing RNN
@@ -827,19 +828,14 @@ int doit(const prb_t &prb, res_t *res) {
     check_known_skipped_case(prb, res);
     if (res->state == SKIPPED) return OK;
 
-    dnnl_primitive_t c {};
-    SAFE(init_prim(&c, init_pd, &prb, res), WARN);
+    benchdnn_dnnl_wrapper_t<dnnl_primitive_t> prim;
+    SAFE(init_prim(prim, init_pd, &prb, res), WARN);
     if (res->state == SKIPPED || res->state == UNIMPLEMENTED) return OK;
-    auto cleanup = [&]() {
-        DNN_SAFE(dnnl_primitive_destroy(c), CRIT);
-        return OK;
-    };
 
     const_dnnl_primitive_desc_t const_fpd;
-    DNN_SAFE(dnnl_primitive_get_primitive_desc(c, &const_fpd), CRIT);
+    DNN_SAFE(dnnl_primitive_get_primitive_desc(prim, &const_fpd), CRIT);
 
     if (check_mem_size(const_fpd) != OK) {
-        DNN_SAFE(dnnl_primitive_destroy(c), CRIT);
         return res->state = SKIPPED, res->reason = NOT_ENOUGH_RAM, OK;
     }
 
@@ -957,7 +953,7 @@ int doit(const prb_t &prb, res_t *res) {
     args.set(DNNL_ARG_WORKSPACE, workspace_dt);
     args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
 
-    SAFE_CLEAN(execute_and_wait(c, args), WARN, cleanup);
+    SAFE(execute_and_wait(prim, args), WARN);
 
     if (prb.prop != dnnl_backward) {
         if (bench_mode & CORR) {
@@ -966,27 +962,21 @@ int doit(const prb_t &prb, res_t *res) {
                     weights_projection_fp, bias_fp, dst_layer_fp, dst_iter_fp,
                     dst_iter_c_fp);
 
-            int compare_status = OK;
-            COMPARE_DAT(compare_status, DST_LAYER, dst_layer, tag::abx /*tnc*/);
-            COMPARE_DAT(compare_status, DST_ITER, dst_iter, tag::abx /*ldnc*/);
+            COMPARE_DAT(DST_LAYER, dst_layer, tag::abx /*tnc*/);
+            COMPARE_DAT(DST_ITER, dst_iter, tag::abx /*ldnc*/);
             if (prb.alg == VANILLA_LSTM)
-                COMPARE_DAT(compare_status, DST_ITER_C, dst_iter_c,
-                        tag::abx /*ldnc*/);
-            SAFE_CLEAN(compare_status, WARN, cleanup);
+                COMPARE_DAT(DST_ITER_C, dst_iter_c, tag::abx /*ldnc*/);
         }
     } else {
-        dnnl_primitive_t bwd_p {};
-        int status = init_prim(&bwd_p, init_pd, &prb, res, FLAG_BWD);
-        dnnl_primitive_destroy(c);
-        if (status != OK) return status;
+        benchdnn_dnnl_wrapper_t<dnnl_primitive_t> tmp_prim;
+        SAFE(init_prim(tmp_prim, init_pd, &prb, res, FLAG_BWD), WARN);
         if (res->state == SKIPPED || res->state == UNIMPLEMENTED) return OK;
-        c = bwd_p;
+        prim.reset(tmp_prim.release());
 
         const_dnnl_primitive_desc_t const_bpd;
-        DNN_SAFE(dnnl_primitive_get_primitive_desc(c, &const_bpd), CRIT);
+        DNN_SAFE(dnnl_primitive_get_primitive_desc(prim, &const_bpd), CRIT);
 
         if (check_mem_size(const_bpd) != OK) {
-            DNN_SAFE(dnnl_primitive_destroy(c), CRIT);
             return res->state = SKIPPED, res->reason = NOT_ENOUGH_RAM, OK;
         }
 
@@ -1118,7 +1108,7 @@ int doit(const prb_t &prb, res_t *res) {
         args.set(DNNL_ARG_DIFF_BIAS, diff_bias_dt);
         args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
 
-        SAFE_CLEAN(execute_and_wait(c, args), WARN, cleanup);
+        SAFE(execute_and_wait(prim, args), WARN);
 
         if (bench_mode & CORR) {
             compute_ref_bwd(prb, src_layer_fp, src_iter_fp, src_iter_c_fp,
@@ -1130,46 +1120,32 @@ int doit(const prb_t &prb, res_t *res) {
                     diff_weights_iter_fp, diff_weights_peephole_fp,
                     diff_weights_projection_fp, diff_bias_fp);
 
-            int compare_fwd_status = OK;
-            COMPARE_DAT(
-                    compare_fwd_status, DST_LAYER, dst_layer, tag::abx /*tnc*/);
-            COMPARE_DAT(
-                    compare_fwd_status, DST_ITER, dst_iter, tag::abx /*ldnc*/);
+            COMPARE_DAT(DST_LAYER, dst_layer, tag::abx /*tnc*/);
+            COMPARE_DAT(DST_ITER, dst_iter, tag::abx /*ldnc*/);
             if (prb.alg == VANILLA_LSTM)
-                COMPARE_DAT(compare_fwd_status, DST_ITER_C, dst_iter_c,
-                        tag::abx /*ldnc*/);
-            SAFE_CLEAN(compare_fwd_status, WARN, cleanup);
+                COMPARE_DAT(DST_ITER_C, dst_iter_c, tag::abx /*ldnc*/);
 
-            int compare_bwd_data_status = OK;
-            COMPARE_DAT(compare_bwd_data_status, DIFF_SRC_LAYER, diff_src_layer,
-                    tag::abx /*tnc*/);
-            COMPARE_DAT(compare_bwd_data_status, DIFF_SRC_ITER, diff_src_iter,
-                    tag::abx /*ldnc*/);
+            COMPARE_DAT(DIFF_SRC_LAYER, diff_src_layer, tag::abx /*tnc*/);
+            COMPARE_DAT(DIFF_SRC_ITER, diff_src_iter, tag::abx /*ldnc*/);
             if (prb.alg == VANILLA_LSTM)
-                COMPARE_DAT(compare_bwd_data_status, DIFF_SRC_ITER_C,
-                        diff_src_iter_c, tag::abx /*ldnc*/);
-            SAFE_CLEAN(compare_bwd_data_status, WARN, cleanup);
+                COMPARE_DAT(
+                        DIFF_SRC_ITER_C, diff_src_iter_c, tag::abx /*ldnc*/);
 
-            int compare_bwd_weights_status = OK;
-            COMPARE_DAT(compare_bwd_weights_status, DIFF_WEIGHTS_LAYER,
-                    diff_weights_layer, tag::abx /*ldigo*/);
-            COMPARE_DAT(compare_bwd_weights_status, DIFF_WEIGHTS_ITER,
-                    diff_weights_iter, tag::abx /*ldigo*/);
+            COMPARE_DAT(
+                    DIFF_WEIGHTS_LAYER, diff_weights_layer, tag::abx /*ldigo*/);
+            COMPARE_DAT(
+                    DIFF_WEIGHTS_ITER, diff_weights_iter, tag::abx /*ldigo*/);
             if (prb.is_lstm_peephole())
-                COMPARE_DAT(compare_bwd_weights_status, DIFF_WEIGHTS_PEEPHOLE,
-                        diff_weights_peephole, tag::abx /*ldgo*/);
+                COMPARE_DAT(DIFF_WEIGHTS_PEEPHOLE, diff_weights_peephole,
+                        tag::abx /*ldgo*/);
             if (prb.is_lstm_projection())
-                COMPARE_DAT(compare_bwd_weights_status, DIFF_WEIGHTS_PROJECTION,
-                        diff_weights_projection, tag::abx /*ldio*/);
-            COMPARE_DAT(compare_bwd_weights_status, DIFF_BIAS, diff_bias,
-                    tag::abx /*ldgo*/);
-            SAFE_CLEAN(compare_bwd_weights_status, WARN, cleanup);
+                COMPARE_DAT(DIFF_WEIGHTS_PROJECTION, diff_weights_projection,
+                        tag::abx /*ldio*/);
+            COMPARE_DAT(DIFF_BIAS, diff_bias, tag::abx /*ldgo*/);
         }
     }
 
-    measure_perf(res->timer, c, args);
-    cleanup();
-
-    return OK;
+    return measure_perf(res->timer, prim, args);
 }
+
 } // namespace rnn

@@ -192,16 +192,17 @@ struct jit_conv_conf_t {
     bool req_zero_point_buffer; // used for calculating padding compensation
     bool zp_pbuff_outer_compute; // indicates if zp_bbuff is computed in
     // a separate parallel region
-    int ow_pad, oh_pad; // output elements with padding & filter overlap
+    int ow_pad, oh_pad, od_pad; // output elements with padding & filter overlap
 
     //output elements requiring zero-point padding compensation
+    int f_pad_output, back_pad_output;
     int t_pad_output, b_pad_output;
     int l_pad_output, r_pad_output;
     // The number of output blocks corresponding to {l_pad, no_pad, r_pad}
     int l_pad_blk, no_pad_w_blk, r_pad_blk;
 
-    bool oh_mid, ow_mid; // indicate if there is overlap between the width and
-            // height padded regions
+    bool od_mid, oh_mid, ow_mid; // indicate if there is overlap between the
+            //width and height padded regions
 
     size_t h_blk_limits[5]; // pre-computed limits for output height block
 
@@ -489,6 +490,11 @@ struct jit_deconv_call_s {
     const void *bias; /* hack, non-const for backward_bias */
     const void *scales;
     const void *compensation;
+    const int32_t *zp_src_pad_str_compensation;
+    const int32_t *zp_compensation;
+    const int32_t *src_zero_point;
+    const int32_t *dst_zero_point;
+
     /*
      * ptr to table of void * elements that are pointers to post_op binary
      * src1 tensors

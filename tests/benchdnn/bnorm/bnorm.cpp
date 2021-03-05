@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2017-2020 Intel Corporation
+* Copyright 2017-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -426,12 +426,11 @@ int init_pd(dnnl_engine_t engine, const prb_t *prb, dnnl_primitive_desc_t &bpd,
                 WARN);
     }
 
-    auto dnnl_attr = create_dnnl_attr(prb->attr, attr_args_t());
+    auto dnnl_attr = make_benchdnn_dnnl_wrapper(
+            create_dnnl_attr(prb->attr, attr_args_t()));
 
     dnnl_status_t init_status
             = dnnl_primitive_desc_create(&bpd, &bd, dnnl_attr, engine, hint);
-
-    dnnl_primitive_attr_destroy(dnnl_attr);
 
     if (init_status == dnnl_unimplemented)
         return res->state = UNIMPLEMENTED, OK;
@@ -445,7 +444,6 @@ int init_pd(dnnl_engine_t engine, const prb_t *prb, dnnl_primitive_desc_t &bpd,
     if (maybe_skip(res->impl_name)) {
         BENCHDNN_PRINT(2, "SKIPPED: oneDNN implementation: %s\n",
                 res->impl_name.c_str());
-        DNN_SAFE(dnnl_primitive_desc_destroy(bpd), WARN);
         return res->state = SKIPPED, res->reason = SKIP_IMPL_HIT, OK;
     } else {
         BENCHDNN_PRINT(
@@ -488,15 +486,14 @@ int doit(const prb_t *prb, res_t *res) {
     check_known_skipped_case(prb, res);
     if (res->state == SKIPPED) return OK;
 
-    dnnl_primitive_t b {};
-    SAFE(init_prim(&b, init_pd, prb, res), WARN);
+    benchdnn_dnnl_wrapper_t<dnnl_primitive_t> prim;
+    SAFE(init_prim(prim, init_pd, prb, res), WARN);
     if (res->state == SKIPPED || res->state == UNIMPLEMENTED) return OK;
 
     const_dnnl_primitive_desc_t const_fpd;
-    DNN_SAFE(dnnl_primitive_get_primitive_desc(b, &const_fpd), CRIT);
+    DNN_SAFE(dnnl_primitive_get_primitive_desc(prim, &const_fpd), CRIT);
 
     if (check_mem_size(const_fpd) != OK) {
-        DNN_SAFE_V(dnnl_primitive_destroy(b));
         return res->state = SKIPPED, res->reason = NOT_ENOUGH_RAM, OK;
     }
 
@@ -549,7 +546,6 @@ int doit(const prb_t *prb, res_t *res) {
     dnn_mem_t d_dst_dt, placeholder_d_src_dt;
 
     if (prepare_fwd(prb, src_fp, mean_fp, var_fp, ss_fp) != OK) {
-        DNN_SAFE_V(dnnl_primitive_destroy(b));
         return res->state = MISTRUSTED, OK;
     }
 
@@ -569,7 +565,7 @@ int doit(const prb_t *prb, res_t *res) {
     args.set(DNNL_ARG_WORKSPACE, ws_dt);
     args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
 
-    SAFE(execute_and_wait(b, args), WARN);
+    SAFE(execute_and_wait(prim, args), WARN);
 
     // Running ref to collect src_hat (used instead of src + mean) and ws, if
     // fuse_relu flag is requested.
@@ -589,21 +585,17 @@ int doit(const prb_t *prb, res_t *res) {
     }
 
     if (prb->dir & FLAG_BWD) {
-        dnnl_primitive_t bwd_p {};
-        int status = init_prim(&bwd_p, init_pd, prb, res, FLAG_BWD, const_fpd);
-        dnnl_primitive_destroy(b);
-        if (status != OK) return status;
+        benchdnn_dnnl_wrapper_t<dnnl_primitive_t> tmp_prim;
+        SAFE(init_prim(tmp_prim, init_pd, prb, res, FLAG_BWD, const_fpd), WARN);
         if (res->state == SKIPPED || res->state == UNIMPLEMENTED) return OK;
-        b = bwd_p;
+        prim.reset(tmp_prim.release());
 
         const_dnnl_primitive_desc_t const_bpd;
-        DNN_SAFE(dnnl_primitive_get_primitive_desc(b, &const_bpd), CRIT);
+        DNN_SAFE(dnnl_primitive_get_primitive_desc(prim, &const_bpd), CRIT);
 
         if (check_mem_size(const_bpd) != OK) {
-            DNN_SAFE_V(dnnl_primitive_destroy(b));
             return res->state = SKIPPED, res->reason = NOT_ENOUGH_RAM, OK;
         }
-
         const auto &d_data_md = q(const_bpd, DNNL_ARG_DIFF_DST);
         const auto &d_scratchpad_md = q(const_bpd, DNNL_ARG_SCRATCHPAD);
 
@@ -631,7 +623,7 @@ int doit(const prb_t *prb, res_t *res) {
         args.set(DNNL_ARG_WORKSPACE, ws_dt);
         args.set(DNNL_ARG_SCRATCHPAD, scratchpad_dt);
 
-        SAFE(execute_and_wait(b, args), WARN);
+        SAFE(execute_and_wait(prim, args), WARN);
 
         if (bench_mode & CORR) {
             compute_ref_bwd(prb, src_hat_fp, var_fp, d_dst_fp, ss_fp, ws_fp,
@@ -643,11 +635,8 @@ int doit(const prb_t *prb, res_t *res) {
             SAFE(compare(prb, DATA, d_src_fp, d_src, res), WARN);
         }
     }
-    measure_perf(res->timer, b, args);
 
-    DNN_SAFE_V(dnnl_primitive_destroy(b));
-
-    return OK;
+    return measure_perf(res->timer, prim, args);
 }
 
 } // namespace bnorm
