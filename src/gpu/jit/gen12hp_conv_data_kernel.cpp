@@ -3135,7 +3135,7 @@ public:
     EmulationStrategy emu_strategy;
     EmulationState emu_state;
 
-    friend struct EmulationImplementation;
+    friend struct dnnl::impl::gpu::jit::EmulationImplementation;
     template <typename DT = void>
     void emov(const ngen::InstructionModifier &mod, ngen::RegData dst,
             ngen::RegData src0) {
