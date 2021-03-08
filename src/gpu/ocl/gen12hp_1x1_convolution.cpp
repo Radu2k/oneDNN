@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
         conf.sp_block = 1;
     } else {
         conf.mb_block = 1;
-        conf.sp_block = 4;
+        conf.sp_block = 8;
         // TODO: compute sp_block
         /*
         auto approx_clocks = [&](const int block) {
@@ -102,15 +102,24 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
                       || utils::div_up(conf.ow, conf.sp_block) % 8 == 0)
             ? 8
             : 1;
-
     conf.sub_group_size = 8;
-    conf.lws_d[0] = conf.sub_group_size;
+
+    // IC loop splitting is turned OFF by default
+    conf.ic_split = 1;
+    // Resnet-50 mb1 heuristics. TODO: compute ic_split
+    if (conf.mb_block == 1 && conf.ic % 2 * conf.ic_block == 0 && conf.ic >= 256
+            && conf.oc >= 256) {
+        conf.ic_split = utils::max_div(utils::div_up(conf.ic, 128), 4);
+    }
+
+    conf.lws_d[0] = conf.sub_group_size * conf.ic_split;
     conf.lws_d[1] = ow_group;
     conf.lws_d[2] = 1;
 
     const int num_sp_threads
             = utils::div_up(conf.ow, conf.sp_block) * conf.oh * conf.od;
-    conf.gws_d[0] = utils::rnd_up(conf.nchunk * 8, conf.lws_d[0]);
+    conf.gws_d[0] = utils::rnd_up(
+            conf.nchunk * conf.sub_group_size * conf.ic_split, conf.lws_d[0]);
     conf.gws_d[1] = utils::rnd_up(num_sp_threads, conf.lws_d[1]);
     conf.gws_d[2] = utils::div_up(conf.mb, conf.mb_block);
 
@@ -194,16 +203,20 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("OC_NCHUNK", utils::div_up(conf.oc, conf.oc_block));
     kernel_ctx.define_int("IC_NCHUNK", utils::div_up(conf.ic, conf.ic_block));
 
-    kernel_ctx.define_int("IC_LOOP_GROUPS",
-            utils::max_div(utils::div_up(conf.ic, conf.ic_block), 4));
+    int ic_loop_groups = utils::max_div(
+            utils::div_up(utils::div_up(conf.ic, conf.ic_split), conf.ic_block),
+            4);
+    kernel_ctx.define_int("IC_LOOP_GROUPS", ic_loop_groups);
 
     kernel_ctx.define_int("USE_DOUBLE_BUFFER", 0);
     kernel_ctx.define_int("USE_WEI_SLM",
-            conf.mb_block == 32
-                    || utils::div_up(conf.ow, conf.sp_block) % 8 == 0);
+            conf.ic_split <= 1
+                    && (conf.mb_block == 32
+                            || utils::div_up(conf.ow, conf.sp_block) % 8 == 0));
     kernel_ctx.define_int("SP_TAIL",
             utils::div_up(conf.ow, conf.sp_block) % conf.lws_d[1] != 0);
     kernel_ctx.define_int("OUT_SP_TAIL", conf.ow % conf.sp_block);
+    kernel_ctx.define_int("IC_SPLIT", conf.ic_split);
 
     kernel_ctx.set_data_type(conf.dst_data_type);
 

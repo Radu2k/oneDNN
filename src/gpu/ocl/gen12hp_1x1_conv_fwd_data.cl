@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * licensed under the apache license, version 2.0 (the "license");
 * you may not use this file except in compliance with the license.
@@ -168,6 +168,8 @@ gen12hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
     const uint sp = get_global_id(1);
     const int sp_local_id = get_local_id(1);
 
+    // IC splitting
+    const uint ic_split_id = get_local_id(0) / SUB_GROUP_SIZE;
 #define OWB ((OW + SP_BLOCK - 1) / SP_BLOCK)
 
     const uint od = sp / (OWB * OH);
@@ -185,7 +187,8 @@ gen12hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
 #else
     src += mb_group_id * SRC_ICB_STRIDE * IC_NCHUNK * G; // MB offset
 #endif
-    src += ic_group_id * SRC_ICB_STRIDE; // IC offset
+    src += ic_group_id * SRC_ICB_STRIDE
+            + ic_split_id * SRC_ICB_STRIDE * IC_NCHUNK / IC_SPLIT; // IC offset
     src += (id * IH * IW + ih * IW + iw) * SRC_SP_STRIDE; // SP offset
 
     // Destination
@@ -200,17 +203,26 @@ gen12hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
     __global DST_DATA_T *dst1 = dst + DST_OCB_STRIDE;
 #endif
     // Weights
-    wei += oc_group_id * WEI_BLOCK_STRIDE * IC_NCHUNK;
+    wei += oc_group_id * WEI_BLOCK_STRIDE * IC_NCHUNK
+            + ic_split_id * WEI_BLOCK_STRIDE * IC_NCHUNK / IC_SPLIT;
     // Output accumulators:
 
     // 8 MB (0-7) x 4 Kernels  (32 8bit ints)
     ACC_DATA_BLOCK C00 = 0, C01 = 0, C02 = 0, C03 = 0;
     // 8 MB (8-15) x 4 Kernels  (32 8bit ints)
     ACC_DATA_BLOCK1 C10 = 0, C11 = 0, C12 = 0, C13 = 0;
-
     ACC_DATA_BLOCK1 C20 = 0, C21 = 0, C22 = 0, C23 = 0;
-
     ACC_DATA_BLOCK1 C30 = 0, C31 = 0, C32 = 0, C33 = 0;
+
+#if IC_SPLIT > 1
+#define C_SLM_SIZE (LWS_0 * LWS_1 * LWS_2)
+    __local ACC_DATA_BLOCK L_C00[C_SLM_SIZE], L_C01[C_SLM_SIZE],
+            L_C02[C_SLM_SIZE], L_C03[C_SLM_SIZE];
+#if MB_BLOCK == 32 || SP_BLOCK > 8
+#error "Not expected"
+#endif
+#endif
+
 #define WEI_LOOP_STRIDE (IC_LOOP_GROUPS * WEI_BLOCK_STRIDE)
 #if USE_WEI_SLM
 
@@ -246,21 +258,24 @@ gen12hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
     barrier(CLK_LOCAL_MEM_FENCE); \
     const __global WEI_DATA_T *wei_copy_from \
             = wei + sp_local_id * WEI_LOOP_STRIDE / LWS_1; \
-    __local WEI_DATA_T *wei_copy_to \
-            = wei_slm + sp_local_id * WEI_LOOP_STRIDE / LWS_1; \
+    __local WEI_DATA_T *wei_copy_to = wei_slm \
+            + sp_local_id * WEI_LOOP_STRIDE / LWS_1 \
+            + ic_split_id * WEI_LOOP_STRIDE; \
     for (int bl = 0; bl < IC_LOOP_GROUPS; bl++) { \
         block_write4((__local uint *)&wei_copy_to[bl * 4 * IC_BLOCK], \
                 intel_sub_group_block_read4( \
                         (__global uint *)&wei_copy_from[bl * 4 * IC_BLOCK])); \
     } \
-    __local WEI_DATA_T *wei_tmp = wei_slm; \
+    __local WEI_DATA_T *wei_tmp = wei_slm + ic_split_id * WEI_LOOP_STRIDE; \
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    __local WEI_DATA_T wei_slm[WEI_LOOP_STRIDE];
+    __local WEI_DATA_T wei_slm[IC_SPLIT * WEI_LOOP_STRIDE];
+
 #endif
 #endif // USE_WEI_SLM
 
-    for (uint ic_block_id = 0; ic_block_id < IC_NCHUNK / IC_LOOP_GROUPS;
+    for (uint ic_block_id = 0;
+            ic_block_id < (IC_NCHUNK / IC_SPLIT) / IC_LOOP_GROUPS;
             ++ic_block_id) {
 #if USE_WEI_SLM
         READ_SLM()
@@ -370,6 +385,28 @@ gen12hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
         wei += WEI_LOOP_STRIDE;
 #endif
     }
+
+#if IC_SPLIT > 1
+    if (ic_split_id > 0) {
+        int idx = get_local_id(0) * LWS_1 + sp_local_id;
+        L_C00[idx] = C00;
+        L_C01[idx] = C01;
+        L_C02[idx] = C02;
+        L_C03[idx] = C03;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    if (ic_split_id == 0) {
+        for (int i = 1; i < IC_SPLIT; i++) {
+            int idx = (get_local_id(0) + i * SUB_GROUP_SIZE) * LWS_1
+                    + sp_local_id;
+            C00 += L_C00[idx];
+            C01 += L_C01[idx];
+            C02 += L_C02[idx];
+            C03 += L_C03[idx];
+        }
+    } else
+        return;
+#endif
 
     float2 tmp2;
     float4 tmp4;

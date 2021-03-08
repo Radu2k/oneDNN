@@ -294,6 +294,7 @@ struct conv_conf_t {
     int workgroups_along_k;
     int num_buffers;
     int calc_block;
+    int ic_split;
 
     int oc_group;
     int ow_group;
