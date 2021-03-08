@@ -24,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-#include "mkldnn.h"
+#include "dnnl.h"
 
 #include "common.hpp"
 
