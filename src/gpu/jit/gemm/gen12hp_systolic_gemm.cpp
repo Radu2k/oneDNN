@@ -29,6 +29,23 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
+struct nocopy_table_t {
+    int mn_limit[2][2]; // Use no-copy if m*n < mn_limit * mn_limit and
+    int k_limit[2][2]; // Use no-copy if k < k_limit
+};
+
+const nocopy_table_t gen12hp_f16_nocopy_table[] = {
+        // NN     NT     TN    TT
+        {{{1280, 768}, {512, 384}}, {{512, 768}, {1024, 512}}}};
+
+const nocopy_table_t gen12hp_bf16_nocopy_table[] = {
+        // NN   NT     TN   TT
+        {{{512, 256}, {512, 512}}, {{512, 256}, {384, 384}}}};
+
+const nocopy_table_t gen12hp_x8x8s32_nocopy_table[] = {
+        // NN   NT     TN   TT
+        {{{384, 384}, {384, 384}}, {{384, 512}, {384, 256}}}};
+
 status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     using namespace prop_kind;
     using namespace data_type;
@@ -45,10 +62,25 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
 
     const auto d = desc();
 
-    // Use FMA implementation for small cases.
+    // Use FMA implementation for very small cases.
     if (d->m() < 32 && d->n() < 32) return status::unimplemented;
     if (d->m() < 32 && d->k() < 32) return status::unimplemented;
     if (d->n() < 32 && d->k() < 32) return status::unimplemented;
+
+    // Use FMA for small/medium sizes
+    if (utils::one_of(d->c_type(), bf16, f16, s32)) {
+        const nocopy_table_t *all_tables[3] = {gen12hp_f16_nocopy_table,
+                gen12hp_bf16_nocopy_table, gen12hp_x8x8s32_nocopy_table};
+        const int type_idx
+                = (d->c_type() == f16) ? 0 : (d->c_type() == bf16) ? 1 : 2;
+        const nocopy_table_t *table = all_tables[type_idx];
+        const long mnl = table->mn_limit[d->transa()][d->transb()];
+        const long kl = table->k_limit[d->transa()][d->transb()];
+
+        if ((d->m() * d->n() < mnl * mnl) && (d->k() < kl)) {
+            return status::unimplemented;
+        }
+    }
 
     bool ok = set_default_formats(d->a_type());
     if (!ok) return status::unimplemented;

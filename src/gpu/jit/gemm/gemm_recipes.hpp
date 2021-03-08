@@ -115,6 +115,12 @@ const gemm_recipe_t gemm_recipes[] = {
     {ngen::HW::Gen12HP, "SSS", "NTN", {}, 32, 16, "sb4/2x2 sb4x2 sb cs di bm8192 bn8192 bk8192", {}, {}},
     {ngen::HW::Gen12HP, "SSS", "TNN", {}, 16, 16, "sb8 sb8 su cab1 wg 4x4 cs di bm8192 bn8192 bk8192", {}, {}},
     {ngen::HW::Gen12HP, "SSS", "TTN", {}, 8,  64, "su4/2x2 sb1x2 su cb1 wg 8x2 cs di fn bm8192 bn8192 bk8192", {}, {}},
+    {ngen::HW::Gen12HP, "OOI", "NNN", {}, 16, 16, "sb32 sb32 sb l4 cab1 wg 4x4 cs di", {}, {}},
+    {ngen::HW::Gen12HP, "OOI", "NNN", {}, 32,  4, "sb8x2 su16x2 sb l4 ca1 wg 2x8 cs di", {}, {}},
+    {ngen::HW::Gen12HP, "OOI", "NTN", {}, 32, 16, "sb8x2 sb8x2 sb l4 cab1 wg 4x4 cs di", {}, {}},
+    {ngen::HW::Gen12HP, "OOI", "TNN", {}, 16, 16, "sb32 sb32 sb l4 cab1 wg 4x4 cs di", {}, {}},
+    {ngen::HW::Gen12HP, "OOI", "TTN", {}, 16, 16, "sb32 sb32 sb l4 cab1 wg 4x4 cs di", {}, {}},
+    {ngen::HW::Gen12HP, "HHH", "NNN", {}, 16, 4,  "ab2x2 as8 ab l4 cs di", {}, {}},                  // DLRM
     {ngen::HW::Gen12HP, "HHH", "TNN", {}, 16, 8,  "sb16 sb16 ab cab2 wg 2x4 cs pab", {}, {}},        // DLRM
     {ngen::HW::Gen12HP, "BBS", "NNN", {}, 32,  8, "sb16 sb16 ab cab1 wg 4x4 fn nmk cs pab", {}, {}}, // DLRM
     {ngen::HW::Gen12HP, "BBS", "NTN", {}, 16, 16, "sb1x4 sb1x4 sb l4 cs di nmk fn pab", {}, {}},     // DLRM

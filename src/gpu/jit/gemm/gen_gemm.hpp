@@ -164,6 +164,14 @@ struct gen_gemm_t : public gpu_gemm_t {
             return with_bias() ? to_cmask[(desc()->bias_mask() >> 1) & 3] : -1;
         }
 
+        bool swap_ab() const {
+            bool check_lda
+                    = ((desc()->transa() == dnnl_notrans && desc()->lda() == 1)
+                            || (desc()->transa() == dnnl_trans));
+            return (desc()->a_type() == data_type::f16 && desc()->m() == 1
+                    && desc()->ldc() == 1 && check_lda);
+        }
+
         size_t dyn_offset_a = 0;
         size_t dyn_offset_b = 0;
         size_t dyn_offset_c = 0;
@@ -186,15 +194,21 @@ struct gen_gemm_t : public gpu_gemm_t {
         char tag;
         auto batch = pd()->desc()->batch();
         bool batched = (batch > 1);
-        bool transa = (pd()->desc()->transa() == dnnl_trans);
-        bool transb = (pd()->desc()->transb() == dnnl_trans);
+        const bool swapab = pd()->swap_ab();
+        const bool transa = swapab ? (pd()->desc()->transb() == dnnl_notrans)
+                                   : (pd()->desc()->transa() == dnnl_trans);
+        const bool transb
+                = swapab ? false : (pd()->desc()->transb() == dnnl_trans);
+        const auto m = swapab ? pd()->desc()->n() : pd()->desc()->m();
+        const auto n = swapab ? pd()->desc()->m() : pd()->desc()->n();
+
         auto a_type = pd()->desc()->a_type();
         auto b_type = pd()->desc()->b_type();
         auto c_type = pd()->desc()->c_type();
 
         kernel_t::choose_unrolls(pd()->arch_, pd()->hw_threads_, transa, transb,
-                a_type, b_type, c_type, pd()->desc()->m(), pd()->desc()->n(),
-                pd()->desc()->k(), batch, unroll_m, unroll_n, tag);
+                a_type, b_type, c_type, m, n, pd()->desc()->k(), batch,
+                unroll_m, unroll_n, tag);
 
         kernel_t kernel;
 

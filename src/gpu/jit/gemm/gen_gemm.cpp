@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -116,20 +116,25 @@ status_t gen_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());
 
-    auto m = pd()->desc()->m();
-    auto n = pd()->desc()->n();
+    const bool swapab = pd()->swap_ab();
+
+    const auto m = swapab ? pd()->desc()->n() : pd()->desc()->m();
+    const auto n = swapab ? pd()->desc()->m() : pd()->desc()->n();
     auto k = pd()->desc()->k();
     auto batch = pd()->desc()->batch();
 
-    bool transa = (pd()->desc()->transa() == dnnl_trans);
-    bool transb = (pd()->desc()->transb() == dnnl_trans);
+    const bool transa = swapab ? (pd()->desc()->transb() == dnnl_notrans)
+                               : (pd()->desc()->transa() == dnnl_trans);
+    const bool transb = swapab ? false : (pd()->desc()->transb() == dnnl_trans);
 
-    auto lda = pd()->desc()->lda();
-    auto ldb = pd()->desc()->ldb();
+    const auto lda = swapab ? pd()->desc()->ldb() : pd()->desc()->lda();
+    const auto ldb = swapab ? pd()->desc()->lda() : pd()->desc()->ldb();
     auto ldc = pd()->desc()->ldc();
 
-    auto stride_a = pd()->desc()->stride_a();
-    auto stride_b = pd()->desc()->stride_b();
+    const auto stride_a
+            = swapab ? pd()->desc()->stride_b() : pd()->desc()->stride_a();
+    const auto stride_b
+            = swapab ? pd()->desc()->stride_a() : pd()->desc()->stride_b();
     auto stride_c = pd()->desc()->stride_c();
 
     auto alpha = pd()->alpha();
@@ -139,8 +144,8 @@ status_t gen_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     auto eltwise_beta = pd()->eltwise_beta();
     auto eltwise_scale = pd()->eltwise_scale();
 
-    auto &a = GEMM_CTX_ARG_STORAGE(b);
-    auto &b = GEMM_CTX_ARG_STORAGE(a);
+    auto &a = swapab ? GEMM_CTX_ARG_STORAGE(a) : GEMM_CTX_ARG_STORAGE(b);
+    auto &b = swapab ? GEMM_CTX_ARG_STORAGE(b) : GEMM_CTX_ARG_STORAGE(a);
     auto &c = GEMM_CTX_ARG_STORAGE(c);
     auto &c_zp = GEMM_CTX_ARG_STORAGE(c_zero_point);
     auto &bias = GEMM_CTX_ARG_STORAGE(bias);

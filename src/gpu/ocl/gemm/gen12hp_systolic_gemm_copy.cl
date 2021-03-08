@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -381,33 +381,48 @@ gen12hp_systolic_gemm_copy(long k, long n, global ELEMENT *b, long offsetb,
     b += offsetb + k0 + n0 * ldb;
     b_packed += offsetb_packed + n0 * ldb_packed + k0 * UNROLL_N;
 
-    // Read all columns.
-    ELEMENT_INT cols[UNROLL_N];
-    if (krem >= UNROLL_K && nrem >= UNROLL_N && aligned) {
-        for (int c = 0; c < UNROLL_N; c++)
-            cols[c] = BLOCK_READ_ELEMENT_INT(b + c * ldb);
-    } else {
-        for (int c = 0; c < UNROLL_N; c++)
-            if (c < nrem)
-                cols[c] = MASKED_BLOCK_READ_ELEMENT_INT(b + c * ldb, krem);
-            else
-                cols[c] = 0;
-    }
+    // Copy in two halves.
 
-    // Repack.
-    ELEMENT_INT4 colgroups[UNROLL_N / 4];
-    for (int cc = 0; cc < UNROLL_N / 4; cc++)
-        REPACK_CC(cc);
-
-    // Write out.
-    for (int cc = 0; cc < UNROLL_N / 4; cc++)
-        BLOCK_WRITE_ELEMENT_INT4(b_packed + cc * 4 * UNROLL_K, colgroups[cc]);
-
-        // Sum if needed.
+#define UNROLL_N_CHUNK (UNROLL_N / 2)
 #if COPY_SUM
     SUM_T sums[UNROLL_N];
-    for (int c = 0; c < UNROLL_N; c++)
-        sums[c] = sum(CONVERT_SUM_T4(AS_SIGNED_ELEMENT_INT(cols[c])));
+#endif
+    ELEMENT_INT cols[UNROLL_N / 2];
+
+    for (int c0 = 0; c0 < UNROLL_N;
+            c0 += UNROLL_N_CHUNK, nrem -= UNROLL_N_CHUNK) {
+        // Read all columns.
+        if (krem >= UNROLL_K && nrem >= UNROLL_N_CHUNK && aligned) {
+            for (int c = 0; c < UNROLL_N_CHUNK; c++)
+                cols[c] = BLOCK_READ_ELEMENT_INT(b + (c + c0) * ldb);
+        } else {
+            for (int c = 0; c < UNROLL_N_CHUNK; c++)
+                if (c < nrem)
+                    cols[c] = MASKED_BLOCK_READ_ELEMENT_INT(
+                            b + (c + c0) * ldb, krem);
+                else
+                    cols[c] = 0;
+        }
+
+        // Repack.
+        ELEMENT_INT4 colgroups[UNROLL_N_CHUNK / 4];
+        for (int cc = 0; cc < UNROLL_N_CHUNK / 4; cc++)
+            REPACK_CC(cc);
+
+        // Write out.
+        for (int cc = 0; cc < UNROLL_N_CHUNK / 4; cc++)
+            BLOCK_WRITE_ELEMENT_INT4(
+                    b_packed + (cc * 4 + c0) * UNROLL_K, colgroups[cc]);
+
+            // Sum if needed.
+#if COPY_SUM
+        for (int c = 0; c < UNROLL_N_CHUNK; c++)
+            sums[c + c0] = sum(CONVERT_SUM_T4(AS_SIGNED_ELEMENT_INT(cols[c])));
+#endif
+    }
+
+    // Accumulate sums.
+#if COPY_SUM
     for (int c0 = 0; c0 < UNROLL_N; c0 += get_sub_group_size())
         atomic_add(b_sum + c0 + lid, sums[c0 + lid]);
 #endif
