@@ -426,12 +426,6 @@ struct attr_args_t {
 
     attr_args_t() = default;
 
-    void insert(int aarg, int64_t acount, const float *avals,
-            bool aruntime = false) {
-        entries.insert(
-                std::make_pair(aarg, entry_t(avals, acount, -1, aruntime)));
-    }
-
     void prepare_output_scales(
             const attr_t &attr, const void *vals, int64_t count, int mask = -1);
 
