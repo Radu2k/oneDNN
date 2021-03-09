@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -88,7 +88,7 @@ status_t convolution_inner_product_fwd_t::pd_t::init_conf(engine_t *engine) {
     ++it;
     cpd_.reset(it.fetch_once());
     if (!cpd_) return status::unimplemented;
-    std::string impl_name(cpd_.get()->name());
+    std::string impl_name(cpd_->name());
     if (impl_name.find("ref") != std::string::npos)
         return status::unimplemented;
 
