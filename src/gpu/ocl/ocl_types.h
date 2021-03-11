@@ -700,6 +700,10 @@
     intel_sub_group_block_write_uc16((__global uchar *)ptr, as_uchar16(v))
 
 #elif DST_DT_F16 || DST_DT_BF16
+#define BLOCK_READ_DST(ptr) \
+    AS_DST_DATA_T(intel_sub_group_block_read_us((__global ushort *)ptr))
+#define BLOCK_WRITE_DST(ptr, v) \
+    intel_sub_group_block_write_us((__global ushort *)ptr, as_ushort(v))
 
 #define BLOCK_READ_DST2(ptr) \
     AS_DST_DATA2_T(intel_sub_group_block_read_us2((__global ushort *)ptr))
@@ -756,7 +760,7 @@
         BLOCK_WRITE_DST8(ptr + 8 * SUB_GROUP_SIZE, (v).s89abcdef); \
     } while (0)
 
-#elif DST_DT_F16
+#elif DST_DT_F16 || DST_DT_BF16
 
 #define BLOCK_READ_DST(ptr) \
     AS_DST_DATA_T(intel_sub_group_block_read_us((__global uint *)ptr))
