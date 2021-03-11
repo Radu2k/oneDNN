@@ -37,7 +37,7 @@ static void fwd_compute_block_sizes(
         conv_conf_t &conf, const convolution_pd_t *pd) {
 
     int max_ow_block = (conf.src_data_type == data_type::f16 ? 20 : 16);
-    if (conf.ver == ver_16mb16c) {
+    if (conf.ver == ver_16mb16c || conf.ver == ver_32mb16c) {
         max_ow_block = 1;
     } else if (conf.is_depthwise || conf.ver == ver_1stconv) {
         max_ow_block = 8;
@@ -49,6 +49,8 @@ static void fwd_compute_block_sizes(
                 = (conf.src_data_type == data_type::f16 && !conf.is_depthwise)
                 ? (conf.mb % 32 == 0 ? 32 : 16)
                 : 16;
+    } else if (conf.ver == ver_32mb16c) {
+        conf.mb_block = 32;
     } else {
         conf.mb_block = 1;
     }
@@ -138,6 +140,12 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     conf.omb = 1;
     conf.ocb = 1;
 
+    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+    const bool is_gen12hp
+            = compute_engine->is_gen12hp() || compute_engine->is_gen12p7();
+    const bool has_non_uniform_wg
+            = compute_engine->mayiuse_non_uniform_work_groups();
+
     if (conf.is_nhwc) {
         if (!utils::one_of(src_mdw.data_type(), f32, f16))
             return status::unimplemented;
@@ -153,16 +161,18 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
         if (!is_16oc) return status::unimplemented;
         conf.ver = ver_1stconv;
     } else if ((is_16oc && is_16ic) || is_dw_16g) {
-        conf.ver = (conf.mb % 16 == 0) ? ver_16mb16c : ver_8ow16c;
+        if (conf.mb % 32 == 0 && conf.is_depthwise
+                && utils::one_of(src_mdw.data_type(), bf16, f16)
+                && is_gen12hp) {
+            conf.ver = ver_32mb16c;
+        } else if (conf.mb % 16 == 0) {
+            conf.ver = ver_16mb16c;
+        } else {
+            conf.ver = ver_8ow16c;
+        }
     } else {
         return status::unimplemented;
     }
-
-    auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
-    const bool is_gen12hp
-            = compute_engine->is_gen12hp() || compute_engine->is_gen12p7();
-    const bool has_non_uniform_wg
-            = compute_engine->mayiuse_non_uniform_work_groups();
 
     const bool is_fp16 = src_mdw.data_type() == data_type::f16;
 
@@ -216,7 +226,8 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
         } break;
         case ver_1stconv:
         case ver_8ow16c:
-        case ver_16mb16c: {
+        case ver_16mb16c:
+        case ver_32mb16c: {
             fwd_compute_block_sizes(conf, this);
             conf.sub_group_size = 16;
             conf.gws_d[0] = conf.ngroups * conf.ocb / (conf.oc_block / 16);
@@ -282,6 +293,18 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
                     conf.ndims - 3, NCw16n16c, NChw16n16c, NCdhw16n16c);
             dst_tag = utils::pick(
                     conf.ndims - 3, NCw16n16c, NChw16n16c, NCdhw16n16c);
+            wei_tag = conf.is_depthwise
+                    ? utils::pick(conf.ndims - 3, Goiw16g, Goihw16g, Goidhw16g)
+                    : (conf.with_groups ? utils::pick(conf.ndims - 3,
+                               gIOw16i16o, gIOhw16i16o, gIOdhw16i16o)
+                                        : utils::pick(conf.ndims - 3, IOw16i16o,
+                                                IOhw16i16o, IOdhw16i16o));
+            break;
+        case ver_32mb16c:
+            src_tag = utils::pick(
+                    conf.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
+            dst_tag = utils::pick(
+                    conf.ndims - 3, NCw32n16c, NChw32n16c, NCdhw32n16c);
             wei_tag = conf.is_depthwise
                     ? utils::pick(conf.ndims - 3, Goiw16g, Goihw16g, Goidhw16g)
                     : (conf.with_groups ? utils::pick(conf.ndims - 3,
@@ -399,6 +422,7 @@ status_t gen9_convolution_fwd_t::pd_t::init_kernel_ctx(
     kernel_ctx.define_int("VER_1STCONV", conf.ver == ver_1stconv);
     kernel_ctx.define_int("VER_8OW16C", conf.ver == ver_8ow16c);
     kernel_ctx.define_int("VER_16MB16C", conf.ver == ver_16mb16c);
+    kernel_ctx.define_int("VER_32MB16C", conf.ver == ver_32mb16c);
 
     kernel_ctx.define_int("SRC_NCHW", conf.is_src_nchw);
     kernel_ctx.define_int("SRC_NHWC", conf.is_src_nhwc);

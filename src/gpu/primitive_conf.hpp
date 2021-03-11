@@ -246,6 +246,7 @@ enum conv_version_t {
     ver_unused,
     ver_1stconv,
     ver_16mb16c,
+    ver_32mb16c,
     ver_32mb32c,
     ver_32c,
     ver_8ow16c,
