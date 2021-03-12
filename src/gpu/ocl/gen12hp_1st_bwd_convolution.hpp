@@ -67,6 +67,8 @@ struct gen12hp_1st_convolution_bwd_weights_t : public gpu_primitive_t {
                             this->desc()->diff_dst_desc.data_type, bf16)
                     && compute_engine->mayiuse(
                             compute::device_ext_t::intel_subgroups)
+                    && compute_engine->mayiuse(compute::device_ext_t::
+                                    intel_subgroup_local_block_io)
                     && compute_engine->mayiuse(
                             compute::device_ext_t::khr_int64_base_atomics)
                     && !has_zero_dim_memory() && attr()->has_default_values();
