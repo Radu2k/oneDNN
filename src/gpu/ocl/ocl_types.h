@@ -476,14 +476,14 @@
 #define SRC_DATA4_T CONCAT2(SRC_DATA_T, 4)
 #define SRC_DATA8_T CONCAT2(SRC_DATA_T, 8)
 #define SRC_DATA16_T CONCAT2(SRC_DATA_T, 16)
-#ifdef SRC_DT_S8
-#define SRC_MMAD_DATA_T int
-#define SRC_MMAD_DATA4_T int4
-#define SRC_MMAD_DATA8_T int8
-#else
+#ifdef SRC_DT_U8
 #define SRC_MMAD_DATA_T uint
 #define SRC_MMAD_DATA4_T uint4
 #define SRC_MMAD_DATA8_T uint8
+#elif SRC_DT_S8
+#define SRC_MMAD_DATA_T int
+#define SRC_MMAD_DATA4_T int4
+#define SRC_MMAD_DATA8_T int8
 #endif
 
 #if defined(SRC_DT_U8) || defined(SRC_DT_S8)
@@ -763,24 +763,24 @@
 #elif DST_DT_F16 || DST_DT_BF16
 
 #define BLOCK_READ_DST(ptr) \
-    AS_DST_DATA_T(intel_sub_group_block_read_us((__global uint *)ptr))
+    AS_DST_DATA_T(intel_sub_group_block_read_us((__global ushort *)ptr))
 #define BLOCK_WRITE_DST(ptr, v) \
-    intel_sub_group_block_write_us((__global uint *)ptr, as_uint(v))
+    intel_sub_group_block_write_us((__global ushort *)ptr, as_ushort(v))
 
 #define BLOCK_READ_DST2(ptr) \
-    AS_DST_DATA2_T(intel_sub_group_block_read_us2((__global uint *)ptr))
+    AS_DST_DATA2_T(intel_sub_group_block_read_us2((__global ushort *)ptr))
 #define BLOCK_WRITE_DST2(ptr, v) \
-    intel_sub_group_block_write_us2((__global uint *)ptr, as_uint2(v))
+    intel_sub_group_block_write_us2((__global ushort *)ptr, as_short2(v))
 
 #define BLOCK_READ_DST4(ptr) \
-    AS_DST_DATA4_T(intel_sub_group_block_read_us4((__global uint *)ptr))
+    AS_DST_DATA4_T(intel_sub_group_block_read_us4((__global ushort *)ptr))
 #define BLOCK_WRITE_DST4(ptr, v) \
-    intel_sub_group_block_write_us4((__global uint *)ptr, as_uint4(v))
+    intel_sub_group_block_write_us4((__global ushort *)ptr, as_ushort4(v))
 
 #define BLOCK_READ_DST8(ptr) \
-    AS_DST_DATA8_T(intel_sub_group_block_read_us8((__global uint *)ptr))
+    AS_DST_DATA8_T(intel_sub_group_block_read_us8((__global ushort *)ptr))
 #define BLOCK_WRITE_DST8(ptr, v) \
-    intel_sub_group_block_write_us8((__global uint *)ptr, as_uint8(v))
+    intel_sub_group_block_write_us8((__global ushort *)ptr, as_ushort8(v))
 
 #define BLOCK_READ_DST16(ptr) \
     (DST_DATA16_T)( \
