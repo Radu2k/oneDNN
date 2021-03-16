@@ -580,6 +580,27 @@ void gemm_kernel_generator_t<hw>::alignUp(const ngen::Subregister &dst,
     alignDown<DT>(dst, dst, align, strategy, state);
 }
 
+// Non-constant integer division.
+// Requires an auxiliary constant: ceiling(2^(32 + s) / denom), where s = floor(log2(denom)).
+template <HW hw>
+template <typename DT>
+void gemm_kernel_generator_t<hw>::divDown(const Subregister &dst,
+        const Subregister &src0, const Subregister &src1,
+        const Subregister &src1Recip, const FlagRegister &flag,
+        const CommonStrategy &strategy, CommonState &state) {
+    auto shift = state.ra.alloc_sub<uint16_t>();
+    auto pop = state.ra.alloc_sub<uint16_t>();
+    cbit(1, pop, src1);
+    fbh(1, shift, src1);
+    cmp(1 | gt | flag, pop, 1);
+    add(1, shift, -shift, 31);
+    emul32High(1 | flag, dst, src0, src1Recip);
+    shr(1 | ~flag, dst, src0, shift);
+    shr(1 | flag, dst, dst, shift);
+    state.ra.safeRelease(shift);
+    state.ra.safeRelease(pop);
+}
+
 // Simple do-while loop macro for the backward conditional branch at end of loop.
 template <HW hw>
 void gemm_kernel_generator_t<hw>::simtDoWhileLoop(
@@ -9756,10 +9777,25 @@ void gemm_kernel_generator_t<hw>::gemmInitState(GEMMProblem &problem,
     state.inputs.offsetC[0] = interface.getArgumentIfExists("offset_C");
     state.inputs.offsetC[1] = interface.getArgumentIfExists("offset_P");
     state.inputs.offsetCO = interface.getArgumentIfExists("offset_CO");
-    state.inputs.strideA = interface.getArgumentIfExists("stride_A");
-    state.inputs.strideB = interface.getArgumentIfExists("stride_B");
-    state.inputs.strideC = interface.getArgumentIfExists("stride_C");
-    state.inputs.offsetBatch = interface.getArgumentIfExists("offset_batch");
+    if (problem.batch == BatchMode::Strided) {
+        state.inputs.strideA[0] = interface.getArgumentIfExists("stride_A");
+        state.inputs.strideB[0] = interface.getArgumentIfExists("stride_B");
+        state.inputs.strideC[0] = interface.getArgumentIfExists("stride_C");
+        if (problem.batchDims > 1) {
+            state.inputs.strideA[1]
+                    = interface.getArgumentIfExists("stride_A1");
+            state.inputs.strideB[1]
+                    = interface.getArgumentIfExists("stride_B1");
+            state.inputs.strideC[1]
+                    = interface.getArgumentIfExists("stride_C1");
+            state.inputs.batchSize1
+                    = interface.getArgumentIfExists("batch_size1");
+            state.inputs.recipBatchSize1
+                    = interface.getArgumentIfExists("recip_batch_size1");
+        }
+    } else if (problem.batch == BatchMode::Nonstrided)
+        state.inputs.offsetBatch
+                = interface.getArgumentIfExists("offset_batch");
     state.inputs.lda = interface.getArgumentIfExists("lda");
     state.inputs.ldb = interface.getArgumentIfExists("ldb");
     state.inputs.ldc[0] = interface.getArgumentIfExists("ldc");
@@ -9898,14 +9934,14 @@ void gemm_kernel_generator_t<hw>::gemmInitState(GEMMProblem &problem,
 
     if (state.inputs.flags.isValid()) state.ra.claim(state.inputs.flags);
 
-    if (problem.batchedS) {
-        state.ra.claim(state.inputs.strideA);
-        state.ra.claim(state.inputs.strideB);
-        state.ra.claim(state.inputs.strideC);
+    if (problem.batch == BatchMode::Strided) {
+        for (int i = 0; i < problem.batchDims; i++) {
+            state.ra.claim(state.inputs.strideA[i]);
+            state.ra.claim(state.inputs.strideB[i]);
+            state.ra.claim(state.inputs.strideC[i]);
+        }
         state.ra.claim(state.inputs.groupIDK);
-    }
-
-    if (problem.batchedN) {
+    } else if (problem.batch == BatchMode::Nonstrided) {
         state.ra.claim(state.inputs.offsetBatch);
         state.ra.claim(state.inputs.groupIDK);
     }
@@ -9984,6 +10020,7 @@ void gemm_kernel_generator_t<hw>::gemmOffsetABC(bool initial, Subregister i0,
     auto offsetA = initial ? state.inputs.offsetA : state.effA;
     auto offsetB = initial ? state.inputs.offsetB : state.effB;
     bool doCO = doC && (problem.cOffset != COffset::None);
+    bool batchedS = (problem.batch == BatchMode::Strided);
 
     Subregister tempQ0 = state.ra.alloc_sub<int64_t>(
             getHint(HintType::TempComp0, strategy));
@@ -10014,11 +10051,15 @@ void gemm_kernel_generator_t<hw>::gemmOffsetABC(bool initial, Subregister i0,
             eadd(1, offsetA, offsetA, tempQ1.reinterpret(0, offsetA.getType()),
                     strategy, state);
         }
-        if (initial && problem.batchedS) {
-            emul(1, state.inputs.strideA, state.inputs.strideA,
-                    state.inputs.groupIDK, strategy, state);
-            eadd(1, offsetA, offsetA, state.inputs.strideA, strategy, state);
-            state.ra.safeRelease(state.inputs.strideA);
+        if (initial && batchedS) {
+            for (int b = 0; b < problem.batchDims; b++)
+                emul(1, state.inputs.strideA[b], state.inputs.strideA[b],
+                        state.batchID[b], strategy, state);
+            for (int b = 0; b < problem.batchDims; b++) {
+                eadd(1, offsetA, offsetA, state.inputs.strideA[b], strategy,
+                        state);
+                state.ra.safeRelease(state.inputs.strideA[b]);
+            }
         }
     }
 
@@ -10035,11 +10076,15 @@ void gemm_kernel_generator_t<hw>::gemmOffsetABC(bool initial, Subregister i0,
             eadd(1, offsetB, offsetB, tempQ0.reinterpret(0, offsetB.getType()),
                     strategy, state);
         }
-        if (initial && problem.batchedS) {
-            emul(1, state.inputs.strideB, state.inputs.strideB,
-                    state.inputs.groupIDK, strategy, state);
-            eadd(1, offsetB, offsetB, state.inputs.strideB, strategy, state);
-            state.ra.safeRelease(state.inputs.strideB);
+        if (initial && batchedS) {
+            for (int b = 0; b < problem.batchDims; b++)
+                emul(1, state.inputs.strideB[b], state.inputs.strideB[b],
+                        state.batchID[b], strategy, state);
+            for (int b = 0; b < problem.batchDims; b++) {
+                eadd(1, offsetB, offsetB, state.inputs.strideB[b], strategy,
+                        state);
+                state.ra.safeRelease(state.inputs.strideB[b]);
+            }
         }
     }
 
@@ -10073,12 +10118,15 @@ void gemm_kernel_generator_t<hw>::gemmOffsetABC(bool initial, Subregister i0,
                 mulConstant(1, tempD0, x, Tc.size());
                 eadd(1, offsetC, offsetC, tempD0, strategy, state);
             }
-            if (initial && problem.batchedS) {
-                emul(1, state.inputs.strideC, state.inputs.strideC,
-                        state.inputs.groupIDK, strategy, state);
-                eadd(1, offsetC, offsetC, state.inputs.strideC, strategy,
-                        state);
-                state.ra.safeRelease(state.inputs.strideC);
+            if (initial && batchedS) {
+                for (int b = 0; b < problem.batchDims; b++)
+                    emul(1, state.inputs.strideC[b], state.inputs.strideC[b],
+                            state.batchID[b], strategy, state);
+                for (int b = 0; b < problem.batchDims; b++) {
+                    eadd(1, offsetC, offsetC, state.inputs.strideC[b], strategy,
+                            state);
+                    state.ra.safeRelease(state.inputs.strideC[b]);
+                }
             }
             emul(1, tempQ0, y, state.inputs.ldc[q], strategy, state);
             eadd(1, offsetC, offsetC, tempQ0.reinterpret(0, offsetC.getType()),
@@ -10132,7 +10180,7 @@ void gemm_kernel_generator_t<hw>::gemmOffsetABC(bool initial, Subregister i0,
             }
     }
 
-    if (problem.batchedS) state.ra.safeRelease(state.inputs.groupIDK);
+    gemmReleaseBatchIDs(problem, strategy, state);
     state.ra.safeRelease(tempQ0);
     state.ra.safeRelease(tempQ1);
 }
@@ -10217,6 +10265,40 @@ void gemm_kernel_generator_t<hw>::gemmSetupABC(GEMMProblem &problem,
     }
 }
 
+// Get (possibly multidimensional) batch IDs.
+template <HW hw>
+void gemm_kernel_generator_t<hw>::gemmGetBatchIDs(const GEMMProblem &problem,
+        const GEMMStrategy &strategy, GEMMState &state) {
+    switch (problem.batchDims) {
+        case 0: break;
+        case 1: state.batchID[0] = state.inputs.groupIDK; break;
+        case 2: {
+            state.batchID[0] = state.ra.alloc_sub<uint32_t>();
+            state.batchID[1] = state.ra.alloc_sub<uint32_t>();
+            divDown(state.batchID[1], state.inputs.groupIDK,
+                    state.inputs.batchSize1, state.inputs.recipBatchSize1,
+                    state.flagAP, strategy, state);
+            emul(1, state.batchID[0], state.batchID[1], state.inputs.batchSize1,
+                    strategy, state);
+            add(1, state.batchID[0], -state.batchID[0], state.inputs.groupIDK);
+            state.ra.safeRelease(state.inputs.batchSize1);
+            state.ra.safeRelease(state.inputs.recipBatchSize1);
+            break;
+        }
+        default: stub();
+    }
+}
+
+template <HW hw>
+void gemm_kernel_generator_t<hw>::gemmReleaseBatchIDs(
+        const GEMMProblem &problem, const GEMMStrategy &strategy,
+        GEMMState &state) {
+    if (problem.batch != BatchMode::Strided) return;
+    if (problem.batchDims == 1 && strategy.moveR0 == MoveR0::None) return;
+    for (int b = 0; b < problem.batchDims; b++)
+        state.ra.safeRelease(state.batchID[b]);
+}
+
 // GEMM kernel generation interface.
 template <ngen::HW hw>
 void gemm_kernel_generator_t<hw>::gemm(GEMMProblem problem,
@@ -10262,11 +10344,16 @@ void gemm_kernel_generator_t<hw>::gemm(GEMMProblem problem,
     removeSG(problem, strategy, state);
     reorderFusedEUs(problem, strategy, state);
 
+    // Batch handling.
+    gemmGetBatchIDs(problem, strategy, state);
+
     // 32-bit add check.
     gemmCheck32(problem, strategy, state);
 
     // Non-strided batch support.
-    if (problem.batchedN) {
+    if (problem.batch == BatchMode::Nonstrided) {
+        if (problem.batchDims != 1) stub();
+
         auto tempA = state.ra.alloc().uq();
         auto tempB = state.ra.alloc().uq();
         auto tempC = state.ra.alloc().uq();
@@ -10405,6 +10492,8 @@ void gemm_kernel_generator_t<hw>::gemm(GEMMProblem problem,
     }
 
     moveR0(strategy, state);
+    if (problem.batch == BatchMode::Strided)
+        state.ra.claim(state.inputs.groupIDK);
 
     // Adjust k range as needed.
     if (strategy.kBlocking) {
@@ -10838,7 +10927,7 @@ CommonDriverInfo GEMMStrategy::driverInfo(const GEMMProblem &problem) const {
     info.fixedWG = slmA || slmB;
     info.kRemainderHandling = (remHandling[LoopK] != RemainderHandling::Ignore);
     info.kBlocking = kBlocking;
-    if (!problem.batchedN && !problem.batchedS) info.loopOrder[2] = LoopNone;
+    if (problem.batch == BatchMode::None) info.loopOrder[2] = LoopNone;
 
     return info;
 }
