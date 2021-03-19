@@ -99,6 +99,22 @@ protected:
     status_t init(engine_t *engine) override;
 
 private:
+    //  brgemm convolution execution context
+    struct brgemm_exec_ctx_t {
+        brgemm_exec_ctx_t(const exec_ctx_t &ctx, const pd_t *pd)
+            : src(CTX_IN_MEM(const src_data_t *, DNNL_ARG_SRC))
+            , weights(CTX_IN_MEM(const wei_data_t *, DNNL_ARG_WEIGHTS))
+            , bias(CTX_IN_MEM(const char *, DNNL_ARG_BIAS))
+            , dst(CTX_OUT_MEM(dst_data_t *, DNNL_ARG_DST))
+            , post_ops_binary_rhs_arg_vec(binary_injector::prepare_binary_args(
+                      pd->attr()->post_ops_, ctx)) {}
+        const src_data_t *const __restrict src;
+        const wei_data_t *const __restrict weights;
+        const char *const __restrict bias;
+        dst_data_t *const __restrict dst;
+        const std::vector<const void *> post_ops_binary_rhs_arg_vec;
+    };
+
     static int get_brg_idx(
             int m, bool do_initialization, bool is_N_tail, bool is_K_tail) {
         return ((m * 2 + (int)do_initialization) * 2 + (int)is_N_tail) * 2
@@ -113,15 +129,15 @@ private:
             int ow, int &kw_s, int &kw_full_s, int &kw_full_e, int &kw_e) const;
     void get_ow_range(int ow, int kw, int &ow_s, int &ow_e) const;
 
-    void ker_base(const exec_ctx_t &ctx, int ithr,
+    void ker_base(const brgemm_exec_ctx_t &brgemm_ctx, int ithr,
             brgemm_batch_element_t *const __restrict brg_batch,
             char *const c_buffer, int g, int n, int ocb, int od, int oh,
             int owb, int icc) const;
-    void ker_trans(const exec_ctx_t &ctx, int ithr,
+    void ker_trans(const brgemm_exec_ctx_t &brgemm_ctx, int ithr,
             brgemm_batch_element_t *const __restrict brg_batch,
             char *const c_buffer, src_data_t *inp_buffer, int g, int n, int ocb,
             int od, int oh, int owb, int icc) const;
-    void ker_vpad(const exec_ctx_t &ctx, int ithr,
+    void ker_vpad(const brgemm_exec_ctx_t &brgemm_ctx, int ithr,
             brgemm_batch_element_t *const __restrict brg_batch,
             char *const c_buffer, int g, int n, int ocb, int od, int oh,
             int owb, int icc) const;
@@ -129,12 +145,13 @@ private:
     void perform_outwork(dst_data_t *dst_base, char *c_buffer,
             const char *bias_w, int od, int oh, int ow, int g_oc,
             bool is_oc_tail, int ker_ow_s, int ker_ow_f, int kd_l, int kh_l,
-            bool do_init, bool do_postwork) const;
+            const void *post_ops_binary_rhs_arg_vec, bool do_init,
+            bool do_postwork) const;
 
     void call_brgemm_kernel(brgemm_kernel_t *brg_ker, int batch_size,
             brgemm_batch_element_t *const __restrict brg_batch, char *ptr_C,
-            dst_data_t *ptr_D, const char *bias_w, int g_oc,
-            bool do_postops) const;
+            dst_data_t *ptr_D, const char *bias_w, int g_oc, bool do_postops,
+            const void *binary_post_ops_rhs) const;
 
     void maybe_conv_inp(int ithr, const src_data_t *__restrict src,
             src_data_t *__restrict inp_buffer,

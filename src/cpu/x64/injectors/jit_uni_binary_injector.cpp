@@ -19,6 +19,7 @@
 #include "common/primitive.hpp"
 #include "common/primitive_attr.hpp"
 #include "common/primitive_exec_types.hpp"
+#include "common/utils.hpp"
 #include "cpu/x64/injectors/jit_uni_binary_injector.hpp"
 
 namespace dnnl {
@@ -32,11 +33,35 @@ bool is_data_supported(cpu_isa_t isa, data_type_t data_type) {
             utils::one_of(isa, avx512_core_bf16, avx512_core));
 }
 
+static bool src1_desc_layout_same_as_dst_d(
+        const dnnl::impl::memory_desc_t &src1_desc,
+        const memory_desc_wrapper &dst_d) {
+    if (dst_d.md_ == nullptr) return false;
+    const auto &lhs = src1_desc;
+    const auto &rhs = *(dst_d.md_);
+
+    using namespace dnnl::impl::utils;
+    return lhs.ndims == rhs.ndims
+            && (lhs.format_kind == rhs.format_kind
+                    || one_of(
+                            format_kind::any, lhs.format_kind, rhs.format_kind))
+            && array_cmp(lhs.dims, rhs.dims, lhs.ndims)
+            && array_cmp(lhs.padded_dims, rhs.padded_dims, lhs.ndims)
+            && array_cmp(lhs.padded_offsets, rhs.padded_offsets, lhs.ndims)
+            && lhs.offset0 == rhs.offset0;
+}
+
 bool is_bcast_supported(const dnnl::impl::memory_desc_t &src1_desc,
         const memory_desc_wrapper &dst_d,
         const bcast_set_t &supported_strategy_set) {
     const auto bcast_type = get_rhs_arg_broadcasting_strategy(
             src1_desc, dst_d, supported_strategy_set);
+
+    if (bcast_type == broadcasting_strategy_t::no_broadcast) {
+        // in case of no broadcast data layout of dst and src1 have to be the same
+        if (!src1_desc_layout_same_as_dst_d(src1_desc, dst_d)) return false;
+    }
+
     return bcast_type != broadcasting_strategy_t::unsupported;
 }
 
@@ -745,7 +770,6 @@ void jit_uni_binary_injector_t<isa, Vmm>::execute_broadcast_tail(
             && "Opmask is not set for tail loading avx512");
     const auto &tail_opmask = rhs_arg_static_params_.tail_opmask;
 
-    host_->uni_vxorps(tmp_vmm, tmp_vmm, tmp_vmm);
     switch (data_type) {
         case data_type::f32:
             host_->vbroadcastss(tmp_vmm | tail_opmask | host_->T_z, rhs_addr);
@@ -1036,7 +1060,6 @@ jit_uni_binary_injector_t<isa, Vmm>::load_rhs_tail_dynamically(
             && "Opmask is not set for tail loading avx512");
 
     const auto &tail_opmask = rhs_arg_static_params_.tail_opmask;
-    host_->uni_vxorps(tmp_vmm, tmp_vmm, tmp_vmm);
 
     switch (data_type) {
         case data_type::f32:
@@ -1067,30 +1090,22 @@ typename std::enable_if<!std::is_same<T, Xbyak::Zmm>::value>::type
 jit_uni_binary_injector_t<isa, Vmm>::load_rhs_tail_dynamically(
         const dnnl_data_type_t &data_type, const T &tmp_vmm,
         const Xbyak::Address &rhs_addr) const {
-    constexpr int simd_w_xmm = 4;
-    constexpr int simd_w_ymm = 8;
     const bool is_ymm = std::is_same<Vmm, Xbyak::Ymm>::value;
-    const int simd_w = is_ymm ? simd_w_ymm : simd_w_xmm;
-
-    Xbyak::Label l_case[simd_w_ymm];
     const Xbyak::Reg64 &reg_addr = rhs_arg_static_params_.rhs_addr_reg;
+    const Xbyak::Reg64 &reg_tmp = rhs_arg_static_params_.rhs_helper_reg;
     const Xbyak::Reg64 &reg_tail_size = rhs_arg_static_params_.reg_tail_size;
-    Xbyak::Xmm x = Xbyak::Xmm(tmp_vmm.getIdx());
-    Xbyak::Ymm y = Xbyak::Ymm(tmp_vmm.getIdx());
+    const Xbyak::Xmm x = Xbyak::Xmm(tmp_vmm.getIdx());
+    const Xbyak::Ymm y = Xbyak::Ymm(tmp_vmm.getIdx());
 
-    for (int i = simd_w - 1; i >= 0; i--) {
-        host_->cmp(reg_tail_size, i);
-        host_->je(l_case[i]);
-    }
-
-    for (int i = simd_w - 1; i >= 0; i--) {
+    auto runtime_tail_load = [&](int load_size) {
         if (is_ymm)
-            host_->load_data(data_type, y, reg_addr, 0, i + 1);
+            host_->load_data(data_type, y, reg_addr, 0, load_size);
         else
-            host_->load_data(data_type, x, reg_addr, 0, i + 1);
-        host_->jmp(l_case[0]);
-        host_->L(l_case[i]);
-    }
+            host_->load_data(data_type, x, reg_addr, 0, load_size);
+    };
+
+    host_->uni_vxorps(tmp_vmm, tmp_vmm, tmp_vmm);
+    host_->runtime_tail_process<Vmm>(reg_tail_size, reg_tmp, runtime_tail_load);
 }
 
 template <cpu_isa_t isa, typename Vmm>

@@ -13,6 +13,7 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 *******************************************************************************/
+#include <memory>
 
 #include "common/c_types_map.hpp"
 #include "common/nstl.hpp"
@@ -22,7 +23,7 @@
 #include "cpu/x64/brgemm/brgemm_amx.hpp"
 #include "cpu/x64/brgemm/brgemm_types.hpp"
 #include "cpu/x64/cpu_barrier.hpp"
-#include "cpu/x64/injectors/jit_uni_eltwise_injector.hpp"
+#include "cpu/x64/injectors/jit_uni_postops_injector.hpp"
 #include "cpu/x64/jit_generator.hpp"
 
 #define GET_OFF(field) offsetof(brgemm_kernel_params_t, field)
@@ -40,27 +41,43 @@ struct jit_brgemm_kernel_base_t : public jit_generator {
     jit_brgemm_kernel_base_t(const brgemm_t &abrg)
         : jit_generator(nullptr, MAX_CODE_SIZE, true, avx512_common)
         , brg(abrg)
-        , eltwise_injector_(nullptr)
+        , postops_injector_(nullptr)
         , is_ldb_loop(false) {
-        if (brg.with_eltwise) {
-            const auto &p = brg.attr->post_ops_;
-            const int eltwise_ind = p.find(primitive_kind::eltwise);
 
-            post_ops_t::entry_t::eltwise_t eltwise;
-            eltwise = p.entry_[eltwise_ind].eltwise;
-            eltwise_injector_ = new jit_uni_eltwise_injector_f32<avx512_common>(
-                    this, eltwise, true, rax, Xbyak::Opmask(1));
+        if (brg.with_eltwise || brg.with_binary || brg.with_sum) {
+
+            static constexpr bool preserve_gpr = true;
+            static constexpr bool preserve_vmm = true;
+            static constexpr bool use_exact_tail_scalar_bcast = false;
+            const auto dst_md_wrapper = memory_desc_wrapper(brg.dst_md);
+
+            const binary_injector::rhs_arg_static_params_t rhs_sp {
+                    static_cast<size_t>(Xbyak::Zmm(1).getIdx()), this->rdx,
+                    this->r10, preserve_gpr, preserve_vmm,
+                    GET_OFF(post_ops_binary_rhs_arg_vec), dst_md_wrapper,
+                    static_cast<size_t>(brg.ldb_tail), ld_tail_mask,
+                    use_exact_tail_scalar_bcast};
+            const binary_injector::static_params_t bsp {this->param1, rhs_sp};
+
+            postops_injector_ = utils::make_unique<
+                    injector::jit_uni_postops_injector_t<avx512_common>>(
+                    this, brg.attr->post_ops_, bsp);
+
+            using namespace dnnl::impl::cpu::binary_injector_utils;
+            std::tie(with_binary_per_oc_bcast_, with_binary_per_oc_sp_bcast_)
+                    = bcast_strategies_present_tup(brg.attr->post_ops_.entry_,
+                            dst_md_wrapper, broadcasting_strategy_t::per_oc,
+                            broadcasting_strategy_t::per_oc_spatial);
         }
     }
-
-    ~jit_brgemm_kernel_base_t() override { delete eltwise_injector_; }
 
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_brgemm_kernel_base_t)
 
     brgemm_t brg;
 
 private:
-    jit_uni_eltwise_injector_f32<avx512_common> *eltwise_injector_;
+    std::unique_ptr<injector::jit_uni_postops_injector_t<avx512_common>>
+            postops_injector_;
 
     using reg64_t = const Xbyak::Reg64;
 
@@ -103,6 +120,9 @@ private:
     const reg64_t reg_bias = reg_rdb_loop;
     const reg64_t reg_scales = reg_rdb_loop;
     const reg64_t reg_aux_bias = reg_rdb_loop;
+    const reg64_t reg_binary_postops_oc_l = reg_rdb_loop;
+    const reg64_t reg_aux_binary_postops_oc_l = reg_rdb_loop;
+
     const reg64_t reg_aux_scales = reg_aux_B;
     const reg64_t reg_do_post_ops = reg_rdb_loop;
     const reg64_t reg_tmp_gpr = reg_rdb_loop;
@@ -129,9 +149,14 @@ private:
     constexpr static int reg_buf_offs_ = 80;
     constexpr static int reg_comp_offs_ = reg_buf_offs_;
     constexpr static int reg_aux_comp_offs_ = 88;
-    constexpr static int stack_space_needed_ = 96;
+    constexpr static int abi_param1_offs_ = 96;
+    constexpr static int reg_binary_postops_oc_l_offs_ = 104;
+    constexpr static int reg_aux_binary_postops_oc_l_offs_ = 112;
+    constexpr static int stack_space_needed_ = 120;
 
     bool is_ldb_loop;
+    bool with_binary_per_oc_bcast_ = false;
+    bool with_binary_per_oc_sp_bcast_ = false;
 
     Xbyak::Opmask ld_full_mask = Xbyak::Opmask(2);
     Xbyak::Opmask ld_tail_mask = Xbyak::Opmask(3);
@@ -146,12 +171,12 @@ private:
             assert(idx > 0);
             return Xbyak::Zmm(idx);
         } else
-            return Xbyak::Zmm(0);
+            return this->zmm0;
     }
 
     Xbyak::Zmm load(int ld = 0) {
         if (n_bcast_1_load) {
-            return Xbyak::Zmm(0);
+            return this->zmm0;
         } else {
             int idx = 31 - (brg.ld_block2 * brg.bd_block) - ld;
             assert(idx > 0);
@@ -159,15 +184,15 @@ private:
         }
     }
 
-    Xbyak::Zmm zmm_tmp_1() { return Xbyak::Zmm(0); }
-    Xbyak::Zmm zmm_tmp_2() { return Xbyak::Zmm(1); }
-    Xbyak::Zmm zmm_tmp_3() { return Xbyak::Zmm(2); }
-    Xbyak::Zmm zmm_inp_shift() { return Xbyak::Zmm(1); }
+    const Xbyak::Zmm &zmm_tmp_1() const noexcept { return this->zmm0; }
+    const Xbyak::Zmm &zmm_tmp_2() const noexcept { return this->zmm1; }
+    const Xbyak::Zmm &zmm_tmp_3() const noexcept { return this->zmm2; }
+    const Xbyak::Zmm &zmm_inp_shift() const noexcept { return this->zmm1; }
 
     Xbyak::Zmm zmm_mask(const Xbyak::Zmm zmm_in, bool mask_flag, bool store,
-            Xbyak::Opmask ktail_mask);
+            Xbyak::Opmask ktail_mask) const;
     Xbyak::Ymm ymm_mask(const Xbyak::Ymm ymm_in, bool mask_flag, bool store,
-            Xbyak::Opmask ktail_mask);
+            Xbyak::Opmask ktail_mask) const;
 
     void cvt2ps(data_type_t type_in, const Xbyak::Zmm zmm_in,
             const Xbyak::Operand &op, bool mask_flag, bool store,
@@ -184,7 +209,7 @@ private:
     void store_accumulators_apply_post_ops(
             int bd_block, int ld_block, bool is_ld_tail);
     void apply_alpha_beta(int bd_block, int ld_block, bool is_ld_tail);
-
+    void apply_post_ops(int bd_block, int ld_block2, bool is_ld_tail);
     void restore_A_B_matrices();
     void set_A_B_matrices();
 
@@ -202,98 +227,112 @@ private:
 
     void generate() override;
 
-    int A_offset(int bd, int rd, bool is_amx = false);
-    int B_offset(int ld, int rd, bool is_amx = false);
-    int C_offset(int bd, int ld);
-    int D_offset(int bd, int ld);
+    int A_offset(int bd, int rd, bool is_amx = false) const noexcept;
+    int B_offset(int ld, int rd, bool is_amx = false) const noexcept;
+    int C_offset(int bd, int ld) const noexcept;
+    int D_offset(int bd, int ld) const noexcept;
 
-    int rdb_A_offset();
-    int rdb_B_offset();
+    int rdb_A_offset() const noexcept;
+    int rdb_B_offset() const noexcept;
 
-    int ldb_B_offset(int ld_block2, bool is_tail = false);
-    int ldb_C_offset(int ld_block2, bool is_tail = false);
-    int ldb_D_offset(int ld_block2, bool is_tail = false);
+    int ldb_B_offset(int ld_block2, bool is_tail = false) const noexcept;
+    int ldb_C_offset(int ld_block2, bool is_tail = false) const noexcept;
+    int ldb_D_offset(int ld_block2, bool is_tail = false) const noexcept;
 
-    int bdb_A_offset(int bd_block2);
-    int bdb_C_offset(int bd_block2);
-    int bdb_D_offset(int bd_block2);
+    int bdb_A_offset(int bd_block2) const noexcept;
+    int bdb_C_offset(int bd_block2) const noexcept;
+    int bdb_D_offset(int bd_block2) const noexcept;
 
-    int bias_offset(int ld, bool is_tail = false);
-    int compensations_offset(int ld, bool is_tail = false);
-    int scales_offset(int ld, bool is_tail = false);
+    int bias_offset(int ld, bool is_tail = false) const noexcept;
+    int oc_logical_offset(int ld, bool is_tail = false) const noexcept;
+
+    int compensations_offset(int ld, bool is_tail = false) const noexcept;
+    int scales_offset(int ld, bool is_tail = false) const noexcept;
 
     bool n_bcast_1_load = false;
     bool vpad_exist = false;
 };
 
-int jit_brgemm_kernel_base_t::A_offset(int bd, int rd, bool is_amx) {
+int jit_brgemm_kernel_base_t::A_offset(int bd, int rd, bool is_amx) const
+        noexcept {
     return (is_amx) ? brg.typesize_A * (bd * brg.bd_block * brg.LDA)
                     : brg.typesize_A * (bd * brg.LDA + rd);
 }
-int jit_brgemm_kernel_base_t::B_offset(int ld, int rd, bool is_amx) {
+int jit_brgemm_kernel_base_t::B_offset(int ld, int rd, bool is_amx) const
+        noexcept {
     return (is_amx)
             ? brg.typesize_B * (brg.rd_step * ld * brg.ld_block)
             : brg.typesize_B * (rd * brg.LDB + brg.rd_step * ld * brg.ld_block);
 }
-int jit_brgemm_kernel_base_t::C_offset(int bd, int ld) {
+int jit_brgemm_kernel_base_t::C_offset(int bd, int ld) const noexcept {
     return brg.typesize_C * (bd * brg.LDC + ld * brg.ld_block);
 }
-int jit_brgemm_kernel_base_t::D_offset(int bd, int ld) {
+int jit_brgemm_kernel_base_t::D_offset(int bd, int ld) const noexcept {
     return brg.typesize_D * (bd * brg.LDD + ld * brg.ld_block);
 }
 
-int jit_brgemm_kernel_base_t::rdb_A_offset() {
+int jit_brgemm_kernel_base_t::rdb_A_offset() const noexcept {
     return brg.typesize_A * brg.rd_block;
 }
-int jit_brgemm_kernel_base_t::rdb_B_offset() {
+int jit_brgemm_kernel_base_t::rdb_B_offset() const noexcept {
     return brg.typesize_B * brg.rd_block * brg.LDB;
 }
 
-int jit_brgemm_kernel_base_t::ldb_B_offset(int ld_block2, bool is_tail) {
+int jit_brgemm_kernel_base_t::ldb_B_offset(int ld_block2, bool is_tail) const
+        noexcept {
     return (is_tail) ? brg.typesize_B * brg.ldb_tail * brg.ld_step
                      : brg.typesize_B * ld_block2 * brg.ld_block * brg.ld_step;
 }
-int jit_brgemm_kernel_base_t::ldb_C_offset(int ld_block2, bool is_tail) {
+int jit_brgemm_kernel_base_t::ldb_C_offset(int ld_block2, bool is_tail) const
+        noexcept {
     return (is_tail) ? brg.typesize_C * brg.ldb_tail
                      : brg.typesize_C * ld_block2 * brg.ld_block;
 }
-int jit_brgemm_kernel_base_t::ldb_D_offset(int ld_block2, bool is_tail) {
+int jit_brgemm_kernel_base_t::ldb_D_offset(int ld_block2, bool is_tail) const
+        noexcept {
     return (is_tail) ? brg.typesize_D * brg.ldb_tail
                      : brg.typesize_D * ld_block2 * brg.ld_block;
 }
 
-int jit_brgemm_kernel_base_t::bdb_A_offset(int bd_block2) {
+int jit_brgemm_kernel_base_t::bdb_A_offset(int bd_block2) const noexcept {
     return brg.typesize_A * bd_block2 * brg.bd_block * brg.LDA;
 }
-int jit_brgemm_kernel_base_t::bdb_C_offset(int bd_block2) {
+int jit_brgemm_kernel_base_t::bdb_C_offset(int bd_block2) const noexcept {
     return brg.typesize_C * bd_block2 * brg.bd_block * brg.LDC;
 }
-int jit_brgemm_kernel_base_t::bdb_D_offset(int bd_block2) {
+int jit_brgemm_kernel_base_t::bdb_D_offset(int bd_block2) const noexcept {
     return brg.typesize_D * bd_block2 * brg.bd_block * brg.LDD;
 }
 
-int jit_brgemm_kernel_base_t::bias_offset(int ld, bool is_tail) {
+int jit_brgemm_kernel_base_t::bias_offset(int ld, bool is_tail) const noexcept {
     return (is_tail) ? brg.typesize_bias * brg.ldb_tail
                      : brg.typesize_bias * ld * brg.ld_block;
 }
 
-int jit_brgemm_kernel_base_t::compensations_offset(int ld, bool is_tail) {
+int jit_brgemm_kernel_base_t::oc_logical_offset(int ld, bool is_tail) const
+        noexcept {
+    return (is_tail) ? brg.ldb_tail : ld * brg.ld_block;
+}
+
+int jit_brgemm_kernel_base_t::compensations_offset(int ld, bool is_tail) const
+        noexcept {
     return (is_tail) ? sizeof(int32_t) * brg.ldb_tail
                      : sizeof(int32_t) * ld * brg.ld_block;
 }
 
-int jit_brgemm_kernel_base_t::scales_offset(int ld, bool is_tail) {
+int jit_brgemm_kernel_base_t::scales_offset(int ld, bool is_tail) const
+        noexcept {
     return (is_tail) ? brg.is_oc_scale * sizeof(float) * brg.ldb_tail
                      : brg.is_oc_scale * sizeof(float) * ld * brg.ld_block;
 }
 Xbyak::Zmm jit_brgemm_kernel_base_t::zmm_mask(const Xbyak::Zmm zmm_in,
-        bool mask_flag, bool store, Xbyak::Opmask ktail_mask) {
+        bool mask_flag, bool store, Xbyak::Opmask ktail_mask) const {
     return mask_flag ? (store ? zmm_in | ktail_mask : zmm_in | ktail_mask | T_z)
                      : zmm_in;
 }
 
 Xbyak::Ymm jit_brgemm_kernel_base_t::ymm_mask(const Xbyak::Ymm ymm_in,
-        bool mask_flag, bool store, Xbyak::Opmask ktail_mask) {
+        bool mask_flag, bool store, Xbyak::Opmask ktail_mask) const {
     return mask_flag ? (store ? ymm_in | ktail_mask : ymm_in | ktail_mask | T_z)
                      : ymm_in;
 }
@@ -319,6 +358,8 @@ void jit_brgemm_kernel_base_t::cvt2ps(data_type_t type_in,
 
 void jit_brgemm_kernel_base_t::read_params() {
     Label label_done;
+
+    if (brg.with_binary) mov(ptr[rsp + abi_param1_offs_], param1);
 
     if (brg.type == brgemm_addr) {
         mov(reg_addr_batch, ptr[param1 + GET_OFF(batch)]);
@@ -358,6 +399,15 @@ void jit_brgemm_kernel_base_t::read_params() {
     if (brg.with_scales) {
         mov(reg_scales, ptr[param1 + GET_OFF(ptr_scales)]);
         mov(ptr[rsp + reg_scales_offs_], reg_scales);
+    }
+    if (with_binary_per_oc_bcast_) {
+        mov(reg_binary_postops_oc_l, ptr[param1 + GET_OFF(oc_logical_off)]);
+        mov(ptr[rsp + reg_binary_postops_oc_l_offs_], reg_binary_postops_oc_l);
+    } else if (with_binary_per_oc_sp_bcast_) {
+        mov(reg_binary_postops_oc_l,
+                ptr[param1 + GET_OFF(dst_row_logical_off)]);
+        mov(ptr[rsp + reg_aux_binary_postops_oc_l_offs_],
+                reg_binary_postops_oc_l);
     }
 
     mov(reg_do_post_ops, ptr[param1 + GET_OFF(do_post_ops)]);
@@ -427,6 +477,74 @@ void jit_brgemm_kernel_base_t::apply_alpha_beta(
     }
 }
 
+void jit_brgemm_kernel_base_t::apply_post_ops(
+        int bd_block, int ld_block2, bool is_ld_tail) {
+
+    binary_injector::rhs_arg_dynamic_params_t rhs_arg_params;
+
+    const injector_utils::conditional_register_preserve_guard_t register_guard(
+            brg.with_binary, this, {param1});
+    const auto guard_space = register_guard.stack_space_occupied();
+    if (brg.with_binary) {
+        mov(param1, ptr[rsp + abi_param1_offs_ + guard_space]);
+
+        if (with_binary_per_oc_bcast_ || with_binary_per_oc_sp_bcast_) {
+            mov(reg_aux_binary_postops_oc_l,
+                    ptr[rsp + reg_aux_binary_postops_oc_l_offs_ + guard_space]);
+
+            for_(int bd = 0; bd < bd_block; bd++)
+            for (int ld = 0; ld < ld_block2; ld++) {
+                const auto zmm_idx = accm(ld_block2, bd, ld).getIdx();
+
+                rhs_arg_params.vmm_idx_to_oc_off_oprnd.emplace(
+                        zmm_idx, reg_aux_binary_postops_oc_l);
+                if (with_binary_per_oc_bcast_)
+                    rhs_arg_params.vmm_idx_to_oc_elem_off_val.emplace(
+                            zmm_idx, oc_logical_offset(ld));
+                else if (with_binary_per_oc_sp_bcast_)
+                    rhs_arg_params.vmm_idx_to_oc_elem_off_val.emplace(
+                            zmm_idx, bd);
+                if (is_ld_tail) rhs_arg_params.vmm_tail_idx_.emplace(zmm_idx);
+            }
+        }
+    }
+    const auto sum_injector = [&] {
+        const float *p_sum_scale = &brg.sum_scale;
+        const bool p_sum_scale_reg_set = *p_sum_scale != 1.f;
+
+        const injector_utils::conditional_register_preserve_guard_t
+                register_guard((with_binary_per_oc_bcast_
+                                       || with_binary_per_oc_sp_bcast_)
+                                && p_sum_scale_reg_set,
+                        this, {reg_ptr_sum_scale});
+
+        if (p_sum_scale_reg_set) mov(reg_ptr_sum_scale, (size_t)p_sum_scale);
+
+        const auto k_mask = (!is_ld_tail) ? ld_full_mask : ld_tail_mask;
+
+        for (int bd = 0; bd < bd_block; bd++) {
+            for (int ld = 0; ld < ld_block2; ld++) {
+                const auto zmm = accm(ld_block2, bd, ld);
+                const auto addr = ptr[reg_aux_D + D_offset(bd, ld)];
+                const auto zmm_prev_dst = Xbyak::Zmm(0);
+                cvt2ps(brg.dt_d, zmm_prev_dst, addr, true, false, k_mask);
+                if (!p_sum_scale_reg_set)
+                    vaddps(zmm, zmm_prev_dst);
+                else
+                    vfmadd231ps(zmm, zmm_prev_dst, zword_b[reg_ptr_sum_scale]);
+            }
+        }
+    };
+
+    if (brg.with_sum) {
+        postops_injector_->set_lambda_injector(
+                primitive_kind::sum, sum_injector);
+    }
+
+    postops_injector_->compute_vector_range(
+            32 - bd_block * ld_block2, 32, rhs_arg_params);
+}
+
 void jit_brgemm_kernel_base_t::store_accumulators_apply_post_ops(
         int bd_block, int ld_block2, bool is_ld_tail) {
     auto k_mask = (!is_ld_tail) ? ld_full_mask : ld_tail_mask;
@@ -478,38 +596,7 @@ void jit_brgemm_kernel_base_t::store_accumulators_apply_post_ops(
         }
     }
 
-    bool sum_before_eltwise = false;
-    if (brg.with_sum) {
-        const auto &p = brg.attr->post_ops_;
-        const int sum_idx = p.find(primitive_kind::sum);
-        sum_before_eltwise
-                = (sum_idx == 0) && p.contain(primitive_kind::eltwise, 1);
-    }
-
-    if (brg.with_eltwise && !sum_before_eltwise)
-        eltwise_injector_->compute_vector_range(32 - bd_block * ld_block2, 32);
-
-    if (brg.with_sum) {
-        const float *p_sum_scale = &brg.sum_scale;
-        if (*p_sum_scale != 1.f) mov(reg_ptr_sum_scale, (size_t)p_sum_scale);
-
-        for (int bd = 0; bd < bd_block; bd++) {
-            for (int ld = 0; ld < ld_block2; ld++) {
-                auto zmm = accm(ld_block2, bd, ld);
-                auto addr = ptr[reg_aux_D + D_offset(bd, ld)];
-
-                auto zmm_prev_dst = Xbyak::Zmm(0);
-                cvt2ps(brg.dt_d, zmm_prev_dst, addr, true, false, k_mask);
-                if (*p_sum_scale == 1.f)
-                    vaddps(zmm, zmm_prev_dst);
-                else
-                    vfmadd231ps(zmm, zmm_prev_dst, zword_b[reg_ptr_sum_scale]);
-            }
-        }
-    }
-
-    if (brg.with_eltwise && sum_before_eltwise)
-        eltwise_injector_->compute_vector_range(32 - bd_block * ld_block2, 32);
+    if (postops_injector_) apply_post_ops(bd_block, ld_block2, is_ld_tail);
 
     const bool dt_requires_saturation
             = one_of(brg.dt_d, data_type::u8, data_type::s8, data_type::s32);
@@ -588,8 +675,8 @@ void jit_brgemm_kernel_base_t::store_accumulators_without_post_ops(
 void jit_brgemm_kernel_base_t::store_accumulators(
         int bd_block2, bool is_bdb_tail, int ld_block2, bool is_ld_tail) {
     const bool are_post_ops_applicable = one_of(true, brg.with_eltwise,
-            brg.with_scales, brg.with_bias, brg.with_sum, brg.dt_d != brg.dt_c,
-            brg.req_s8s8_compensation);
+            brg.with_binary, brg.with_scales, brg.with_bias, brg.with_sum,
+            brg.dt_d != brg.dt_c, brg.req_s8s8_compensation);
     const bool need_to_apply_alpha_beta = brg.beta != 0.f || brg.alpha != 1.f;
 
     if (brg.is_amx) {
@@ -620,19 +707,29 @@ void jit_brgemm_kernel_base_t::store_accumulators(
                         if (apply_post_ops) {
                             store_accumulators_apply_post_ops(
                                     brg.bd_block, 1, is_ld_tail);
-                            if (brg.with_bias && ldb < ld_block2 - 1) {
-                                mov(reg_aux_bias,
-                                        ptr[rsp + reg_aux_bias_offs_]);
-                                add(reg_aux_bias, bias_offset(1));
-                                mov(ptr[rsp + reg_aux_bias_offs_],
-                                        reg_aux_bias);
-                            }
-                            if (brg.with_scales && ldb < ld_block2 - 1) {
-                                mov(reg_aux_scales,
-                                        ptr[rsp + reg_aux_scales_offs_]);
-                                add(reg_aux_scales, scales_offset(1));
-                                mov(ptr[rsp + reg_aux_scales_offs_],
-                                        reg_aux_scales);
+                            if (ldb < ld_block2 - 1) {
+                                if (brg.with_bias) {
+                                    mov(reg_aux_bias,
+                                            ptr[rsp + reg_aux_bias_offs_]);
+                                    add(reg_aux_bias, bias_offset(1));
+                                    mov(ptr[rsp + reg_aux_bias_offs_],
+                                            reg_aux_bias);
+                                }
+                                if (brg.with_scales) {
+                                    mov(reg_aux_scales,
+                                            ptr[rsp + reg_aux_scales_offs_]);
+                                    add(reg_aux_scales, scales_offset(1));
+                                    mov(ptr[rsp + reg_aux_scales_offs_],
+                                            reg_aux_scales);
+                                }
+                                if (with_binary_per_oc_bcast_) {
+                                    mov(reg_aux_binary_postops_oc_l,
+                                            ptr[rsp + reg_aux_binary_postops_oc_l_offs_]);
+                                    add(reg_aux_binary_postops_oc_l,
+                                            oc_logical_offset(1));
+                                    mov(ptr[rsp + reg_aux_binary_postops_oc_l_offs_],
+                                            reg_aux_binary_postops_oc_l);
+                                }
                             }
                             mov(reg_buf, ptr[rsp + reg_buf_offs_]);
                             add(reg_aux_D, ldb_D_offset(1));
@@ -652,20 +749,33 @@ void jit_brgemm_kernel_base_t::store_accumulators(
                     sub(reg_aux_D, ldb_D_offset(ld_block2));
                     add(reg_aux_D, bdb_D_offset(1));
 
-                    if ((brg.with_bias || brg.with_scales) && ld_block2 > 1) {
+                    if (ld_block2 > 1) {
+                        bool post_processed = false;
                         if (brg.with_bias) {
+                            post_processed = true;
                             mov(reg_aux_bias, ptr[rsp + reg_aux_bias_offs_]);
                             sub(reg_aux_bias, bias_offset(ld_block2 - 1));
                             mov(ptr[rsp + reg_aux_bias_offs_], reg_aux_bias);
                         }
                         if (brg.with_scales) {
+                            post_processed = true;
                             mov(reg_aux_scales,
                                     ptr[rsp + reg_aux_scales_offs_]);
                             sub(reg_aux_scales, scales_offset(ld_block2 - 1));
                             mov(ptr[rsp + reg_aux_scales_offs_],
                                     reg_aux_scales);
                         }
-                        mov(reg_buf, ptr[rsp + reg_buf_offs_]);
+                        if (with_binary_per_oc_bcast_) {
+                            post_processed = true;
+                            mov(reg_aux_binary_postops_oc_l,
+                                    ptr[rsp + reg_aux_binary_postops_oc_l_offs_]);
+                            sub(reg_aux_binary_postops_oc_l,
+                                    oc_logical_offset(ld_block2 - 1));
+                            mov(ptr[rsp + reg_aux_binary_postops_oc_l_offs_],
+                                    reg_aux_binary_postops_oc_l);
+                        }
+                        if (post_processed)
+                            mov(reg_buf, ptr[rsp + reg_buf_offs_]);
                     }
                 }
             }
@@ -1000,6 +1110,15 @@ void jit_brgemm_kernel_base_t::ldb_loop(int bd_block2, bool is_bdb_tail,
                               : scales_offset(ld_block2));
             mov(ptr[rsp + reg_aux_scales_offs_], reg_aux_scales);
         }
+        if (with_binary_per_oc_bcast_) {
+            mov(reg_aux_binary_postops_oc_l,
+                    ptr[rsp + reg_aux_binary_postops_oc_l_offs_]);
+            add(reg_aux_binary_postops_oc_l,
+                    (is_tail) ? oc_logical_offset(1, true)
+                              : oc_logical_offset(ld_block2));
+            mov(ptr[rsp + reg_aux_binary_postops_oc_l_offs_],
+                    reg_aux_binary_postops_oc_l);
+        }
     };
 
     Label ldb_loop_label;
@@ -1020,6 +1139,12 @@ void jit_brgemm_kernel_base_t::ldb_loop(int bd_block2, bool is_bdb_tail,
         if (brg.with_scales) {
             mov(reg_scales, ptr[rsp + reg_scales_offs_]);
             mov(ptr[rsp + reg_aux_scales_offs_], reg_scales);
+        }
+        if (with_binary_per_oc_bcast_) {
+            mov(reg_binary_postops_oc_l,
+                    ptr[rsp + reg_binary_postops_oc_l_offs_]);
+            mov(ptr[rsp + reg_aux_binary_postops_oc_l_offs_],
+                    reg_binary_postops_oc_l);
         }
     }
 
@@ -1378,7 +1503,7 @@ void jit_brgemm_kernel_base_t::generate() {
 
     postamble();
 
-    if (brg.with_eltwise) eltwise_injector_->prepare_table();
+    if (brg.with_eltwise) postops_injector_->prepare_table();
 }
 
 brgemm_kernel_t::brgemm_kernel_t(const brgemm_t abrd) {

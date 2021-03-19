@@ -294,7 +294,8 @@ public:
     void init_saturate_f32(Vmm vmm_lbound, Vmm vmm_ubound,
             Xbyak_aarch64::XReg reg_tmp, data_type_t idt, data_type_t odt) {
         using namespace data_type;
-        if (!((idt == f32) && utils::one_of(odt, u8, s8, s32))) return;
+        if (!((idt == f32) && utils::one_of(odt, u8, data_type::s8, s32)))
+            return;
 
         assert(IMPLICATION(
                 idt == u8, vmm_lbound.getIdx() != vmm_ubound.getIdx()));
@@ -326,7 +327,7 @@ public:
         // behavior (it returns INT_MIN if the f32 is out of the
         // s32 range)
         using namespace data_type;
-        if (!utils::one_of(odt, u8, s8, s32)) return;
+        if (!utils::one_of(odt, u8, data_type::s8, s32)) return;
 
         Xbyak_aarch64::VReg4S v_tmp(vmm.getIdx());
         Xbyak_aarch64::VReg4S v_lbound(vmm_lbound.getIdx());
@@ -359,7 +360,9 @@ public:
 public:
     jit_generator(void *code_ptr = nullptr, size_t code_size = MAX_CODE_SIZE,
             bool use_autogrow = true)
-        : Xbyak_aarch64::CodeGenerator(code_size, code_ptr) {}
+        : Xbyak_aarch64::CodeGenerator(code_size,
+                (code_ptr == nullptr && use_autogrow) ? Xbyak_aarch64::AutoGrow
+                                                      : code_ptr) {}
     virtual ~jit_generator() {}
 
     virtual const char *name() const = 0;

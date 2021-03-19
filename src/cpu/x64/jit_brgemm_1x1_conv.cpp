@@ -18,6 +18,7 @@
 #include "common/dnnl_thread.hpp"
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
+#include "cpu/x64/injectors/jit_uni_binary_injector.hpp"
 
 #include "cpu/x64/jit_brgemm_1x1_conv.hpp"
 
@@ -109,10 +110,10 @@ brgemm_1x1_convolution_fwd_t<isa, src_type, wei_type, dst_type>::pd_t::init(
         brgattr.max_bottom_vpad = jcp_.max_vpad;
         brgattr.wary_tail_read = false;
         CHECK(brgemm_desc_set_attr(&brg, brgattr));
-        auto dt_d = dst_type;
         auto LDD = jcp_.oc_without_padding;
         brg.with_sum = with_sum;
-        CHECK(brgemm_desc_set_postops(&brg, attr(), dt_d, LDD, jcp_.bia_dt));
+        CHECK(brgemm_desc_set_postops(
+                &brg, attr(), &dst_md_, LDD, jcp_.bia_dt));
     }
 
     auto scratchpad = scratchpad_registry().registrar();
@@ -168,7 +169,7 @@ status_t brgemm_1x1_convolution_fwd_t<isa, src_type, wei_type, dst_type>::init(
     wei_ocb_sz = jcp.wei_plain ? jcp.oc_block * last_ic_block
                                : jcp.nb_oc * wei_ic_sz;
 
-    need_postwork = jcp.with_bias || jcp.with_eltwise
+    need_postwork = jcp.with_bias || jcp.with_eltwise || jcp.with_binary
             || (one_of(src_type, u8, s8) && wei_type == s8) // oscales needed
             || (jcp.dst_dt != jcp.acc_dt) || jcp.with_sum;
 
@@ -196,17 +197,17 @@ status_t brgemm_1x1_convolution_fwd_t<isa, src_type, wei_type, dst_type>::init(
 template <cpu_isa_t isa, data_type_t src_type, data_type_t wei_type,
         data_type_t dst_type>
 void brgemm_1x1_convolution_fwd_t<isa, src_type, wei_type, dst_type>::exec_ker(
-        const exec_ctx_t &ctx, int ithr,
+        const brgemm_exec_ctx_t &brgemm_ctx, int ithr,
         brgemm_batch_element_t *const __restrict brg_batch,
         char *const c_buffer, int g, int n, int ocb, int od, int oh, int ow,
         int icc) const {
 
-    const src_data_t *const __restrict src
-            = CTX_IN_MEM(const src_data_t *, DNNL_ARG_SRC);
-    const wei_data_t *const __restrict weights
-            = CTX_IN_MEM(const wei_data_t *, DNNL_ARG_WEIGHTS);
-    const char *const __restrict bias = CTX_IN_MEM(const char *, DNNL_ARG_BIAS);
-    dst_data_t *const __restrict dst = CTX_OUT_MEM(dst_data_t *, DNNL_ARG_DST);
+    const src_data_t *const __restrict src = brgemm_ctx.src;
+    const wei_data_t *const __restrict weights = brgemm_ctx.weights;
+    const char *const __restrict bias = brgemm_ctx.bias;
+    dst_data_t *const __restrict dst = brgemm_ctx.dst;
+    const std::vector<const void *> &post_ops_binary_rhs_arg_vec
+            = brgemm_ctx.post_ops_binary_rhs_arg_vec;
 
     const float *oscales = pd()->attr()->output_scales_.scales_;
 
@@ -263,9 +264,14 @@ void brgemm_1x1_convolution_fwd_t<isa, src_type, wei_type, dst_type>::exec_ker(
         }
 
         if (do_postops) {
+            const brgemm_post_ops_data_t post_ops_data {
+                    static_cast<const void *>(bias_w),
+                    &oscales[jcp.is_oc_scale * g_oc],
+                    post_ops_binary_rhs_arg_vec.data(),
+                    static_cast<size_t>(g_oc)};
+
             brgemm_kernel_execute_postops(brg_ker, n_ic_blocks, brg_batch,
-                    (void *)ptr_C, (void *)ptr_D, (void *)bias_w,
-                    &oscales[jcp.is_oc_scale * g_oc]);
+                    (void *)ptr_C, (void *)ptr_D, post_ops_data);
         } else {
             brgemm_kernel_execute(
                     brg_ker, n_ic_blocks, brg_batch, (void *)ptr_C);
@@ -296,6 +302,8 @@ template <cpu_isa_t isa, data_type_t src_type, data_type_t wei_type,
         data_type_t dst_type>
 void brgemm_1x1_convolution_fwd_t<isa, src_type, wei_type,
         dst_type>::execute_forward_all(const exec_ctx_t &ctx) const {
+
+    brgemm_exec_ctx_t brgemm_ctx(ctx, pd());
 
     const memory_tracking::grantor_t scratchpad = ctx.get_scratchpad_grantor();
 
@@ -336,8 +344,8 @@ void brgemm_1x1_convolution_fwd_t<isa, src_type, wei_type,
                 const int oh = (os % (OH * OW)) / OW; \
                 const int ow = os % OW; \
                 for (int icc = 0; icc < ic_chunks; icc++) \
-                    exec_ker(ctx, ithr, brg_batch, c_buffer, g, n, ocb, od, \
-                            oh, ow, icc); \
+                    exec_ker(brgemm_ctx, ithr, brg_batch, c_buffer, g, n, ocb, \
+                            od, oh, ow, icc); \
             } \
             nd_iterator_step(__VA_ARGS__); \
         } \
@@ -371,8 +379,8 @@ void brgemm_1x1_convolution_fwd_t<isa, src_type, wei_type,
         for (auto work = start; work < end; work++) { \
             for (int icc = 0; icc < ic_chunks; icc++) { \
                 const int ow = owb * jcp.ow_block; \
-                exec_ker(ctx, ithr, brg_batch, c_buffer, g, n, ocb, od, oh, \
-                        ow, icc); \
+                exec_ker(brgemm_ctx, ithr, brg_batch, c_buffer, g, n, ocb, od, \
+                        oh, ow, icc); \
             } \
             nd_iterator_step(__VA_ARGS__); \
         } \

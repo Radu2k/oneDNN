@@ -104,59 +104,61 @@ struct brgemm_batch_element_t {
 };
 
 struct brgemm_t {
-    int bcast_dim; // M;
-    int load_dim; // N;
-    int reduce_dim; // K;
-    int LDA;
-    int LDB;
-    int LDC;
-    int LDD;
+    int bcast_dim = 0; // M;
+    int load_dim = 0; // N;
+    int reduce_dim = 0; // K;
+    int LDA = 0;
+    int LDB = 0;
+    int LDC = 0;
+    int LDD = 0;
 
-    float alpha;
-    float beta;
+    float alpha = 0.0f;
+    float beta = 0.0f;
 
-    int bdb, bd_block, bdb_tail;
-    int bdb2, bd_block2, bdb2_tail;
-    int ldb, ld_block, ldb_tail;
-    int ldb2, ld_block2, ldb2_tail;
-    int rdb, rd_block, rdb_tail;
-    int rd_step, ld_step;
+    int bdb = 0, bd_block = 0, bdb_tail = 0;
+    int bdb2 = 0, bd_block2 = 0, bdb2_tail = 0;
+    int ldb = 0, ld_block = 0, ldb_tail = 0;
+    int ldb2 = 0, ld_block2 = 0, ldb2_tail = 0;
+    int rdb = 0, rd_block = 0, rdb_tail = 0;
+    int rd_step = 0, ld_step = 0;
 
-    impl::data_type_t dt_a;
-    impl::data_type_t dt_c;
-    impl::data_type_t dt_b;
-    impl::data_type_t dt_d;
-    impl::data_type_t dt_bias;
+    impl::data_type_t dt_a = data_type::undef;
+    impl::data_type_t dt_c = data_type::undef;
+    impl::data_type_t dt_b = data_type::undef;
+    impl::data_type_t dt_d = data_type::undef;
+    impl::data_type_t dt_bias = data_type::undef;
 
-    int typesize_A;
-    int typesize_B;
-    int typesize_C;
-    int typesize_D;
-    int typesize_bias;
+    int typesize_A = 0;
+    int typesize_B = 0;
+    int typesize_C = 0;
+    int typesize_D = 0;
+    int typesize_bias = 0;
 
-    bool is_int8, is_int8_amx;
-    bool is_bf16, is_bf16_amx;
-    bool is_f32;
-    bool is_amx;
+    bool is_int8 = false, is_int8_amx = false;
+    bool is_bf16 = false, is_bf16_amx = false;
+    bool is_f32 = false;
+    bool is_amx = false;
 
-    dim_t stride_a; // Offset in bytes
-    dim_t stride_b;
+    dim_t stride_a = 0; // Offset in bytes
+    dim_t stride_b = 0;
 
     brgemm_layout_t layout;
-
     brgemm_batch_kind_t type;
-    bool embd_bcst;
 
-    bool with_bias;
-    bool with_sum;
-    float sum_scale;
-    bool with_eltwise;
-    bool with_scales;
-    bool req_s8s8_compensation;
-    int is_oc_scale;
+    bool embd_bcst = false;
 
-    const primitive_attr_t *attr;
-    post_ops_t::entry_t::eltwise_t eltwise;
+    bool with_bias = false;
+    bool with_sum = false;
+    float sum_scale = 0.0f;
+    bool with_eltwise = false;
+    bool with_binary = false;
+    bool with_scales = false;
+    bool req_s8s8_compensation = false;
+
+    int is_oc_scale = 0;
+
+    const primitive_attr_t *attr = nullptr;
+    const memory_desc_t *dst_md = nullptr;
 
     brgemm_attr_t brgattr;
     static constexpr int MAX_VPAD = 100;
@@ -176,6 +178,14 @@ struct brgemm_kernel_params_t {
 
     size_t do_post_ops;
     size_t BS;
+
+    /*
+     * ptr to table of void * elements that are pointers to post_op binary
+     * src1 tensors
+     */
+    const void *post_ops_binary_rhs_arg_vec;
+    size_t oc_logical_off;
+    size_t dst_row_logical_off;
 };
 
 struct jit_brgemm_kernel_base_t;
@@ -191,6 +201,34 @@ private:
     jit_brgemm_kernel_base_t *brgemm_kernel_ = nullptr;
 
     DNNL_DISALLOW_COPY_AND_ASSIGN(brgemm_kernel_t);
+};
+
+/// @param bias Vector of bias (vector length is N)
+/// @param scales Vector of scales (vector length is N)
+/// @param binary_post_ops_rhs - Ptr to table of pointers to tensors used as rhs
+///     in binary post-operation { void* binary_op_tensor1, ...,
+//      void* binary_op_tensor_n}
+/// @param oc_logical_off - Used in binary postops in per_oc bcast strategy.
+///     Offset to start oc processed by given thread in elements.
+/// @param scratch Scratchpad needed for AMX version, can be nullptr for
+///     avx512 version
+///
+struct brgemm_post_ops_data_t {
+    brgemm_post_ops_data_t() = default;
+    brgemm_post_ops_data_t(const void *bias, const float *scales,
+            const void *binary_post_ops_rhs, size_t oc_logical_off,
+            const size_t dst_row_logical_off = 0)
+        : bias(bias)
+        , scales(scales)
+        , binary_post_ops_rhs(binary_post_ops_rhs)
+        , oc_logical_off(oc_logical_off)
+        , dst_row_logical_off(dst_row_logical_off) {}
+
+    const void *bias = nullptr;
+    const float *scales = nullptr;
+    const void *binary_post_ops_rhs = nullptr;
+    size_t oc_logical_off = 0;
+    size_t dst_row_logical_off = 0;
 };
 
 } // namespace x64

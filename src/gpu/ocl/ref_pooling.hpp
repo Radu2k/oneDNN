@@ -33,6 +33,7 @@ namespace gpu {
 namespace ocl {
 
 struct ref_pooling_fwd_t : public gpu_primitive_t {
+    using gpu_primitive_t::gpu_primitive_t;
     struct pd_t : public gpu_pooling_fwd_pd_t {
         pd_t(const pooling_v2_desc_t *adesc, const primitive_attr_t *attr,
                 const pooling_fwd_pd_t *hint_fwd_pd)
@@ -108,8 +109,6 @@ struct ref_pooling_fwd_t : public gpu_primitive_t {
         offsets_t off;
     };
 
-    ref_pooling_fwd_t(const pd_t *apd) : gpu_primitive_t(apd) {}
-
     status_t init(engine_t *engine) override {
         compute::kernel_ctx_t kernel_ctx;
         status_t status = pd()->init_kernel_ctx(kernel_ctx);
@@ -132,6 +131,7 @@ private:
 };
 
 struct ref_pooling_bwd_t : public gpu_primitive_t {
+    using gpu_primitive_t::gpu_primitive_t;
     struct pd_t : public gpu_pooling_bwd_pd_t {
         pd_t(const pooling_v2_desc_t *adesc, const primitive_attr_t *attr,
                 const pooling_fwd_pd_t *hint_fwd_pd)
@@ -171,8 +171,6 @@ struct ref_pooling_bwd_t : public gpu_primitive_t {
         pool_conf_t conf;
         offsets_t off;
     };
-
-    ref_pooling_bwd_t(const pd_t *apd) : gpu_primitive_t(apd) {}
 
     status_t init(engine_t *engine) override {
         compute::kernel_ctx_t kernel_ctx;
