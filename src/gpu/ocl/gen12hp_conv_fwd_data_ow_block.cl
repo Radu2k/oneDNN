@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -156,7 +156,7 @@ inline void copy_src_to_slm(const __global SRC_DATA_T *src,
         if (ow < OW) {
 #if PW > 0
             if (left_nozero_tail) {
-                for (int i = -PW; i < 0; i++) {
+                for (int i = -PW - min(iw, 0); i < 0; i++) {
                     if (mode == READ_FROM_GLOBAL) {
                         Sreg_0[i + PW] = intel_sub_group_block_read(
                                 (const __global uint *)(&src[i * IC_BLOCK]));
@@ -171,8 +171,10 @@ inline void copy_src_to_slm(const __global SRC_DATA_T *src,
             }
 #endif
             if (right_nozero_tail) {
+                int buffer_last = (KW - 1) * (1 + DW) - PW;
+                int src_last = IW - iw - SW * OW_BLOCK - PW;
                 for (int i = SW * OW_BLOCK;
-                        i < SW * OW_BLOCK + (KW - 1) * (1 + DW) - PW; i++) {
+                        i < SW * OW_BLOCK + min(buffer_last, src_last); i++) {
                     if (mode == READ_FROM_GLOBAL) {
                         Sreg_1[i] = intel_sub_group_block_read(
                                 (const __global uint *)(&src[i * IC_BLOCK]));
@@ -182,6 +184,12 @@ inline void copy_src_to_slm(const __global SRC_DATA_T *src,
                         block_write(S_part + i * 8,
                                 intel_sub_group_block_read((const __global uint
                                                 *)(&src[i * IC_BLOCK])));
+                    }
+                }
+                for (int i = SW * OW_BLOCK + min(buffer_last, src_last);
+                        i < SW * OW_BLOCK + buffer_last; i++) {
+                    if (mode == WRITE_TO_LOCAL || mode == READ_WRITE) {
+                        block_write(S_part + i * 8, 0);
                     }
                 }
             }
@@ -263,11 +271,11 @@ gen12hp_conv_fwd_ow_block(const __global SRC_DATA_T *src,
     __local uint *S_work = S_slice + 32 / 4 * (sp * SW * OW_BLOCK);
 
     const bool left_tail = iw < 0;
-    const bool left_nozero_tail = sub_group_id == 0 && iw >= 0;
+    const bool left_nozero_tail = sub_group_id == 0 && iw > -PW;
     const bool right_tail = (iw + PW + OW_SLM_TAIL >= IW) && (iw + PW < IW);
-    const bool empty = (iw + PW >= IW);
     const bool right_nozero_tail
             = sp == (LWS_1 - 1) && (iw + PW + OW_SLM_TAIL < IW);
+    const bool empty = (iw + PW >= IW);
 
     dst += OC_CALC_BLOCK * OD * OH * OW * MB_BLOCK * (group_oc + oc);
     dst += OC_BLOCK * OD * OH * OW * OC_NCHUNK * G * MB_BLOCK * group_mb;
@@ -298,7 +306,8 @@ gen12hp_conv_fwd_ow_block(const __global SRC_DATA_T *src,
         }
 #if SLM_WORKING_GROUPS < OW_NCHUNK
         if (empty) {
-            for (int i = 0; i < SW * OW_BLOCK + (KW - 1) * (1 + DW) - PW; i++) {
+            for (int i = -PW; i < SW * OW_BLOCK + (KW - 1) * (1 + DW) - PW;
+                    i++) {
                 block_write(S_part + idx * SRC_SLM_SIZE + i * 8, 0);
             }
         }
