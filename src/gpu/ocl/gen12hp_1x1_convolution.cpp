@@ -59,6 +59,8 @@ status_t gen12hp_1x1_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
             && (conf.oc % conf.oc_block != 0 || conf.ic % conf.ic_block != 0))
         return status::unimplemented;
 
+    if (conf.l_pad > 0 || conf.r_pad > 0 || conf.t_pad > 0 || conf.f_pad > 0)
+        return status::unimplemented;
     const bool is_stride1
             = conf.stride_d == 1 && conf.stride_h == 1 && conf.stride_w == 1;
 
