@@ -48,7 +48,8 @@ struct ref_pp_kernel_t : public pp_kernel_t<acc_type, dst_type> {
     using dst_data_t = typename prec_traits<dst_type>::type;
 
     void operator()(dst_data_t *dst, const acc_data_t *acc, const char *bias,
-            const float *scales, size_t start, size_t end, size_t runtime_oc,
+            const float *scales, size_t start, size_t dst_logical_offs,
+            size_t dst_row_idx, size_t end, size_t runtime_oc,
             dim_t dst_mb_stride, const float *dst_zero_points,
             const void *post_ops_binary_rhs_arg_vec, const void *dst_orig,
             const exec_ctx_t &ctx, const memory_desc_t &dst_md) const override;
@@ -60,8 +61,8 @@ private:
 template <data_type_t acc_type, data_type_t dst_type>
 void ref_pp_kernel_t<acc_type, dst_type>::operator()(dst_data_t *dst,
         const acc_data_t *acc, const char *bias, const float *scales,
-        size_t start, size_t end, size_t runtime_oc, dim_t dst_mb_stride,
-        const float *dst_zero_points,
+        size_t start, size_t dst_row_idx, size_t dst_logical_off, size_t end,
+        size_t runtime_oc, dim_t dst_mb_stride, const float *dst_zero_points,
         const void * /* post_ops_binary_rhs_arg_vec */,
         const void * /* dst_orig */, const exec_ctx_t &ctx,
         const memory_desc_t &dst_md) const {
@@ -187,8 +188,14 @@ bool post_ops_ok(const post_ops_t &post_ops, const memory_desc_wrapper *dst_d) {
         using namespace x64::injector;
         static constexpr bool sum_at_pos_0_only = true;
         static constexpr bool sum_requires_scale_one = false;
+        static const bcast_set_t enabled_bcast_strategy
+                = {broadcasting_strategy_t::scalar,
+                        broadcasting_strategy_t::per_oc,
+                        broadcasting_strategy_t::per_oc_spatial,
+                        broadcasting_strategy_t::no_broadcast};
         return injector::post_ops_ok({isa_supported, {binary, eltwise, sum},
-                post_ops, dst_d, sum_at_pos_0_only, sum_requires_scale_one});
+                post_ops, dst_d, sum_at_pos_0_only, sum_requires_scale_one,
+                enabled_bcast_strategy});
     }
 #endif
     for (size_t i = 0; i < post_ops.entry_.size(); i++) {

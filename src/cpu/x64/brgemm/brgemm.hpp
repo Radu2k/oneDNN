@@ -30,7 +30,7 @@ namespace x64 {
 /// @param brg Output BRGEMM descriptor
 /// @param isa Target ISA of BRGEMM kernel
 ///     If isa is equal to 'isa_any' maximum supported ISA on current
-//      hardware will be used for BRGEMM kernel generation
+///     hardware will be used for BRGEMM kernel generation
 /// @param type Type of batch
 /// @param dt_a Data type of A matrix, can be
 ///     AVX512: f32, u8(row-major layout), s8(column-major layout), bf16
@@ -73,17 +73,20 @@ status_t brgemm_desc_init(brgemm_t *brg, cpu_isa_t isa,
 /// Adds post-operations to BRGEMM descriptor
 ///
 /// @param brg Output BRGEMM descriptor
-/// @param attr Primitive attributes (can be NULL). Specifies element-wise
+/// @param dst_md Specifies memory descriptor output tensor, needed for binary
+/// postops to determine
+/// @param attr Primitive attributes (can be nullptr). Specifies post-ops
 ///     operations
-/// @param dt_d Specifies the data type of D matrix
-///     Can be u8, s8, s32, bf16 or fp32
+/// @param dst_md Specifies the memory descriptor of the destination tensor,
+///     needed for binary postops to determine broadcast type, as well as to
+///     determine dst data type.
 /// @param LDD Specifies the leading dimension of matrix D
 ///        LDD must be at least max(1, N)
 /// @param dt_bias Specifies the data type Bias
 ///     Can be u8, s8, s32, bf16 or fp32
 ///
 status_t brgemm_desc_set_postops(brgemm_t *brg, const primitive_attr_t *attr,
-        impl::data_type_t dt_d, int LDD,
+        const memory_desc_t *dst_md, int LDD,
         impl::data_type_t dt_bias = impl::data_type::undef);
 
 /// Adds BRGEMM attributes to BRGEMM descriptor
@@ -155,14 +158,13 @@ void brgemm_kernel_execute(const brgemm_kernel_t *brg_kernel, int bs,
 ///     and virtual padding for matrices A
 /// @param ptr_C Pointer to matrix C
 /// @param ptr_D Pointer to destination matrix D
-/// @param bias Vector of bias (vector length is N)
-/// @param scales Vector of scales (vector length is N)
+/// @param post_ops_data Specifies tensors and data used in post processing phase
 /// @param scratch Scratchpad needed for AMX version, can be nullptr for
 ///     avx512 version
 ///
 void brgemm_kernel_execute_postops(const brgemm_kernel_t *brg_kernel, int bs,
         const brgemm_batch_element_t *batch, void *ptr_C, void *ptr_D,
-        const void *bias, const float *scales, void *scratch = nullptr);
+        const brgemm_post_ops_data_t &post_ops_data, void *scratch = nullptr);
 
 /// Execute BRGEMM kernel (brgemm_offs and brgemm_strd version)
 ///
@@ -176,15 +178,14 @@ void brgemm_kernel_execute_postops(const brgemm_kernel_t *brg_kernel, int bs,
 ///     and virtual padding for matrices A
 /// @param ptr_C Pointer to destination matrix C
 /// @param ptr_D Pointer to destination matrix D
-/// @param bias Vector of bias (vector length is N)
-/// @param scales Vector of scales (vector length is N)
+/// @param post_ops_data Specifies tensors and data used in post processing phase
 /// @param scratch Scratchpad needed for AMX version, can be nullptr for
 ///     avx512 version
 ///
 void brgemm_kernel_execute_postops(const brgemm_kernel_t *brg_kernel, int bs,
         const void *addr_A, const void *addr_B,
         const brgemm_batch_element_t *batch, void *ptr_C, void *ptr_D,
-        const void *bias, const float *scales, void *scratch = nullptr);
+        const brgemm_post_ops_data_t &post_ops_data, void *scratch = nullptr);
 
 /// AMX utilities: Creates a palette based on BRGEMM descriptor
 ///

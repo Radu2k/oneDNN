@@ -24,6 +24,7 @@
 #include "common/utils.hpp"
 
 #include "cpu/x64/cpu_isa_traits.hpp"
+#include "cpu/x64/injectors/jit_uni_postops_injector.hpp"
 #include "cpu/x64/jit_brgemm_conv_utils.hpp"
 #include "cpu/x64/jit_generator.hpp"
 
@@ -62,23 +63,17 @@ inline status_t init_tag(format_tag_t &tag, memory_desc_t &md,
     return status::success;
 }
 
-bool post_ops_ok(jit_brgemm_conv_conf_t &jcp, const primitive_attr_t &attr) {
-    using namespace primitive_kind;
-    const auto &p = attr.post_ops_;
+bool post_ops_ok(jit_brgemm_conv_conf_t &jcp, const primitive_attr_t &attr,
+        const memory_desc_wrapper &dst_d) {
+    using namespace injector;
 
-    auto is_eltwise = [&](int idx) { return p.entry_[idx].is_eltwise(); };
+    const auto &post_ops = attr.post_ops_;
 
-    switch (p.len()) {
-        case 0: return true;
-        case 1: return is_eltwise(0) || p.contain(sum, 0);
-        case 2:
-            return (p.contain(sum, 0) && is_eltwise(1))
-                    || (one_of(jcp.src_dt, u8, s8) && p.contain(sum, 1)
-                            && is_eltwise(0));
-        default: return false;
-    }
-
-    return false;
+    return injector::post_ops_ok(post_ops_ok_args_t(avx512_common,
+            {sum, eltwise, binary}, post_ops, &dst_d,
+            false /*sum_at_pos_0_only*/, false /*sum_requires_scale_one*/,
+            {broadcasting_strategy_t::per_oc,
+                    broadcasting_strategy_t::scalar}));
 }
 
 status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
@@ -333,7 +328,8 @@ struct brg_blocking_t : public jit_brgemm_conv_conf_t {
     void save_to_jcp(jit_brgemm_conv_conf_t &jcp) const { jcp = *this; }
 
     int estimate_brgemm_ur(int spb) const;
-    int get_brgemm_ur(const primitive_attr_t *attr, bool is_1x1) const;
+    int get_brgemm_ur(const primitive_attr_t *attr, const memory_desc_t &dst_md,
+            bool is_1x1) const;
 
     float io_k(dim_t src, dim_t wei, dim_t dst, float n, float pk,
             bool is_broadcast, bool is_shared) const;
@@ -477,8 +473,8 @@ int brg_blocking_t::estimate_brgemm_ur(int spb) const {
     return status == success ? brg.bd_block : 0;
 }
 
-int brg_blocking_t::get_brgemm_ur(
-        const primitive_attr_t *attr, bool is_1x1) const {
+int brg_blocking_t::get_brgemm_ur(const primitive_attr_t *attr,
+        const memory_desc_t &dst_md, bool is_1x1) const {
     // Detailed simulation of brgemm convolution init
     brgemm_t brg;
     const auto LDA = (exec_type == exec_trans) ? stride_w * ic_block
@@ -540,10 +536,9 @@ int brg_blocking_t::get_brgemm_ur(
                     status = brgemm_desc_set_attr(&brg, brgattr);
                     if (status != success) break;
 
-                    auto dt_d = dst_dt;
                     brg.with_sum = with_sum;
                     status = brgemm_desc_set_postops(
-                            &brg, attr, dt_d, LDD, bia_dt);
+                            &brg, attr, &dst_md, LDD, bia_dt);
                     if (status != success) break;
                 }
                 if (status != success) break;
@@ -894,6 +889,7 @@ void brg_blocking_t::iterate_ker_block(brg_blocking_t &best_brgb, int kd_block_,
             use_buffer = use_buffer || (maybe_use_buffer && iwp != iw);
 
         ur = estimate_brgemm_ur(ow_block);
+        if (ur == 0) continue;
         update_blocks();
 
         eff = est_eff();
@@ -928,7 +924,7 @@ void brg_blocking_t::calc_blocks() {
     const auto max_ow_block_thr = utils::saturate(1, ow,
             (int)div_up(mb * ngroups * nb_oc * os, thr_eff_threshold * nthr));
 
-    ow_block = -1;
+    ow_block = os_block = sp_block = -1;
     brg_blocking_t best_brgb = *this;
     for (const auto &kd_block : kd_blocks) {
         for (const auto &kh_block : kh_blocks) {
@@ -1253,6 +1249,7 @@ void brg_blocking_t::calc_blocks_1x1() {
         start_sp_block = utils::saturate(
                 1, ow, nstl::min(max_ow_block_thr, max_ow_block_L2));
     }
+    os_block = ow_block = sp_block = -1;
     brg_blocking_t best_brgb = *this;
 
     auto prev_spb = 0;
@@ -1260,12 +1257,10 @@ void brg_blocking_t::calc_blocks_1x1() {
         const auto spb = div_up(sp, ns);
         if (spb == prev_spb || spb > start_sp_block) continue;
         prev_spb = spb;
-        if (is_os_block)
-            os_block = spb;
-        else
-            ow_block = spb;
+        os_block = ow_block = sp_block = spb;
         select_ic_block();
         ur = estimate_brgemm_ur(spb);
+        if (ur == 0) continue;
         update_blocks();
 
         use_buffer = (dst_dt != acc_dt || with_sum)
@@ -1374,18 +1369,21 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     jcp.acc_dsz = types::data_type_size(jcp.acc_dt);
     jcp.bia_dsz = jcp.with_bias ? types::data_type_size(jcp.bia_dt) : 0;
 
+    if (!post_ops_ok(jcp, attr, dst_d)) return status::unimplemented;
+
     jcp.simd_w = cpu_isa_traits<avx512_common>::vlen / jcp.src_dsz;
     const auto &p = attr.post_ops_;
     jcp.with_sum = p.find(primitive_kind::sum) != -1;
     const int eltwise_ind = p.find(primitive_kind::eltwise);
     jcp.with_eltwise = eltwise_ind != -1;
-    if (jcp.with_eltwise) jcp.eltwise = p.entry_[eltwise_ind].eltwise;
+
+    const int binary_ind = p.find(primitive_kind::binary);
+    jcp.with_binary = binary_ind != -1;
+
     if (jcp.with_bias) {
         if (bias_d.format_kind() == format_kind::any)
             CHECK(memory_desc_init_by_tag(bias_md, x));
     }
-
-    if (!post_ops_ok(jcp, attr)) return status::unimplemented;
 
     jcp.nthr = nthreads;
 
@@ -1448,7 +1446,7 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
 
             cur_brgb.calc_blocks();
             const bool is_1x1 = false;
-            const auto ur = cur_brgb.get_brgemm_ur(&attr, is_1x1);
+            const auto ur = cur_brgb.get_brgemm_ur(&attr, dst_md, is_1x1);
             if (ur == 0) continue;
             cur_brgb.ur = ur;
             cur_brgb.eff = cur_brgb.est_eff();
@@ -1508,8 +1506,10 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         try_exec_type_res = try_exec_type();
         const auto iw_block = (jcp.ow_block - 1) * jcp.stride_w + 1;
         // transform kernel doesn't work well with big padding
+        // and with ic not divided by ic_block
         // TODO: remove this restriction
-        if (iw_block < jcp.l_pad || iw_block < jcp.r_pad)
+        if (iw_block < jcp.l_pad || iw_block < jcp.r_pad
+                || (jcp.ic % jcp.ic_block != 0))
             try_exec_type_res = false;
     }
     if (try_exec_type_res == false) {
@@ -1631,7 +1631,7 @@ status_t init_1x1_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
 
         cur_brgb.calc_blocks_1x1();
         const bool is_1x1 = true;
-        const auto ur = cur_brgb.get_brgemm_ur(&attr, is_1x1);
+        const auto ur = cur_brgb.get_brgemm_ur(&attr, dst_md, is_1x1);
         if (ur == 0) continue;
         cur_brgb.ur = ur;
         cur_brgb.eff = cur_brgb.est_eff_1x1();

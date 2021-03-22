@@ -28,6 +28,7 @@ namespace gpu {
 namespace ocl {
 
 struct ref_zero_pad_t : public gpu_primitive_t {
+    using gpu_primitive_t::gpu_primitive_t;
     struct pd_t : public gpu_zero_pad_pd_t {
         using gpu_zero_pad_pd_t::gpu_zero_pad_pd_t;
 
@@ -35,7 +36,7 @@ struct ref_zero_pad_t : public gpu_primitive_t {
         status_t init(engine_t *engine) { return status::success; }
     };
 
-    ref_zero_pad_t(const pd_t *apd) : gpu_primitive_t(apd) {};
+    ;
 
     status_t init(engine_t *engine) override {
         compute::kernel_ctx_t kernel_ctx;

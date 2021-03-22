@@ -217,7 +217,6 @@ struct offsets_t {
     int src_off[4][MAX_NDIMS];
     int wei_off[4][MAX_NDIMS];
     int dst_off[4][MAX_NDIMS];
-    int bias_off[4][MAX_NDIMS];
 };
 
 struct rnn_offsets_t {
@@ -348,6 +347,8 @@ struct conv_conf_t {
 struct pool_conf_t {
     int ndims;
     int mb, c;
+    int mb_padded;
+    int c_padded;
     int id, ih, iw, od, oh, ow;
     int stride_d, stride_h, stride_w;
     int kd, kh, kw;
@@ -697,6 +698,8 @@ inline void set_default_pool_conf(pool_conf_t &conf,
     conf.mb = src_dims[0];
 
     conf.c = src_dims[1];
+    conf.mb_padded = src_mdw.padded_dims()[0];
+    conf.c_padded = src_mdw.padded_dims()[1];
     conf.id = (ndims == 5) ? src_dims[2] : 1;
     conf.ih = (ndims == 3) ? 1 : src_dims[ndims - 2];
     conf.iw = src_dims[ndims - 1];

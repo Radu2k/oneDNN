@@ -15,8 +15,9 @@
 *******************************************************************************/
 
 #include "cpu/x64/matmul/brgemm_matmul_utils.hpp"
-#include "cpu/matmul/matmul_utils.hpp"
+#include "cpu/x64/injectors/jit_uni_postops_injector.hpp"
 
+#include "cpu/matmul/matmul_utils.hpp"
 #include "oneapi/dnnl/dnnl_debug.h"
 
 namespace dnnl {
@@ -34,23 +35,17 @@ using namespace data_type;
 using namespace format_tag;
 
 // TODO: add support of post-ops with multiple binary and eltwise execution
-bool post_ops_ok(brgemm_matmul_conf_t &bgmmc, const primitive_attr_t &attr) {
-    using namespace primitive_kind;
-    const auto &p = attr.post_ops_;
+bool post_ops_ok(brgemm_matmul_conf_t &bgmmc, const primitive_attr_t &attr,
+        const memory_desc_wrapper &dst_d) {
+    using namespace injector;
 
-    auto is_eltwise = [&](int idx) { return p.entry_[idx].is_eltwise(); };
+    const auto &post_ops = attr.post_ops_;
 
-    switch (p.len()) {
-        case 0: return true;
-        case 1: return is_eltwise(0) || p.contain(sum, 0);
-        case 2:
-            return (p.contain(sum, 0) && is_eltwise(1))
-                    || (one_of(bgmmc.src_dt, u8, s8) && p.contain(sum, 1)
-                            && is_eltwise(0));
-        default: return false;
-    }
-
-    return false;
+    return injector::post_ops_ok(post_ops_ok_args_t(avx512_common,
+            {sum, eltwise, binary}, post_ops, &dst_d,
+            false /*sum_at_pos_0_only*/, false /*sum_requires_scale_one*/,
+            {broadcasting_strategy_t::per_oc,
+                    broadcasting_strategy_t::scalar}));
 }
 
 status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
@@ -73,6 +68,7 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     bgmmc.with_bias = mmd.bias_desc.format_kind != format_kind::undef;
     bgmmc.bia_dt = bgmmc.with_bias ? mmd.bias_desc.data_type : data_type::undef;
     bgmmc.signed_input = isa == avx512_core_vnni && bgmmc.src_dt == s8;
+    bgmmc.ndims = dst_d.ndims();
 
     const bool is_int8 = one_of(bgmmc.src_dt, u8, s8) && bgmmc.wei_dt == s8
             && one_of(bgmmc.dst_dt, u8, s8, s32, f32);
@@ -85,10 +81,10 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
 
     if (bgmmc.with_scales) {
         const auto &oscales = attr.output_scales_;
-        bgmmc.is_oscale_per_n = oscales.mask_ == 1 << 1;
+        bgmmc.is_oscale_per_n = oscales.mask_ == 1 << (bgmmc.ndims - 1);
 
         // only common and per-oc-channel scales are supported
-        const bool oscales_ok = one_of(oscales.mask_, 0, 1 << 1);
+        const bool oscales_ok = oscales.mask_ == 0 || bgmmc.is_oscale_per_n;
         if (!oscales_ok) return status::unimplemented;
     }
 
@@ -96,18 +92,23 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     bgmmc.with_sum = p.find(primitive_kind::sum) != -1;
     const int eltwise_ind = p.find(primitive_kind::eltwise);
     bgmmc.with_eltwise = eltwise_ind != -1;
-    if (bgmmc.with_eltwise) bgmmc.eltwise = p.entry_[eltwise_ind].eltwise;
-    if (!post_ops_ok(bgmmc, attr)) return status::unimplemented;
+    const int binary_ind = p.find(primitive_kind::binary);
+    bgmmc.with_binary = binary_ind != -1;
+
+    if (!post_ops_ok(bgmmc, attr, dst_d)) return status::unimplemented;
 
     if (IMPLICATION(is_int8,
                 !one_of(isa, avx512_core_vnni, avx512_core_bf16_amx_int8)))
         return status::unimplemented;
     matmul_helper_t helper(src_d, weights_d, dst_d);
-    bgmmc.ndims = dst_d.ndims();
-
-    if (bgmmc.ndims > 3) return status::unimplemented;
 
     bgmmc.batch_ndims = bgmmc.ndims - 2;
+    for (int d = 0; d < (int)bgmmc.batch_ndims; d++) {
+        // Do not support broadcast across any batch dimension
+        if (!everyone_is(src_d.dims()[d], weights_d.dims()[d], dst_d.dims()[d]))
+            return status::unimplemented;
+    }
+
     bgmmc.M = helper.M();
     bgmmc.N = helper.N();
     bgmmc.K = helper.K();
@@ -118,7 +119,9 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     const int k_blk_gran = is_amx ? 64 : 4;
 
     auto set_or_check_tags = [&]() -> status_t {
-        format_tag_t desired_src_tag = pick(bgmmc.ndims - 2, ab, abc);
+        format_tag_t desired_src_tag = pick(bgmmc.batch_ndims, ab, abc, abcd,
+                abcde, abcdef, abcdefg, abcdefgh, abcdefghi, abcdefghij,
+                abcdefghijk, abcdefghijkl);
         format_tag_t desired_dst_tag = desired_src_tag;
 
         if (src_d.format_kind() == format_kind::any) {
@@ -142,7 +145,9 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
             CHECK(memory_desc_init_by_tag(weights_md, desired_wei_tag));
             bgmmc.wei_tag = desired_wei_tag;
         } else {
-            format_tag_t transposed_wei_tag = pick(bgmmc.ndims - 2, ba, acb);
+            format_tag_t transposed_wei_tag = pick(bgmmc.batch_ndims, ba, acb,
+                    abdc, abced, abcdfe, abcdegf, abcdefhg, abcdefgih,
+                    abcdefghji, abcdefghikj, abcdefghijlk);
             bgmmc.wei_tag = memory_desc_matches_one_of_tag(
                     weights_md, desired_wei_tag, transposed_wei_tag);
         }

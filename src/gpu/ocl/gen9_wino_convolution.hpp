@@ -36,6 +36,7 @@ namespace gpu {
 namespace ocl {
 
 struct gen9_wino_convolution_fwd_t : public gpu_primitive_t {
+    using gpu_primitive_t::gpu_primitive_t;
     struct pd_t : public gpu_convolution_fwd_pd_t {
         pd_t(const convolution_desc_t *adesc, const primitive_attr_t *attr,
                 const convolution_fwd_pd_t *hint_fwd_pd)
@@ -57,7 +58,9 @@ struct gen9_wino_convolution_fwd_t : public gpu_primitive_t {
 
             bool ok = utils::one_of(this->desc()->prop_kind, forward_training,
                               forward_inference)
-                    && this->desc()->alg_kind == alg_kind::convolution_winograd
+                    && (this->desc()->alg_kind == alg_kind::convolution_winograd
+                            || this->desc()->alg_kind
+                                    == alg_kind::convolution_auto)
                     && utils::one_of(true,
                             expect_data_types(f32, f32, f32, f32, f32),
                             expect_data_types(f16, f16, f16, f16, f16))
@@ -92,8 +95,6 @@ struct gen9_wino_convolution_fwd_t : public gpu_primitive_t {
 
         conv_conf_t conf;
     };
-
-    gen9_wino_convolution_fwd_t(const pd_t *apd) : gpu_primitive_t(apd) {}
 
     status_t init(engine_t *engine) override {
         bool is_fused = pd()->conf.is_fused;
