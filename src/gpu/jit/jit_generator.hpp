@@ -44,6 +44,9 @@ constexpr gpu_gen_t gpu_xe_hp = ngen::HW::Xe_HP;
 #if DNNL_WITH_XE_HPG
 constexpr gpu_gen_t gpu_xe_hpg = ngen::HW::Xe_HPG;
 #endif
+#if DNNL_WITH_XE_HPC
+constexpr gpu_gen_t gpu_xe_hpc = ngen::HW::Xe_HPC;
+#endif
 
 // nGEN jit generator
 //

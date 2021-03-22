@@ -421,6 +421,9 @@ template struct jit_eltwise_injector_f32<gpu_xe_hp>;
 #if DNNL_WITH_XE_HPG
 template struct jit_eltwise_injector_f32<gpu_xe_hpg>;
 #endif
+#if DNNL_WITH_XE_HPC
+template struct jit_eltwise_injector_f32<gpu_xe_hpc>;
+#endif
 
 } // namespace jit
 } // namespace gpu

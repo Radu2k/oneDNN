@@ -60,7 +60,7 @@ public:
         newArgument("ok", ExternalArgumentType::GlobalPtr);
 
         setDefaultAutoSWSB();
-        requireSIMD(8);
+        requireSIMD((GRF::bytes(hw) == 64) ? 16 : 8);
         requireLocalID(3); // r1-r3
         requireLocalSize(); // r7.0-2:ud
         finalizeInterface();
@@ -128,8 +128,19 @@ public:
         mark(doWrite);
 
         // Write out results.
-        mov<uint32_t>(1, header, uint16_t(0));
-        store(1 | SWSB(sb2, 1), scattered_dword(), ok_surface, header, data);
+#if DNNL_WITH_XE_HPC
+        if (hw >= HW::Xe_HPC) {
+            // stateless
+            mov<uint32_t>(2, header, getArgument("ok").d(0)(1));
+            store.ugm(1 | SWSB(sb2, 1), D32(1), A64, header, data);
+        } else
+#endif
+        {
+            // bti surface
+            mov<uint32_t>(1, header, uint16_t(0));
+            store(1 | SWSB(sb2, 1), scattered_dword(), ok_surface, header,
+                    data);
+        }
 
 #if DNNL_WITH_XE_HP
         if (hw >= HW::Xe_HP) memfence(sb2, header);
@@ -165,6 +176,12 @@ public:
 #if DNNL_WITH_XE_HPG
                 case compute::gpu_arch_t::xe_hpg:
                     kernel = binary_format_kernel_t<HW::Xe_HPG>::make_kernel(
+                            engine);
+                    break;
+#endif
+#if DNNL_WITH_XE_HPC
+                case compute::gpu_arch_t::xe_hpc:
+                    kernel = binary_format_kernel_t<HW::Xe_HPC>::make_kernel(
                             engine);
                     break;
 #endif
