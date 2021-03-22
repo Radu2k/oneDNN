@@ -277,14 +277,14 @@ public:
 
         if (!do_gmem2reg()) return *this;
 
-        if (++kd < conf.kd) return *this;
-        kd = 0;
-
         if (++kw < conf.kw) return *this;
         kw = 0;
 
         if (++kh < conf.kh) return *this;
         kh = 0;
+
+        if (++kd < conf.kd) return *this;
+        kd = 0;
 
         ic += conf.ic_block;
         return *this;
@@ -1694,7 +1694,7 @@ public:
                 mad(1, dst, dst, src0, src1);
             } else if (is_src0_w) {
                 mov(1, tmp.d(), int32_t(src1));
-                mad(1, dst, dst, tmp0, src0);
+                mad(1, dst, dst, tmp.d(), src0);
             } else {
                 emul(1, tmp, src0, src1);
                 add(1, dst, dst, tmp);
