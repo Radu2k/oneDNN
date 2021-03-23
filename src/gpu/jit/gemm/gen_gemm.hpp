@@ -59,6 +59,9 @@ struct gen_gemm_t : public gpu_gemm_t {
 
             auto attr_skip_mask = smask_t::oscale | smask_t::post_ops;
 
+            auto *dev_info = compute_engine->device_info();
+            arch_ = dev_info->gpu_arch();
+
             ok = set_default_formats();
             if (!ok) return status::unimplemented;
 
@@ -114,10 +117,6 @@ struct gen_gemm_t : public gpu_gemm_t {
 
             if (!ok) return status::unimplemented;
 
-            auto *dev_info = compute_engine->device_info();
-
-            arch_ = dev_info->gpu_arch();
-
             ok &= utils::one_of(arch_, arch_t::gen9, arch_t::gen12lp,
                     arch_t::gen12hp, arch_t::gen12p7);
 
@@ -144,6 +143,70 @@ struct gen_gemm_t : public gpu_gemm_t {
         }
 
         bool set_default_formats() {
+            using namespace data_type;
+            using namespace format_tag;
+            using arch_t = compute::gpu_arch_t;
+
+            auto d = desc();
+
+            auto m = d->m();
+            auto n = d->n();
+            auto k = d->k();
+            auto a_t = d->a_type();
+            auto b_t = d->b_type();
+            auto c_t = d->c_type();
+            auto a_t_sz = types::data_type_size(a_t);
+            auto b_t_sz = types::data_type_size(b_t);
+
+            bool is_f16 = utils::everyone_is(f16, a_t, b_t, c_t);
+            bool is_gen12hp_plus = arch_ >= arch_t::gen12hp;
+
+            // Rename memory descriptors following column major format.
+            auto &a_desc = desc_.b_desc;
+            auto &b_desc = desc_.a_desc;
+
+            memory_desc_wrapper a_mdw(&a_desc);
+            memory_desc_wrapper b_mdw(&b_desc);
+
+            bool is_a_trans = a_mdw.matches_one_of_tag(ba, acb);
+            bool is_b_trans = b_mdw.matches_one_of_tag(ba, acb);
+
+            auto lda = is_a_trans ? m : k;
+            auto ldb = is_b_trans ? k : n;
+
+            auto is_aligned = [](dim_t ld, size_t sz, int byte) {
+                return ld * sz % byte == 0;
+            };
+
+            bool a_4B_aligned = is_aligned(lda, a_t_sz, 4);
+            bool b_4B_aligned = is_aligned(ldb, b_t_sz, 4);
+            bool ab_4B_aligned = a_4B_aligned && b_4B_aligned;
+
+            bool a_tn_4B_aligned = is_aligned(k, a_t_sz, 4);
+            bool b_tn_4B_aligned = is_aligned(k, b_t_sz, 4);
+            bool ab_tn_4B_aligned = a_tn_4B_aligned && b_tn_4B_aligned;
+
+            bool use_tn = (m <= 32 || n <= 32) && !ab_4B_aligned
+                    && ab_tn_4B_aligned;
+
+            bool a_any = a_mdw.format_any();
+            bool b_any = b_mdw.format_any();
+            bool batch = d->is_batched();
+
+            auto dotrans = batch ? acb : ba;
+            auto notrans = batch ? abc : ab;
+
+            if (is_f16 && is_gen12hp_plus && use_tn) {
+                if (a_any && b_any) {
+                    CHECK(memory_desc_init_by_tag(a_desc, dotrans));
+                    CHECK(memory_desc_init_by_tag(b_desc, notrans));
+                } else if (a_any && !is_b_trans) {
+                    CHECK(memory_desc_init_by_tag(a_desc, dotrans));
+                } else if (b_any && is_a_trans) {
+                    CHECK(memory_desc_init_by_tag(b_desc, notrans));
+                }
+            }
+
             return gpu_gemm_pd_t::set_default_formats();
         }
 
