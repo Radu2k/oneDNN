@@ -170,7 +170,8 @@ inline HW decodeGfxCoreFamily(GfxCoreFamily family)
         case GfxCoreFamily::Gen10LP:  return HW::Gen10;
         case GfxCoreFamily::Gen11:    return HW::Gen11;
         case GfxCoreFamily::Gen11LP:  return HW::Gen11;
-        case GfxCoreFamily::Gen12:    return HW::Gen12HP;
+        case GfxCoreFamily::Gen12:
+        case GfxCoreFamily::XeHP:     return HW::Gen12HP;
         case GfxCoreFamily::Gen12LP:  return HW::Gen12LP;
 #if NGEN_GEN12P7
         case GfxCoreFamily::Gen12p7:  return HW::Gen12p7;
