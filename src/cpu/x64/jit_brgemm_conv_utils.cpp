@@ -461,6 +461,7 @@ void brg_blocking_t::select_ic_block() {
 
 int brg_blocking_t::estimate_brgemm_ur(int spb) const {
     // Simple simulation of brgemm_desc init
+    if (sp_block <= 0) return 0;
     brgemm_t brg;
     const auto LDA = (exec_type == exec_trans) ? stride_w * ic_block
                                                : stride_w * ic_without_padding;
@@ -480,6 +481,7 @@ int brg_blocking_t::estimate_brgemm_ur(int spb) const {
 int brg_blocking_t::get_brgemm_ur(
         const primitive_attr_t *attr, bool is_1x1) const {
     // Detailed simulation of brgemm convolution init
+    if (sp_block <= 0) return 0;
     brgemm_t brg;
     const auto LDA = (exec_type == exec_trans) ? stride_w * ic_block
                                                : stride_w * ic_without_padding;
@@ -557,6 +559,7 @@ int brg_blocking_t::get_brgemm_ur(
 }
 
 void brg_blocking_t::update_blocks() {
+    if (sp_block <= 0) return;
     nb_od = div_up(od, od_blk_size);
     nb_oh = div_up(oh, oh_blk_size);
     nb_ic = div_up(ic, ic_block);
