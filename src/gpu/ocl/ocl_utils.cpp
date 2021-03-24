@@ -84,8 +84,11 @@ status_t get_ocl_device_index(size_t *index, cl_device_id device) {
     CHECK(get_ocl_devices(&ocl_devices, CL_DEVICE_TYPE_GPU));
 
     auto it = std::find(ocl_devices.begin(), ocl_devices.end(), device);
-    if (it == ocl_devices.end()) return status::invalid_arguments;
-    *index = it - ocl_devices.begin();
+    if (it == ocl_devices.end()) {
+        *index = SIZE_MAX; // TODO: quick fix. Find parent device index instead.
+    } else {
+        *index = it - ocl_devices.begin();
+    }
     return status::success;
 }
 
