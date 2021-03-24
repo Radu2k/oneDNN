@@ -104,8 +104,11 @@ inline status_t get_sycl_device_index(
 
     auto it = std::find_if(devices.begin(), devices.end(),
             [&](const cl::sycl::device &d) { return are_equal(d, dev); });
-    if (it == devices.end()) return status::invalid_arguments;
-    *index = it - devices.begin();
+    if (it == devices.end()) {
+        *index = SIZE_MAX;
+    } else {
+        *index = it - devices.begin();
+    }
     return status::success;
 }
 
