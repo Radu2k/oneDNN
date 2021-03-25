@@ -77,18 +77,12 @@ bool dpas_t::matches(const multiply_desc_t &desc) const {
 }
 
 bool dpas_t::matches_types(const type_t &a, const type_t &b, const type_t &c) {
-    bool a_is_x8 = utils::one_of(a, type_t::s8(), type_t::u8());
-    bool b_is_x8 = utils::one_of(a, type_t::s8(), type_t::u8());
-    bool a_is_f16 = (a == type_t::f16());
-    bool b_is_f16 = (b == type_t::f16());
-    bool a_is_bf16 = (a == type_t::bf16());
-    bool b_is_bf16 = (b == type_t::bf16());
-    bool c_is_s32 = (c == type_t::s32());
-    bool c_is_f32 = (c == type_t::f32());
+    if (a.is_x8() && b.is_x8() && c.is_s32()) return true;
+    if (a.is_f16() && b.is_f16() && c.is_f32()) return true;
+    if (a.is_bf16() && b.is_bf16() && c.is_f32()) return true;
 
-    if (a_is_x8 && b_is_x8 && c_is_s32) return true;
-    if (a_is_f16 && b_is_f16 && c_is_f32) return true;
-    if (a_is_bf16 && b_is_bf16 && c_is_f32) return true;
+    return false;
+}
 
     return false;
 }

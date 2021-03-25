@@ -254,10 +254,32 @@ public:
                 kind(), type_kind_t::bf16, type_kind_t::f16, type_kind_t::f32);
     }
 
+    bool is_bf16() const { return kind() == type_kind_t::bf16; }
+    bool is_f16() const { return kind() == type_kind_t::f16; }
+    bool is_f32() const { return kind() == type_kind_t::f32; }
+
     bool is_int() const {
         return utils::one_of(kind(), type_kind_t::u8, type_kind_t::s8,
                 type_kind_t::u16, type_kind_t::s16, type_kind_t::u32,
                 type_kind_t::s32, type_kind_t::u64, type_kind_t::s64);
+    }
+
+    bool is_s8() const { return kind() == type_kind_t::s8; }
+    bool is_u8() const { return kind() == type_kind_t::u8; }
+    bool is_x8() const {
+        return utils::one_of(kind(), type_kind_t::s8, type_kind_t::u8);
+    }
+
+    bool is_s16() const { return kind() == type_kind_t::s16; }
+    bool is_u16() const { return kind() == type_kind_t::u16; }
+    bool is_x16() const {
+        return utils::one_of(kind(), type_kind_t::s16, type_kind_t::u16);
+    }
+
+    bool is_s32() const { return kind() == type_kind_t::s32; }
+    bool is_u32() const { return kind() == type_kind_t::u32; }
+    bool is_x32() const {
+        return utils::one_of(kind(), type_kind_t::s32, type_kind_t::u32);
     }
 
     bool is_signed(int elems = -1) const {
