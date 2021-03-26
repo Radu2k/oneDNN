@@ -83,13 +83,25 @@ status_t get_ocl_device_index(size_t *index, cl_device_id device) {
     std::vector<cl_device_id> ocl_devices;
     CHECK(get_ocl_devices(&ocl_devices, CL_DEVICE_TYPE_GPU));
 
-    auto it = std::find(ocl_devices.begin(), ocl_devices.end(), device);
-    if (it == ocl_devices.end()) {
-        *index = SIZE_MAX; // TODO: quick fix. Find parent device index instead.
-    } else {
-        *index = it - ocl_devices.begin();
+    // Search the top level device unconditionally
+    auto parent_device = device;
+    auto top_level_device = device;
+    while (parent_device) {
+        top_level_device = parent_device;
+        OCL_CHECK(clGetDeviceInfo(top_level_device, CL_DEVICE_PARENT_DEVICE,
+                sizeof(cl_device_id), &parent_device, nullptr));
     }
-    return status::success;
+
+    // Find the top level device in the list
+    auto it = std::find(
+            ocl_devices.begin(), ocl_devices.end(), top_level_device);
+    if (it != ocl_devices.end()) {
+        *index = it - ocl_devices.begin();
+        return status::success;
+    } else {
+        *index = SIZE_MAX;
+        return status::invalid_arguments;
+    }
 }
 
 status_t get_ocl_kernel_arg_type(compute::scalar_type_t *type,

@@ -170,10 +170,15 @@ TEST(sycl_engine_test, HostDevice) {
 TEST_P(sycl_engine_test, SubDevice) {
     auto param = GetParam();
 
-    SKIP_IF(param.adev_kind != dev_kind::gpu,
-            "Non GPU doesn't support sub-devices");
+    SKIP_IF(param.expected_status != dnnl_success,
+            "Don't test for failed scenarios");
+    SKIP_IF(!gpu_dev.get(), "Non GPU doesn't support sub-devices");
 
     auto &dev = *gpu_dev.get();
+    auto max_sub_devices
+            = dev.get_info<info::device::partition_max_sub_devices>();
+    SKIP_IF(max_sub_devices < 2, "This GPU doesn't support sub-devices");
+
     auto sub_dev = dev.create_sub_devices<
             info::partition_property::partition_by_affinity_domain>(
             info::partition_affinity_domain::next_partitionable);
