@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ status_t ocl_gpu_device_info_t::init_arch(engine_t *engine) {
     }
 
     // XXX: temporary WA for different Gen12HP devices
+#if DNNL_WITH_GEN12HP
     if (gpu_arch_ == compute::gpu_arch_t::gen12hp) {
         // query extensions
         size_t param_size = 0;
@@ -62,12 +63,13 @@ status_t ocl_gpu_device_info_t::init_arch(engine_t *engine) {
         err = clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, param_size,
                 &extension_string[0], &param_size);
         OCL_CHECK(err);
-
-        if (extension_string.find(ext2cl_str(compute::device_ext_t::khr_fp64))
-                == std::string::npos)
-            gpu_arch_ = compute::gpu_arch_t::gen12p7;
     }
-
+#endif
+#if DNNL_WITH_GEN12P7
+    if (extension_string.find(ext2cl_str(compute::device_ext_t::khr_fp64))
+            == std::string::npos)
+        gpu_arch_ = compute::gpu_arch_t::gen12p7;
+#endif
     return status::success;
 }
 
@@ -167,13 +169,16 @@ std::string ocl_gpu_device_info_t::get_cl_ext_options() const {
 
         // These extensions are not handled properly by the OpenCL runtime.
         // Pass macros for them manually.
-        if (utils::one_of(ext, device_ext_t::intel_dot_accumulate,
+        if (utils::one_of(ext,
+#if DNNL_WITH_GEN12HP
                     device_ext_t::intel_global_float_atomics,
                     device_ext_t::intel_subgroup_matrix_multiply_accumulate,
                     device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate,
                     device_ext_t::intel_global_float_atomics,
-                    device_ext_t::future_bf16_cvt))
+                    device_ext_t::future_bf16_cvt,
+#endif
+                    device_ext_t::intel_dot_accumulate))
             opts += std::string("-D") + ext2cl_str(ext) + " ";
     }
     if (!opts.empty()) { opts[opts.size() - 1] = '\0'; }

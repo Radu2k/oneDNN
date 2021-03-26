@@ -255,9 +255,11 @@ enum conv_version_t {
     ver_mb_block,
     ver_ow_block,
 
-    // Gen12HP-specific versions.
+// Gen12HP-specific versions.
+#if DNNL_WITH_GEN12HP
     ver_v1,
     ver_v2
+#endif
 };
 
 struct conv_conf_t {

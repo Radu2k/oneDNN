@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#if DNNL_WITH_GEN12HP
 #ifndef GPU_JIT_GEN12HP_CONVOLUTION_HPP
 #define GPU_JIT_GEN12HP_CONVOLUTION_HPP
 
@@ -295,4 +296,5 @@ private:
 } // namespace impl
 } // namespace dnnl
 
+#endif
 #endif

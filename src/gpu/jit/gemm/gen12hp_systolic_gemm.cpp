@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#if DNNL_WITH_GEN12HP
 #include "gpu/jit/gemm/gen12hp_systolic_gemm.hpp"
 
 #include "common/c_types_map.hpp"
@@ -709,5 +710,5 @@ status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
-
+#endif
 // vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

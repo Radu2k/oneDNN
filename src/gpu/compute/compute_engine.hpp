@@ -106,12 +106,16 @@ public:
     bool is_gen12lp() const {
         return device_info_->gpu_arch() == gpu_arch_t::gen12lp;
     }
+#if DNNL_WITH_GEN12HP
     bool is_gen12hp() const {
         return device_info_->gpu_arch() == gpu_arch_t::gen12hp;
     }
+#endif
+#if DNNL_WITH_GEN12P7
     bool is_gen12p7() const {
         return device_info_->gpu_arch() == gpu_arch_t::gen12p7;
     }
+#endif
     bool mayiuse_ngen_kernels() {
         return device_info_->mayiuse_ngen_kernels(this);
     }

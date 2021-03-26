@@ -74,7 +74,9 @@ ngen::AddressBase get_address_base(char c) {
 bool gen_gemm_kernel_t::matching_hw(ngen::HW hw, ngen::HW hw_ref) {
     using ngen::HW;
     if (hw == hw_ref) return true;
+#if DNNL_WITH_GEN12P7
     if (hw == HW::Gen12p7 && hw_ref == HW::Gen12HP) return true;
+#endif
     return false;
 }
 
@@ -359,18 +361,22 @@ std::vector<unsigned char> gen_gemm_kernel_t::get_binary(
             program_binary = generator.getBinary(ctx, dev);
             break;
         }
+#if DNNL_WITH_GEN12HP
         case HW::Gen12HP: {
             gemm_kernel_generator_t<HW::Gen12HP> generator;
             generator.gemm(problem_, strategy_, interface_);
             program_binary = generator.getBinary(ctx, dev);
             break;
         }
+#endif
+#if DNNL_WITH_GEN12P7
         case HW::Gen12p7: {
             gemm_kernel_generator_t<HW::Gen12p7> generator;
             generator.gemm(problem_, strategy_, interface_);
             program_binary = generator.getBinary(ctx, dev);
             break;
         }
+#endif
         default: assert(!"Unsupported architecture"); break;
     }
 
@@ -572,6 +578,7 @@ const kernel_table_t *gen12lp_bf16_nocopy_tables[2][2] = {
     {nullptr, nullptr}
 };
 
+#if DNNL_WITH_GEN12HP
 const kernel_table_t gen12hp_f16_nocopy_nn_table[] = {
     {{16,  4}, {0,   0}, {1,  0}, {}},
     {{32, 16}, {64,  0}, {64, 0}, 'B'},
@@ -661,6 +668,7 @@ const kernel_table_t *gen12hp_bf16_nocopy_tables[2][2] = {
     {gen12hp_bf16_nocopy_nn_table, gen12hp_bf16_nocopy_nt_table},
     {gen12hp_bf16_nocopy_tn_table, gen12hp_bf16_nocopy_tt_table}
 };
+#endif
 
 // clang-format on
 
@@ -674,6 +682,7 @@ void gen_gemm_nocopy_kernel_t::choose_unrolls(compute::gpu_arch_t arch,
     unroll_m = unroll_n = 1;
 
     using tables_t = decltype(gen9_f32_nocopy_tables);
+#if DNNL_WITH_GEN12HP
     const tables_t *all_tables[4][3]
             = {{&gen9_f32_nocopy_tables, &gen12lp_f32_nocopy_tables,
                        &gen12hp_f32_nocopy_tables},
@@ -683,10 +692,21 @@ void gen_gemm_nocopy_kernel_t::choose_unrolls(compute::gpu_arch_t arch,
                             &gen12hp_bf16_nocopy_tables},
                     {&gen9_x8_nocopy_tables, &gen12lp_x8_nocopy_tables,
                             &gen12hp_x8_nocopy_tables}};
+#else
+    const tables_t *all_tables[4][2]
+            = {{&gen9_f32_nocopy_tables, &gen12lp_f32_nocopy_tables},
+                    {&gen9_f16_nocopy_tables, &gen12lp_f16_nocopy_tables},
+                    {&gen9_bf16_nocopy_tables, &gen12lp_bf16_nocopy_tables},
+                    {&gen9_x8_nocopy_tables, &gen12lp_x8_nocopy_tables}};
+#endif
 
     // clang-format off
     int arch_idx = (arch == compute::gpu_arch_t::gen12lp) ? 1
+#if DNNL_WITH_GEN12HP
                  : (arch >= compute::gpu_arch_t::gen12hp) ? 2 : 0;
+#else
+                 : 0;
+#endif
     int type_idx = (c_type == data_type::f16) ? 1
                 : (c_type == data_type::bf16) ? 2
                 :  (c_type == data_type::s32) ? 3 : 0;

@@ -117,17 +117,27 @@ struct gen_gemm_t : public gpu_gemm_t {
 
             if (!ok) return status::unimplemented;
 
-            ok &= utils::one_of(arch_, arch_t::gen9, arch_t::gen12lp,
-                    arch_t::gen12hp, arch_t::gen12p7);
 
+            ok &= utils::one_of(arch_, arch_t::gen9, arch_t::gen12lp
+
+#if DNNL_WITH_GEN12HP
+                    ,
+                    arch_t::gen12hp
+#endif
+#if DNNL_WITH_GEN12HP
+                    ,
+                    arch_t::gen12p7
+#endif
+            );
             attr_info_ = attr_info_t::create(attr());
 
+#if DNNL_WITH_GEN12HP
             bool is_gen12hp_plus = arch_ >= arch_t::gen12hp;
             // int8 not enabled on Gen12HP+ for now. bf16 only enabled on Gen12HP+.
             ok &= IMPLICATION(is_gen12hp_plus,
                     utils::one_of(d->c_type(), f16, bf16, f32));
             ok &= IMPLICATION(d->c_type() == bf16, is_gen12hp_plus);
-
+#endif
             if (!ok) return status::unimplemented;
 
             eu_count_ = dev_info->eu_count();

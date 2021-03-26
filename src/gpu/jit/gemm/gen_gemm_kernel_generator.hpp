@@ -1320,9 +1320,10 @@ protected:
             const ngen::Subregister &count, const MatrixAddressing &atype,
             const MatrixAddressingStrategy &astrategy,
             const CommonStrategy &strategy, CommonState &state);
-
+#if DNNL_WITH_GEN12P7
     static ngen::DataSpec12p7 getDataSpec12p7(
             AccessType access, const RegisterBlock &block);
+#endif
     ngen::InstructionModifier getRegisterBlockMask(
             const RegisterBlock &block, CommonState &state);
     void loadMatrixBlock(const ngen::GRF &dest, const RegisterBlock &layout,

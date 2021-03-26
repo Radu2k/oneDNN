@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#if DNNL_WITH_GEN12HP
 #ifndef GPU_JIT_GEN12HP_CONV_DATA_KERNEL_HPP
 #define GPU_JIT_GEN12HP_CONV_DATA_KERNEL_HPP
 
@@ -37,4 +38,5 @@ status_t gen12hp_conv_data_create_kernel(const conv_conf_t &conf,
 } // namespace impl
 } // namespace dnnl
 
+#endif
 #endif

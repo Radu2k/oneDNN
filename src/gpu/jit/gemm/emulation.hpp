@@ -35,10 +35,19 @@ struct EmulationStrategy {
     EmulationStrategy() = default;
     EmulationStrategy(ngen::HW hw_) : EmulationStrategy() {
         if (hw_ == ngen::HW::Gen11 || hw_ == ngen::HW::Gen12LP
+#if DNNL_WITH_GEN12P7
                 || hw_ == ngen::HW::Gen12p7)
+#else
+        )
+#endif
             emulate64 = true;
         if (hw_ == ngen::HW::Gen11
-                || (hw_ >= ngen::HW::Gen12LP && hw_ <= ngen::HW::Gen12p7))
+                || (hw_ >= ngen::HW::Gen12LP
+#if DNNL_WITH_GEN12P7
+                        && hw_ <= ngen::HW::Gen12p7))
+#else
+                        ))
+#endif
             emulateDWxDW = true;
     }
 };
@@ -544,7 +553,12 @@ struct EmulationImplementation {
             auto dummy = g.null.retype(mulHiType)[dst.getOffset()];
 
             g.mul(mod, acc, src0, lowWord(src1));
-            if (g.hardware >= HW::Gen11 && g.hardware <= HW::Gen12p7) {
+            if (g.hardware >= HW::Gen11
+#if DNNL_WITH_GEN12P7
+                    && g.hardware <= HW::Gen12p7) {
+#else
+            ) {
+#endif
                 g.macl(mod, dst, src0, src1);
             } else {
                 g.mach(mod, dummy, src0, src1);

@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#if DNNL_WITH_GEN12HP
 #include "gpu/jit/gen12hp_conv_data_kernel.hpp"
 
 #include <algorithm>
@@ -3356,3 +3357,4 @@ status_t gen12hp_conv_data_create_kernel(const conv_conf_t &conf,
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
+#endif

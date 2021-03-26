@@ -20,7 +20,6 @@
 #include "gpu/jit/conv/gen_convolution.hpp"
 #include "gpu/jit/gemm/gen12hp_systolic_gemm.hpp"
 #include "gpu/jit/gemm/gen_gemm.hpp"
-#include "gpu/jit/gen12hp_convolution.hpp"
 #include "gpu/ocl/convolution_inner_product.hpp"
 #include "gpu/ocl/gemm/gemm_with_post_ops.hpp"
 #include "gpu/ocl/gemm/gen12lp_gemm.hpp"
@@ -30,10 +29,14 @@
 #include "gpu/ocl/gemm_inner_product.hpp"
 #include "gpu/ocl/gemm_matmul.hpp"
 #include "gpu/ocl/gemm_post_ops_inner_product.hpp"
+#if DNNL_WITH_GEN12HP
+#include "gpu/jit/gemm/gen12hp_systolic_gemm.hpp"
+#include "gpu/jit/gen12hp_convolution.hpp"
 #include "gpu/ocl/gen12hp_1st_bwd_convolution.hpp"
 #include "gpu/ocl/gen12hp_1x1_convolution.hpp"
 #include "gpu/ocl/gen12hp_bf16_convolution.hpp"
 #include "gpu/ocl/gen12hp_convolution.hpp"
+#endif
 #include "gpu/ocl/gen12lp_x8s8x_1x1_convolution.hpp"
 #include "gpu/ocl/gen12lp_x8s8x_convolution.hpp"
 #include "gpu/ocl/gen9_batch_normalization.hpp"
@@ -88,6 +91,7 @@ const impl_list_item_t gpu_impl_list[] = {
         // Convolution
         INSTANCE(jit::gen_convolution_fwd_t),
         INSTANCE(jit::gen_convolution_bwd_data_t),
+#if DNNL_WITH_GEN12HP
         INSTANCE(jit::gen12hp_convolution_fwd_t),
         INSTANCE(jit::gen12hp_convolution_bwd_data_t),
         INSTANCE(jit::gen12hp_convolution_bwd_weights_t),
@@ -96,6 +100,7 @@ const impl_list_item_t gpu_impl_list[] = {
         INSTANCE(ocl::gen12hp_bf16_convolution_bwd_weights_t),
         INSTANCE(ocl::gen12hp_convolution_fwd_t),
         INSTANCE(ocl::gen12hp_convolution_bwd_data_t),
+#endif
         INSTANCE(ocl::gen12lp_x8s8x_1x1_convolution_fwd_t),
         INSTANCE(ocl::gen12lp_x8s8x_convolution_fwd_t),
         INSTANCE(ocl::gen12lp_x8s8x_convolution_bwd_data_t),
@@ -142,8 +147,10 @@ const impl_list_item_t gpu_impl_list[] = {
         INSTANCE(ocl::ref_softmax_fwd_t),
         INSTANCE(ocl::ref_softmax_bwd_t),
 
-        // GEMM (internal)
+// GEMM (internal)
+#if DNNL_WITH_GEN12HP
         INSTANCE(jit::gen12hp_systolic_gemm_t),
+#endif
         INSTANCE(ocl::gemm_with_post_ops_t),
         INSTANCE(jit::gen_gemm_t),
         INSTANCE(ocl::gen12lp_gemm_t),

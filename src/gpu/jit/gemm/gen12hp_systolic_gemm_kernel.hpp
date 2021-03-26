@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#if DNNL_WITH_GEN12HP
 #ifndef GPU_JIT_GEN12HP_SYSTOLIC_GEMM_KERNEL_HPP
 #define GPU_JIT_GEN12HP_SYSTOLIC_GEMM_KERNEL_HPP
 
@@ -352,3 +353,4 @@ public:
 } // namespace dnnl
 
 #endif // GPU_JIT_GEN12HP_SYSTOLIC_GEMM_KERNEL_HPP
+#endif // DNNL_WITH_GEN12HP

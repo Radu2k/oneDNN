@@ -13,7 +13,7 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 *******************************************************************************/
-
+#if DNNL_WITH_GEN12HP
 #include "gpu/ocl/gen12hp_1st_bwd_convolution.hpp"
 
 #include "common/c_types_map.hpp"
@@ -380,5 +380,5 @@ status_t gen12hp_1st_convolution_bwd_weights_t::execute_backward_weights(
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
-
+#endif
 // vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

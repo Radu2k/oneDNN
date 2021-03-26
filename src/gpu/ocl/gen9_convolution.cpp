@@ -236,7 +236,11 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
                     = (conf.od * conf.oh * utils::div_up(conf.ow, conf.ow_block)
                             * (conf.omb / conf.mb_block));
             conf.gws_d[2] = (conf.oc / conf.ocb) * (conf.mb / conf.omb);
+#if DNNL_WITH_GEN12HP
             conf.lws_d[0] = is_gen12hp ? 32 : 16;
+#else
+            conf.lws_d[0] = 16;
+#endif
             conf.lws_d[1] = 1;
             conf.lws_d[2] = 1;
             break;
@@ -273,6 +277,8 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
                 src_tag = utils::pick(conf.ndims - 3, nwc, nhwc, ndhwc);
             else
                 src_tag = utils::pick(conf.ndims - 3, ncw, nchw, ncdhw);
+
+#if DNNL_WITH_GEN12HP
             if (is_gen12hp && is_fp16) {
                 dst_tag = (conf.mb == 8 || conf.mb == 16 || conf.mb % 32 == 0)
                         ? utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c,
@@ -280,11 +286,14 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
                         : utils::pick(
                                 conf.ndims - 3, nCw16c, nChw16c, nCdhw16c);
             } else {
+#endif
                 dst_tag = conf.mb % 16 == 0 ? utils::pick(conf.ndims - 3,
                                   NCw16n16c, NChw16n16c, NCdhw16n16c)
                                             : utils::pick(conf.ndims - 3,
                                                     nCw16c, nChw16c, nCdhw16c);
+#if DNNL_WITH_GEN12HP
             }
+#endif
             wei_tag = conf.with_groups
                     ? utils::pick(conf.ndims - 3, gOwi16o, gOhwi16o, gOdhwi16o)
                     : utils::pick(conf.ndims - 3, Owi16o, Ohwi16o, Odhwi16o);
@@ -533,8 +542,10 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
         return status::unimplemented;
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+#if DNNL_WITH_GEN12HP
     const bool is_gen12hp
             = compute_engine->is_gen12hp() || compute_engine->is_gen12p7();
+#endif
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();
 
@@ -551,7 +562,11 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
             if (conf.is_depthwise) {
                 conf.icb = conf.ngroups;
                 conf.lws_d[0] = 1;
+#if DNNL_WITH_GEN12HP
                 conf.lws_d[1] = is_gen12hp ? 32 : 16;
+#else
+                conf.lws_d[1] = 16;
+#endif
                 conf.lws_d[2] = 1;
                 conf.gws_d[0] = conf.ih * conf.iw * conf.id;
                 conf.gws_d[1] = conf.ic * conf.ngroups;
@@ -562,7 +577,11 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
                     if (conf.ic % conf.icb == 0) break;
                     conf.icb /= 2;
                 }
+#if DNNL_WITH_GEN12HP
                 conf.lws_d[0] = is_gen12hp ? 32 : 16;
+#else
+                conf.lws_d[0] = 16;
+#endif
                 conf.lws_d[1] = 1;
                 conf.lws_d[2] = 1;
                 conf.gws_d[0] = conf.icb;
@@ -856,13 +875,20 @@ status_t gen9_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
     bwd_w_compute_block_sizes(conf, engine);
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+
+#if DNNL_WITH_GEN12HP
     const bool is_gen12hp
             = compute_engine->is_gen12hp() || compute_engine->is_gen12p7();
+#endif
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();
 
     conf.sub_group_size = 16;
+#if DNNL_WITH_GEN12HP
     conf.lws_d[0] = is_gen12hp ? 32 : 16;
+#else
+    conf.lws_d[0] = 16;
+#endif
     conf.lws_d[1] = 1;
     conf.lws_d[2] = 1;
 

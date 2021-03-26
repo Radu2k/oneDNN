@@ -155,8 +155,10 @@ static inline bool hasNativeAtomicAdd(
         HW hw, Type T, const MatrixAddressing &atype) {
     if (T.isInteger())
         return true;
+#if DNNL_WITH_GEN12HP
     else if (T == Type::f32)
         return (atype.base.getModel() == ModelA64) && (hw >= HW::Gen12HP);
+#endif
     else
         return false;
 }
@@ -408,8 +410,10 @@ template <HW hw>
 void gemm_kernel_generator_t<hw>::syncall() {
     if (hw == HW::Gen12LP)
         sync.allwr(SWSB(1));
+#if DNNL_WITH_GEN12HP
     else if (hw >= HW::Gen12HP)
         sync.allwr(SWSB<AllPipes>(1));
+#endif
 }
 
 // Multiply by a constant, optimizing for power-of-2 constants.
@@ -441,12 +445,16 @@ template <typename DT, typename S0, typename S2>
 void gemm_kernel_generator_t<hw>::eadd3(const InstructionModifier &mod,
         const RegData &dst, const S0 &src0, const RegData &src1,
         const S2 &src2) {
+#if DNNL_WITH_GEN12HP
     if ((hw >= HW::Gen12HP) && !(dst.getOffset() & 1))
         add3<DT>(mod, dst, src0, src1, src2);
     else {
+#endif
         add<DT>(mod, dst, src1, src0);
         add<DT>(mod, dst, dst, src2);
+#if DNNL_WITH_GEN12HP
     }
+#endif
 }
 
 template <HW hw>
@@ -1067,8 +1075,12 @@ Bundle gemm_kernel_generator_t<hw>::getHint(
             }
             break;
         case HW::Gen12LP:
+#if DNNL_WITH_GEN12HP
         case HW::Gen12HP:
+#endif
+#if DNNL_WITH_GEN12P7
         case HW::Gen12p7:
+#endif
             switch (strategy.registerScheme) {
                 case GEMMStrategy::CSeparate:
                     switch (type) {
@@ -1135,8 +1147,12 @@ Bundle gemm_kernel_generator_t<hw>::getHint(
         case HW::Gen10:
         case HW::Gen11:
         case HW::Gen12LP:
+#if DNNL_WITH_GEN12HP
         case HW::Gen12HP:
+#endif
+#if DNNL_WITH_GEN12P7
         case HW::Gen12p7:
+#endif
             switch (type) {
                 case HintType::S: return Bundle();
                 case HintType::D: return Bundle();
@@ -1213,7 +1229,11 @@ static bool needsPseudoblock(HW hw, Type T, int r, int c,
     bool owAligned = (atype.alignment & 0xF) == 0;
     bool pseudo = !dwAligned || ((r * c * T) & 0x3) || (writable && !owAligned)
             || (masked && !owAligned
+#if DNNL_WITH_GEN12HP
                     && (hw >= HW::Gen12HP || atype.base.getModel() != ModelA64))
+#else
+                    && (atype.base.getModel() != ModelA64))
+#endif
             || astrategy.atomic
             || (isColMajor(atype.layout) ? c : r) % atype.crosspack
             || ((atype.base.getModel() == ModelSLM)
@@ -2253,13 +2273,17 @@ bool gemm_kernel_generator_t<hw>::add1DBlockToRegLayout(Type T,
         bool oword = !a64;
         bool aoword = (atype.base.getModel()
                 == ModelSC); // SC only does aligned oword
+#if DNNL_WITH_GEN12HP
         if (hw >= HW::Gen12HP) oword |= ((atype.alignment & 0x1F) != 0);
+#endif
 
         extra = aoword;
         ebytes = oword ? 16 : 32;
         maxBBytes = oword ? 128 : 256;
+#if DNNL_WITH_GEN12HP
         if (atype.base.getModel() == ModelSLM && hw >= HW::Gen12HP)
             maxBBytes = 256;
+#endif
         addrShift = (!a64 && oword && !aoword) ? 4 : 0;
         maxSIMD = 16;
     }
@@ -2583,7 +2607,11 @@ template <ngen::HW hw>
 void gemm_kernel_generator_t<hw>::setupTeardownLoadStoreDesc(
         bool setup, const CommonStrategy &strategy, CommonState &state) {
     if (strategy.emulate.emulateDWxDW) {
+#if DNNL_WITH_GEN12P7
         auto nconstants = (hw >= HW::Gen12p7) ? 3 : 2;
+#else
+        auto nconstants = 2;
+#endif
         if (setup)
             for (int s = 0; s < nconstants; s++) {
                 state.lsDescConstant[s] = state.ra.alloc_sub<uint32_t>();
@@ -2610,6 +2638,7 @@ void gemm_kernel_generator_t<hw>::loadLoadStoreDescriptors(bool load,
     Subregister t1 = state.ra.alloc_sub<uint32_t>();
     Subregister t2 = state.ra.alloc_sub<uint32_t>();
 
+#if DNNL_WITH_GEN12P7
     if (astrategy.newDP) switch (astrategy.accessType) {
             case AccessType::ChannelScattered:
             case AccessType::Scattered: {
@@ -2645,6 +2674,7 @@ void gemm_kernel_generator_t<hw>::loadLoadStoreDescriptors(bool load,
             default: hw_unsupported();
         }
     else
+#endif
         switch (astrategy.accessType) {
             case AccessType::ChannelScattered: {
                 encodeLoadDescriptors(hw, descLoad, exdescLoad, block.simdSize,
@@ -2711,6 +2741,7 @@ static inline int contiguityCheck(
     return offsetReg;
 }
 
+#if DNNL_WITH_GEN12P7
 static DPDataSize12p7 getDPDataSize12p7(int ebytes, bool pad32) {
     switch (ebytes) {
         case 8: return DPDataSize12p7::D64;
@@ -2743,6 +2774,7 @@ DataSpec12p7 gemm_kernel_generator_t<hw>::getDataSpec12p7(
         default: stub();
     }
 }
+#endif
 
 // Output code for loading a matrix chunk into registers.
 template <ngen::HW hw>
@@ -2778,6 +2810,7 @@ void gemm_kernel_generator_t<hw>::loadMatrixBlock(const GRF &dest,
     // Get mask to apply, if any.
     maskMod |= getRegisterBlockMask(block, state);
 
+#if DNNL_WITH_GEN12P7
     if (astrategy.newDP)
         switch (implAccessType(astrategy.accessType, atype, block)) {
             case AccessType::Block:
@@ -2802,7 +2835,9 @@ void gemm_kernel_generator_t<hw>::loadMatrixBlock(const GRF &dest,
             }
             default: stub();
         }
-    else if (block.descAssigned)
+    else
+#endif
+            if (block.descAssigned)
         send(block.simdSize | maskMod, static_cast<SharedFunction>(block.sfid),
                 dest, addr, null, block.sfid, a0[0]);
     else
@@ -2886,6 +2921,8 @@ void gemm_kernel_generator_t<hw>::storeMatrixBlock(const GRF &src,
     if (block.descAssigned)
         send(block.simdSize | maskMod, static_cast<SharedFunction>(block.sfid),
                 null, addr, src, a0.ud(1), a0.ud(0));
+
+#if DNNL_WITH_GEN12P7
     else if (astrategy.newDP)
         switch (implAccessType(astrategy.accessType, atype, block)) {
             case AccessType::Block:
@@ -2900,6 +2937,7 @@ void gemm_kernel_generator_t<hw>::storeMatrixBlock(const GRF &src,
             default: stub();
         }
     else
+#endif
         switch (implAccessType(astrategy.accessType, atype, block)) {
             case AccessType::ChannelScattered: {
                 static const ChannelMask cmasks[4] = {ChannelMask::r,
@@ -2981,10 +3019,12 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
     auto nreg = block.nregs();
     auto nregReal = (nreg * simd) / block.simdSize;
 
+#if DNNL_WITH_GEN12P7
     auto spec12p7 = D32;
     if (astrategy.newDP)
         spec12p7 = getDataSpec12p7(
                 implAccessType(astrategy.accessType, atype, block), block);
+#endif
 
     switch (implAccessType(astrategy.accessType, atype, block)) {
         case AccessType::Scattered:
@@ -2994,10 +3034,12 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
                 for (int eoff = 0, hoff = 0; eoff < block.simdSize;
                         eoff += simd, hoff += hsize, curSrc += nregReal) {
                     auto mod = simd | maskMod | ExecutionOffset(eoff);
+#if DNNL_WITH_GEN12P7
                     if (astrategy.newDP)
                         atomic(T.isFP() ? AtomicOp::fadd : AtomicOp::add, mod,
                                 spec12p7, atype.base, addr[hoff], curSrc);
                     else
+#endif
                         switch (T.real()) {
                             case Type::f32:
                                 atomic(AtomicOp::fadd, mod, scattered_dword(),
@@ -3030,10 +3072,13 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
                 auto rNew = rOldNew[nregReal];
                 auto flagToDo = getPhysicalFlag(state.vflagEAtomicAdd, state);
 
+#if DNNL_WITH_GEN12P7
                 if (astrategy.newDP)
                     load(block.simdSize | maskMod, rOld, spec12p7, atype.base,
                             addr[0]);
-                else if (atype.base.getModel() == ModelA64) {
+                else
+#endif
+                        if (atype.base.getModel() == ModelA64) {
                     if (block.ebytes == 2)
                         load(block.simdSize | maskMod, rOld, scattered_byte(2),
                                 atype.base, addr);
@@ -3085,10 +3130,12 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
                     auto atomicMod = simd | flagToDo | eoMod;
                     auto cmpMod = simd | flagToDo | ne | flagToDo | eoMod;
 
+#if DNNL_WITH_GEN12P7
                     if (astrategy.newDP)
                         atomic(AtomicOp::cmpwr, atomicMod, rOld, spec12p7,
                                 atype.base, addr[hoff], rOld);
                     else
+#endif
                         switch (block.ebytes) {
                             case 2:
                                 if (hw < HW::Gen12LP) hw_unsupported();
@@ -3464,6 +3511,7 @@ void gemm_kernel_generator_t<hw>::setupAddrShifted(const GRFRange &addr,
             // Add offsets to base.
             if (ptr != 0) {
                 if (a64) {
+#if DNNL_WITH_GEN12HP
                     if (hw >= HW::Gen12HP) {
                         auto temp = state.ra.alloc_range(simd16 ? 4 : 2);
                         if (simd16) mov<uint32_t>(8, temp[2][0](2), addr[1]);
@@ -3475,12 +3523,16 @@ void gemm_kernel_generator_t<hw>::setupAddrShifted(const GRFRange &addr,
                                 strategy, state);
                         state.ra.safeRelease(temp);
                     } else {
+#endif
                         if (simd16)
                             eadd<uint64_t>(8, addr[2], addr[1].ud(), ptr,
                                     strategy, state);
                         eadd<uint64_t>(
                                 8, addr[0], addr[0].ud(), ptr, strategy, state);
+
+#if DNNL_WITH_GEN12HP
                     }
+#endif
                 } else
                     add<uint32_t>(simdSize, addr, addr, ptr);
             }
@@ -4012,9 +4064,11 @@ void gemm_kernel_generator_t<hw>::outerProduct(int h, int ha, int hb,
 
             colMajor ? dp4a(mod, C(1), C(1), Ar(1), Br(0))
                      : dp4a(mod, C(1), C(1), Br(1), Ar(0));
+#if DNNL_WITH_GEN12HP
         } else if (C.isARF() && hw < HW::Gen12HP) {
             colMajor ? mac(mod, C(1), A(1), bcastSrc)
                      : mac(mod, C(1), bcastSrc, B(1));
+#endif
         } else {
             // On Gen12, always put broadcast in src2 for better bank conflict avoidance.
             colMajor
@@ -5458,6 +5512,7 @@ void gemm_kernel_generator_t<hw>::doAlternateCRemainder(COperation op,
     bool header4 = !qword && !surface;
     int neq = elementsPerGRF(hw, DataType::uq);
 
+#if DNNL_WITH_GEN12HP
     if (hw >= HW::Gen12HP && !surface) {
         if (header4)
             FOR_EACH_C mov<uint32_t>(2 * neq, header[q][2][0](2), header[q][1]);
@@ -5465,7 +5520,7 @@ void gemm_kernel_generator_t<hw>::doAlternateCRemainder(COperation op,
         FOR_EACH_C mov<uint32_t>(neq, header[q][0][0](2), header[q][0][0](1));
         hs = 2;
     }
-
+#endif
     and_(1, temp, ~temp, uint16_t(rsimd - 1));
     FOR_EACH_C surface
             ? add(rsimd, header[q][0].d(), header[q][0].d(), state.effC[q])
@@ -5999,7 +6054,12 @@ void gemm_kernel_generator_t<hw>::gemmAllocRegs(
             break;
         case GEMMStrategy::VNC: {
             if (hw < HW::Gen12LP) stub();
+
+#if DNNL_WITH_GEN12HP
             bool hp = (hw >= HW::Gen12HP);
+#else
+            bool hp = false;
+#endif
             // Gen12+. Assign non-broadcast input matrix (V), then broadcast input matrix (N), then C.
             auto unrollVBytes = strategy.unroll[globalCM ? LoopM : LoopN]
                     * (globalCM ? Ta.size() : Tb.size());
@@ -6082,8 +6142,10 @@ void gemm_kernel_generator_t<hw>::gemmAllocRegs(
         case GEMMStrategy::NSeparate: {
             // Gen12HP+. Broadcast matrix has dedicated bundle(s) (both banks)
             //  not shared with other matrices.
+            //
+#if DNNL_WITH_GEN12HP
             if (hw < HW::Gen12HP) stub();
-
+#endif
             int chunk = 8;
             int bundles = Bundle::bundle_count(hw);
             int bregs = Bundle(0, 0).group_size(hw) * 2;
@@ -6648,6 +6710,8 @@ void gemm_kernel_generator_t<hw>::gemmVariableOffsetC(bool column,
     const GRFMultirange *offsetsPtr = &offsets;
 
     GRFMultirange repackOffsets;
+
+#if DNNL_WITH_GEN12HP
     if (stride > 1 && hw >= HW::Gen12HP && Tc.isFP()) {
         // Repack data to unit stride as float pipe can't swizzle.
         vector<RegisterBlock> repackLayout;
@@ -6660,7 +6724,7 @@ void gemm_kernel_generator_t<hw>::gemmVariableOffsetC(bool column,
         stride = crosspack = 1;
         offsetsPtr = &repackOffsets;
     }
-
+#endif
     for (int y = 0; y < unrollY; y++) {
         for (int x = 0; x < unrollX;) {
             auto i = globalCM ? x : y;
@@ -8972,12 +9036,14 @@ bool gemm_kernel_generator_t<hw>::gemmUpdateC(
     if (problem.cOffset == COffset::Pre)
         if (!gemmApplyCOffsetDispatch(problem, strategy, state)) return false;
 
-    // Claim a flag register for complex swizzles for ATS+.
+            // Claim a flag register for complex swizzles for ATS+.
+            //
+#if DNNL_WITH_GEN12HP
     if (hw >= HW::Gen12HP) {
         state.flagSwizzle = state.raVFlag.alloc();
         state.raVFlag.unlock(state.flagSwizzle);
     }
-
+#endif
     // Prepare postop injector if configured.
     GRFRange postOpScratch;
     if (problem.hasPostOp()) {
@@ -11645,10 +11711,12 @@ bool gemm_kernel_generator_t<hw>::copyBodyInternal(
     state.ra.safeRelease(state.w0);
 
     // Get flag register for complex swizzles for ATS+.
+#if DNNL_WITH_GEN12HP
     if (hw >= HW::Gen12HP && Ts.isComplex()) {
         state.flagSwizzle = state.raVFlag.alloc();
         state.raVFlag.unlock(state.flagSwizzle);
     }
+#endif
 
     MatrixAddressingStrategy S_strategyReflected = strategy.S;
     vector<RegisterBlock> S_layoutReflected;
@@ -12319,7 +12387,12 @@ bool gemm_kernel_generator_t<hw>::copyRegisters(Type Ts, Type Td,
         bool conjugate, const CommonStrategy &strategy, CommonState &state) {
     int nphases = 1;
 
+#if DNNL_WITH_GEN12HP
     bool preswizzle = (hw >= HW::Gen12HP);
+#else
+    bool preswizzle = false;
+#endif
+
     GRFRange copyTemp;
 
     auto allocTemp = [&]() {
@@ -12588,8 +12661,12 @@ constexpr typename gemm_kernel_generator_t<hw>::status_stream::Endl
 
 template class gemm_kernel_generator_t<HW::Gen9>;
 template class gemm_kernel_generator_t<HW::Gen12LP>;
+#if DNNL_WITH_GEN12HP
 template class gemm_kernel_generator_t<HW::Gen12HP>;
+#endif
+#if DNNL_WITH_GEN12P7
 template class gemm_kernel_generator_t<HW::Gen12p7>;
+#endif
 
 } // namespace jit
 } // namespace gpu

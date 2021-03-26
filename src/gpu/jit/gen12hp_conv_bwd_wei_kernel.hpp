@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#if DNNL_WITH_GEN12HP
 #ifndef GEN12HP_CONV_BWD_WEI_KERNEL_HPP
 #define GEN12HP_CONV_BWD_WEI_KERNEL_HPP
 
@@ -36,3 +37,4 @@ status_t gen12hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
 } // namespace dnnl
 
 #endif // GEN12HP_CONV_BWD_WEI_KERNEL_HPP
+#endif // DNNL_WITH_GEN12HP

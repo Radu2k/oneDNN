@@ -35,8 +35,12 @@ enum class gpu_arch_t {
     unknown,
     gen9,
     gen12lp,
+#if DNNL_WITH_GEN12HP
     gen12hp,
+#endif
+#if DNNL_WITH_GEN12P7
     gen12p7,
+#endif
 };
 
 enum class device_ext_t : uint64_t {
@@ -60,13 +64,17 @@ enum class device_ext_t : uint64_t {
     // Intel specific Gen12LP+
     intel_subgroup_local_block_io = 1ull << 21,
     intel_dot_accumulate          = 1ull << 22,
+#if DNNL_WITH_GEN12HP
     // Intel specific Gen12HP+
     intel_global_float_atomics                      = 1ull << 23,
     intel_subgroup_matrix_multiply_accumulate       = 1ull << 24,
     intel_subgroup_split_matrix_multiply_accumulate = 1ull << 25,
     intel_variable_eu_thread_count                  = 1ull << 26,
+#endif
+#if DNNL_WITH_GEN12P7
     // Future extensions
     future_bf16_cvt                                 = 1ull << 31,
+#endif
     last
     // clang-format on
 };
@@ -94,12 +102,15 @@ static inline const char *ext2cl_str(device_ext_t ext) {
         CASE(intel_subgroup_local_block_io)
         CASE(intel_dot_accumulate)
 
+#if DNNL_WITH_GEN12HP
         CASE(intel_global_float_atomics)
         CASE(intel_subgroup_matrix_multiply_accumulate)
         CASE(intel_subgroup_split_matrix_multiply_accumulate)
         CASE(intel_variable_eu_thread_count)
-
+#endif
+#if DNNL_WITH_GEN12P7
         CASE(future_bf16_cvt)
+#endif
         default: return nullptr;
     }
 #undef CASE

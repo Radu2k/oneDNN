@@ -85,13 +85,17 @@ struct gen12lp_x8s8x_convolution_fwd_t : public gpu_primitive_t {
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
 
+#if DNNL_WITH_GEN12HP
             is_gen12hp = compute_engine->is_gen12hp()
                     || compute_engine->is_gen12p7();
+#endif
 
             return ok ? status::success : status::unimplemented;
         }
 
+#if DNNL_WITH_GEN12HP
         bool is_gen12hp = false;
+#endif
         status_t init_conf();
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
         void init_scratchpad();

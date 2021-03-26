@@ -80,6 +80,7 @@ status_t ref_zero_pad_t::execute_ref(const exec_ctx_t &ctx) const {
 
         // Balance work unit size with parallelism
         cl_ulong step_block = 1;
+#if DNNL_WITH_GEN12HP
         if (!engine->is_gen12hp() && !engine->is_gen12p7()) {
             while (step_nelems / nelems_block * step_block < 4 * 1024
                     && step_count % (step_block * 2) == 0
@@ -87,7 +88,7 @@ status_t ref_zero_pad_t::execute_ref(const exec_ctx_t &ctx) const {
                 step_block *= 2;
             }
         }
-
+#endif
         dim_t tail_start = dims[i] % blk_size[i];
         dims_t pos;
         for (int j = 0; j < ndims; j++) {

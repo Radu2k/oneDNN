@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -29,8 +29,12 @@ compute::gpu_arch_t detect_gpu_arch(cl_device_id device, cl_context context) {
     switch (hw) {
         case HW::Gen9: return compute::gpu_arch_t::gen9;
         case HW::Gen12LP: return compute::gpu_arch_t::gen12lp; break;
+#if DNNL_WITH_GEN12HP
         case HW::Gen12HP: return compute::gpu_arch_t::gen12hp; break;
+#endif
+#if DNNL_WITH_GEN12P7
         case HW::Gen12p7: return compute::gpu_arch_t::gen12p7; break;
+#endif
         default: return compute::gpu_arch_t::unknown; break;
     }
 }
@@ -40,9 +44,10 @@ compute::gpu_arch_t detect_gpu_arch_by_device_name(const std::string &name) {
         return compute::gpu_arch_t::gen9;
     if (name.find("Gen12LP") != std::string::npos)
         return compute::gpu_arch_t::gen12lp;
+#if DNNL_WITH_GEN12HP
     if (name.find("Gen12HP") != std::string::npos)
         return compute::gpu_arch_t::gen12hp;
-
+#endif
     return compute::gpu_arch_t::unknown;
 }
 

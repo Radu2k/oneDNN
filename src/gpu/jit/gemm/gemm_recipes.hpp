@@ -105,6 +105,7 @@ const gemm_recipe_t gemm_recipes[] = {
     {ngen::HW::Gen12LP, "OOI", "NTN", {}, 16, 32, "ab8 ab4 ab l4 int k16 cab1 wg 4x4", {}, {}},
     {ngen::HW::Gen12LP, "OOI", "TNN", {}, 16, 16, "as8 as8 ab l4 vnc k64 cab1 wg 4x4", {}, {}},
     {ngen::HW::Gen12LP, "OOI", "TTN", {}, 16, 32, "ab4 ab4 ab l4 int k16 cab1 wg 4x4", {}, {}},
+#if DNNL_WITH_GEN12HP
     {ngen::HW::Gen12HP, "HHH", "NNN", {}, 32, 32, "ab4/1x2 as4/1x2 ab l4 cb1 wg 8x2 cs nmk", {}, {}},
     {ngen::HW::Gen12HP, "HHH", "NTN", {}, 32, 32, "ab4/1x2 ab2/1x2 ab l4 cs", {}, {}},
     {ngen::HW::Gen12HP, "HHH", "TNN", {}, 16, 16, "as8 as32 ab l4 cab1 wg 4x4 cs", {}, {}},
@@ -128,6 +129,7 @@ const gemm_recipe_t gemm_recipes[] = {
     {ngen::HW::Gen12HP, "BBS", "TTN", {}, 8,  32, "sb16 sb16 as cab1 wg 4x4 cs pab", {}, {}},        // DLRM
     {ngen::HW::Gen12HP, "HHH", "NNN", {}, 32, 16, "ab16/8 as16 ab l4 cab1 wg 4x4 cs di", {}, 'A'},   // BERT
     {ngen::HW::Gen12HP, "HHH", "NNN", {}, 32, 16, "ab8 ab16 ab l4 ca1 wg 2x8 cs di", {}, 'B'},       // BERT
+#endif
 };
 // clang-format on
 

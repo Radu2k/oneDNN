@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#if DNNL_WITH_GEN12HP
 #include <assert.h>
 
 #include "gpu/jit/gemm/gen12hp_systolic_gemm_kernel.hpp"
@@ -1706,3 +1707,4 @@ template class gen12hp_systolic_gemm_kernel_t<HW::Gen12p7>;
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
+#endif

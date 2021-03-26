@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#if DNNL_WITH_GEN12HP
 #include "gpu/ocl/gen12hp_convolution.hpp"
 
 #include "common/c_types_map.hpp"
@@ -449,3 +450,4 @@ status_t gen12hp_convolution_bwd_data_t::execute_backward_data(
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
+#endif

@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#if DNNL_WITH_GEN12HP
 #ifndef GPU_OCL_GEN12HP_1ST_BWD_CONVOLUTION_HPP
 #define GPU_OCL_GEN12HP_1ST_BWD_CONVOLUTION_HPP
 
@@ -150,5 +151,5 @@ private:
 } // namespace dnnl
 
 #endif
-
+#endif
 // vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

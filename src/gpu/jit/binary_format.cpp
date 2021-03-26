@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -131,8 +131,9 @@ public:
         mov<uint32_t>(1, header, uint16_t(0));
         store(1 | SWSB(sb2, 1), scattered_dword(), ok_surface, header, data);
 
+#if DNNL_WITH_GEN12HP
         if (hw >= HW::Gen12HP) memfence(sb2, header);
-
+#endif
         mov<uint32_t>(8, r127, r0);
         threadend(SWSB(sb2, 1), r127);
     }
@@ -155,14 +156,18 @@ public:
                     kernel = binary_format_kernel_t<HW::Gen12LP>::make_kernel(
                             engine);
                     break;
+#if DNNL_WITH_GEN12HP
                 case compute::gpu_arch_t::gen12hp:
                     kernel = binary_format_kernel_t<HW::Gen12HP>::make_kernel(
                             engine);
                     break;
+#endif
+#if DNNL_WITH_GEN12P7
                 case compute::gpu_arch_t::gen12p7:
                     kernel = binary_format_kernel_t<HW::Gen12p7>::make_kernel(
                             engine);
                     break;
+#endif
                 default: kernel = nullptr; break;
             }
         }
