@@ -255,7 +255,7 @@ using BasicBlockList = std::vector<BasicBlock>;
 inline PipeMask allPipes(HW hw)
 {
     PipeMask mask = PipeMaskA | PipeMaskO;
-    if (hw >= HW::Gen12HP) mask |= PipeMaskF | PipeMaskI | PipeMaskL;
+    if (hw >= HW::Xe_HP) mask |= PipeMaskF | PipeMaskI | PipeMaskL;
 #if NGEN_GEN12P8
     if (hw >= HW::Gen12p8) mask |= PipeMaskM;
 #endif
@@ -300,7 +300,7 @@ inline GeneralizedPipe getPipe(HW hw, const Instruction &insn, bool checkOOO = t
     // For SWSB purposes, Gen12LP has a single in-order pipe.
     // Otherwise, in-order pipe determined by destination type.
     // Exception: if there are any long operands, it's a long pipe instruction.
-    if (hw >= HW::Gen12HP) {
+    if (hw >= HW::Xe_HP) {
         auto dt = insn.dstTypecode();
 #if NGEN_GEN12P8 && !NGEN_PVC_A
         unsigned lmask = (hw == HW::Gen12p8) ? 0b1011 : 0b0011;
@@ -336,7 +336,7 @@ inline PipeMask getPipeMask(HW hw, const Instruction &insn)
 
 PipeMask GeneralizedPipe::syncPipes(HW hw) const
 {
-    if ((hw >= HW::Gen12HP) && (v & PipeMaskA))
+    if ((hw >= HW::Xe_HP) && (v & PipeMaskA))
         return allPipes(hw) & ~PipeMaskA & ~PipeMaskO;
     return (v == PipeMaskNone) ? allPipes(hw) : inOrderPipe();
 }
@@ -615,7 +615,7 @@ inline bool impliesWithoutRegion(const Dependency<true> &dep1, const Dependency<
     if (dep2.pipe.inOrder()) {
         // Pipeline dependency. Consumer dependencies are only compared
         //  within BBs, so it's enough to check the A counter.
-        // Note distance check not always valid for A@ consumers >= Gen12HP,
+        // Note distance check not always valid for A@ consumers >= Xe_HP,
         //  but is never used in these cases.
         if (dep2.counters[PipeBitA] < dep1.counters[PipeBitA])
             return false;
@@ -1007,7 +1007,7 @@ inline BasicBlockList getBasicBlocks(HW hw, const Program &program)
 template <typename Instruction>
 inline bool canDefaultPipe(HW hw, const Instruction &insn)
 {
-    if (hw >= HW::Gen12HP && insn.opcode() == Opcode::mov_gen12 && (insn.dstTypecode() ^ insn.src0Typecode()) & 0x8)
+    if (hw >= HW::Xe_HP && insn.opcode() == Opcode::mov_gen12 && (insn.dstTypecode() ^ insn.src0Typecode()) & 0x8)
         return false;
     return true;
 }

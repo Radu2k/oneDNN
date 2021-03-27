@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ void __builtin_IB_simd_block_write_1_global_l(__global ulong *, ulong);
 
 __attribute__((intel_reqd_sub_group_size(8)))
 __attribute__((reqd_work_group_size(8, 16, 1))) __kernel void
-gen12hp_wei_f32_zero_init(__global float *wei_f32, __global float *bia_f32) {
+xe_hp_wei_f32_zero_init(__global float *wei_f32, __global float *bia_f32) {
     const int gid[2] = {get_group_id(0), get_group_id(1)};
     const int sg_id = get_sub_group_id();
     const int sg_loc_id = get_sub_group_local_id();

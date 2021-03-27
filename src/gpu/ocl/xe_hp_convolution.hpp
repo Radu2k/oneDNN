@@ -14,9 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#ifndef GPU_OCL_GEN12HP_CONVOLUTION_HPP
-#define GPU_OCL_GEN12HP_CONVOLUTION_HPP
+#if DNNL_WITH_XE_HP
+#ifndef GPU_OCL_XE_HP_CONVOLUTION_HPP
+#define GPU_OCL_XE_HP_CONVOLUTION_HPP
 
 #include "common/c_types_map.hpp"
 #include "gpu/gpu_convolution_pd.hpp"
@@ -31,13 +31,13 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
+struct xe_hp_convolution_fwd_t : public gpu_primitive_t {
     struct pd_t : public gpu_convolution_fwd_pd_t {
         pd_t(const convolution_desc_t *adesc, const primitive_attr_t *attr,
                 const convolution_fwd_pd_t *hint_fwd_pd)
             : gpu_convolution_fwd_pd_t(adesc, attr, hint_fwd_pd) {}
 
-        DECLARE_COMMON_PD_T("ocl:gen12hp", gen12hp_convolution_fwd_t);
+        DECLARE_COMMON_PD_T("ocl:xe_hp", xe_hp_convolution_fwd_t);
 
         status_t init(engine_t *engine) {
             using namespace prop_kind;
@@ -45,7 +45,7 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
             assert(engine->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
-            if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_gen12p7())
                 return status::unimplemented;
 
             const auto attr_skip_mask
@@ -111,9 +111,9 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
     status_t init(engine_t *engine) override {
         const char *kernel_name = nullptr;
         if (pd()->conf.mb_block == 32)
-            kernel_name = "gen12hp_conv_fwd";
+            kernel_name = "xe_hp_conv_fwd";
         else
-            kernel_name = "gen12hp_conv_fwd_ow_block";
+            kernel_name = "xe_hp_conv_fwd_ow_block";
         compute::kernel_ctx_t kernel_ctx;
         auto status = pd()->init_kernel_ctx(kernel_ctx);
         if (status != status::success) return status;
@@ -124,7 +124,7 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
         return status::success;
     }
 
-    gen12hp_convolution_fwd_t(const pd_t *apd) : gpu_primitive_t(apd) {}
+    xe_hp_convolution_fwd_t(const pd_t *apd) : gpu_primitive_t(apd) {}
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
         return execute_forward(ctx);
@@ -161,13 +161,13 @@ private:
     enum { SCALES_ = 0 };
 };
 
-struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
+struct xe_hp_convolution_bwd_data_t : public gpu_primitive_t {
     struct pd_t : public gpu_convolution_bwd_data_pd_t {
         pd_t(const convolution_desc_t *adesc, const primitive_attr_t *attr,
                 const convolution_fwd_pd_t *hint_fwd_pd)
             : gpu_convolution_bwd_data_pd_t(adesc, attr, hint_fwd_pd) {}
 
-        DECLARE_COMMON_PD_T("ocl:gen12hp", gen12hp_convolution_bwd_data_t);
+        DECLARE_COMMON_PD_T("ocl:xe_hp", xe_hp_convolution_bwd_data_t);
 
         status_t init(engine_t *engine) {
             using namespace prop_kind;
@@ -175,7 +175,7 @@ struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
             assert(engine->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
-            if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_gen12p7())
                 return status::unimplemented;
 
             const auto attr_skip_mask = primitive_attr_t::skip_mask_t::oscale
@@ -215,7 +215,7 @@ struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
     };
 
     status_t init(engine_t *engine) override {
-        const char *kernel_name = "gen12hp_conv_bwd_data";
+        const char *kernel_name = "xe_hp_conv_bwd_data";
         compute::kernel_ctx_t kernel_ctx;
         auto status = pd()->init_kernel_ctx(kernel_ctx);
         if (status != status::success) return status;
@@ -226,7 +226,7 @@ struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
         return status::success;
     }
 
-    gen12hp_convolution_bwd_data_t(const pd_t *apd) : gpu_primitive_t(apd) {}
+    xe_hp_convolution_bwd_data_t(const pd_t *apd) : gpu_primitive_t(apd) {}
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {
         return execute_backward_data(ctx);

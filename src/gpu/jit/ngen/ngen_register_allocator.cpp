@@ -37,7 +37,7 @@ int Bundle::first_reg(HW hw) const
     case HW::Gen12p8:
 #endif
         return (bundle0 << 1) | bank0;
-    case HW::Gen12HP:
+    case HW::Xe_HP:
 #if NGEN_GEN12P7
     case HW::Gen12p7:
 #endif
@@ -53,7 +53,7 @@ int Bundle::group_size(HW hw) const
         return 128;
     else switch (hw) {
     case HW::Gen11:
-    case HW::Gen12HP:
+    case HW::Xe_HP:
 #if NGEN_GEN12P7
     case HW::Gen12p7:
 #endif
@@ -75,7 +75,7 @@ int Bundle::stride(HW hw) const
         return 4;
     case HW::Gen12LP:
         return 16;
-    case HW::Gen12HP:
+    case HW::Xe_HP:
 #if NGEN_GEN12P7
     case HW::Gen12p7:
 #endif
@@ -109,7 +109,7 @@ int64_t Bundle::reg_mask(HW hw, int offset) const
         if (bundle_id != any)                           base_mask  = 0x0003000300030003;
         if (bank_id != any)                             base_mask &= 0x5555555555555555;
         return base_mask << (bank0 + (bundle0 << 1));
-    case HW::Gen12HP:
+    case HW::Xe_HP:
 #if NGEN_GEN12P7
     case HW::Gen12p7:
 #endif
@@ -139,7 +139,7 @@ Bundle Bundle::locate(HW hw, RegData reg)
             return Bundle((base >> 1) & 1, base >> 6);
         case HW::Gen12LP:
             return Bundle(base & 1, (base >> 1) & 7);
-        case HW::Gen12HP:
+        case HW::Xe_HP:
 #if NGEN_GEN12P7
         case HW::Gen12p7:
 #endif
@@ -168,7 +168,7 @@ void RegisterAllocator::init()
     free_flag = (1u << FlagRegister::subcount(hw)) - 1;
     reg_count = max_regs;
 
-    if (hw < HW::Gen12HP)
+    if (hw < HW::Xe_HP)
         setRegisterCount(128);
 }
 

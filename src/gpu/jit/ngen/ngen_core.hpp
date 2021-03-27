@@ -210,7 +210,7 @@ enum class HW {
     Gen10,
     Gen11,
     Gen12LP,
-    Gen12HP,
+    Xe_HP,
 #if NGEN_GEN12P7
     Gen12p7,
 #endif
@@ -978,7 +978,7 @@ public:
 
     AccumulatorRegister &operator=(const Invalid &i) { this->invalidate(); return *this; }
 
-    static constexpr int count(HW hw) { return (hw >= HW::Gen12HP) ? 4 : 2; }
+    static constexpr int count(HW hw) { return (hw >= HW::Xe_HP) ? 4 : 2; }
 };
 
 class SpecialAccumulatorRegister : public AccumulatorRegister

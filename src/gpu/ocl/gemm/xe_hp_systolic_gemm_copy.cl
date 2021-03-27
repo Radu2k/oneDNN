@@ -141,7 +141,7 @@ __attribute__((overloadable)) inline int sum(int4 v) {
 
 // A sum clear kernel: initialize row sums to zero.
 __attribute__((intel_reqd_sub_group_size(8))) kernel void
-gen12hp_systolic_gemm_copy(long m, long k, global ELEMENT *a_packed,
+xe_hp_systolic_gemm_copy(long m, long k, global ELEMENT *a_packed,
         int offseta_packed, int lda_packed) {
 
     uint m0 = (sub_group_broadcast(get_global_id(0), 0) / 8) * UNROLL_M;
@@ -183,7 +183,7 @@ gen12hp_systolic_gemm_copy(long m, long k, global ELEMENT *a_packed,
 // Nontranspose A copy.
 // Each thread packs a 32x16 (f16/bf16) or 32x32 (u8/s8) block of A.
 __attribute__((intel_reqd_sub_group_size(8))) kernel void
-gen12hp_systolic_gemm_copy(long m, long k, global ELEMENT *a, long offseta,
+xe_hp_systolic_gemm_copy(long m, long k, global ELEMENT *a, long offseta,
         long lda, global ELEMENT *a_packed, int offseta_packed,
         int lda_packed) {
 
@@ -238,7 +238,7 @@ gen12hp_systolic_gemm_copy(long m, long k, global ELEMENT *a, long offseta,
 
 // Transpose A copy.
 __attribute__((intel_reqd_sub_group_size(8))) kernel void
-gen12hp_systolic_gemm_copy(long m, long k, global ELEMENT *a, long offseta,
+xe_hp_systolic_gemm_copy(long m, long k, global ELEMENT *a, long offseta,
         long lda, global ELEMENT *a_packed, int offseta_packed,
         int lda_packed) {
 
@@ -349,7 +349,7 @@ gen12hp_systolic_gemm_copy(long m, long k, global ELEMENT *a, long offseta,
 
 // B sum clear kernel: initialize column sums to zero.
 __attribute__((intel_reqd_sub_group_size(8))) kernel void
-gen12hp_systolic_gemm_copy(long k, long n, global ELEMENT *b_packed,
+xe_hp_systolic_gemm_copy(long k, long n, global ELEMENT *b_packed,
         int offsetb_packed, int ldb_packed) {
 
     uint n0 = (sub_group_broadcast(get_global_id(0), 0) / 8) * UNROLL_N;
@@ -366,7 +366,7 @@ gen12hp_systolic_gemm_copy(long k, long n, global ELEMENT *b_packed,
 // Each thread packs a 16x48 (f16/bf16) or 32x48 (u8/s8) block of B.
 // Nontranspose B copy.
 __attribute__((intel_reqd_sub_group_size(8))) kernel void
-gen12hp_systolic_gemm_copy(long k, long n, global ELEMENT *b, long offsetb,
+xe_hp_systolic_gemm_copy(long k, long n, global ELEMENT *b, long offsetb,
         long ldb, global ELEMENT *b_packed, int offsetb_packed,
         int ldb_packed) {
 
@@ -444,7 +444,7 @@ gen12hp_systolic_gemm_copy(long k, long n, global ELEMENT *b, long offsetb,
 
 // Transpose B copy.
 __attribute__((intel_reqd_sub_group_size(16))) kernel void
-gen12hp_systolic_gemm_copy(long k, long n, global ELEMENT *b, long offsetb,
+xe_hp_systolic_gemm_copy(long k, long n, global ELEMENT *b, long offsetb,
         long ldb, global ELEMENT *b_packed, int offsetb_packed,
         int ldb_packed) {
 

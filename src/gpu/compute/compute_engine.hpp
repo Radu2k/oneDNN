@@ -106,9 +106,9 @@ public:
     bool is_gen12lp() const {
         return device_info_->gpu_arch() == gpu_arch_t::gen12lp;
     }
-#if DNNL_WITH_GEN12HP
-    bool is_gen12hp() const {
-        return device_info_->gpu_arch() == gpu_arch_t::gen12hp;
+#if DNNL_WITH_XE_HP
+    bool is_xe_hp() const {
+        return device_info_->gpu_arch() == gpu_arch_t::xe_hp;
     }
 #endif
 #if DNNL_WITH_GEN12P7

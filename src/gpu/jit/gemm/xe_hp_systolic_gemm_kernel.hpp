@@ -14,9 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#ifndef GPU_JIT_GEN12HP_SYSTOLIC_GEMM_KERNEL_HPP
-#define GPU_JIT_GEN12HP_SYSTOLIC_GEMM_KERNEL_HPP
+#if DNNL_WITH_XE_HP
+#ifndef GPU_JIT_XE_HP_SYSTOLIC_GEMM_KERNEL_HPP
+#define GPU_JIT_XE_HP_SYSTOLIC_GEMM_KERNEL_HPP
 
 #include <cstdint>
 
@@ -37,7 +37,7 @@ namespace gpu {
 namespace jit {
 
 template <gpu_gen_t hw>
-class gen12hp_systolic_gemm_kernel_t : public jit_generator<hw> {
+class xe_hp_systolic_gemm_kernel_t : public jit_generator<hw> {
 public:
     NGEN_FORWARD_OPENCL(hw);
     enum class bias_t { none, fixed, row, column, runtime };
@@ -344,7 +344,7 @@ private:
     void epilogue();
 
 public:
-    gen12hp_systolic_gemm_kernel_t(config_t cfg_);
+    xe_hp_systolic_gemm_kernel_t(config_t cfg_);
 };
 
 } // namespace jit
@@ -352,5 +352,5 @@ public:
 } // namespace impl
 } // namespace dnnl
 
-#endif // GPU_JIT_GEN12HP_SYSTOLIC_GEMM_KERNEL_HPP
-#endif // DNNL_WITH_GEN12HP
+#endif // GPU_JIT_XE_HP_SYSTOLIC_GEMM_KERNEL_HPP
+#endif // DNNL_WITH_XE_HP

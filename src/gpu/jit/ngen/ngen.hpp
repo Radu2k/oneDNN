@@ -361,22 +361,22 @@ protected:
     }
     template <typename DT = void>
     void add3(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
-        if (hw < HW::Gen12HP) unsupported();
+        if (hw < HW::Xe_HP) unsupported();
         opX(Opcode::add3, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void add3(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const RegData &src2) {
-        if (hw < HW::Gen12HP) unsupported();
+        if (hw < HW::Xe_HP) unsupported();
         opX(Opcode::add3, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void add3(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const Immediate &src2) {
-        if (hw < HW::Gen12HP) unsupported();
+        if (hw < HW::Xe_HP) unsupported();
         opX(Opcode::add3, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void add3(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
-        if (hw < HW::Gen12HP) unsupported();
+        if (hw < HW::Xe_HP) unsupported();
         opX(Opcode::add3, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
@@ -455,22 +455,22 @@ protected:
     }
     template <typename DT = void>
     void bfn(const InstructionModifier &mod, uint8_t ctrl, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
-        if (hw < HW::Gen12HP) unsupported();
+        if (hw < HW::Xe_HP) unsupported();
         opBfn(Opcode::bfn, getDataType<DT>(), mod, ctrl, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfn(const InstructionModifier &mod, uint8_t ctrl, const RegData &dst, const Immediate &src0, const RegData &src1, const RegData &src2) {
-        if (hw < HW::Gen12HP) unsupported();
+        if (hw < HW::Xe_HP) unsupported();
         opBfn(Opcode::bfn, getDataType<DT>(), mod, ctrl, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfn(const InstructionModifier &mod, uint8_t ctrl, const RegData &dst, const RegData &src0, const RegData &src1, const Immediate &src2) {
-        if (hw < HW::Gen12HP) unsupported();
+        if (hw < HW::Xe_HP) unsupported();
         opBfn(Opcode::bfn, getDataType<DT>(), mod, ctrl, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfn(const InstructionModifier &mod, uint8_t ctrl, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
-        if (hw < HW::Gen12HP) unsupported();
+        if (hw < HW::Xe_HP) unsupported();
         opBfn(Opcode::bfn, getDataType<DT>(), mod, ctrl, dst, src0, src1, src2);
     }
     template <typename DT = void>
@@ -2233,7 +2233,7 @@ template <HW hw>
 template <typename D, typename S0, typename S2>
 void BinaryCodeGenerator<hw>::opBfn(Opcode op, DataType defaultType, const InstructionModifier &mod, int bfnCtrl, D dst, S0 src0, RegData src1, S2 src2)
 {
-    if (hw < HW::Gen12HP)
+    if (hw < HW::Xe_HP)
         unsupported();
 
     typename EncodingTag12Dispatch<hw>::tag tag;
@@ -2264,7 +2264,7 @@ void BinaryCodeGenerator<hw>::opBfn(Opcode op, DataType defaultType, const Instr
 template <HW hw>
 void BinaryCodeGenerator<hw>::opDpas(Opcode op, DataType defaultType, const InstructionModifier &mod, int sdepth, int rcount, RegData dst, RegData src0, RegData src1, RegData src2)
 {
-    if (hw < HW::Gen12HP)
+    if (hw < HW::Xe_HP)
         unsupported();
 
     typename EncodingTag12Dispatch<hw>::tag tag;

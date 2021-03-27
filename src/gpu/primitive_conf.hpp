@@ -255,8 +255,8 @@ enum conv_version_t {
     ver_mb_block,
     ver_ow_block,
 
-// Gen12HP-specific versions.
-#if DNNL_WITH_GEN12HP
+// Xe_HP-specific versions.
+#if DNNL_WITH_XE_HP
     ver_v1,
     ver_v2
 #endif

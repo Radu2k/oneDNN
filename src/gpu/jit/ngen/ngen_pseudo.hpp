@@ -341,7 +341,7 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
 // Thread spawner messages.
 void threadend(const InstructionModifier &mod, const RegData &r0_info) {
 #if NGEN_GEN12P7
-    auto sf = (hardware <= HW::Gen12HP) ? SharedFunction::ts
+    auto sf = (hardware <= HW::Xe_HP) ? SharedFunction::ts
                                         : SharedFunction::gtwy;
 #else
     auto sf = SharedFunction::ts;
@@ -442,7 +442,7 @@ void barrier(const Targs &...barrierArgs)
 void memfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
 #if NGEN_GEN12P7
-    if (hardware <= HW::Gen12HP) {
+    if (hardware <= HW::Xe_HP) {
         const uint32_t exdesc = static_cast<int>(SharedFunction::dc0) & 0xF;
         send(8 | mod | NoMask, dst, header, exdesc, 0x219E000);
     } else
@@ -459,7 +459,7 @@ void memfence(const RegData &dst, const RegData &header = GRF(0)) { memfence(Ins
 void slmfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
 #if NGEN_GEN12P7
-    if (hardware <= HW::Gen12HP) {
+    if (hardware <= HW::Xe_HP) {
         const uint32_t exdesc = static_cast<int>(SharedFunction::dc0) & 0xF;
         send(8 | mod | NoMask, dst, header, exdesc, 0x219E0FE);
     } else
@@ -475,7 +475,7 @@ void slmfence(const RegData &dst, const RegData &header = GRF(0)) { slmfence(Ins
 // ATS prologues.
 void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127), int paddedSize = 0)
 {
-    if (hardware >= HW::Gen12HP) {
+    if (hardware >= HW::Xe_HP) {
         const int grfSize = GRF::bytes(hardware);
         const int grfOW = grfSize / 16;
 #if NGEN_GEN12P8
@@ -521,7 +521,7 @@ void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127)
 
 void loadargs(const GRF &base, int argGRFs, const GRF &temp = GRF(127))
 {
-    if (hardware >= HW::Gen12HP) {
+    if (hardware >= HW::Xe_HP) {
         if (argGRFs > 0) {
             auto dst = base;
             auto dmSave = defaultModifier;

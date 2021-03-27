@@ -14,16 +14,16 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#include "gpu/jit/gemm/gen12hp_systolic_gemm.hpp"
+#if DNNL_WITH_XE_HP
+#include "gpu/jit/gemm/xe_hp_systolic_gemm.hpp"
 
 #include "common/c_types_map.hpp"
 #include "common/dnnl_traits.hpp"
 #include "common/float16.hpp"
 #include "common/type_helpers.hpp"
-#include "gpu/jit/gemm/gen12hp_systolic_gemm_kernel.hpp"
+#include "gpu/jit/gemm/xe_hp_systolic_gemm_kernel.hpp"
 #include "gpu/jit/ngen_type_bridge.hpp"
-#include "gpu/ocl/gemm/gen12hp_systolic_gemm_copy_kernel.hpp"
+#include "gpu/ocl/gemm/xe_hp_systolic_gemm_copy_kernel.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -35,19 +35,19 @@ struct nocopy_table_t {
     int k_limit[2][2]; // Use no-copy if k < k_limit
 };
 
-const nocopy_table_t gen12hp_f16_nocopy_table[] = {
+const nocopy_table_t xe_hp_f16_nocopy_table[] = {
         // NN     NT     TN    TT
         {{{1280, 768}, {512, 384}}, {{512, 768}, {1024, 512}}}};
 
-const nocopy_table_t gen12hp_bf16_nocopy_table[] = {
+const nocopy_table_t xe_hp_bf16_nocopy_table[] = {
         // NN   NT     TN   TT
         {{{512, 256}, {512, 512}}, {{512, 256}, {384, 384}}}};
 
-const nocopy_table_t gen12hp_x8x8s32_nocopy_table[] = {
+const nocopy_table_t xe_hp_x8x8s32_nocopy_table[] = {
         // NN   NT     TN   TT
         {{{384, 384}, {384, 384}}, {{384, 512}, {384, 256}}}};
 
-status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
+status_t xe_hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     using namespace prop_kind;
     using namespace data_type;
     using namespace primitive_kind;
@@ -73,8 +73,8 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
 
     // Use FMA for small/medium sizes
     if (utils::one_of(d->c_type(), bf16, f16, s32) && !is_bf16_with_bias) {
-        const nocopy_table_t *all_tables[3] = {gen12hp_f16_nocopy_table,
-                gen12hp_bf16_nocopy_table, gen12hp_x8x8s32_nocopy_table};
+        const nocopy_table_t *all_tables[3] = {xe_hp_f16_nocopy_table,
+                xe_hp_bf16_nocopy_table, xe_hp_x8x8s32_nocopy_table};
         const int type_idx
                 = (d->c_type() == f16) ? 0 : (d->c_type() == bf16) ? 1 : 2;
         const nocopy_table_t *table = all_tables[type_idx];
@@ -115,7 +115,7 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     if (dt_int_ok) attr_skip_mask |= smask_t::zero_points_runtime;
 
     ok = true && limits_ok && (dt_float_ok || dt_int_ok)
-            && utils::one_of(arch, arch_t::gen12hp, arch_t::gen12p7)
+            && utils::one_of(arch, arch_t::xe_hp, arch_t::gen12p7)
             && compute_engine->mayiuse(compute::device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate)
             && attr()->has_default_values(attr_skip_mask)
@@ -153,7 +153,7 @@ status_t gen12hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     return status::success;
 }
 
-status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
+status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
     using namespace data_type;
     using arch_t = compute::gpu_arch_t;
 
@@ -174,7 +174,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     ab_zero_points_ = (c_type == s32);
 
     // Initialize compute kernels (assembly)
-    using kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
+    using kernel_t = xe_hp_systolic_gemm_kernel_t<gpu_xe_hp>;
     kernel_t::config_t cfg;
     auto attr_info = pd()->attr_info();
 
@@ -255,7 +255,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
                 }
 
                 switch (arch_) {
-                    case arch_t::gen12hp: {
+                    case arch_t::xe_hp: {
                         auto kernel = kernel_t(cfg_copy);
 
                         create_kernel(engine,
@@ -264,7 +264,7 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
                     }
                     case arch_t::gen12p7: {
                         using kernel_12p7_t
-                                = gen12hp_systolic_gemm_kernel_t<gpu_gen12p7>;
+                                = xe_hp_systolic_gemm_kernel_t<gpu_gen12p7>;
                         cfg_copy.emulate64 = true;
                         auto kernel = kernel_12p7_t(
                                 cfg_copy.cast<kernel_12p7_t::config_t>());
@@ -293,13 +293,13 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
             auto trans
                     = !copy_b ? pd()->desc()->transa() : pd()->desc()->transb();
             auto status
-                    = ocl::gen12hp_systolic_gemm_copy_kernel_t::init_kernel_ctx(
+                    = ocl::xe_hp_systolic_gemm_copy_kernel_t::init_kernel_ctx(
                             kernel_ctx, !copy_b ? a_type : b_type, copy_b,
                             trans, ab_zero_points_, clear_sum);
             if (status != status::success) return status;
 
             create_kernel(engine, &copy_kernel_[copy_b][clear_sum],
-                    "gen12hp_systolic_gemm_copy", kernel_ctx);
+                    "xe_hp_systolic_gemm_copy", kernel_ctx);
             if (!copy_kernel_[copy_b][clear_sum]) return status::runtime_error;
         }
     }
@@ -307,9 +307,9 @@ status_t gen12hp_systolic_gemm_t::init(engine_t *engine) {
     return status::success;
 }
 
-status_t gen12hp_systolic_gemm_t::init_res_storage(
+status_t xe_hp_systolic_gemm_t::init_res_storage(
         engine_t *engine, gpu_resource_t *r) const {
-    using kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
+    using kernel_t = xe_hp_systolic_gemm_kernel_t<gpu_xe_hp>;
 
     auto a_type = pd()->desc()->a_type();
     auto b_type = pd()->desc()->b_type();
@@ -349,26 +349,26 @@ status_t gen12hp_systolic_gemm_t::init_res_storage(
     return status::success;
 }
 
-bool gen12hp_systolic_gemm_t::enable_mn_blocking() const {
+bool xe_hp_systolic_gemm_t::enable_mn_blocking() const {
     return (pd()->desc()->m() >= 8192) && (pd()->desc()->n() >= 8192);
 }
 
-int64_t gen12hp_systolic_gemm_t::default_block_m() const {
+int64_t xe_hp_systolic_gemm_t::default_block_m() const {
     return 1024; // 8 thread groups in m dimension
 }
 
-int64_t gen12hp_systolic_gemm_t::default_block_n() const {
+int64_t xe_hp_systolic_gemm_t::default_block_n() const {
     return eu_count_
             * 6; // Up to 16 thread groups in n dimension, enough to fill GPU.
 }
 
-int64_t gen12hp_systolic_gemm_t::default_block_k(data_type_t dt) const {
+int64_t xe_hp_systolic_gemm_t::default_block_k(data_type_t dt) const {
     return 8192 / types::data_type_size(dt);
 }
 
 std::tuple<int64_t, int64_t, int64_t>
-gen12hp_systolic_gemm_t::get_blocking() const {
-    using kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
+xe_hp_systolic_gemm_t::get_blocking() const {
+    using kernel_t = xe_hp_systolic_gemm_kernel_t<gpu_xe_hp>;
 
     int64_t m = pd()->desc()->m();
     int64_t n = pd()->desc()->n();
@@ -420,13 +420,13 @@ gen12hp_systolic_gemm_t::get_blocking() const {
     return std::make_tuple(block_m, block_n, block_k);
 }
 
-status_t gen12hp_systolic_gemm_t::launch_copy(const gemm_exec_ctx_t &ctx,
+status_t xe_hp_systolic_gemm_t::launch_copy(const gemm_exec_ctx_t &ctx,
         int64_t r, int64_t c, const memory_storage_t &src, int64_t offset_src,
         int64_t ld_src, const memory_storage_t &dst, int32_t offset_dst,
         int32_t ld_dst, bool copyb) const {
 
-    using compute_kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
-    using copy_kernel_t = ocl::gen12hp_systolic_gemm_copy_kernel_t;
+    using compute_kernel_t = xe_hp_systolic_gemm_kernel_t<gpu_xe_hp>;
+    using copy_kernel_t = ocl::xe_hp_systolic_gemm_copy_kernel_t;
 
     if (ab_zero_points_) {
         auto status
@@ -478,7 +478,7 @@ status_t gen12hp_systolic_gemm_t::launch_copy(const gemm_exec_ctx_t &ctx,
     return parallel_for(ctx, nd_range, kernel, arg_list);
 }
 
-status_t gen12hp_systolic_gemm_t::launch_clear_sum(const gemm_exec_ctx_t &ctx,
+status_t xe_hp_systolic_gemm_t::launch_clear_sum(const gemm_exec_ctx_t &ctx,
         int64_t r, int64_t c, const memory_storage_t &dst, int32_t offset_dst,
         int32_t ld_dst, bool copyb) const {
 
@@ -495,9 +495,8 @@ status_t gen12hp_systolic_gemm_t::launch_clear_sum(const gemm_exec_ctx_t &ctx,
     auto elt_size = types::data_type_size(pd()->desc()->a_type());
     size_t threads = !copyb ? utils::div_up(r, unroll_m_)
                             : utils::div_up(c, unroll_n_);
-    size_t sg
-            = ocl::gen12hp_systolic_gemm_copy_kernel_t::subgroup_size_clear_sum(
-                    elt_size, copyb);
+    size_t sg = ocl::xe_hp_systolic_gemm_copy_kernel_t::subgroup_size_clear_sum(
+            elt_size, copyb);
 
     size_t gws[3] = {threads * sg, 1, 1};
     size_t lws[3] = {sg, 1, 1};
@@ -507,7 +506,7 @@ status_t gen12hp_systolic_gemm_t::launch_clear_sum(const gemm_exec_ctx_t &ctx,
     return parallel_for(ctx, nd_range, kernel, arg_list);
 }
 
-status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
+status_t xe_hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
         int32_t m, int32_t n, int32_t k, const memory_storage_t &ap,
         int64_t offset_a, int32_t lda, const memory_storage_t &bp,
         int64_t offset_b, int32_t ldb, const memory_storage_t &c,
@@ -516,7 +515,7 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
         bool first_k_block, bool last_k_block, int32_t batch, int32_t stride_a,
         int32_t stride_b, int32_t stride_c) const {
 
-    using kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
+    using kernel_t = xe_hp_systolic_gemm_kernel_t<gpu_xe_hp>;
     auto tg_m = kernel_t::thread_group_m;
     auto tg_n = kernel_t::thread_group_n;
     auto sg = kernel_t::nominal_subgroup_size;
@@ -578,9 +577,9 @@ status_t gen12hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
     return parallel_for(ctx, nd_range, kernel, arg_list);
 }
 
-status_t gen12hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
+status_t xe_hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
 
-    using compute_kernel_t = gen12hp_systolic_gemm_kernel_t<gpu_gen12hp>;
+    using compute_kernel_t = xe_hp_systolic_gemm_kernel_t<gpu_xe_hp>;
 
     auto a_type = pd()->desc()->a_type();
     auto b_type = pd()->desc()->b_type();

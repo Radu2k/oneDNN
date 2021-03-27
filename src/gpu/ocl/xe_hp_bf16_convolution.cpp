@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#include "gpu/ocl/gen12hp_bf16_convolution.hpp"
+#if DNNL_WITH_XE_HP
+#include "gpu/ocl/xe_hp_bf16_convolution.hpp"
 
 #include "common/c_types_map.hpp"
 #include "common/dnnl_thread.hpp"
@@ -29,7 +29,7 @@ namespace ocl {
 
 using namespace dnnl::impl::memory_tracking::names;
 
-status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_conf(
+status_t xe_hp_bf16_convolution_bwd_weights_t::pd_t::init_conf(
         engine_t *engine) {
     const convolution_desc_t &cd = *desc();
 
@@ -207,7 +207,7 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_conf(
     return status::success;
 }
 
-status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
+status_t xe_hp_bf16_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
         compute::kernel_ctx_t &kernel_ctx) const {
     kernel_ctx.define_int("NDIMS", conf.ndims);
     kernel_ctx.define_int("WITH_GROUPS", conf.with_groups);
@@ -283,7 +283,7 @@ status_t gen12hp_bf16_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
     return status::success;
 }
 
-status_t gen12hp_bf16_convolution_bwd_weights_t::execute_backward_weights(
+status_t xe_hp_bf16_convolution_bwd_weights_t::execute_backward_weights(
         const exec_ctx_t &ctx) const {
 
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);

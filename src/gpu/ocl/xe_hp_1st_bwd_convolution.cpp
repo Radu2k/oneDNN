@@ -13,8 +13,8 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 *******************************************************************************/
-#if DNNL_WITH_GEN12HP
-#include "gpu/ocl/gen12hp_1st_bwd_convolution.hpp"
+#if DNNL_WITH_XE_HP
+#include "gpu/ocl/xe_hp_1st_bwd_convolution.hpp"
 
 #include "common/c_types_map.hpp"
 #include "common/dnnl_thread.hpp"
@@ -34,7 +34,7 @@ namespace ocl {
 using namespace dnnl::impl::data_type;
 using namespace dnnl::impl::format_tag;
 
-status_t gen12hp_1st_convolution_bwd_weights_t::pd_t::init_conf(
+status_t xe_hp_1st_convolution_bwd_weights_t::pd_t::init_conf(
         engine_t *engine) {
     using namespace dnnl::impl::format_tag;
     using namespace data_type;
@@ -95,12 +95,12 @@ status_t gen12hp_1st_convolution_bwd_weights_t::pd_t::init_conf(
     bwd_w_compute_block_sizes(conf, engine);
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
-    const bool is_gen12hp = compute_engine->is_gen12hp();
+    const bool is_xe_hp = compute_engine->is_xe_hp();
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();
 
     conf.sub_group_size = 8;
-    conf.lws_d[0] = is_gen12hp ? 32 : 16;
+    conf.lws_d[0] = is_xe_hp ? 32 : 16;
     conf.lws_d[1] = 1;
     conf.lws_d[2] = 1;
     conf.kwb = utils::rnd_up(conf.kw, 8);
@@ -182,7 +182,7 @@ status_t gen12hp_1st_convolution_bwd_weights_t::pd_t::init_conf(
     return status::success;
 }
 
-status_t gen12hp_1st_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
+status_t xe_hp_1st_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
         compute::kernel_ctx_t &kernel_ctx) const {
     kernel_ctx.define_int("IS_DW", conf.is_depthwise);
     kernel_ctx.define_int("BWD_WEIGHTS", 1);
@@ -267,7 +267,7 @@ status_t gen12hp_1st_convolution_bwd_weights_t::pd_t::init_kernel_ctx(
     return status::success;
 }
 
-status_t gen12hp_1st_convolution_bwd_weights_t::pd_t::init_scratchpad() {
+status_t xe_hp_1st_convolution_bwd_weights_t::pd_t::init_scratchpad() {
     auto scratchpad = scratchpad_registry().registrar();
     if (!conf.reorder_wei && !conf.reorder_bias) return status::success;
     if (conf.reorder_wei) {
@@ -291,7 +291,7 @@ status_t gen12hp_1st_convolution_bwd_weights_t::pd_t::init_scratchpad() {
     return status::success;
 }
 
-status_t gen12hp_1st_convolution_bwd_weights_t::execute_backward_weights(
+status_t xe_hp_1st_convolution_bwd_weights_t::execute_backward_weights(
         const exec_ctx_t &ctx) const {
     auto *compute_stream
             = utils::downcast<compute::compute_stream_t *>(ctx.stream());

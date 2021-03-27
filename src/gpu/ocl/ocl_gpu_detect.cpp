@@ -29,8 +29,8 @@ compute::gpu_arch_t detect_gpu_arch(cl_device_id device, cl_context context) {
     switch (hw) {
         case HW::Gen9: return compute::gpu_arch_t::gen9;
         case HW::Gen12LP: return compute::gpu_arch_t::gen12lp; break;
-#if DNNL_WITH_GEN12HP
-        case HW::Gen12HP: return compute::gpu_arch_t::gen12hp; break;
+#if DNNL_WITH_XE_HP
+        case HW::Xe_HP: return compute::gpu_arch_t::xe_hp; break;
 #endif
 #if DNNL_WITH_GEN12P7
         case HW::Gen12p7: return compute::gpu_arch_t::gen12p7; break;
@@ -44,9 +44,9 @@ compute::gpu_arch_t detect_gpu_arch_by_device_name(const std::string &name) {
         return compute::gpu_arch_t::gen9;
     if (name.find("Gen12LP") != std::string::npos)
         return compute::gpu_arch_t::gen12lp;
-#if DNNL_WITH_GEN12HP
-    if (name.find("Gen12HP") != std::string::npos)
-        return compute::gpu_arch_t::gen12hp;
+#if DNNL_WITH_XE_HP
+    if (name.find("Xe_HP") != std::string::npos)
+        return compute::gpu_arch_t::xe_hp;
 #endif
     return compute::gpu_arch_t::unknown;
 }

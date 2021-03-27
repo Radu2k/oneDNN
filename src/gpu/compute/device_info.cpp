@@ -36,13 +36,13 @@ uint64_t get_future_extensions(compute::gpu_arch_t gpu_arch) {
 
     uint64_t extensions = 0;
     switch (gpu_arch) {
-#if DNNL_WITH_GEN12HP
-        case gpu_arch_t::gen12hp:
+#if DNNL_WITH_XE_HP
+        case gpu_arch_t::xe_hp:
 #endif
 #if DNNL_WITH_GEN12P7
         case gpu_arch_t::gen12p7:
 #endif
-#if DNNL_WITH_GEN12HP
+#if DNNL_WITH_XE_HP
             extensions |= (uint64_t)device_ext_t::intel_global_float_atomics;
             extensions |= (uint64_t)
                     device_ext_t::intel_subgroup_matrix_multiply_accumulate;
@@ -66,8 +66,8 @@ inline gpu_arch_t str2gpu_arch(const char *str) {
 
     CASE(gen9);
     CASE(gen12lp);
-#if DNNL_WITH_GEN12HP
-    CASE(gen12hp);
+#if DNNL_WITH_XE_HP
+    CASE(xe_hp);
 #endif
 #if DNNL_WITH_GEN12P7
     CASE(gen12p7);
@@ -111,13 +111,13 @@ status_t device_info_t::init_attributes_common(engine_t *engine) {
             threads_per_eu[0] = 7;
             threads_per_eu[1] = 7;
             break;
-#if DNNL_WITH_GEN12HP
-        case gpu::compute::gpu_arch_t::gen12hp:
+#if DNNL_WITH_XE_HP
+        case gpu::compute::gpu_arch_t::xe_hp:
 #endif
 #if DNNL_WITH_GEN12P7
         case gpu::compute::gpu_arch_t::gen12p7:
 #endif
-#if DNNL_WITH_GEN12HP
+#if DNNL_WITH_XE_HP
             threads_per_eu[0] = 8; // 128 regs/thread
             threads_per_eu[1] = 4; // 256 regs/thread
             break;

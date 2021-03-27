@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#include "gpu/ocl/gen12hp_convolution.hpp"
+#if DNNL_WITH_XE_HP
+#include "gpu/ocl/xe_hp_convolution.hpp"
 
 #include "common/c_types_map.hpp"
 #include "common/dnnl_thread.hpp"
@@ -30,7 +30,7 @@ namespace ocl {
 using namespace data_type;
 using namespace format_tag;
 
-status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
+status_t xe_hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     const convolution_desc_t &cd = *desc();
     set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
             *weights_md(1), *attr());
@@ -152,7 +152,7 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     return status;
 }
 
-status_t gen12hp_convolution_fwd_t::pd_t::init_kernel_ctx(
+status_t xe_hp_convolution_fwd_t::pd_t::init_kernel_ctx(
         compute::kernel_ctx_t &kernel_ctx) const {
     kernel_ctx.define_int("G", conf.ngroups);
     kernel_ctx.define_int("MB", conf.mb);
@@ -240,8 +240,7 @@ status_t gen12hp_convolution_fwd_t::pd_t::init_kernel_ctx(
     return status::success;
 }
 
-status_t gen12hp_convolution_fwd_t::execute_forward(
-        const exec_ctx_t &ctx) const {
+status_t xe_hp_convolution_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
 
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &weights = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
@@ -282,7 +281,7 @@ status_t gen12hp_convolution_fwd_t::execute_forward(
     return status;
 }
 
-status_t gen12hp_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
+status_t xe_hp_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
     const convolution_desc_t &cd = *desc();
     set_default_conf(conf, cd, *diff_src_md(), *weights_md(), *diff_dst_md(),
             *weights_md(1), *attr());
@@ -362,7 +361,7 @@ status_t gen12hp_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
     return status;
 }
 
-status_t gen12hp_convolution_bwd_data_t::pd_t::init_kernel_ctx(
+status_t xe_hp_convolution_bwd_data_t::pd_t::init_kernel_ctx(
         compute::kernel_ctx_t &kernel_ctx) const {
     kernel_ctx.define_int("G", conf.ngroups);
     kernel_ctx.define_int("MB", conf.mb);
@@ -424,7 +423,7 @@ status_t gen12hp_convolution_bwd_data_t::pd_t::init_kernel_ctx(
     return status::success;
 }
 
-status_t gen12hp_convolution_bwd_data_t::execute_backward_data(
+status_t xe_hp_convolution_bwd_data_t::execute_backward_data(
         const exec_ctx_t &ctx) const {
 
     auto &diff_src = CTX_OUT_STORAGE(DNNL_ARG_DIFF_SRC);

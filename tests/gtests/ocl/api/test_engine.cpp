@@ -128,7 +128,7 @@ TEST_P(ocl_engine_test_t, BasicInteropC) {
             std::vector<cl_device_id> sub_dev(max_sub_dev);
 
             // Only CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN partition type is
-            // available for Gen12HP
+            // available for Xe_HP
             cl_device_partition_property properties[3]
                     = {CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN,
                             CL_DEVICE_AFFINITY_DOMAIN_NEXT_PARTITIONABLE, 0};
@@ -223,7 +223,7 @@ TEST_P(ocl_engine_test_t, BasicInteropCpp) {
                 if (max_sub_dev > 0) {
 
                     // Only CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN partition
-                    // type is available for Gen12HP
+                    // type is available for Xe_HP
                     cl_device_partition_property properties[3] = {
                             CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN,
                             CL_DEVICE_AFFINITY_DOMAIN_NEXT_PARTITIONABLE, 0};

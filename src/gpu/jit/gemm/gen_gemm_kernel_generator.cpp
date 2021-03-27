@@ -155,9 +155,9 @@ static inline bool hasNativeAtomicAdd(
         HW hw, Type T, const MatrixAddressing &atype) {
     if (T.isInteger())
         return true;
-#if DNNL_WITH_GEN12HP
+#if DNNL_WITH_XE_HP
     else if (T == Type::f32)
-        return (atype.base.getModel() == ModelA64) && (hw >= HW::Gen12HP);
+        return (atype.base.getModel() == ModelA64) && (hw >= HW::Xe_HP);
 #endif
     else
         return false;
@@ -410,8 +410,8 @@ template <HW hw>
 void gemm_kernel_generator_t<hw>::syncall() {
     if (hw == HW::Gen12LP)
         sync.allwr(SWSB(1));
-#if DNNL_WITH_GEN12HP
-    else if (hw >= HW::Gen12HP)
+#if DNNL_WITH_XE_HP
+    else if (hw >= HW::Xe_HP)
         sync.allwr(SWSB<AllPipes>(1));
 #endif
 }
@@ -445,14 +445,14 @@ template <typename DT, typename S0, typename S2>
 void gemm_kernel_generator_t<hw>::eadd3(const InstructionModifier &mod,
         const RegData &dst, const S0 &src0, const RegData &src1,
         const S2 &src2) {
-#if DNNL_WITH_GEN12HP
-    if ((hw >= HW::Gen12HP) && !(dst.getOffset() & 1))
+#if DNNL_WITH_XE_HP
+    if ((hw >= HW::Xe_HP) && !(dst.getOffset() & 1))
         add3<DT>(mod, dst, src0, src1, src2);
     else {
 #endif
         add<DT>(mod, dst, src1, src0);
         add<DT>(mod, dst, dst, src2);
-#if DNNL_WITH_GEN12HP
+#if DNNL_WITH_XE_HP
     }
 #endif
 }
@@ -1075,8 +1075,8 @@ Bundle gemm_kernel_generator_t<hw>::getHint(
             }
             break;
         case HW::Gen12LP:
-#if DNNL_WITH_GEN12HP
-        case HW::Gen12HP:
+#if DNNL_WITH_XE_HP
+        case HW::Xe_HP:
 #endif
 #if DNNL_WITH_GEN12P7
         case HW::Gen12p7:
@@ -1147,8 +1147,8 @@ Bundle gemm_kernel_generator_t<hw>::getHint(
         case HW::Gen10:
         case HW::Gen11:
         case HW::Gen12LP:
-#if DNNL_WITH_GEN12HP
-        case HW::Gen12HP:
+#if DNNL_WITH_XE_HP
+        case HW::Xe_HP:
 #endif
 #if DNNL_WITH_GEN12P7
         case HW::Gen12p7:
@@ -1229,8 +1229,8 @@ static bool needsPseudoblock(HW hw, Type T, int r, int c,
     bool owAligned = (atype.alignment & 0xF) == 0;
     bool pseudo = !dwAligned || ((r * c * T) & 0x3) || (writable && !owAligned)
             || (masked && !owAligned
-#if DNNL_WITH_GEN12HP
-                    && (hw >= HW::Gen12HP || atype.base.getModel() != ModelA64))
+#if DNNL_WITH_XE_HP
+                    && (hw >= HW::Xe_HP || atype.base.getModel() != ModelA64))
 #else
                     && (atype.base.getModel() != ModelA64))
 #endif
@@ -1601,7 +1601,7 @@ bool gemm_kernel_generator_t<hw>::getBlockInfo(Type T,
             //  aligned_oword:  4 byte align, no masking, read only
             //    block_hword: [Gen9-12LP] A64; 4 byte align R, BLKCM masking (= dw but can do ow channel on Gen9 only)
             //                             A64; 16 byte align W
-            //                 [Gen12HP]   A64/BTS; 32 byte align R/W
+            //                 [Xe_HP]   A64/BTS; 32 byte align R/W
             // New dataport messages support {DW, QW}x{1...64} with DW/QW alignment, no masking.
             //
             // Prefer block_hword in all cases. When block_hword can't be used:
@@ -2273,15 +2273,15 @@ bool gemm_kernel_generator_t<hw>::add1DBlockToRegLayout(Type T,
         bool oword = !a64;
         bool aoword = (atype.base.getModel()
                 == ModelSC); // SC only does aligned oword
-#if DNNL_WITH_GEN12HP
-        if (hw >= HW::Gen12HP) oword |= ((atype.alignment & 0x1F) != 0);
+#if DNNL_WITH_XE_HP
+        if (hw >= HW::Xe_HP) oword |= ((atype.alignment & 0x1F) != 0);
 #endif
 
         extra = aoword;
         ebytes = oword ? 16 : 32;
         maxBBytes = oword ? 128 : 256;
-#if DNNL_WITH_GEN12HP
-        if (atype.base.getModel() == ModelSLM && hw >= HW::Gen12HP)
+#if DNNL_WITH_XE_HP
+        if (atype.base.getModel() == ModelSLM && hw >= HW::Xe_HP)
             maxBBytes = 256;
 #endif
         addrShift = (!a64 && oword && !aoword) ? 4 : 0;
@@ -3511,8 +3511,8 @@ void gemm_kernel_generator_t<hw>::setupAddrShifted(const GRFRange &addr,
             // Add offsets to base.
             if (ptr != 0) {
                 if (a64) {
-#if DNNL_WITH_GEN12HP
-                    if (hw >= HW::Gen12HP) {
+#if DNNL_WITH_XE_HP
+                    if (hw >= HW::Xe_HP) {
                         auto temp = state.ra.alloc_range(simd16 ? 4 : 2);
                         if (simd16) mov<uint32_t>(8, temp[2][0](2), addr[1]);
                         mov<uint32_t>(8, temp[0][0](2), addr[0]);
@@ -3530,7 +3530,7 @@ void gemm_kernel_generator_t<hw>::setupAddrShifted(const GRFRange &addr,
                         eadd<uint64_t>(
                                 8, addr[0], addr[0].ud(), ptr, strategy, state);
 
-#if DNNL_WITH_GEN12HP
+#if DNNL_WITH_XE_HP
                     }
 #endif
                 } else
@@ -4064,8 +4064,8 @@ void gemm_kernel_generator_t<hw>::outerProduct(int h, int ha, int hb,
 
             colMajor ? dp4a(mod, C(1), C(1), Ar(1), Br(0))
                      : dp4a(mod, C(1), C(1), Br(1), Ar(0));
-#if DNNL_WITH_GEN12HP
-        } else if (C.isARF() && hw < HW::Gen12HP) {
+#if DNNL_WITH_XE_HP
+        } else if (C.isARF() && hw < HW::Xe_HP) {
             colMajor ? mac(mod, C(1), A(1), bcastSrc)
                      : mac(mod, C(1), bcastSrc, B(1));
 #endif
@@ -5512,8 +5512,8 @@ void gemm_kernel_generator_t<hw>::doAlternateCRemainder(COperation op,
     bool header4 = !qword && !surface;
     int neq = elementsPerGRF(hw, DataType::uq);
 
-#if DNNL_WITH_GEN12HP
-    if (hw >= HW::Gen12HP && !surface) {
+#if DNNL_WITH_XE_HP
+    if (hw >= HW::Xe_HP && !surface) {
         if (header4)
             FOR_EACH_C mov<uint32_t>(2 * neq, header[q][2][0](2), header[q][1]);
         FOR_EACH_C mov<uint32_t>(neq, header[q][1][0](2), header[q][0][neq](1));
@@ -6055,8 +6055,8 @@ void gemm_kernel_generator_t<hw>::gemmAllocRegs(
         case GEMMStrategy::VNC: {
             if (hw < HW::Gen12LP) stub();
 
-#if DNNL_WITH_GEN12HP
-            bool hp = (hw >= HW::Gen12HP);
+#if DNNL_WITH_XE_HP
+            bool hp = (hw >= HW::Xe_HP);
 #else
             bool hp = false;
 #endif
@@ -6140,11 +6140,11 @@ void gemm_kernel_generator_t<hw>::gemmAllocRegs(
             break;
         }
         case GEMMStrategy::NSeparate: {
-            // Gen12HP+. Broadcast matrix has dedicated bundle(s) (both banks)
+            // Xe_HP+. Broadcast matrix has dedicated bundle(s) (both banks)
             //  not shared with other matrices.
             //
-#if DNNL_WITH_GEN12HP
-            if (hw < HW::Gen12HP) stub();
+#if DNNL_WITH_XE_HP
+            if (hw < HW::Xe_HP) stub();
 #endif
             int chunk = 8;
             int bundles = Bundle::bundle_count(hw);
@@ -6711,8 +6711,8 @@ void gemm_kernel_generator_t<hw>::gemmVariableOffsetC(bool column,
 
     GRFMultirange repackOffsets;
 
-#if DNNL_WITH_GEN12HP
-    if (stride > 1 && hw >= HW::Gen12HP && Tc.isFP()) {
+#if DNNL_WITH_XE_HP
+    if (stride > 1 && hw >= HW::Xe_HP && Tc.isFP()) {
         // Repack data to unit stride as float pipe can't swizzle.
         vector<RegisterBlock> repackLayout;
         int r = column ? 1 : strategy.unroll[LoopM];
@@ -6921,7 +6921,7 @@ void gemm_kernel_generator_t<hw>::gemmApplyABOffset(const GEMMProblem &problem,
     // Two steps: (O = all-1s matrix)
     //   1) C += A * O * bo
     //   2) C += (O * B + bo * k) * ao
-    // TODO: combine C adds into add3 on Gen12HP+.
+    // TODO: combine C adds into add3 on Xe_HP+.
     auto temp = state.ra.alloc_sub(problem.Tc.ngen());
     mul(1, temp, state.inputs.k, state.inputs.bo);
 
@@ -9038,8 +9038,8 @@ bool gemm_kernel_generator_t<hw>::gemmUpdateC(
 
             // Claim a flag register for complex swizzles for ATS+.
             //
-#if DNNL_WITH_GEN12HP
-    if (hw >= HW::Gen12HP) {
+#if DNNL_WITH_XE_HP
+    if (hw >= HW::Xe_HP) {
         state.flagSwizzle = state.raVFlag.alloc();
         state.raVFlag.unlock(state.flagSwizzle);
     }
@@ -11711,8 +11711,8 @@ bool gemm_kernel_generator_t<hw>::copyBodyInternal(
     state.ra.safeRelease(state.w0);
 
     // Get flag register for complex swizzles for ATS+.
-#if DNNL_WITH_GEN12HP
-    if (hw >= HW::Gen12HP && Ts.isComplex()) {
+#if DNNL_WITH_XE_HP
+    if (hw >= HW::Xe_HP && Ts.isComplex()) {
         state.flagSwizzle = state.raVFlag.alloc();
         state.raVFlag.unlock(state.flagSwizzle);
     }
@@ -12387,8 +12387,8 @@ bool gemm_kernel_generator_t<hw>::copyRegisters(Type Ts, Type Td,
         bool conjugate, const CommonStrategy &strategy, CommonState &state) {
     int nphases = 1;
 
-#if DNNL_WITH_GEN12HP
-    bool preswizzle = (hw >= HW::Gen12HP);
+#if DNNL_WITH_XE_HP
+    bool preswizzle = (hw >= HW::Xe_HP);
 #else
     bool preswizzle = false;
 #endif
@@ -12661,8 +12661,8 @@ constexpr typename gemm_kernel_generator_t<hw>::status_stream::Endl
 
 template class gemm_kernel_generator_t<HW::Gen9>;
 template class gemm_kernel_generator_t<HW::Gen12LP>;
-#if DNNL_WITH_GEN12HP
-template class gemm_kernel_generator_t<HW::Gen12HP>;
+#if DNNL_WITH_XE_HP
+template class gemm_kernel_generator_t<HW::Xe_HP>;
 #endif
 #if DNNL_WITH_GEN12P7
 template class gemm_kernel_generator_t<HW::Gen12p7>;

@@ -50,9 +50,9 @@ status_t ocl_gpu_device_info_t::init_arch(engine_t *engine) {
         OCL_CHECK(err);
     }
 
-    // XXX: temporary WA for different Gen12HP devices
-#if DNNL_WITH_GEN12HP
-    if (gpu_arch_ == compute::gpu_arch_t::gen12hp) {
+    // XXX: temporary WA for different Xe_HP devices
+#if DNNL_WITH_XE_HP
+    if (gpu_arch_ == compute::gpu_arch_t::xe_hp) {
         // query extensions
         size_t param_size = 0;
         err = clGetDeviceInfo(
@@ -170,7 +170,7 @@ std::string ocl_gpu_device_info_t::get_cl_ext_options() const {
         // These extensions are not handled properly by the OpenCL runtime.
         // Pass macros for them manually.
         if (utils::one_of(ext,
-#if DNNL_WITH_GEN12HP
+#if DNNL_WITH_XE_HP
                     device_ext_t::intel_global_float_atomics,
                     device_ext_t::intel_subgroup_matrix_multiply_accumulate,
                     device_ext_t::

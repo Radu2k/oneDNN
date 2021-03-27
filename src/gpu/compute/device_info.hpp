@@ -35,8 +35,8 @@ enum class gpu_arch_t {
     unknown,
     gen9,
     gen12lp,
-#if DNNL_WITH_GEN12HP
-    gen12hp,
+#if DNNL_WITH_XE_HP
+    xe_hp,
 #endif
 #if DNNL_WITH_GEN12P7
     gen12p7,
@@ -64,8 +64,8 @@ enum class device_ext_t : uint64_t {
     // Intel specific Gen12LP+
     intel_subgroup_local_block_io = 1ull << 21,
     intel_dot_accumulate          = 1ull << 22,
-#if DNNL_WITH_GEN12HP
-    // Intel specific Gen12HP+
+#if DNNL_WITH_XE_HP
+    // Intel specific Xe_HP+
     intel_global_float_atomics                      = 1ull << 23,
     intel_subgroup_matrix_multiply_accumulate       = 1ull << 24,
     intel_subgroup_split_matrix_multiply_accumulate = 1ull << 25,
@@ -102,7 +102,7 @@ static inline const char *ext2cl_str(device_ext_t ext) {
         CASE(intel_subgroup_local_block_io)
         CASE(intel_dot_accumulate)
 
-#if DNNL_WITH_GEN12HP
+#if DNNL_WITH_XE_HP
         CASE(intel_global_float_atomics)
         CASE(intel_subgroup_matrix_multiply_accumulate)
         CASE(intel_subgroup_split_matrix_multiply_accumulate)

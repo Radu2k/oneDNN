@@ -131,8 +131,8 @@ public:
         mov<uint32_t>(1, header, uint16_t(0));
         store(1 | SWSB(sb2, 1), scattered_dword(), ok_surface, header, data);
 
-#if DNNL_WITH_GEN12HP
-        if (hw >= HW::Gen12HP) memfence(sb2, header);
+#if DNNL_WITH_XE_HP
+        if (hw >= HW::Xe_HP) memfence(sb2, header);
 #endif
         mov<uint32_t>(8, r127, r0);
         threadend(SWSB(sb2, 1), r127);
@@ -156,9 +156,9 @@ public:
                     kernel = binary_format_kernel_t<HW::Gen12LP>::make_kernel(
                             engine);
                     break;
-#if DNNL_WITH_GEN12HP
-                case compute::gpu_arch_t::gen12hp:
-                    kernel = binary_format_kernel_t<HW::Gen12HP>::make_kernel(
+#if DNNL_WITH_XE_HP
+                case compute::gpu_arch_t::xe_hp:
+                    kernel = binary_format_kernel_t<HW::Xe_HP>::make_kernel(
                             engine);
                     break;
 #endif

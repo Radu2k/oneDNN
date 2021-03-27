@@ -290,7 +290,7 @@ void InterfaceHandler::generateDummyCL(std::ostream &stream) const
         /* To do: Gen11 */
     }
 
-    if (hw >= HW::Gen12HP) for (const auto &assignment : assignments) {
+    if (hw >= HW::Xe_HP) for (const auto &assignment : assignments) {
         // Force IGC to assume stateless accesses could occur.
         if (assignment.exttype == ExternalArgumentType::GlobalPtr)
             stream << "    __asm__ volatile(\"\" :: \"rw.u\"(" << assignment.name << "));\n";
@@ -390,7 +390,7 @@ void InterfaceHandler::finalize()
 GRF InterfaceHandler::getCrossthreadBase(bool effective) const
 {
     if (!needLocalID)
-        return GRF((!effective || (hw >= HW::Gen12HP)) ? 1 : 2);
+        return GRF((!effective || (hw >= HW::Xe_HP)) ? 1 : 2);
     else
         return GRF(1 + 3 * grfsPerLID());
 }

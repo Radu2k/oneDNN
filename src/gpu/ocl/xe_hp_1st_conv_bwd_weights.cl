@@ -84,7 +84,7 @@ __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) // attr:no-format
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) // attr:no-format
 #endif
 __kernel void
-gen12hp_1st_conv_bwd_weights(__global SRC_DATA_T *src,
+xe_hp_1st_conv_bwd_weights(__global SRC_DATA_T *src,
         volatile __global float *diff_wei, volatile __global float *diff_bias,
         __global DST_DATA_T *diff_dst) {
 

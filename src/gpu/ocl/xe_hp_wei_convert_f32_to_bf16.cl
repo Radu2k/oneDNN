@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 
 __attribute__((intel_reqd_sub_group_size(8)))
 __attribute__((reqd_work_group_size(8, 16, 1))) __kernel void
-gen12hp_wei_convert_f32_to_bf16(const __global float *wei_f32,
+xe_hp_wei_convert_f32_to_bf16(const __global float *wei_f32,
         const __global float *bia_f32, __global ushort *wei_bf16,
         __global ushort *bia_bf16) {
 

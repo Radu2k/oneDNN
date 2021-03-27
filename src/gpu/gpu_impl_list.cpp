@@ -29,13 +29,13 @@
 #include "gpu/ocl/gemm_inner_product.hpp"
 #include "gpu/ocl/gemm_matmul.hpp"
 #include "gpu/ocl/gemm_post_ops_inner_product.hpp"
-#if DNNL_WITH_GEN12HP
-#include "gpu/jit/gemm/gen12hp_systolic_gemm.hpp"
-#include "gpu/jit/gen12hp_convolution.hpp"
-#include "gpu/ocl/gen12hp_1st_bwd_convolution.hpp"
-#include "gpu/ocl/gen12hp_1x1_convolution.hpp"
-#include "gpu/ocl/gen12hp_bf16_convolution.hpp"
-#include "gpu/ocl/gen12hp_convolution.hpp"
+#if DNNL_WITH_XE_HP
+#include "gpu/jit/gemm/xe_hp_systolic_gemm.hpp"
+#include "gpu/jit/xe_hp_convolution.hpp"
+#include "gpu/ocl/xe_hp_1st_bwd_convolution.hpp"
+#include "gpu/ocl/xe_hp_1x1_convolution.hpp"
+#include "gpu/ocl/xe_hp_bf16_convolution.hpp"
+#include "gpu/ocl/xe_hp_convolution.hpp"
 #endif
 #include "gpu/ocl/gen12lp_x8s8x_1x1_convolution.hpp"
 #include "gpu/ocl/gen12lp_x8s8x_convolution.hpp"
@@ -91,15 +91,21 @@ const impl_list_item_t gpu_impl_list[] = {
         // Convolution
         INSTANCE(jit::gen_convolution_fwd_t),
         INSTANCE(jit::gen_convolution_bwd_data_t),
-#if DNNL_WITH_GEN12HP
-        INSTANCE(jit::gen12hp_convolution_fwd_t),
-        INSTANCE(jit::gen12hp_convolution_bwd_data_t),
-        INSTANCE(jit::gen12hp_convolution_bwd_weights_t),
-        INSTANCE(ocl::gen12hp_1x1_convolution_fwd_t),
-        INSTANCE(ocl::gen12hp_1st_convolution_bwd_weights_t),
-        INSTANCE(ocl::gen12hp_bf16_convolution_bwd_weights_t),
-        INSTANCE(ocl::gen12hp_convolution_fwd_t),
-        INSTANCE(ocl::gen12hp_convolution_bwd_data_t),
+#if DNNL_WITH_XE_HPC
+        INSTANCE(ocl::xe_hpc_1x1_convolution_fwd_t),
+        INSTANCE(ocl::xe_hpc_bf16_convolution_bwd_weights_t),
+        INSTANCE(ocl::xe_hpc_convolution_fwd_t),
+        INSTANCE(ocl::xe_hpc_convolution_bwd_data_t),
+#endif
+#if DNNL_WITH_XE_HP
+        INSTANCE(jit::xe_hp_convolution_fwd_t),
+        INSTANCE(jit::xe_hp_convolution_bwd_data_t),
+        INSTANCE(jit::xe_hp_convolution_bwd_weights_t),
+        INSTANCE(ocl::xe_hp_1x1_convolution_fwd_t),
+        INSTANCE(ocl::xe_hp_1st_convolution_bwd_weights_t),
+        INSTANCE(ocl::xe_hp_bf16_convolution_bwd_weights_t),
+        INSTANCE(ocl::xe_hp_convolution_fwd_t),
+        INSTANCE(ocl::xe_hp_convolution_bwd_data_t),
 #endif
         INSTANCE(ocl::gen12lp_x8s8x_1x1_convolution_fwd_t),
         INSTANCE(ocl::gen12lp_x8s8x_convolution_fwd_t),
@@ -148,8 +154,8 @@ const impl_list_item_t gpu_impl_list[] = {
         INSTANCE(ocl::ref_softmax_bwd_t),
 
 // GEMM (internal)
-#if DNNL_WITH_GEN12HP
-        INSTANCE(jit::gen12hp_systolic_gemm_t),
+#if DNNL_WITH_XE_HP
+        INSTANCE(jit::xe_hp_systolic_gemm_t),
 #endif
         INSTANCE(ocl::gemm_with_post_ops_t),
         INSTANCE(jit::gen_gemm_t),

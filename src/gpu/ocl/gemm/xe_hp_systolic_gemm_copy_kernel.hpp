@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GPU_OCL_GEMM_GEN12HP_SYSTOLIC_GEMM_COPY_KERNEL_HPP
-#define GPU_OCL_GEMM_GEN12HP_SYSTOLIC_GEMM_COPY_KERNEL_HPP
+#ifndef GPU_OCL_GEMM_XE_HP_SYSTOLIC_GEMM_COPY_KERNEL_HPP
+#define GPU_OCL_GEMM_XE_HP_SYSTOLIC_GEMM_COPY_KERNEL_HPP
 
 #include "common/c_types_map.hpp"
 #include "gpu/compute/compute.hpp"
@@ -26,7 +26,7 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-struct gen12hp_systolic_gemm_copy_kernel_t {
+struct xe_hp_systolic_gemm_copy_kernel_t {
     static status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx,
             data_type_t dt, bool copyb, bool trans, bool sum = false,
             bool clear_sum = false) {

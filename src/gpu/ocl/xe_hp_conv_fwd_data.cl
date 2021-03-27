@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2019-2020 Intel Corporation
+* Copyright 2019-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -91,7 +91,7 @@
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE))) // attr:no-format
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
+xe_hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
         const __global BIA_DATA_T *bias, __global DST_DATA_T *dst POST_OP_ARGS,
         float scale, const __global float *scales_per_oc) {
     const int group_oc = get_group_id(0) * OC_GROUP;

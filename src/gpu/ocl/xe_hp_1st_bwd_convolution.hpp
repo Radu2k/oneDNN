@@ -14,9 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#ifndef GPU_OCL_GEN12HP_1ST_BWD_CONVOLUTION_HPP
-#define GPU_OCL_GEN12HP_1ST_BWD_CONVOLUTION_HPP
+#if DNNL_WITH_XE_HP
+#ifndef GPU_OCL_XE_HP_1ST_BWD_CONVOLUTION_HPP
+#define GPU_OCL_XE_HP_1ST_BWD_CONVOLUTION_HPP
 
 #include <assert.h>
 
@@ -36,7 +36,7 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-struct gen12hp_1st_convolution_bwd_weights_t : public gpu_primitive_t {
+struct xe_hp_1st_convolution_bwd_weights_t : public gpu_primitive_t {
     struct pd_t : public gpu_convolution_bwd_weights_pd_t {
         pd_t(const convolution_desc_t *adesc, const primitive_attr_t *attr,
                 const convolution_fwd_pd_t *hint_fwd_pd)
@@ -49,7 +49,7 @@ struct gen12hp_1st_convolution_bwd_weights_t : public gpu_primitive_t {
         }
 
         DECLARE_COMMON_PD_T(
-                "ocl:gen12hp:1st", gen12hp_1st_convolution_bwd_weights_t);
+                "ocl:xe_hp:1st", xe_hp_1st_convolution_bwd_weights_t);
 
         status_t init(engine_t *engine) {
             using namespace data_type;
@@ -100,13 +100,13 @@ struct gen12hp_1st_convolution_bwd_weights_t : public gpu_primitive_t {
         status_t init_scratchpad();
     };
 
-    gen12hp_1st_convolution_bwd_weights_t(const pd_t *apd)
+    xe_hp_1st_convolution_bwd_weights_t(const pd_t *apd)
         : gpu_primitive_t(apd) {}
 
     status_t init(engine_t *engine) override {
         const char *kernel_name;
 
-        kernel_name = "gen12hp_1st_conv_bwd_weights";
+        kernel_name = "xe_hp_1st_conv_bwd_weights";
 
         if (pd()->conf.reorder_wei) {
             CHECK(pd()->rpd_wei_->create_primitive(wei_reorder_, engine));

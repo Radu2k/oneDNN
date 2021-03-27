@@ -14,9 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#ifndef GEN12HP_CONV_BWD_WEI_KERNEL_HPP
-#define GEN12HP_CONV_BWD_WEI_KERNEL_HPP
+#if DNNL_WITH_XE_HP
+#ifndef XE_HP_CONV_BWD_WEI_KERNEL_HPP
+#define XE_HP_CONV_BWD_WEI_KERNEL_HPP
 
 #include "gpu/compute/compute.hpp"
 #include "gpu/gpu_primitive.hpp"
@@ -27,7 +27,7 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
-status_t gen12hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
+status_t xe_hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
         std::vector<compute::kernel_t> &kernels, gpu_primitive_t *primitive,
         engine_t *engine);
 
@@ -36,5 +36,5 @@ status_t gen12hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
 } // namespace impl
 } // namespace dnnl
 
-#endif // GEN12HP_CONV_BWD_WEI_KERNEL_HPP
-#endif // DNNL_WITH_GEN12HP
+#endif // XE_HP_CONV_BWD_WEI_KERNEL_HPP
+#endif // DNNL_WITH_XE_HP

@@ -105,30 +105,30 @@ const gemm_recipe_t gemm_recipes[] = {
     {ngen::HW::Gen12LP, "OOI", "NTN", {}, 16, 32, "ab8 ab4 ab l4 int k16 cab1 wg 4x4", {}, {}},
     {ngen::HW::Gen12LP, "OOI", "TNN", {}, 16, 16, "as8 as8 ab l4 vnc k64 cab1 wg 4x4", {}, {}},
     {ngen::HW::Gen12LP, "OOI", "TTN", {}, 16, 32, "ab4 ab4 ab l4 int k16 cab1 wg 4x4", {}, {}},
-#if DNNL_WITH_GEN12HP
-    {ngen::HW::Gen12HP, "HHH", "NNN", {}, 32, 32, "ab4/1x2 as4/1x2 ab l4 cb1 wg 8x2 cs nmk", {}, {}},
-    {ngen::HW::Gen12HP, "HHH", "NTN", {}, 32, 32, "ab4/1x2 ab2/1x2 ab l4 cs", {}, {}},
-    {ngen::HW::Gen12HP, "HHH", "TNN", {}, 16, 16, "as8 as32 ab l4 cab1 wg 4x4 cs", {}, {}},
-    {ngen::HW::Gen12HP, "HHH", "TTN", {}, 32, 32, "as4/1x2 ab4/1x2 ab l4 ca1 wg 2x8 cs nmk", {}, {}},
-    {ngen::HW::Gen12HP, "SSS", "NNN", {}, 64, 8,  "sb1x2 su4/2x2 sb ca1 wg 2x8 cs di bm8192 bn8192 bk8192", {}, {}},
-    {ngen::HW::Gen12HP, "SSS", "NNN", {}, 32, 8,  "sb4 sb8 sb cab1 wg 4x4 cs di bm4096 bn4096 bk8192", {}, {}},
-    {ngen::HW::Gen12HP, "SSS", "NNN", {}, 16, 8,  "sb16 sb16 sb cab1 wg 4x4 cs di bm2048 bn2048 bk8192", {}, {}},
-    {ngen::HW::Gen12HP, "SSS", "NTN", {}, 32, 16, "sb4/2x2 sb4x2 sb cs di bm8192 bn8192 bk8192", {}, {}},
-    {ngen::HW::Gen12HP, "SSS", "TNN", {}, 16, 16, "sb8 sb8 su cab1 wg 4x4 cs di bm8192 bn8192 bk8192", {}, {}},
-    {ngen::HW::Gen12HP, "SSS", "TTN", {}, 8,  64, "su4/2x2 sb1x2 su cb1 wg 8x2 cs di fn bm8192 bn8192 bk8192", {}, {}},
-    {ngen::HW::Gen12HP, "OOI", "NNN", {}, 16, 16, "sb32 sb32 sb l4 cab1 wg 4x4 cs di", {}, {}},
-    {ngen::HW::Gen12HP, "OOI", "NNN", {}, 32,  4, "sb8x2 su16x2 sb l4 ca1 wg 2x8 cs di", {}, {}},
-    {ngen::HW::Gen12HP, "OOI", "NTN", {}, 32, 16, "sb8x2 sb8x2 sb l4 cab1 wg 4x4 cs di", {}, {}},
-    {ngen::HW::Gen12HP, "OOI", "TNN", {}, 16, 16, "sb32 sb32 sb l4 cab1 wg 4x4 cs di", {}, {}},
-    {ngen::HW::Gen12HP, "OOI", "TTN", {}, 16, 16, "sb32 sb32 sb l4 cab1 wg 4x4 cs di", {}, {}},
-    {ngen::HW::Gen12HP, "HHH", "NNN", {}, 16, 4,  "ab2x2 as8 ab l4 cs di", {}, {}},                  // DLRM
-    {ngen::HW::Gen12HP, "HHH", "TNN", {}, 16, 8,  "sb16 sb16 ab cab2 wg 2x4 cs pab", {}, {}},        // DLRM
-    {ngen::HW::Gen12HP, "BBS", "NNN", {}, 32,  8, "sb16 sb16 ab cab1 wg 4x4 fn nmk cs pab", {}, {}}, // DLRM
-    {ngen::HW::Gen12HP, "BBS", "NTN", {}, 16, 16, "sb1x4 sb1x4 sb l4 cs di nmk fn pab", {}, {}},     // DLRM
-    {ngen::HW::Gen12HP, "BBS", "TNN", {}, 32,  8, "sb16 sb16 ab ca2 wg 1x4 fn nmk cs pab", {}, {}},  // DLRM
-    {ngen::HW::Gen12HP, "BBS", "TTN", {}, 8,  32, "sb16 sb16 as cab1 wg 4x4 cs pab", {}, {}},        // DLRM
-    {ngen::HW::Gen12HP, "HHH", "NNN", {}, 32, 16, "ab16/8 as16 ab l4 cab1 wg 4x4 cs di", {}, 'A'},   // BERT
-    {ngen::HW::Gen12HP, "HHH", "NNN", {}, 32, 16, "ab8 ab16 ab l4 ca1 wg 2x8 cs di", {}, 'B'},       // BERT
+#if DNNL_WITH_XE_HP
+    {ngen::HW::Xe_HP, "HHH", "NNN", {}, 32, 32, "ab4/1x2 as4/1x2 ab l4 cb1 wg 8x2 cs nmk", {}, {}},
+    {ngen::HW::Xe_HP, "HHH", "NTN", {}, 32, 32, "ab4/1x2 ab2/1x2 ab l4 cs", {}, {}},
+    {ngen::HW::Xe_HP, "HHH", "TNN", {}, 16, 16, "as8 as32 ab l4 cab1 wg 4x4 cs", {}, {}},
+    {ngen::HW::Xe_HP, "HHH", "TTN", {}, 32, 32, "as4/1x2 ab4/1x2 ab l4 ca1 wg 2x8 cs nmk", {}, {}},
+    {ngen::HW::Xe_HP, "SSS", "NNN", {}, 64, 8,  "sb1x2 su4/2x2 sb ca1 wg 2x8 cs di bm8192 bn8192 bk8192", {}, {}},
+    {ngen::HW::Xe_HP, "SSS", "NNN", {}, 32, 8,  "sb4 sb8 sb cab1 wg 4x4 cs di bm4096 bn4096 bk8192", {}, {}},
+    {ngen::HW::Xe_HP, "SSS", "NNN", {}, 16, 8,  "sb16 sb16 sb cab1 wg 4x4 cs di bm2048 bn2048 bk8192", {}, {}},
+    {ngen::HW::Xe_HP, "SSS", "NTN", {}, 32, 16, "sb4/2x2 sb4x2 sb cs di bm8192 bn8192 bk8192", {}, {}},
+    {ngen::HW::Xe_HP, "SSS", "TNN", {}, 16, 16, "sb8 sb8 su cab1 wg 4x4 cs di bm8192 bn8192 bk8192", {}, {}},
+    {ngen::HW::Xe_HP, "SSS", "TTN", {}, 8,  64, "su4/2x2 sb1x2 su cb1 wg 8x2 cs di fn bm8192 bn8192 bk8192", {}, {}},
+    {ngen::HW::Xe_HP, "OOI", "NNN", {}, 16, 16, "sb32 sb32 sb l4 cab1 wg 4x4 cs di", {}, {}},
+    {ngen::HW::Xe_HP, "OOI", "NNN", {}, 32,  4, "sb8x2 su16x2 sb l4 ca1 wg 2x8 cs di", {}, {}},
+    {ngen::HW::Xe_HP, "OOI", "NTN", {}, 32, 16, "sb8x2 sb8x2 sb l4 cab1 wg 4x4 cs di", {}, {}},
+    {ngen::HW::Xe_HP, "OOI", "TNN", {}, 16, 16, "sb32 sb32 sb l4 cab1 wg 4x4 cs di", {}, {}},
+    {ngen::HW::Xe_HP, "OOI", "TTN", {}, 16, 16, "sb32 sb32 sb l4 cab1 wg 4x4 cs di", {}, {}},
+    {ngen::HW::Xe_HP, "HHH", "NNN", {}, 16, 4,  "ab2x2 as8 ab l4 cs di", {}, {}},                  // DLRM
+    {ngen::HW::Xe_HP, "HHH", "TNN", {}, 16, 8,  "sb16 sb16 ab cab2 wg 2x4 cs pab", {}, {}},        // DLRM
+    {ngen::HW::Xe_HP, "BBS", "NNN", {}, 32,  8, "sb16 sb16 ab cab1 wg 4x4 fn nmk cs pab", {}, {}}, // DLRM
+    {ngen::HW::Xe_HP, "BBS", "NTN", {}, 16, 16, "sb1x4 sb1x4 sb l4 cs di nmk fn pab", {}, {}},     // DLRM
+    {ngen::HW::Xe_HP, "BBS", "TNN", {}, 32,  8, "sb16 sb16 ab ca2 wg 1x4 fn nmk cs pab", {}, {}},  // DLRM
+    {ngen::HW::Xe_HP, "BBS", "TTN", {}, 8,  32, "sb16 sb16 as cab1 wg 4x4 cs pab", {}, {}},        // DLRM
+    {ngen::HW::Xe_HP, "HHH", "NNN", {}, 32, 16, "ab16/8 as16 ab l4 cab1 wg 4x4 cs di", {}, 'A'},   // BERT
+    {ngen::HW::Xe_HP, "HHH", "NNN", {}, 32, 16, "ab8 ab16 ab l4 ca1 wg 2x8 cs di", {}, 'B'},       // BERT
 #endif
 };
 // clang-format on

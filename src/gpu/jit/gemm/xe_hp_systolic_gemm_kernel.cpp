@@ -14,10 +14,10 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
+#if DNNL_WITH_XE_HP
 #include <assert.h>
 
-#include "gpu/jit/gemm/gen12hp_systolic_gemm_kernel.hpp"
+#include "gpu/jit/gemm/xe_hp_systolic_gemm_kernel.hpp"
 
 using namespace ngen;
 
@@ -32,14 +32,14 @@ static constexpr uint16_t flag_c_bias_row = FlagCORow;
 static constexpr uint16_t flag_c_bias_col = FlagCOColumn;
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::barrier_prep(
+void xe_hp_systolic_gemm_kernel_t<hw>::barrier_prep(
         const InstructionModifier &swsb, const GRF &header) {
     and_<uint32_t>(1 | swsb, header[2], r0_save[2],
             uint32_t((hw >= HW::Gen12p7) ? 0xFFFF0000 : 0x7F000000));
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::mul_constant(
+void xe_hp_systolic_gemm_kernel_t<hw>::mul_constant(
         const InstructionModifier &mod, const RegData &dst, const RegData &src0,
         int32_t src1) {
     if (src1 == 0)
@@ -53,7 +53,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::mul_constant(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::zero_c() {
+void xe_hp_systolic_gemm_kernel_t<hw>::zero_c() {
     for (int ii = 0; ii < (cfg.tile_m / 8); ii++) {
         for (int o = 0; o < cfg.tile_n; o += 4) {
             mov<float>(16, c_regs[ii * acc_stride + o], 0.0f);
@@ -63,7 +63,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::zero_c() {
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::scattered_setup_c(
+void xe_hp_systolic_gemm_kernel_t<hw>::scattered_setup_c(
         int stride, bool load) {
     // Set up SIMD16 scattered access pointers to emulate block access to C
     //   (2 columns x 8 regs/column).
@@ -89,7 +89,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::scattered_setup_c(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::block_setup_c(
+void xe_hp_systolic_gemm_kernel_t<hw>::block_setup_c(
         bool remainder, bool load) {
     auto c_elem_bytes = getBytes(cfg.c_type);
     if (remainder) {
@@ -128,7 +128,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::block_setup_c(
 }
 
 template <HW hw>
-int gen12hp_systolic_gemm_kernel_t<hw>::interleave(int j) {
+int xe_hp_systolic_gemm_kernel_t<hw>::interleave(int j) {
     // Convert logical column index in C to the corresponding interleaved index.
     int half_n = cfg.tile_n / 2;
     bool second = (j >= half_n);
@@ -137,7 +137,7 @@ int gen12hp_systolic_gemm_kernel_t<hw>::interleave(int j) {
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
+void xe_hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
         bool remainder, bool c_align16) {
     Label done;
 
@@ -326,7 +326,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
             }
         }
 
-        // Half-precision C must be upconverted to single precision separately (no hf/f mixed mode support in Gen12HP).
+        // Half-precision C must be upconverted to single precision separately (no hf/f mixed mode support in Xe_HP).
         // Similarly integer C must be upconverted if alpha or beta float.
         auto old_type = cfg.c_type;
         if (!beta0) {
@@ -401,7 +401,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::load_update_c(
+void xe_hp_systolic_gemm_kernel_t<hw>::load_update_c(
         bool remainder, bool c_align16) {
     if (cfg.early_c_bias) add_c_bias();
     load_update_c_internal(remainder, c_align16);
@@ -409,8 +409,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::load_update_c(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::store_c(
-        bool remainder, bool c_align16) {
+void xe_hp_systolic_gemm_kernel_t<hw>::store_c(bool remainder, bool c_align16) {
     Label done;
 
     const auto c_elem_bytes = getBytes(cfg.c_type);
@@ -544,7 +543,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::store_c(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::load_c_bias(bool remainder) {
+void xe_hp_systolic_gemm_kernel_t<hw>::load_c_bias(bool remainder) {
     if (cfg.c_bias == bias_t::runtime) {
         Label label_row, label_col, label_done;
         and_(1 | nz | f1[0], null.ud(), uflags, flag_c_bias_col);
@@ -568,7 +567,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::load_c_bias(bool remainder) {
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::load_c_bias(
+void xe_hp_systolic_gemm_kernel_t<hw>::load_c_bias(
         bias_t c_bias, bool remainder) {
     if (!remainder && getBytes(cfg.co_type) == 4)
         load_c_bias_block(c_bias);
@@ -577,7 +576,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::load_c_bias(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::load_c_bias_block(bias_t c_bias) {
+void xe_hp_systolic_gemm_kernel_t<hw>::load_c_bias_block(bias_t c_bias) {
     assert(uoff_co.getOffset() == 2 && uoff_co2.getOffset() == 2);
 
     switch (c_bias) {
@@ -606,7 +605,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::load_c_bias_block(bias_t c_bias) {
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::load_c_bias_scattered(
+void xe_hp_systolic_gemm_kernel_t<hw>::load_c_bias_scattered(
         bias_t c_bias, bool remainder) {
     auto bytes = getBytes(cfg.co_type);
     auto lg2_bytes = ngen::utils::log2(bytes);
@@ -675,7 +674,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::load_c_bias_scattered(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::convert_c_bias(
+void xe_hp_systolic_gemm_kernel_t<hw>::convert_c_bias(
         bias_t c_bias, ngen::DataType dst_type) {
     auto src_type = cfg.co_type;
 
@@ -714,7 +713,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::convert_c_bias(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::add_c_bias() {
+void xe_hp_systolic_gemm_kernel_t<hw>::add_c_bias() {
     if (cfg.c_bias == bias_t::runtime) {
         Label label_row, label_col, label_done;
         and_(1 | nz | f1[0], null.ud(), uflags, flag_c_bias_col);
@@ -738,7 +737,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::add_c_bias() {
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::add_c_bias(bias_t c_bias) {
+void xe_hp_systolic_gemm_kernel_t<hw>::add_c_bias(bias_t c_bias) {
     auto cur_type = cfg.early_c_bias ? cfg.acc_type : cfg.c_type;
 
     convert_c_bias(c_bias, cur_type);
@@ -783,13 +782,13 @@ void gen12hp_systolic_gemm_kernel_t<hw>::add_c_bias(bias_t c_bias) {
 }
 
 template <HW hw>
-bool gen12hp_systolic_gemm_kernel_t<hw>::merge_abc_bias() {
+bool xe_hp_systolic_gemm_kernel_t<hw>::merge_abc_bias() {
     return cfg.a_bias && cfg.b_bias && (cfg.c_bias == bias_t::fixed)
             && cfg.alpha1;
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::add_ab_bias() {
+void xe_hp_systolic_gemm_kernel_t<hw>::add_ab_bias() {
     auto a_row_sums = utemp[6] - utemp[9];
     auto b_col_sums = utemp[0] - utemp[5];
     GRF headers[3] = {uheaders[0], uheaders[2], uheaders[4]};
@@ -849,7 +848,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::add_ab_bias() {
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::update_c(bool remainder) {
+void xe_hp_systolic_gemm_kernel_t<hw>::update_c(bool remainder) {
     // C is arranged in 8x8 column major blocks organized in a 4x6 row major array (allowing a tile size of up to 32x48).
     // Each 8x8 block is split in two 8x4 blocks (due to dpasw).
     // Rearrange into contiguous columns and use hword x4 stores, taking 4 columns at a time.
@@ -911,7 +910,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::update_c(bool remainder) {
 
 // Update C, checking at runtime for remainder handling.
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::update_c() {
+void xe_hp_systolic_gemm_kernel_t<hw>::update_c() {
     Label partial_c;
 
     // Turn on auto-SWSB for the remainder of the kernel.
@@ -953,7 +952,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::update_c() {
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::dpasw_typed(
+void xe_hp_systolic_gemm_kernel_t<hw>::dpasw_typed(
         const InstructionModifier &mod, uint8_t sdepth, uint8_t rcount,
         const GRF &c_reg, const GRF &a_reg, const GRF &b_reg) {
     dpasw(mod, sdepth, rcount, c_reg.retype(cfg.acc_type),
@@ -962,7 +961,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::dpasw_typed(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::multiply_chunk(int ao, int i0,
+void xe_hp_systolic_gemm_kernel_t<hw>::multiply_chunk(int ao, int i0,
         bool waitb, const InstructionModifier &swsb0,
         const InstructionModifier &swsb_end) {
     int co = i0 * 6;
@@ -1016,7 +1015,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::multiply_chunk(int ao, int i0,
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::multiply(
+void xe_hp_systolic_gemm_kernel_t<hw>::multiply(
         int buffer, bool last_multiply) {
     // Load half of A (16x32) -- hopefully broadcast from SLM to this row -- and half of B, interleaved.
     InstructionModifier swsb = last_multiply ? SWSB(1) : dep_addr0;
@@ -1083,8 +1082,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::multiply(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::copy_load(
-        int store_buffer, bool use_c) {
+void xe_hp_systolic_gemm_kernel_t<hw>::copy_load(int store_buffer, bool use_c) {
     // Load new A and B and increment load pointers
     if (!cfg.emulate64) {
         sync(SyncFunction::nop,
@@ -1142,7 +1140,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::copy_load(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::copy_store(
+void xe_hp_systolic_gemm_kernel_t<hw>::copy_store(
         int store_buffer, bool first) {
     auto aoffset = first ? slm_a_offset_store_init : slm_a_offset_store;
     auto boffset = first ? slm_b_offset_store_init : slm_b_offset_store;
@@ -1185,7 +1183,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::copy_store(
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::store_signal(bool force_fence) {
+void xe_hp_systolic_gemm_kernel_t<hw>::store_signal(bool force_fence) {
     if (cfg.use_slm_fence || force_fence) {
         // Signal SLM data ready once memory fence returns, asynchronously
         sync(SyncFunction::nop, dep_addr0);
@@ -1202,7 +1200,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::store_signal(bool force_fence) {
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::body() {
+void xe_hp_systolic_gemm_kernel_t<hw>::body() {
     Label top, bottom, skip_main, rem_top, rem_bottom;
 
     if (!cfg.global_3x_buf) {
@@ -1402,7 +1400,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::body() {
 }
 
 template <HW hw>
-void gen12hp_systolic_gemm_kernel_t<hw>::epilogue() {
+void xe_hp_systolic_gemm_kernel_t<hw>::epilogue() {
     // Global memory fence and end of thread.
     memfence(SWSB(sb14), r16);
     mov<uint32_t>(8, r255, r0_save);
@@ -1410,8 +1408,7 @@ void gen12hp_systolic_gemm_kernel_t<hw>::epilogue() {
 }
 
 template <HW hw>
-gen12hp_systolic_gemm_kernel_t<hw>::gen12hp_systolic_gemm_kernel_t(
-        config_t cfg_)
+xe_hp_systolic_gemm_kernel_t<hw>::xe_hp_systolic_gemm_kernel_t(config_t cfg_)
     : cfg(cfg_) {
     if (!cfg.valid()) assert(!"Invalid configuration");
 
@@ -1434,7 +1431,7 @@ gen12hp_systolic_gemm_kernel_t<hw>::gen12hp_systolic_gemm_kernel_t(
     //                           [, int *co, int offset_co [, uint flags]]
     //                           [, int stride_a, int stride_b, int stride_c);
 
-    externalName("gen12hp_systolic_gemm_kernel");
+    externalName("xe_hp_systolic_gemm_kernel");
     newArgument("ap", ExternalArgumentType::GlobalPtr);
     newArgument("bp", ExternalArgumentType::GlobalPtr);
     newArgument("c", ExternalArgumentType::GlobalPtr);
@@ -1700,8 +1697,8 @@ gen12hp_systolic_gemm_kernel_t<hw>::gen12hp_systolic_gemm_kernel_t(
         nop();
 }
 
-template class gen12hp_systolic_gemm_kernel_t<HW::Gen12HP>;
-template class gen12hp_systolic_gemm_kernel_t<HW::Gen12p7>;
+template class xe_hp_systolic_gemm_kernel_t<HW::Xe_HP>;
+template class xe_hp_systolic_gemm_kernel_t<HW::Gen12p7>;
 
 } // namespace jit
 } // namespace gpu

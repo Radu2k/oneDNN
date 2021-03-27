@@ -14,9 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#ifndef GPU_JIT_GEN12HP_SYSTOLIC_GEMM_HPP
-#define GPU_JIT_GEN12HP_SYSTOLIC_GEMM_HPP
+#if DNNL_WITH_XE_HP
+#ifndef GPU_JIT_XE_HP_SYSTOLIC_GEMM_HPP
+#define GPU_JIT_XE_HP_SYSTOLIC_GEMM_HPP
 
 #include <assert.h>
 #include <memory>
@@ -36,7 +36,7 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
-struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
+struct xe_hp_systolic_gemm_t : public gpu_gemm_t {
     struct pd_t : public gpu_gemm_pd_t {
         using hint_class = void;
 
@@ -44,7 +44,7 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
                 const hint_class *)
             : gpu_gemm_pd_t(adesc, attr, nullptr) {}
 
-        DECLARE_COMMON_PD_T("ngen:gen12hp:gemm:any", gen12hp_systolic_gemm_t);
+        DECLARE_COMMON_PD_T("ngen:xe_hp:gemm:any", xe_hp_systolic_gemm_t);
 
         status_t init(engine_t *engine);
 
@@ -149,7 +149,7 @@ struct gen12hp_systolic_gemm_t : public gpu_gemm_t {
             engine_t *engine, gpu_resource_t *r) const override;
 
 public:
-    gen12hp_systolic_gemm_t(const pd_t *apd) : gpu_gemm_t(apd) {}
+    xe_hp_systolic_gemm_t(const pd_t *apd) : gpu_gemm_t(apd) {}
 
     virtual status_t execute(const gemm_exec_ctx_t &ctx) const override;
 

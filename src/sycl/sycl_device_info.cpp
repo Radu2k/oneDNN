@@ -78,7 +78,7 @@ status_t sycl_device_info_t::init_arch(engine_t *engine) {
         assert(!"not_expected");
     }
 
-    // XXX: temporary WA for different Gen12HP devices
+    // XXX: temporary WA for different Xe_HP devices
 #if DNNL_WITH_GEN12P7
     if (gpu_arch_ == gpu::compute::gpu_arch_t::gen12p7
             && !device.has_extension(

@@ -14,9 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#ifndef GPU_OCL_GEN12HP_BF16_CONVOLUTION_HPP
-#define GPU_OCL_GEN12HP_BF16_CONVOLUTION_HPP
+#if DNNL_WITH_XE_HP
+#ifndef GPU_OCL_XE_HP_BF16_CONVOLUTION_HPP
+#define GPU_OCL_XE_HP_BF16_CONVOLUTION_HPP
 
 #include "common/c_types_map.hpp"
 #include "gpu/compute/compute.hpp"
@@ -31,21 +31,20 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-struct gen12hp_bf16_convolution_bwd_weights_t : public gpu_primitive_t {
+struct xe_hp_bf16_convolution_bwd_weights_t : public gpu_primitive_t {
     struct pd_t : public gpu_convolution_bwd_weights_pd_t {
         pd_t(const convolution_desc_t *adesc, const primitive_attr_t *attr,
                 const convolution_fwd_pd_t *hint_fwd_pd)
             : gpu_convolution_bwd_weights_pd_t(adesc, attr, hint_fwd_pd) {}
 
-        DECLARE_COMMON_PD_T(
-                "ocl:gen12hp", gen12hp_bf16_convolution_bwd_weights_t);
+        DECLARE_COMMON_PD_T("ocl:xe_hp", xe_hp_bf16_convolution_bwd_weights_t);
 
         status_t init(engine_t *engine) {
             using namespace prop_kind;
             using namespace data_type;
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
-            if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_gen12p7())
                 return status::unimplemented;
 
             bool ok = desc()->prop_kind == backward_weights
@@ -82,12 +81,12 @@ struct gen12hp_bf16_convolution_bwd_weights_t : public gpu_primitive_t {
         std::vector<const char *> kernel_names;
         // split barrier is disabled due to worse performance
         if (pd()->conf.use_split_barrier)
-            kernel_names.push_back("gen12hp_conv_bwd_wei_bf16_split_bar");
+            kernel_names.push_back("xe_hp_conv_bwd_wei_bf16_split_bar");
         else
-            kernel_names.push_back("gen12hp_conv_bwd_wei_bf16");
-        kernel_names.push_back("gen12hp_wei_f32_zero_init");
+            kernel_names.push_back("xe_hp_conv_bwd_wei_bf16");
+        kernel_names.push_back("xe_hp_wei_f32_zero_init");
         if (pd()->conf.weights_data_type == data_type::bf16)
-            kernel_names.push_back("gen12hp_wei_convert_f32_to_bf16");
+            kernel_names.push_back("xe_hp_wei_convert_f32_to_bf16");
 
         compute::kernel_ctx_t kernel_ctx;
         auto status = pd()->init_kernel_ctx(kernel_ctx);
@@ -104,7 +103,7 @@ struct gen12hp_bf16_convolution_bwd_weights_t : public gpu_primitive_t {
         return status::success;
     }
 
-    gen12hp_bf16_convolution_bwd_weights_t(const pd_t *apd)
+    xe_hp_bf16_convolution_bwd_weights_t(const pd_t *apd)
         : gpu_primitive_t(apd) {}
 
     virtual status_t execute(const exec_ctx_t &ctx) const override {

@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#include "gpu/jit/gen12hp_conv_bwd_wei_kernel.hpp"
+#if DNNL_WITH_XE_HP
+#include "gpu/jit/xe_hp_conv_bwd_wei_kernel.hpp"
 
 #include "gpu/jit/jit_generator.hpp"
 #include "gpu/jit/ngen/ngen_register_allocator.hpp"
@@ -30,7 +30,7 @@ namespace jit {
 using namespace ngen;
 
 template <gpu_gen_t hw>
-class gen12hp_conv_bwd_wei_init_kernel_t : public jit_generator<hw> {
+class xe_hp_conv_bwd_wei_init_kernel_t : public jit_generator<hw> {
 public:
     NGEN_FORWARD_OPENCL(hw);
 
@@ -38,7 +38,7 @@ public:
     RegisterAllocator ra;
 
 public:
-    gen12hp_conv_bwd_wei_init_kernel_t(const conv_conf_t &conf)
+    xe_hp_conv_bwd_wei_init_kernel_t(const conv_conf_t &conf)
         : conf(conf), ra(hw) {
         newArgument("wei", ExternalArgumentType::GlobalPtr);
         newArgument("bia", ExternalArgumentType::GlobalPtr);
@@ -152,7 +152,7 @@ public:
 };
 
 template <gpu_gen_t hw>
-class gen12hp_conv_bwd_wei_cvt_kernel_t : public jit_generator<hw> {
+class xe_hp_conv_bwd_wei_cvt_kernel_t : public jit_generator<hw> {
 public:
     NGEN_FORWARD_OPENCL(hw);
 
@@ -160,7 +160,7 @@ public:
     RegisterAllocator ra;
 
 public:
-    gen12hp_conv_bwd_wei_cvt_kernel_t(const conv_conf_t &conf)
+    xe_hp_conv_bwd_wei_cvt_kernel_t(const conv_conf_t &conf)
         : conf(conf), ra(hw) {
         newArgument("wei_bf16", ExternalArgumentType::GlobalPtr);
         newArgument("bia_bf16", ExternalArgumentType::GlobalPtr);
@@ -328,7 +328,7 @@ public:
 };
 
 template <gpu_gen_t hw>
-class gen12hp_conv_bwd_wei_conv_kernel_t : public jit_generator<hw> {
+class xe_hp_conv_bwd_wei_conv_kernel_t : public jit_generator<hw> {
 public:
     NGEN_FORWARD_OPENCL(hw);
 
@@ -392,7 +392,7 @@ public:
     GRF r_sfence, r_mfence, r_bar;
 
 public:
-    gen12hp_conv_bwd_wei_conv_kernel_t(const conv_conf_t &conf)
+    xe_hp_conv_bwd_wei_conv_kernel_t(const conv_conf_t &conf)
         : conf(conf), ra(hw) {
 
         proto();
@@ -668,7 +668,7 @@ public:
         slm_blk_sz_in_ow = slm_blk_sz / 16;
         slm_buf_sz_in_ow = slm_buf_sz / 16;
 
-        externalName("gen12hp_conv_bwd_wei");
+        externalName("xe_hp_conv_bwd_wei");
         requireLocalID(3);
         requireLocalSize();
         requireGRF(256);
@@ -1574,7 +1574,7 @@ public:
     }
 };
 
-status_t gen12hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
+status_t xe_hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
         std::vector<compute::kernel_t> &kernels, gpu_primitive_t *primitive,
         engine_t *engine) {
 
@@ -1588,21 +1588,26 @@ status_t gen12hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
     auto device_info = compute_engine->device_info();
 
     switch (device_info->gpu_arch()) {
-        case gpu_arch_t::gen12hp:
+        case gpu_arch_t::xe_hp:
             jit_gen_wei_init.reset(
-                    new gen12hp_conv_bwd_wei_init_kernel_t<gpu_gen12hp>(conf));
+                    new xe_hp_conv_bwd_wei_init_kernel_t<ngen::HW::Xe_HP>(
+                            conf));
             jit_gen_wei_cvt.reset(
-                    new gen12hp_conv_bwd_wei_cvt_kernel_t<gpu_gen12hp>(conf));
+                    new xe_hp_conv_bwd_wei_cvt_kernel_t<ngen::HW::Xe_HP>(conf));
             jit_gen_convolution.reset(
-                    new gen12hp_conv_bwd_wei_conv_kernel_t<gpu_gen12hp>(conf));
+                    new xe_hp_conv_bwd_wei_conv_kernel_t<ngen::HW::Xe_HP>(
+                            conf));
             break;
-        case gpu_arch_t::gen12p7:
+        case gpu_arch_t::xe_hpc:
             jit_gen_wei_init.reset(
-                    new gen12hp_conv_bwd_wei_init_kernel_t<gpu_gen12p7>(conf));
+                    new xe_hp_conv_bwd_wei_init_kernel_t<ngen::HW::Xe_HPC>(
+                            conf));
             jit_gen_wei_cvt.reset(
-                    new gen12hp_conv_bwd_wei_cvt_kernel_t<gpu_gen12p7>(conf));
+                    new xe_hp_conv_bwd_wei_cvt_kernel_t<ngen::HW::Xe_HPC>(
+                            conf));
             jit_gen_convolution.reset(
-                    new gen12hp_conv_bwd_wei_conv_kernel_t<gpu_gen12p7>(conf));
+                    new xe_hp_conv_bwd_wei_conv_kernel_t<ngen::HW::Xe_HPC>(
+                            conf));
             break;
         default: return status::runtime_error;
     }

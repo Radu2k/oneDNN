@@ -148,7 +148,7 @@ void block_write_dst(int n, const DST_DATA_T *d, __global DST_DATA_T *dst);
 
 __attribute__((intel_reqd_sub_group_size(SUB_GROUP_SIZE)))
 __attribute__((reqd_work_group_size(LWS_0, LWS_1, LWS_2))) __kernel void
-gen12hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
+xe_hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
         const __global WEI_DATA_T *wei, const __global BIA_DATA_T *bias,
         __global DST_DATA_T *dst POST_OP_ARGS, float scale,
         const __global float *scales_per_oc) {

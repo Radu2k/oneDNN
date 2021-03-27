@@ -14,9 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#ifndef GPU_JIT_GEN12HP_CONVOLUTION_HPP
-#define GPU_JIT_GEN12HP_CONVOLUTION_HPP
+#if DNNL_WITH_XE_HP
+#ifndef GPU_JIT_XE_HP_CONVOLUTION_HPP
+#define GPU_JIT_XE_HP_CONVOLUTION_HPP
 
 #include "common/c_types_map.hpp"
 #include "gpu/compute/compute.hpp"
@@ -30,11 +30,11 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
-struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
+struct xe_hp_convolution_fwd_t : public gpu_primitive_t {
     struct pd_t : public gpu_convolution_fwd_pd_t {
         using gpu_convolution_fwd_pd_t::gpu_convolution_fwd_pd_t;
 
-        DECLARE_COMMON_PD_T("ngen:gen12hp", gen12hp_convolution_fwd_t);
+        DECLARE_COMMON_PD_T("ngen:xe_hp", xe_hp_convolution_fwd_t);
 
         status_t init(engine_t *engine) {
             using namespace prop_kind;
@@ -43,7 +43,7 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
 
-            if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_gen12p7())
                 return status::unimplemented;
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;
@@ -158,11 +158,11 @@ private:
     const int OSCALES_ = 0;
 };
 
-struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
+struct xe_hp_convolution_bwd_data_t : public gpu_primitive_t {
     struct pd_t : public gpu_convolution_bwd_data_pd_t {
         using gpu_convolution_bwd_data_pd_t::gpu_convolution_bwd_data_pd_t;
 
-        DECLARE_COMMON_PD_T("ngen:gen12hp", gen12hp_convolution_bwd_data_t);
+        DECLARE_COMMON_PD_T("ngen:xe_hp", xe_hp_convolution_bwd_data_t);
 
         status_t init(engine_t *engine) {
             using namespace prop_kind;
@@ -171,7 +171,7 @@ struct gen12hp_convolution_bwd_data_t : public gpu_primitive_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
 
-            if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_gen12p7())
                 return status::unimplemented;
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;
@@ -233,12 +233,12 @@ private:
     compute::kernel_t kernel_;
 };
 
-struct gen12hp_convolution_bwd_weights_t : public gpu_primitive_t {
+struct xe_hp_convolution_bwd_weights_t : public gpu_primitive_t {
     struct pd_t : public gpu_convolution_bwd_weights_pd_t {
         using gpu_convolution_bwd_weights_pd_t::
                 gpu_convolution_bwd_weights_pd_t;
 
-        DECLARE_COMMON_PD_T("ngen:gen12hp", gen12hp_convolution_bwd_weights_t);
+        DECLARE_COMMON_PD_T("ngen:xe_hp", xe_hp_convolution_bwd_weights_t);
 
         status_t init(engine_t *engine) {
             using namespace prop_kind;
@@ -247,7 +247,7 @@ struct gen12hp_convolution_bwd_weights_t : public gpu_primitive_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
 
-            if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpc())
                 return status::unimplemented;
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;

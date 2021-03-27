@@ -14,11 +14,11 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#include "gpu/jit/gen12hp_convolution.hpp"
+#if DNNL_WITH_XE_HP
+#include "gpu/jit/xe_hp_convolution.hpp"
 
-#include "gpu/jit/gen12hp_conv_bwd_wei_kernel.hpp"
-#include "gpu/jit/gen12hp_conv_data_kernel.hpp"
+#include "gpu/jit/xe_hp_conv_bwd_wei_kernel.hpp"
+#include "gpu/jit/xe_hp_conv_data_kernel.hpp"
 #include "gpu/ocl/ocl_gpu_engine.hpp"
 
 namespace dnnl {
@@ -29,7 +29,7 @@ namespace jit {
 using namespace dnnl::impl::data_type;
 using namespace dnnl::impl::format_tag;
 
-status_t gen12hp_convolution_data_common_init_conf(engine_t *engine,
+status_t xe_hp_convolution_data_common_init_conf(engine_t *engine,
         conv_conf_t &conf, const memory_desc_t &src_md,
         const memory_desc_t &wei_md, const memory_desc_t &dst_md) {
 
@@ -239,21 +239,21 @@ status_t gen12hp_convolution_data_common_init_conf(engine_t *engine,
     return status::success;
 }
 
-status_t gen12hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
+status_t xe_hp_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     const convolution_desc_t &cd = *desc();
 
     set_default_conf(conf, cd, *src_md(), *weights_md(), *dst_md(),
             *weights_md(1), *attr());
-    return gen12hp_convolution_data_common_init_conf(
+    return xe_hp_convolution_data_common_init_conf(
             engine, conf, *src_md(), *weights_md(), *dst_md());
 }
 
-status_t gen12hp_convolution_fwd_t::init(engine_t *engine) {
-    CHECK(gen12hp_conv_data_create_kernel(pd()->conf, &kernel_, this, engine));
+status_t xe_hp_convolution_fwd_t::init(engine_t *engine) {
+    CHECK(xe_hp_conv_data_create_kernel(pd()->conf, &kernel_, this, engine));
     return status::success;
 }
 
-status_t gen12hp_convolution_fwd_t::execute(const exec_ctx_t &ctx) const {
+status_t xe_hp_convolution_fwd_t::execute(const exec_ctx_t &ctx) const {
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &wei = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
     auto &bia = CTX_IN_STORAGE(DNNL_ARG_BIAS);
@@ -285,23 +285,23 @@ status_t gen12hp_convolution_fwd_t::execute(const exec_ctx_t &ctx) const {
     return parallel_for(ctx, nd_range, kernel_, arg_list);
 }
 
-status_t gen12hp_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
+status_t xe_hp_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
     const convolution_desc_t &cd = *desc();
 
     // The data kernel is expressed in terms of FWD convolution
     // So we need to swap diff_src and diff_dst mds to fill the conf properly
     set_default_conf(conf, cd, *diff_dst_md(), *weights_md(), *diff_src_md(),
             *weights_md(1), *attr());
-    return gen12hp_convolution_data_common_init_conf(
+    return xe_hp_convolution_data_common_init_conf(
             engine, conf, *diff_dst_md(), *weights_md(), *diff_src_md());
 }
 
-status_t gen12hp_convolution_bwd_data_t::init(engine_t *engine) {
-    CHECK(gen12hp_conv_data_create_kernel(pd()->conf, &kernel_, this, engine));
+status_t xe_hp_convolution_bwd_data_t::init(engine_t *engine) {
+    CHECK(xe_hp_conv_data_create_kernel(pd()->conf, &kernel_, this, engine));
     return status::success;
 }
 
-status_t gen12hp_convolution_bwd_data_t::execute(const exec_ctx_t &ctx) const {
+status_t xe_hp_convolution_bwd_data_t::execute(const exec_ctx_t &ctx) const {
     // TODO: we can add bias here if we want to support deconvolution
     auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
     auto &wei = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
@@ -321,7 +321,7 @@ status_t gen12hp_convolution_bwd_data_t::execute(const exec_ctx_t &ctx) const {
     return parallel_for(ctx, nd_range, kernel_, arg_list);
 }
 
-status_t gen12hp_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
+status_t xe_hp_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
     const convolution_desc_t &cd = *desc();
     const memory_desc_wrapper src_mdw(src_md());
     const memory_desc_wrapper wei_mdw(diff_weights_md());
@@ -396,7 +396,7 @@ status_t gen12hp_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
     return status::success;
 }
 
-void gen12hp_convolution_bwd_weights_t::pd_t::init_scratchpad() {
+void xe_hp_convolution_bwd_weights_t::pd_t::init_scratchpad() {
     auto scratchpad = scratchpad_registry().registrar();
 
     if (conf.weights_data_type == data_type::bf16) {
@@ -413,13 +413,12 @@ void gen12hp_convolution_bwd_weights_t::pd_t::init_scratchpad() {
     }
 }
 
-status_t gen12hp_convolution_bwd_weights_t::init(engine_t *engine) {
-    return gen12hp_conv_bwd_weights_create_kernels(
+status_t xe_hp_convolution_bwd_weights_t::init(engine_t *engine) {
+    return xe_hp_conv_bwd_weights_create_kernels(
             pd()->conf, kernels_, this, engine);
 }
 
-status_t gen12hp_convolution_bwd_weights_t::execute(
-        const exec_ctx_t &ctx) const {
+status_t xe_hp_convolution_bwd_weights_t::execute(const exec_ctx_t &ctx) const {
     auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
     auto &diff_dst = CTX_IN_STORAGE(DNNL_ARG_DIFF_DST);
     auto &diff_wei = CTX_OUT_STORAGE(DNNL_ARG_DIFF_WEIGHTS);

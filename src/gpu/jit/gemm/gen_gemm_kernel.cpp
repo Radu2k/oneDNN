@@ -75,7 +75,7 @@ bool gen_gemm_kernel_t::matching_hw(ngen::HW hw, ngen::HW hw_ref) {
     using ngen::HW;
     if (hw == hw_ref) return true;
 #if DNNL_WITH_GEN12P7
-    if (hw == HW::Gen12p7 && hw_ref == HW::Gen12HP) return true;
+    if (hw == HW::Gen12p7 && hw_ref == HW::Xe_HP) return true;
 #endif
     return false;
 }
@@ -361,9 +361,9 @@ std::vector<unsigned char> gen_gemm_kernel_t::get_binary(
             program_binary = generator.getBinary(ctx, dev);
             break;
         }
-#if DNNL_WITH_GEN12HP
-        case HW::Gen12HP: {
-            gemm_kernel_generator_t<HW::Gen12HP> generator;
+#if DNNL_WITH_XE_HP
+        case HW::Xe_HP: {
+            gemm_kernel_generator_t<HW::Xe_HP> generator;
             generator.gemm(problem_, strategy_, interface_);
             program_binary = generator.getBinary(ctx, dev);
             break;
@@ -578,95 +578,95 @@ const kernel_table_t *gen12lp_bf16_nocopy_tables[2][2] = {
     {nullptr, nullptr}
 };
 
-#if DNNL_WITH_GEN12HP
-const kernel_table_t gen12hp_f16_nocopy_nn_table[] = {
+#if DNNL_WITH_XE_HP
+const kernel_table_t xe_hp_f16_nocopy_nn_table[] = {
     {{16,  4}, {0,   0}, {1,  0}, {}},
     {{32, 16}, {64,  0}, {64, 0}, 'B'},
     {{32, 16}, {-1, -1}, {0,  0}, 'A'}
 };
 
-const kernel_table_t gen12hp_f16_nocopy_nt_table[] = {
+const kernel_table_t xe_hp_f16_nocopy_nt_table[] = {
     {{32, 32}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t gen12hp_f16_nocopy_tn_table[] = {
+const kernel_table_t xe_hp_f16_nocopy_tn_table[] = {
     {{16,  8}, {32, 32}, {32, 32}, {}},
     {{16, 16}, {-1, -1}, {0,   0}, {}}
 };
 
-const kernel_table_t gen12hp_f16_nocopy_tt_table[] = {
+const kernel_table_t xe_hp_f16_nocopy_tt_table[] = {
     {{32, 32}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t *gen12hp_f16_nocopy_tables[2][2] = {
-    {gen12hp_f16_nocopy_nn_table, gen12hp_f16_nocopy_nt_table},
-    {gen12hp_f16_nocopy_tn_table, gen12hp_f16_nocopy_tt_table}
+const kernel_table_t *xe_hp_f16_nocopy_tables[2][2] = {
+    {xe_hp_f16_nocopy_nn_table, xe_hp_f16_nocopy_nt_table},
+    {xe_hp_f16_nocopy_tn_table, xe_hp_f16_nocopy_tt_table}
 };
 
-const kernel_table_t gen12hp_f32_nocopy_nn_table[] = {
+const kernel_table_t xe_hp_f32_nocopy_nn_table[] = {
     {{16, 8}, { 0,  0}, {0, 0}, {}},
     {{32, 8}, { 0,  0}, {0, 0}, {}},
     {{64, 8}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t gen12hp_f32_nocopy_nt_table[] = {
+const kernel_table_t xe_hp_f32_nocopy_nt_table[] = {
     {{32, 16}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t gen12hp_f32_nocopy_tn_table[] = {
+const kernel_table_t xe_hp_f32_nocopy_tn_table[] = {
     {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t gen12hp_f32_nocopy_tt_table[] = {
+const kernel_table_t xe_hp_f32_nocopy_tt_table[] = {
     {{8, 64}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t *gen12hp_f32_nocopy_tables[2][2] = {
-    {gen12hp_f32_nocopy_nn_table, gen12hp_f32_nocopy_nt_table},
-    {gen12hp_f32_nocopy_tn_table, gen12hp_f32_nocopy_tt_table}
+const kernel_table_t *xe_hp_f32_nocopy_tables[2][2] = {
+    {xe_hp_f32_nocopy_nn_table, xe_hp_f32_nocopy_nt_table},
+    {xe_hp_f32_nocopy_tn_table, xe_hp_f32_nocopy_tt_table}
 };
 
-const kernel_table_t gen12hp_x8_nocopy_nn_table[] = {
+const kernel_table_t xe_hp_x8_nocopy_nn_table[] = {
     {{32,  4}, { 0,  0}, {0, 0}, {}},
     {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t gen12hp_x8_nocopy_nt_table[] = {
+const kernel_table_t xe_hp_x8_nocopy_nt_table[] = {
     {{32, 16}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t gen12hp_x8_nocopy_tn_table[] = {
+const kernel_table_t xe_hp_x8_nocopy_tn_table[] = {
     {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t gen12hp_x8_nocopy_tt_table[] = {
+const kernel_table_t xe_hp_x8_nocopy_tt_table[] = {
     {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t *gen12hp_x8_nocopy_tables[2][2] = {
-    {gen12hp_x8_nocopy_nn_table, gen12hp_x8_nocopy_nt_table},
-    {gen12hp_x8_nocopy_tn_table, gen12hp_x8_nocopy_tt_table}
+const kernel_table_t *xe_hp_x8_nocopy_tables[2][2] = {
+    {xe_hp_x8_nocopy_nn_table, xe_hp_x8_nocopy_nt_table},
+    {xe_hp_x8_nocopy_tn_table, xe_hp_x8_nocopy_tt_table}
 };
 
-const kernel_table_t gen12hp_bf16_nocopy_nn_table[] = {
+const kernel_table_t xe_hp_bf16_nocopy_nn_table[] = {
     {{32, 8}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t gen12hp_bf16_nocopy_nt_table[] = {
+const kernel_table_t xe_hp_bf16_nocopy_nt_table[] = {
     {{16, 16}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t gen12hp_bf16_nocopy_tn_table[] = {
+const kernel_table_t xe_hp_bf16_nocopy_tn_table[] = {
     {{32, 8}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t gen12hp_bf16_nocopy_tt_table[] = {
+const kernel_table_t xe_hp_bf16_nocopy_tt_table[] = {
     {{8, 32}, {-1, -1}, {0, 0}, {}}
 };
 
-const kernel_table_t *gen12hp_bf16_nocopy_tables[2][2] = {
-    {gen12hp_bf16_nocopy_nn_table, gen12hp_bf16_nocopy_nt_table},
-    {gen12hp_bf16_nocopy_tn_table, gen12hp_bf16_nocopy_tt_table}
+const kernel_table_t *xe_hp_bf16_nocopy_tables[2][2] = {
+    {xe_hp_bf16_nocopy_nn_table, xe_hp_bf16_nocopy_nt_table},
+    {xe_hp_bf16_nocopy_tn_table, xe_hp_bf16_nocopy_tt_table}
 };
 #endif
 
@@ -682,16 +682,16 @@ void gen_gemm_nocopy_kernel_t::choose_unrolls(compute::gpu_arch_t arch,
     unroll_m = unroll_n = 1;
 
     using tables_t = decltype(gen9_f32_nocopy_tables);
-#if DNNL_WITH_GEN12HP
+#if DNNL_WITH_XE_HP
     const tables_t *all_tables[4][3]
             = {{&gen9_f32_nocopy_tables, &gen12lp_f32_nocopy_tables,
-                       &gen12hp_f32_nocopy_tables},
+                       &xe_hp_f32_nocopy_tables},
                     {&gen9_f16_nocopy_tables, &gen12lp_f16_nocopy_tables,
-                            &gen12hp_f16_nocopy_tables},
+                            &xe_hp_f16_nocopy_tables},
                     {&gen9_bf16_nocopy_tables, &gen12lp_bf16_nocopy_tables,
-                            &gen12hp_bf16_nocopy_tables},
+                            &xe_hp_bf16_nocopy_tables},
                     {&gen9_x8_nocopy_tables, &gen12lp_x8_nocopy_tables,
-                            &gen12hp_x8_nocopy_tables}};
+                            &xe_hp_x8_nocopy_tables}};
 #else
     const tables_t *all_tables[4][2]
             = {{&gen9_f32_nocopy_tables, &gen12lp_f32_nocopy_tables},
@@ -702,8 +702,8 @@ void gen_gemm_nocopy_kernel_t::choose_unrolls(compute::gpu_arch_t arch,
 
     // clang-format off
     int arch_idx = (arch == compute::gpu_arch_t::gen12lp) ? 1
-#if DNNL_WITH_GEN12HP
-                 : (arch >= compute::gpu_arch_t::gen12hp) ? 2 : 0;
+#if DNNL_WITH_XE_HP
+                 : (arch >= compute::gpu_arch_t::xe_hp) ? 2 : 0;
 #else
                  : 0;
 #endif

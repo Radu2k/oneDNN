@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_GEN12HP
-#include "gpu/jit/gen12hp_conv_data_kernel.hpp"
+#if DNNL_WITH_XE_HP
+#include "gpu/jit/xe_hp_conv_data_kernel.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -54,15 +54,15 @@ const bool enable_smem_write = true;
 const bool enable_barrier = true;
 
 template <gpu_gen_t hw>
-class gen12hp_conv_data_kernel_t;
+class xe_hp_conv_data_kernel_t;
 
 // Convert registers between data types.
 // to_stride is always assumed to be 1.
 template <gpu_gen_t hw>
 class convertor_t {
 public:
-    convertor_t(gen12hp_conv_data_kernel_t<hw> *host, int width,
-            DataType to_type, DataType from_type, int from_stride = 1)
+    convertor_t(xe_hp_conv_data_kernel_t<hw> *host, int width, DataType to_type,
+            DataType from_type, int from_stride = 1)
         : host_(host)
         , width_(width)
         , to_type_(to_type)
@@ -125,7 +125,7 @@ private:
         return grf[(new_off % 32) / sub.getBytes()];
     }
 
-    gen12hp_conv_data_kernel_t<hw> *host_;
+    xe_hp_conv_data_kernel_t<hw> *host_;
 
     int width_;
     DataType to_type_;
@@ -141,16 +141,15 @@ private:
 template <gpu_gen_t hw>
 class nw_read_region_t {
 public:
-    nw_read_region_t(gen12hp_conv_data_kernel_t<hw> *host, int mb_len,
-            int w_val, int w_shift, int w_len)
+    nw_read_region_t(xe_hp_conv_data_kernel_t<hw> *host, int mb_len, int w_val,
+            int w_shift, int w_len)
         : host(host)
         , mb_len(mb_len)
         , w_val(w_val)
         , w_shift(w_shift)
         , w_len(w_len) {}
 
-    nw_read_region_t(
-            gen12hp_conv_data_kernel_t<hw> *host, int mb_len, int w_len)
+    nw_read_region_t(xe_hp_conv_data_kernel_t<hw> *host, int mb_len, int w_len)
         : host(host)
         , mb_len(mb_len)
         , w_val(INT_MAX)
@@ -161,7 +160,7 @@ public:
 
     void read_and_reorder();
 
-    gen12hp_conv_data_kernel_t<hw> *host;
+    xe_hp_conv_data_kernel_t<hw> *host;
 
     int mb_len;
     int w_val;
@@ -445,13 +444,13 @@ int loop_iterator_t::id_update() const {
 }
 
 template <gpu_gen_t hw>
-class gen12hp_conv_data_kernel_t : public jit_generator<hw> {
+class xe_hp_conv_data_kernel_t : public jit_generator<hw> {
 public:
     NGEN_FORWARD_OPENCL(hw);
     friend class convertor_t<hw>;
     friend class nw_read_region_t<hw>;
 
-    gen12hp_conv_data_kernel_t(const conv_conf_t &conf)
+    xe_hp_conv_data_kernel_t(const conv_conf_t &conf)
         : conf(conf), attr_info(conf.attr_info), ra(hw) {
 
         src_type = convert_dnnl_type_to_ngen(conf.src_data_type);
@@ -575,7 +574,7 @@ public:
         newArgument("common_oscales", DataType::f);
         newArgument("binary", ExternalArgumentType::GlobalPtr);
 
-        externalName("gen12hp_conv_data");
+        externalName("xe_hp_conv_data");
         requireLocalID(3);
         requireLocalSize();
         requireGRF(256);
@@ -3328,7 +3327,7 @@ void nw_read_region_t<hw>::read_and_reorder() {
 
 } // namespace
 
-status_t gen12hp_conv_data_create_kernel(const conv_conf_t &conf,
+status_t xe_hp_conv_data_create_kernel(const conv_conf_t &conf,
         compute::kernel_t *kernel, gpu_primitive_t *primitive,
         engine_t *engine) {
     using namespace compute;
@@ -3339,13 +3338,13 @@ status_t gen12hp_conv_data_create_kernel(const conv_conf_t &conf,
     auto device_info = compute_engine->device_info();
 
     switch (device_info->gpu_arch()) {
-        case gpu_arch_t::gen12hp:
+        case gpu_arch_t::xe_hp:
             jit_gen_convolution.reset(
-                    new gen12hp_conv_data_kernel_t<gpu_gen12hp>(conf));
+                    new xe_hp_conv_data_kernel_t<gpu_xe_hp>(conf));
             break;
         case gpu_arch_t::gen12p7:
             jit_gen_convolution.reset(
-                    new gen12hp_conv_data_kernel_t<gpu_gen12p7>(conf));
+                    new xe_hp_conv_data_kernel_t<gpu_gen12p7>(conf));
             break;
         default: return status::runtime_error;
     }
