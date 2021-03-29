@@ -44,10 +44,6 @@ public:
         , device_(adevice)
         , context_(acontext)
         , is_user_context_(acontext) {}
-    ~ocl_gpu_engine_t() override {
-        if (device_) { clReleaseDevice(device_); }
-        if (context_) { clReleaseContext(context_); }
-    }
 
     status_t init() override;
 
@@ -106,7 +102,15 @@ public:
         return engine_id_t(new ocl_gpu_engine_id_impl_t(
                 device(), context(), kind(), runtime_kind(), index()));
     }
+
+protected:
 #endif
+
+    ~ocl_gpu_engine_t() override {
+        if (device_) { clReleaseDevice(device_); }
+        if (context_) { clReleaseContext(context_); }
+    }
+
 protected:
     status_t init_device_info() override;
 
