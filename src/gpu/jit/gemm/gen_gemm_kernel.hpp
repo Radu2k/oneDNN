@@ -70,8 +70,8 @@ protected:
 #if DNNL_WITH_XE_HP
             case compute::gpu_arch_t::xe_hp: return ngen::HW::Xe_HP;
 #endif
-#if DNNL_WITH_GEN12P7
-            case compute::gpu_arch_t::gen12p7: return ngen::HW::Gen12p7;
+#if DNNL_WITH_XE_HPG
+            case compute::gpu_arch_t::xe_hpg: return ngen::HW::Xe_HPG;
 #endif
             default: return ngen::HW::Unknown;
         }

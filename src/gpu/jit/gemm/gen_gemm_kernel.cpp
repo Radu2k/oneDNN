@@ -74,8 +74,8 @@ ngen::AddressBase get_address_base(char c) {
 bool gen_gemm_kernel_t::matching_hw(ngen::HW hw, ngen::HW hw_ref) {
     using ngen::HW;
     if (hw == hw_ref) return true;
-#if DNNL_WITH_GEN12P7
-    if (hw == HW::Gen12p7 && hw_ref == HW::Xe_HP) return true;
+#if DNNL_WITH_XE_HPG
+    if (hw == HW::Xe_HPG && hw_ref == HW::Xe_HP) return true;
 #endif
     return false;
 }
@@ -369,9 +369,9 @@ std::vector<unsigned char> gen_gemm_kernel_t::get_binary(
             break;
         }
 #endif
-#if DNNL_WITH_GEN12P7
-        case HW::Gen12p7: {
-            gemm_kernel_generator_t<HW::Gen12p7> generator;
+#if DNNL_WITH_XE_HPG
+        case HW::Xe_HPG: {
+            gemm_kernel_generator_t<HW::Xe_HPG> generator;
             generator.gemm(problem_, strategy_, interface_);
             program_binary = generator.getBinary(ctx, dev);
             break;

@@ -340,7 +340,7 @@ void sqt_ieee(const InstructionModifier &mod, FlagRegister flag, RegData dst, Re
 
 // Thread spawner messages.
 void threadend(const InstructionModifier &mod, const RegData &r0_info) {
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     auto sf = (hardware <= HW::Xe_HP) ? SharedFunction::ts
                                         : SharedFunction::gtwy;
 #else
@@ -363,8 +363,8 @@ void barriermsg(const GRF &header) { barriermsg(InstructionModifier(), header); 
 
 // prepare barrier header
 void barrierheader(const GRF &header, const GRF &r0_info = r0) {
-#if NGEN_GEN12P7
-    if (hardware >= HW::Gen12p7) {
+#if NGEN_XE_HPG
+    if (hardware >= HW::Xe_HPG) {
         mov(1 | NoMask, header.hf(4), Immediate::hf(0));
         mov(2 | NoMask, header.ub(10)(1), r0_info.ub(11)(0));
     } else
@@ -382,8 +382,8 @@ void barriersignal(const InstructionModifier &mod, const GRF &temp, const GRF &r
 
 void barriersignal(const InstructionModifier &mod, const GRF &temp, uint32_t threadCount, const GRF &r0_info = r0)
 {
-#if NGEN_GEN12P7
-    if (hardware >= HW::Gen12p7)
+#if NGEN_XE_HPG
+    if (hardware >= HW::Xe_HPG)
         mov(1 | NoMask, temp.ud(2), (threadCount << 24) | (threadCount << 16));
     else
 #endif
@@ -441,7 +441,7 @@ void barrier(const Targs &...barrierArgs)
 // Global memory fence.
 void memfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     if (hardware <= HW::Xe_HP) {
         const uint32_t exdesc = static_cast<int>(SharedFunction::dc0) & 0xF;
         send(8 | mod | NoMask, dst, header, exdesc, 0x219E000);
@@ -458,7 +458,7 @@ void memfence(const RegData &dst, const RegData &header = GRF(0)) { memfence(Ins
 // SLM-only memory fence.
 void slmfence(const InstructionModifier &mod, const RegData &dst, const RegData &header = GRF(0))
 {
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     if (hardware <= HW::Xe_HP) {
         const uint32_t exdesc = static_cast<int>(SharedFunction::dc0) & 0xF;
         send(8 | mod | NoMask, dst, header, exdesc, 0x219E0FE);

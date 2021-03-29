@@ -143,7 +143,7 @@ protected:
     int crossthreadGRFs = 0;
     inline int getCrossthreadGRFs() const;
     inline GRF getCrossthreadBase(bool effective = true) const;
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     int grfsPerLID() const { return (simd > 16 && GRF::bytes(hw) < 64) ? 2 : 1; }
 #else
     int grfsPerLID() const { return (simd > 16) ? 2 : 1; }

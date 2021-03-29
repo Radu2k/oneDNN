@@ -41,8 +41,8 @@ enum class GfxCoreFamily : uint32_t {
     Gen12 = 17,
     Gen12LP = 18,
     XeHP = 0xC05,
-#if NGEN_GEN12P7
-    Gen12p7 = 0xC07,
+#if NGEN_XE_HPG
+    Xe_HPG = 0xC07,
 #endif
 #if NGEN_XE_HPC
     Xe_HPC = 0xC08,
@@ -57,7 +57,7 @@ enum class ProductFamily : uint32_t {
     TGLLP = 0x22,
     DG1 = 1210,
     TGLHP = 1250,
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     DG2 = 1270,
 #endif
 #if NGEN_XE_HPC

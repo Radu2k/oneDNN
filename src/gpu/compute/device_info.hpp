@@ -38,8 +38,8 @@ enum class gpu_arch_t {
 #if DNNL_WITH_XE_HP
     xe_hp,
 #endif
-#if DNNL_WITH_GEN12P7
-    gen12p7,
+#if DNNL_WITH_XE_HPG
+    xe_hpg,
 #endif
 };
 
@@ -71,7 +71,7 @@ enum class device_ext_t : uint64_t {
     intel_subgroup_split_matrix_multiply_accumulate = 1ull << 25,
     intel_variable_eu_thread_count                  = 1ull << 26,
 #endif
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
     // Future extensions
     future_bf16_cvt                                 = 1ull << 31,
 #endif
@@ -108,7 +108,7 @@ static inline const char *ext2cl_str(device_ext_t ext) {
         CASE(intel_subgroup_split_matrix_multiply_accumulate)
         CASE(intel_variable_eu_thread_count)
 #endif
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
         CASE(future_bf16_cvt)
 #endif
         default: return nullptr;

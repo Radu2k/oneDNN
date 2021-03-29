@@ -54,7 +54,7 @@ public:
         bool early_c_bias = false;
         bool c_packed = false;
         bool batch = false;
-        bool emulate64 = (hw == ngen::HW::Gen12p7);
+        bool emulate64 = (hw == ngen::HW::Xe_HPG);
 
         int tile_m = 32;
         int tile_n = 48;

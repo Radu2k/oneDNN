@@ -156,8 +156,8 @@ private:
             fileHeader.flags.all = 0;
             fileHeader.flags.parts.useGfxCoreFamily = 1;
             fileHeader.machine = static_cast<uint16_t>(npack::encodeGfxCoreFamily(hw));
-#if NGEN_GEN12P7
-            if (hw == HW::Gen12p7) {
+#if NGEN_XE_HPG
+            if (hw == HW::Xe_HPG) {
                 fileHeader.flags.parts.useGfxCoreFamily = 0;
                 fileHeader.machine = static_cast<uint16_t>(npack::ProductFamily::DG2);
             }

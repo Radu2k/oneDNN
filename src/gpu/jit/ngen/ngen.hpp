@@ -27,8 +27,8 @@
 #ifndef NGEN_HPP
 #define NGEN_HPP
 
-#ifndef NGEN_GEN12P7
-#define NGEN_GEN12P7 1
+#ifndef NGEN_XE_HPG
+#define NGEN_XE_HPG 1
 #endif
 
 #ifndef NGEN_XE_HPC
@@ -1241,7 +1241,7 @@ private:
             parent.send(mod, dst, addr, exdesc.all, desc.all);
         }
 
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
         template <typename DataSpec>
         void operator()(const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const GRFDisp &addr)
         {
@@ -1298,7 +1298,7 @@ private:
             parent.sends(mod, NullRegister(), addr, data, exdesc.all, desc.all);
         }
 
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
         template <typename DataSpec>
         void operator()(const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const GRFDisp &addr, const RegData &data)
         {
@@ -1363,7 +1363,7 @@ private:
             (*this)(op, mod, NullRegister(), spec, base, addr, data);
         }
 
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
         template <typename DataSpec>
         void operator()(AtomicOp op, const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
         {
@@ -1695,7 +1695,7 @@ using ngen::BinaryCodeGenerator<hw>::r240; using ngen::BinaryCodeGenerator<hw>::
 using ngen::BinaryCodeGenerator<hw>::r244; using ngen::BinaryCodeGenerator<hw>::r245; using ngen::BinaryCodeGenerator<hw>::r246; using ngen::BinaryCodeGenerator<hw>::r247; \
 using ngen::BinaryCodeGenerator<hw>::r248; using ngen::BinaryCodeGenerator<hw>::r249; using ngen::BinaryCodeGenerator<hw>::r250; using ngen::BinaryCodeGenerator<hw>::r251; \
 using ngen::BinaryCodeGenerator<hw>::r252; using ngen::BinaryCodeGenerator<hw>::r253; using ngen::BinaryCodeGenerator<hw>::r254; using ngen::BinaryCodeGenerator<hw>::r255;
-#if !NGEN_GEN12P7
+#if !NGEN_XE_HPG
 #define NGEN_FORWARD_REGISTERS_EXTRA2
 #else
 #define NGEN_FORWARD_REGISTERS_EXTRA2 \

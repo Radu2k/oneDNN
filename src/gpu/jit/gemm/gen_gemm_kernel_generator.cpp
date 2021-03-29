@@ -1078,8 +1078,8 @@ Bundle gemm_kernel_generator_t<hw>::getHint(
 #if DNNL_WITH_XE_HP
         case HW::Xe_HP:
 #endif
-#if DNNL_WITH_GEN12P7
-        case HW::Gen12p7:
+#if DNNL_WITH_XE_HPG
+        case HW::Xe_HPG:
 #endif
             switch (strategy.registerScheme) {
                 case GEMMStrategy::CSeparate:
@@ -1150,8 +1150,8 @@ Bundle gemm_kernel_generator_t<hw>::getHint(
 #if DNNL_WITH_XE_HP
         case HW::Xe_HP:
 #endif
-#if DNNL_WITH_GEN12P7
-        case HW::Gen12p7:
+#if DNNL_WITH_XE_HPG
+        case HW::Xe_HPG:
 #endif
             switch (type) {
                 case HintType::S: return Bundle();
@@ -2607,8 +2607,8 @@ template <ngen::HW hw>
 void gemm_kernel_generator_t<hw>::setupTeardownLoadStoreDesc(
         bool setup, const CommonStrategy &strategy, CommonState &state) {
     if (strategy.emulate.emulateDWxDW) {
-#if DNNL_WITH_GEN12P7
-        auto nconstants = (hw >= HW::Gen12p7) ? 3 : 2;
+#if DNNL_WITH_XE_HPG
+        auto nconstants = (hw >= HW::Xe_HPG) ? 3 : 2;
 #else
         auto nconstants = 2;
 #endif
@@ -2638,7 +2638,7 @@ void gemm_kernel_generator_t<hw>::loadLoadStoreDescriptors(bool load,
     Subregister t1 = state.ra.alloc_sub<uint32_t>();
     Subregister t2 = state.ra.alloc_sub<uint32_t>();
 
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
     if (astrategy.newDP) switch (astrategy.accessType) {
             case AccessType::ChannelScattered:
             case AccessType::Scattered: {
@@ -2741,7 +2741,7 @@ static inline int contiguityCheck(
     return offsetReg;
 }
 
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
 static DPDataSize12p7 getDPDataSize12p7(int ebytes, bool pad32) {
     switch (ebytes) {
         case 8: return DPDataSize12p7::D64;
@@ -2810,7 +2810,7 @@ void gemm_kernel_generator_t<hw>::loadMatrixBlock(const GRF &dest,
     // Get mask to apply, if any.
     maskMod |= getRegisterBlockMask(block, state);
 
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
     if (astrategy.newDP)
         switch (implAccessType(astrategy.accessType, atype, block)) {
             case AccessType::Block:
@@ -2922,7 +2922,7 @@ void gemm_kernel_generator_t<hw>::storeMatrixBlock(const GRF &src,
         send(block.simdSize | maskMod, static_cast<SharedFunction>(block.sfid),
                 null, addr, src, a0.ud(1), a0.ud(0));
 
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
     else if (astrategy.newDP)
         switch (implAccessType(astrategy.accessType, atype, block)) {
             case AccessType::Block:
@@ -3019,7 +3019,7 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
     auto nreg = block.nregs();
     auto nregReal = (nreg * simd) / block.simdSize;
 
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
     auto spec12p7 = D32;
     if (astrategy.newDP)
         spec12p7 = getDataSpec12p7(
@@ -3034,7 +3034,7 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
                 for (int eoff = 0, hoff = 0; eoff < block.simdSize;
                         eoff += simd, hoff += hsize, curSrc += nregReal) {
                     auto mod = simd | maskMod | ExecutionOffset(eoff);
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
                     if (astrategy.newDP)
                         atomic(T.isFP() ? AtomicOp::fadd : AtomicOp::add, mod,
                                 spec12p7, atype.base, addr[hoff], curSrc);
@@ -3072,7 +3072,7 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
                 auto rNew = rOldNew[nregReal];
                 auto flagToDo = getPhysicalFlag(state.vflagEAtomicAdd, state);
 
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
                 if (astrategy.newDP)
                     load(block.simdSize | maskMod, rOld, spec12p7, atype.base,
                             addr[0]);
@@ -3130,7 +3130,7 @@ void gemm_kernel_generator_t<hw>::atomicAddMatrixBlock(Type T, const GRF &src,
                     auto atomicMod = simd | flagToDo | eoMod;
                     auto cmpMod = simd | flagToDo | ne | flagToDo | eoMod;
 
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
                     if (astrategy.newDP)
                         atomic(AtomicOp::cmpwr, atomicMod, rOld, spec12p7,
                                 atype.base, addr[hoff], rOld);
@@ -7979,7 +7979,7 @@ bool gemm_kernel_generator_t<hw>::gemmKLoop(int ka_repack_in, int kb_repack_in,
                     switch (strategy.slmBuffers) {
                         case 1:
                         case 2: {
-                            if (hw >= HW::Gen12p7) {
+                            if (hw >= HW::Xe_HPG) {
                                 // Ensure all prior SLM reads have completed.
                                 if (strategy.slmA && A_copies > 1)
                                     wrdepRanges(state.A_regs);
@@ -12664,8 +12664,8 @@ template class gemm_kernel_generator_t<HW::Gen12LP>;
 #if DNNL_WITH_XE_HP
 template class gemm_kernel_generator_t<HW::Xe_HP>;
 #endif
-#if DNNL_WITH_GEN12P7
-template class gemm_kernel_generator_t<HW::Gen12p7>;
+#if DNNL_WITH_XE_HPG
+template class gemm_kernel_generator_t<HW::Xe_HPG>;
 #endif
 
 } // namespace jit

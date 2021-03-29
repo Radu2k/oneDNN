@@ -44,7 +44,7 @@ struct xe_hp_bf16_convolution_bwd_weights_t : public gpu_primitive_t {
             using namespace data_type;
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
-            if (!compute_engine->is_xe_hp() && !compute_engine->is_gen12p7())
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
                 return status::unimplemented;
 
             bool ok = desc()->prop_kind == backward_weights

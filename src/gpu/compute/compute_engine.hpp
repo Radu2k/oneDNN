@@ -111,9 +111,9 @@ public:
         return device_info_->gpu_arch() == gpu_arch_t::xe_hp;
     }
 #endif
-#if DNNL_WITH_GEN12P7
-    bool is_gen12p7() const {
-        return device_info_->gpu_arch() == gpu_arch_t::gen12p7;
+#if DNNL_WITH_XE_HPG
+    bool is_xe_hpg() const {
+        return device_info_->gpu_arch() == gpu_arch_t::xe_hpg;
     }
 #endif
     bool mayiuse_ngen_kernels() {

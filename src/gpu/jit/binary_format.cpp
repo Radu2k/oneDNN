@@ -162,9 +162,9 @@ public:
                             engine);
                     break;
 #endif
-#if DNNL_WITH_GEN12P7
-                case compute::gpu_arch_t::gen12p7:
-                    kernel = binary_format_kernel_t<HW::Gen12p7>::make_kernel(
+#if DNNL_WITH_XE_HPG
+                case compute::gpu_arch_t::xe_hpg:
+                    kernel = binary_format_kernel_t<HW::Xe_HPG>::make_kernel(
                             engine);
                     break;
 #endif

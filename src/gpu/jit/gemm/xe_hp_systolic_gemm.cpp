@@ -115,7 +115,7 @@ status_t xe_hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     if (dt_int_ok) attr_skip_mask |= smask_t::zero_points_runtime;
 
     ok = true && limits_ok && (dt_float_ok || dt_int_ok)
-            && utils::one_of(arch, arch_t::xe_hp, arch_t::gen12p7)
+            && utils::one_of(arch, arch_t::xe_hp, arch_t::xe_hpg)
             && compute_engine->mayiuse(compute::device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate)
             && attr()->has_default_values(attr_skip_mask)
@@ -262,9 +262,10 @@ status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
                                 &kernel_[first_k_block][last_k_block], kernel);
                         break;
                     }
-                    case arch_t::gen12p7: {
+#if DNNL_WITH_XE_HPG
+                    case arch_t::xe_hpg: {
                         using kernel_12p7_t
-                                = xe_hp_systolic_gemm_kernel_t<gpu_gen12p7>;
+                                = xe_hp_systolic_gemm_kernel_t<gpu_xe_hpg>;
                         cfg_copy.emulate64 = true;
                         auto kernel = kernel_12p7_t(
                                 cfg_copy.cast<kernel_12p7_t::config_t>());
@@ -273,6 +274,7 @@ status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
                                 &kernel_[first_k_block][last_k_block], kernel);
                         break;
                     }
+#endif
                     default:
                         assert(!"Unsupported GPU architecture.");
                         return status::unimplemented;

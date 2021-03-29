@@ -35,16 +35,16 @@ struct EmulationStrategy {
     EmulationStrategy() = default;
     EmulationStrategy(ngen::HW hw_) : EmulationStrategy() {
         if (hw_ == ngen::HW::Gen11 || hw_ == ngen::HW::Gen12LP
-#if DNNL_WITH_GEN12P7
-                || hw_ == ngen::HW::Gen12p7)
+#if DNNL_WITH_XE_HPG
+                || hw_ == ngen::HW::Xe_HPG)
 #else
         )
 #endif
             emulate64 = true;
         if (hw_ == ngen::HW::Gen11
                 || (hw_ >= ngen::HW::Gen12LP
-#if DNNL_WITH_GEN12P7
-                        && hw_ <= ngen::HW::Gen12p7))
+#if DNNL_WITH_XE_HPG
+                        && hw_ <= ngen::HW::Xe_HPG))
 #else
                         ))
 #endif
@@ -554,8 +554,8 @@ struct EmulationImplementation {
 
             g.mul(mod, acc, src0, lowWord(src1));
             if (g.hardware >= HW::Gen11
-#if DNNL_WITH_GEN12P7
-                    && g.hardware <= HW::Gen12p7) {
+#if DNNL_WITH_XE_HPG
+                    && g.hardware <= HW::Xe_HPG) {
 #else
             ) {
 #endif

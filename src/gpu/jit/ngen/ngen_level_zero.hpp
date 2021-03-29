@@ -17,8 +17,8 @@
 #ifndef NGEN_LEVEL_ZERO_HPP
 #define NGEN_LEVEL_ZERO_HPP
 
-#ifndef NGEN_GEN12P7
-#define NGEN_GEN12P7 1
+#ifndef NGEN_XE_HPG
+#define NGEN_XE_HPG 1
 #endif
 
 #ifndef NGEN_XE_HPC

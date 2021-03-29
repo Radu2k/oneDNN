@@ -39,8 +39,8 @@ uint64_t get_future_extensions(compute::gpu_arch_t gpu_arch) {
 #if DNNL_WITH_XE_HP
         case gpu_arch_t::xe_hp:
 #endif
-#if DNNL_WITH_GEN12P7
-        case gpu_arch_t::gen12p7:
+#if DNNL_WITH_XE_HPG
+        case gpu_arch_t::xe_hpg:
 #endif
 #if DNNL_WITH_XE_HP
             extensions |= (uint64_t)device_ext_t::intel_global_float_atomics;
@@ -69,8 +69,8 @@ inline gpu_arch_t str2gpu_arch(const char *str) {
 #if DNNL_WITH_XE_HP
     CASE(xe_hp);
 #endif
-#if DNNL_WITH_GEN12P7
-    CASE(gen12p7);
+#if DNNL_WITH_XE_HPG
+    CASE(xe_hpg);
 #endif
     return gpu_arch_t::unknown;
 #undef CASE
@@ -114,8 +114,8 @@ status_t device_info_t::init_attributes_common(engine_t *engine) {
 #if DNNL_WITH_XE_HP
         case gpu::compute::gpu_arch_t::xe_hp:
 #endif
-#if DNNL_WITH_GEN12P7
-        case gpu::compute::gpu_arch_t::gen12p7:
+#if DNNL_WITH_XE_HPG
+        case gpu::compute::gpu_arch_t::xe_hpg:
 #endif
 #if DNNL_WITH_XE_HP
             threads_per_eu[0] = 8; // 128 regs/thread

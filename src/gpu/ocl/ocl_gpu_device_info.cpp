@@ -65,10 +65,10 @@ status_t ocl_gpu_device_info_t::init_arch(engine_t *engine) {
         OCL_CHECK(err);
     }
 #endif
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
     if (extension_string.find(ext2cl_str(compute::device_ext_t::khr_fp64))
             == std::string::npos)
-        gpu_arch_ = compute::gpu_arch_t::gen12p7;
+        gpu_arch_ = compute::gpu_arch_t::xe_hpg;
 #endif
     return status::success;
 }

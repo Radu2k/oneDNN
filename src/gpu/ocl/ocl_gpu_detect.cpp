@@ -32,8 +32,8 @@ compute::gpu_arch_t detect_gpu_arch(cl_device_id device, cl_context context) {
 #if DNNL_WITH_XE_HP
         case HW::Xe_HP: return compute::gpu_arch_t::xe_hp; break;
 #endif
-#if DNNL_WITH_GEN12P7
-        case HW::Gen12p7: return compute::gpu_arch_t::gen12p7; break;
+#if DNNL_WITH_XE_HPG
+        case HW::Xe_HPG: return compute::gpu_arch_t::xe_hpg; break;
 #endif
         default: return compute::gpu_arch_t::unknown; break;
     }

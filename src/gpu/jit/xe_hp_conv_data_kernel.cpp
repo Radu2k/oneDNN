@@ -3342,10 +3342,12 @@ status_t xe_hp_conv_data_create_kernel(const conv_conf_t &conf,
             jit_gen_convolution.reset(
                     new xe_hp_conv_data_kernel_t<gpu_xe_hp>(conf));
             break;
-        case gpu_arch_t::gen12p7:
+#if DNNL_WITH_XE_HPG
+        case gpu_arch_t::xe_hpg:
             jit_gen_convolution.reset(
-                    new xe_hp_conv_data_kernel_t<gpu_gen12p7>(conf));
+                    new xe_hp_conv_data_kernel_t<gpu_xe_hpg>(conf));
             break;
+#endif
         default: return status::runtime_error;
     }
 

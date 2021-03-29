@@ -1320,7 +1320,7 @@ protected:
             const ngen::Subregister &count, const MatrixAddressing &atype,
             const MatrixAddressingStrategy &astrategy,
             const CommonStrategy &strategy, CommonState &state);
-#if DNNL_WITH_GEN12P7
+#if DNNL_WITH_XE_HPG
     static ngen::DataSpec12p7 getDataSpec12p7(
             AccessType access, const RegisterBlock &block);
 #endif

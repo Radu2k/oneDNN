@@ -122,7 +122,7 @@ struct DependencyRegion {
     HW hw;
 #if NGEN_XE_HPC
     std::array<uint64_t, 32> masks;
-#elif NGEN_GEN12P7
+#elif NGEN_XE_HPG
     std::array<uint32_t, 16> masks;
 #else
     std::array<uint32_t, 8> masks;

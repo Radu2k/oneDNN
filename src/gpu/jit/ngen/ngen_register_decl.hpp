@@ -412,7 +412,7 @@ PREFIX constexpr ngen::GRF CG::r253; \
 PREFIX constexpr ngen::GRF CG::r254; \
 PREFIX constexpr ngen::GRF CG::r255;
 
-#if !NGEN_GEN12P7
+#if !NGEN_XE_HPG
 #define NGEN_REGISTER_DECL_EXTRA2(CG,PREFIX)
 #else
 #define NGEN_REGISTER_DECL_EXTRA2(CG,PREFIX) \
@@ -514,8 +514,8 @@ template class ngen::BinaryCodeGenerator<ngen::HW::Gen10>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen11>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen12LP>;
 template class ngen::BinaryCodeGenerator<ngen::HW::Xe_HP>;
-#if NGEN_GEN12P7
-template class ngen::BinaryCodeGenerator<ngen::HW::Gen12p7>;
+#if NGEN_XE_HPG
+template class ngen::BinaryCodeGenerator<ngen::HW::Xe_HPG>;
 #endif
 #if NGEN_XE_HPC
 template class ngen::BinaryCodeGenerator<ngen::HW::Xe_HPC>;

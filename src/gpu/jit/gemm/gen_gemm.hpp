@@ -126,7 +126,7 @@ struct gen_gemm_t : public gpu_gemm_t {
 #endif
 #if DNNL_WITH_XE_HP
                     ,
-                    arch_t::gen12p7
+                    arch_t::xe_hpg
 #endif
             );
             attr_info_ = attr_info_t::create(attr());

@@ -17,8 +17,8 @@
 #ifndef NGEN_ASM_HPP
 #define NGEN_ASM_HPP
 
-#ifndef NGEN_GEN12P7
-#define NGEN_GEN12P7 1
+#ifndef NGEN_XE_HPG
+#define NGEN_XE_HPG 1
 #endif
 
 #ifndef NGEN_XE_HPC
@@ -344,8 +344,8 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
                 len = -1;
         } else if (opNum == 1) {
             bool exdescImm = (src[2].type == AsmOperand::Type::imm);
-#if NGEN_GEN12P7
-            if (exdescImm && (hw >= HW::Gen12p7))
+#if NGEN_XE_HPG
+            if (exdescImm && (hw >= HW::Xe_HPG))
                 len = ext >> 8;
             else
 #endif
@@ -499,8 +499,8 @@ private:
         if (i.src[2].type == AsmOperand::Type::imm) {
             uint32_t exdesc = static_cast<uint64_t>(i.src[2].imm);
             if (isGen12) {
-#if NGEN_GEN12P7
-                if (hardware >= HW::Gen12p7) {
+#if NGEN_XE_HPG
+                if (hardware >= HW::Xe_HPG) {
                     i.ext |= 0x80 | (((exdesc >> 6) & 0x1F) << 8);
                     i.src[2].imm = uint32_t(exdesc & ~0x7EF);
                 } else
@@ -1429,7 +1429,7 @@ private:
             parent.send(mod, dst, addr, exdesc.all, desc.all);
         }
 
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
         template <typename DataSpec>
         void operator()(const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const GRFDisp &addr)
         {
@@ -1486,7 +1486,7 @@ private:
             parent.sends(mod, NullRegister(), addr, data, exdesc.all, desc.all);
         }
 
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
         template <typename DataSpec>
         void operator()(const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const GRFDisp &addr, const RegData &data)
         {
@@ -1551,7 +1551,7 @@ private:
             (*this)(op, mod, NullRegister(), spec, base, addr, data);
         }
 
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
         template <typename DataSpec>
         void operator()(AtomicOp op, const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const GRFDisp &addr, const RegData &data = NullRegister())
         {
@@ -1768,8 +1768,8 @@ void AsmCodeGenerator::outX(std::ostream &out, const AsmInstruction &i, int line
     i.dst.outputText(out, ddst, labelManager); out << '\t';
     for (int n = 0; n < 4; n++) {
         i.src[n].outputText(out, dsrc[n], labelManager);
-#if NGEN_GEN12P7
-        if (hardware >= HW::Gen12p7 && n == 1 && (i.op == Opcode::send || i.op == Opcode::sendc) && (i.ext & 0x80))
+#if NGEN_XE_HPG
+        if (hardware >= HW::Xe_HPG && n == 1 && (i.op == Opcode::send || i.op == Opcode::sendc) && (i.ext & 0x80))
             out << ':' << (i.ext >> 8);
 #endif
         out << '\t';

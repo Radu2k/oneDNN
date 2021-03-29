@@ -177,7 +177,7 @@ static inline AddressBase Surface(uint8_t index) { return AddressBase::createBTS
 static inline AddressBase CC(uint8_t index) { return AddressBase::createCC(index); }
 static inline AddressBase SC(uint8_t index) { return AddressBase::createSC(index); }
 
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
 static inline AddressBase BTI(uint8_t index) { return AddressBase::createBTS(index); }
 static inline AddressBase SS(uint32_t index) { return AddressBase::createSS(index); }
 static inline AddressBase BSS(uint32_t index) { return AddressBase::createBSS(index); }
@@ -231,4 +231,4 @@ static constexpr_reg CacheSettings12p7 L1WT_L3UC = CacheSettings12p7::L1WT_L3UC;
 static constexpr_reg CacheSettings12p7 L1WT_L3WB = CacheSettings12p7::L1WT_L3WB;
 static constexpr_reg CacheSettings12p7 L1S_L3WB  = CacheSettings12p7::L1S_L3WB;
 static constexpr_reg CacheSettings12p7 L1WB_L3WB = CacheSettings12p7::L1WB_L3WB;
-#endif /* NGEN_GEN12P7 */
+#endif /* NGEN_XE_HPG */

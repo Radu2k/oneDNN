@@ -400,8 +400,8 @@ template struct jit_eltwise_injector_f32<gpu_gen12lp>;
 #if DNNL_WITH_XE_HP
 template struct jit_eltwise_injector_f32<gpu_xe_hp>;
 #endif
-#if DNNL_WITH_GEN12P7
-template struct jit_eltwise_injector_f32<gpu_gen12p7>;
+#if DNNL_WITH_XE_HPG
+template struct jit_eltwise_injector_f32<gpu_xe_hpg>;
 #endif
 
 } // namespace jit

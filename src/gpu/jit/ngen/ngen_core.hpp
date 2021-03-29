@@ -211,8 +211,8 @@ enum class HW {
     Gen11,
     Gen12LP,
     Xe_HP,
-#if NGEN_GEN12P7
-    Gen12p7,
+#if NGEN_XE_HPG
+    Xe_HPG,
 #endif
 #if NGEN_XE_HPC
     Xe_HPC,
@@ -329,8 +329,8 @@ static inline std::ostream &operator<<(std::ostream &str, MathFunction func)
 
 static inline bool hasIEEEMacro(HW hw) {
     if (hw == HW::Gen12LP) return false;
-#if NGEN_GEN12P7
-    if (hw == HW::Gen12p7) return false;
+#if NGEN_XE_HPG
+    if (hw == HW::Xe_HPG) return false;
 #endif
     return true;
 }
@@ -368,7 +368,7 @@ enum class SharedFunction : uint8_t {
     pixi = 0xB,
     dc1 = 0xC,
     cre = 0xD,
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     btd = 0x7,
     rta = 0x8,
     ugml = 0x1,
@@ -390,12 +390,12 @@ static inline const char *getMnemonic(SharedFunction sfid, HW hw)
         "null", ""    , "smpl", "gtwy", "dc2", "rc" , "urb", "ts" ,
         "vme" , "dcro", "dc0" , "pixi", "dc1", "cre", ""   , ""   ,
     };
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     static const char *names12p7[16] = {
         "null", "ugml", "smpl", "gtwy", "dc2", "rc" , "urb", "btd",
         "rta" , "dcro", "dc0" , "pixi", "dc1", "tgm", "slm", "ugm",
     };
-    const auto &table = (hw >= HW::Gen12p7) ? names12p7 : names;
+    const auto &table = (hw >= HW::Xe_HPG) ? names12p7 : names;
 #else
     const auto &table = names;
 #endif
@@ -2095,7 +2095,7 @@ union MessageDescriptor {
         unsigned messageLen : 4;
         unsigned : 3;
     } surface;
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     struct {
         unsigned opcode : 6;
         unsigned : 1;
@@ -2139,7 +2139,7 @@ union ExtendedMessageDescriptor {
         unsigned : 4;                  /* Part of exFuncCtrl for non-immediate sends */
         unsigned exFuncCtrl : 16;
     } parts;
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     struct {
         unsigned : 12;
         signed offset : 20;
@@ -2160,7 +2160,7 @@ union ExtendedMessageDescriptor {
 };
 
 enum class AtomicOp : uint16_t {
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     cmpwr_2w = 0x00,
     and_ = 0x1801,
     or_ = 0x1902,
@@ -2220,7 +2220,7 @@ static inline int operandCount(AtomicOp op) {
     case AtomicOp::inc:
     case AtomicOp::dec:
     case AtomicOp::predec:
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     case AtomicOp::load:
 #endif
         return 1;
@@ -2250,7 +2250,7 @@ enum AddressModel : uint8_t {
     ModelCC = 0x10,
     ModelSC = 0x20,
     ModelScratch = 0x40,
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     ModelSS = 0x80,
     ModelBSS = 0x81,
 #endif
@@ -2291,7 +2291,7 @@ public:
     static constexpr AddressBase createSC(uint8_t index) {
         return AddressBase(index, ModelSC);
     }
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     static constexpr AddressBase createSS(uint32_t index) {
         return AddressBase(index, ModelSS);
     }
@@ -2705,7 +2705,7 @@ public:
     }
 };
 
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
 /********************************************************************/
 /* New dataport messages.                                           */
 /********************************************************************/
@@ -2864,7 +2864,7 @@ static inline DataSpec12p7 block(const DataSpec12p7 &dtype, int vsize = 1) { ret
 inline constexpr DataSpec12p7 operator|(const DataSpec12p7 &s1, const DataSpec12p7 &s2) {
     return DataSpec12p7{s1.desc | s2.desc, uint8_t(s1.vcount | s2.vcount), uint8_t(s1.dbytes | s2.dbytes)};
 }
-#endif /* NGEN_GEN12P7 */
+#endif /* NGEN_XE_HPG */
 
 #if NGEN_XE_HPC
 class block_2d : public DataSpec12p7 {

@@ -545,7 +545,7 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
 #if DNNL_WITH_XE_HP
     const bool is_xe_hp
-            = compute_engine->is_xe_hp() || compute_engine->is_gen12p7();
+            = compute_engine->is_xe_hp() || compute_engine->is_xe_hpg();
 #endif
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();
@@ -879,7 +879,7 @@ status_t gen9_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
 
 #if DNNL_WITH_XE_HP
     const bool is_xe_hp
-            = compute_engine->is_xe_hp() || compute_engine->is_gen12p7();
+            = compute_engine->is_xe_hp() || compute_engine->is_xe_hpg();
 #endif
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();

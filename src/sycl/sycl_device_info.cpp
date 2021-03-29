@@ -79,11 +79,11 @@ status_t sycl_device_info_t::init_arch(engine_t *engine) {
     }
 
     // XXX: temporary WA for different Xe_HP devices
-#if DNNL_WITH_GEN12P7
-    if (gpu_arch_ == gpu::compute::gpu_arch_t::gen12p7
+#if DNNL_WITH_XE_HPG
+    if (gpu_arch_ == gpu::compute::gpu_arch_t::xe_hpg
             && !device.has_extension(
                     ext2cl_str(gpu::compute::device_ext_t::khr_fp64)))
-        gpu_arch_ = gpu::compute::gpu_arch_t::gen12p7;
+        gpu_arch_ = gpu::compute::gpu_arch_t::xe_hpg;
     }
 #endif
     return status::success;

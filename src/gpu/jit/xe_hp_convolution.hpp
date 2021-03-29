@@ -43,7 +43,7 @@ struct xe_hp_convolution_fwd_t : public gpu_primitive_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
 
-            if (!compute_engine->is_xe_hp() && !compute_engine->is_gen12p7())
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
                 return status::unimplemented;
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;
@@ -171,7 +171,7 @@ struct xe_hp_convolution_bwd_data_t : public gpu_primitive_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
 
-            if (!compute_engine->is_xe_hp() && !compute_engine->is_gen12p7())
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
                 return status::unimplemented;
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;

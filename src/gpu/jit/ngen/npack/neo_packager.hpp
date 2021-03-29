@@ -173,8 +173,8 @@ inline HW decodeGfxCoreFamily(GfxCoreFamily family)
         case GfxCoreFamily::Gen12:
         case GfxCoreFamily::XeHP:     return HW::Xe_HP;
         case GfxCoreFamily::Gen12LP:  return HW::Gen12LP;
-#if NGEN_GEN12P7
-        case GfxCoreFamily::Gen12p7:  return HW::Gen12p7;
+#if NGEN_XE_HPG
+        case GfxCoreFamily::Xe_HPG:  return HW::Xe_HPG;
 #endif
 #if NGEN_XE_HPC
         case GfxCoreFamily::Xe_HPC:  return HW::Xe_HPC;
@@ -191,8 +191,8 @@ inline GfxCoreFamily encodeGfxCoreFamily(HW hw)
         case HW::Gen11:   return GfxCoreFamily::Gen11LP;
         case HW::Xe_HP: return GfxCoreFamily::Gen12;
         case HW::Gen12LP: return GfxCoreFamily::Gen12LP;
-#if NGEN_GEN12P7
-        case HW::Gen12p7: return GfxCoreFamily::Gen12p7;
+#if NGEN_XE_HPG
+        case HW::Xe_HPG: return GfxCoreFamily::Xe_HPG;
 #endif
 #if NGEN_XE_HPC
         case HW::Xe_HPC: return GfxCoreFamily::Xe_HPC;
@@ -208,8 +208,8 @@ inline HW decodeProductFamily(ProductFamily family)
     if (family >= ProductFamily::ICL && family < ProductFamily::TGLLP) return HW::Gen11;
     if (family >= ProductFamily::TGLLP && family <= ProductFamily::DG1) return HW::Gen12LP;
     if (family == ProductFamily::TGLHP) return HW::Xe_HP;
-#if NGEN_GEN12P7
-    if (family == ProductFamily::DG2) return HW::Gen12p7;
+#if NGEN_XE_HPG
+    if (family == ProductFamily::DG2) return HW::Xe_HPG;
 #endif
 #if NGEN_XE_HPC
     if (family == ProductFamily::PVC) return HW::Xe_HPC;
@@ -224,13 +224,13 @@ inline HW getBinaryArch(const std::vector<uint8_t> &binary)
     findDeviceBinary(binary, nullptr, &pheader, nullptr);
     auto hw = decodeGfxCoreFamily(pheader->Device);
 
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     // DG2 identifies as Xe_HP. Check whether EOT goes to TS (Xe_HP) or gateway (DG2+).
     using b14 = std::array<uint8_t, 14>;
     b14 gtwyEOT{{3, 0x80, 4, 0, 0, 0, 0xC, 0x7F, 0x20, 0x30, 0, 0, 0, 0}};
     if (hw == HW::Xe_HP) for (size_t i = 0; i < binary.size() - 0x10; i++) {
         if (binary[i] == 0x31 && *(b14 *)(binary.data() + i + 2) == gtwyEOT) {
-            hw = HW::Gen12p7;
+            hw = HW::Xe_HPG;
             break;
         }
     }

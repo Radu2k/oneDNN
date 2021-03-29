@@ -185,7 +185,7 @@ void _workaround_() {
     (void) A64.getModel();
     (void) A64NC.getModel();
     (void) SLM.getModel();
-#if NGEN_GEN12P7
+#if NGEN_XE_HPG
     (void) D8.desc;     (void) D8T.desc;
     (void) D16.desc;    (void) D16T.desc;
     (void) D32.desc;    (void) D32T.desc;

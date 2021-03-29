@@ -40,8 +40,8 @@ constexpr gpu_gen_t gpu_gen12lp = ngen::HW::Gen12LP;
 #if DNNL_WITH_XE_HP
 constexpr gpu_gen_t gpu_xe_hp = ngen::HW::Xe_HP;
 #endif
-#if DNNL_WITH_GEN12P7
-constexpr gpu_gen_t gpu_gen12p7 = ngen::HW::Gen12p7;
+#if DNNL_WITH_XE_HPG
+constexpr gpu_gen_t gpu_xe_hpg = ngen::HW::Xe_HPG;
 #endif
 
 // nGEN jit generator
