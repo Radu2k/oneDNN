@@ -34,7 +34,7 @@ namespace compute {
 enum class gpu_arch_t {
     unknown,
     gen9,
-    gen12lp,
+    xe_lp,
 #if DNNL_WITH_XE_HP
     xe_hp,
 #endif
@@ -61,7 +61,7 @@ enum class device_ext_t : uint64_t {
     intel_subgroups_char         = 1ull << 18,
     intel_subgroups_short        = 1ull << 19,
     intel_subgroups_long         = 1ull << 20,
-    // Intel specific Gen12LP+
+    // Intel specific Xe_LP+
     intel_subgroup_local_block_io = 1ull << 21,
     intel_dot_accumulate          = 1ull << 22,
 #if DNNL_WITH_XE_HP

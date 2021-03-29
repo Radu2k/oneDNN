@@ -297,7 +297,7 @@ inline GeneralizedPipe getPipe(HW hw, const Instruction &insn, bool checkOOO = t
 
     PipeMask mask = PipeMaskNone;
 
-    // For SWSB purposes, Gen12LP has a single in-order pipe.
+    // For SWSB purposes, Xe_LP has a single in-order pipe.
     // Otherwise, in-order pipe determined by destination type.
     // Exception: if there are any long operands, it's a long pipe instruction.
     if (hw >= HW::Xe_HP) {
@@ -474,7 +474,7 @@ inline bool contains(const DependencyRegion &dep1, const DependencyRegion &dep2)
 inline int timeout(GeneralizedPipe pipe)
 {
     switch (pipe.inOrderPipe()) {
-        case PipeMaskA: return 11; // Gen12LP
+        case PipeMaskA: return 11; // Xe_LP
         case PipeMaskI: return 11;
         case PipeMaskF: return 11;
         case PipeMaskL: return 15;
@@ -490,7 +490,7 @@ template <typename Instruction>
 inline int estimateLatency(HW hw, const Instruction &insn)
 {
     switch (insn.opcode()) {
-        case Opcode::math: return (hw == HW::Gen12LP) ? 20 : 17;
+        case Opcode::math: return (hw == HW::Xe_LP) ? 20 : 17;
         case Opcode::dpas:
         case Opcode::dpasw: return 20;   // need correct value
         case Opcode::send:
@@ -501,10 +501,10 @@ inline int estimateLatency(HW hw, const Instruction &insn)
                     MessageDescriptor desc;
                     if (insn.getSendDesc(desc))
                         if (desc.surface.index == 0xFE)
-                            return (hw == HW::Gen12LP) ? 33 : 25;
-                    return (hw == HW::Gen12LP) ? 106 : 150;
+                            return (hw == HW::Xe_LP) ? 33 : 25;
+                    return (hw == HW::Xe_LP) ? 106 : 150;
                 }
-                case SharedFunction::sampler: return (hw == HW::Gen12LP) ? 175 : 210;
+                case SharedFunction::sampler: return (hw == HW::Xe_LP) ? 175 : 210;
                 default: return 50;
             }
         }
@@ -902,7 +902,7 @@ void DependencyTable<consumer>::dump() const
 template <typename Program>
 inline bool hasAutoSWSB(HW hw, const Program &program)
 {
-    if (hw < HW::Gen12LP)
+    if (hw < HW::Xe_LP)
         return false;
     for (uint32_t n = 0; n < program.size(); n++)
         if (program[n].autoSWSB())
@@ -1035,7 +1035,7 @@ inline bool getSWSBDependencies(HW hw, const Instruction &insn, Dependency<false
 
     if (swsb.hasDist()) {
         auto pipe = swsb.getPipe();
-        consume.depPipe =     (hw == HW::Gen12LP) ? PipeMaskA :
+        consume.depPipe =     (hw == HW::Xe_LP) ? PipeMaskA :
                           (pipe == Pipe::Default) ? getPipe(hw, insn).inOrderPipe()
                                                   : toMask(pipe);
         if (consume.depPipe) {      // if is here to ignore default pipe deps for OOO instructions.
@@ -1075,7 +1075,7 @@ inline SWSBInfo encodeSWSB(HW hw, const Instruction &insn, const Dependency<fals
     }
 
     if (consume.hasDist()) {
-        if (canDefaultPipe(hw, insn) && ((hw == HW::Gen12LP) || (GeneralizedPipe(consume.depPipe) == consume.pipe)))
+        if (canDefaultPipe(hw, insn) && ((hw == HW::Xe_LP) || (GeneralizedPipe(consume.depPipe) == consume.pipe)))
             swsb.setPipe(Pipe::Default);
         else
             swsb.setPipe(fromMask(consume.depPipe));
@@ -1318,7 +1318,7 @@ inline void analyze(HW hw, Program &program, BasicBlock &bb, int phase)
                         p = 0;
                     bb.producers.clear();
                     bb.consumers.clear();
-                    syncSWSB = (hw == HW::Gen12LP) ? SWSB(1) : SWSB<AllPipes>(1);
+                    syncSWSB = (hw == HW::Xe_LP) ? SWSB(1) : SWSB<AllPipes>(1);
                 }
             }
 
@@ -1413,7 +1413,7 @@ inline void analyze(HW hw, Program &program, BasicBlock &bb, int phase)
                         bb.producers.removeIntersections(generated, hw);
                         generated.depPipe = PipeMaskNone;
                         generated.dist = 0;
-                        auto swsb = (hw == HW::Gen12LP) ? SWSB(1) : SWSB<AllPipes>(1);
+                        auto swsb = (hw == HW::Xe_LP) ? SWSB(1) : SWSB<AllPipes>(1);
                         if (recordSWSB)
                             bb.syncs.push_back({uint32_t(inum), swsb, SyncFunction::nop, 0});
                     }

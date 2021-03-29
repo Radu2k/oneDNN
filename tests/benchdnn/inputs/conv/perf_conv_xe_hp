@@ -1,4 +1,4 @@
---batch=perf_conv_gen12lp
+--batch=perf_conv_xe_lp
 
 --reset
 

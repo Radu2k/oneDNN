@@ -393,7 +393,7 @@ class AsmCodeGenerator {
 private:
 #include "ngen_compiler_fix.hpp"
 public:
-    AsmCodeGenerator(HW hardware_) : hardware(hardware_), isGen12(hardware_ >= HW::Gen12LP),
+    AsmCodeGenerator(HW hardware_) : hardware(hardware_), isGen12(hardware_ >= HW::Xe_LP),
             defaultOutput{nullptr}, sync{this}, load{this}, store{this}, atomic{this} {
         _workaround_();
         streamStack.push_back(new InstructionStream());
@@ -1862,9 +1862,9 @@ void AsmCodeGenerator::outMods(std::ostream &out,const InstructionModifier &mod,
             }
             if (swsb.hasDist()) {
                 startPostMod();
-                if (hardware > HW::Gen12LP && (op == Opcode::send || op == Opcode::sendc) && swsb.getPipe() == Pipe::Default)
+                if (hardware > HW::Xe_LP && (op == Opcode::send || op == Opcode::sendc) && swsb.getPipe() == Pipe::Default)
                     out << Pipe::A;
-                else if (hardware > HW::Gen12LP || !swsb.hasToken())
+                else if (hardware > HW::Xe_LP || !swsb.hasToken())
                     out << swsb.getPipe();
                 out << '@' << swsb.parts.dist;
             }

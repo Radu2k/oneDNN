@@ -209,7 +209,7 @@ enum class HW {
     Gen9,
     Gen10,
     Gen11,
-    Gen12LP,
+    Xe_LP,
     Xe_HP,
 #if NGEN_XE_HPG
     Xe_HPG,
@@ -328,7 +328,7 @@ static inline std::ostream &operator<<(std::ostream &str, MathFunction func)
 #endif
 
 static inline bool hasIEEEMacro(HW hw) {
-    if (hw == HW::Gen12LP) return false;
+    if (hw == HW::Xe_LP) return false;
 #if NGEN_XE_HPG
     if (hw == HW::Xe_HPG) return false;
 #endif
@@ -1491,7 +1491,7 @@ static const char *getMnemonic(Opcode op, HW hw)
 
     const char *mnemonic = names[static_cast<int>(op) & 0x7F];
 
-    if (hw < HW::Gen12LP) switch (op) {
+    if (hw < HW::Xe_LP) switch (op) {
         case Opcode::mov:   mnemonic = "mov";   break;
         case Opcode::line:  mnemonic = "line";  break;
         case Opcode::pln:   mnemonic = "pln";   break;

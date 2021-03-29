@@ -396,7 +396,7 @@ void jit_eltwise_injector_f32<hw>::prepare() {
 
 template struct jit_eltwise_injector_f32<gpu_gen9>;
 template struct jit_eltwise_injector_f32<gpu_gen11>;
-template struct jit_eltwise_injector_f32<gpu_gen12lp>;
+template struct jit_eltwise_injector_f32<gpu_xe_lp>;
 #if DNNL_WITH_XE_HP
 template struct jit_eltwise_injector_f32<gpu_xe_hp>;
 #endif

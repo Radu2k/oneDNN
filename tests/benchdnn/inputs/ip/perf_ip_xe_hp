@@ -1,4 +1,4 @@
---batch=perf_ip_gen12lp
+--batch=perf_ip_xe_lp
 
 --reset
 

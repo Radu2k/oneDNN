@@ -81,7 +81,7 @@ public:
 
     SWSBInfo decode(Opcode op) const {
         if (combined.combined) {
-            bool vl = isVariableLatency(HW::Gen12LP, op);
+            bool vl = isVariableLatency(HW::Xe_LP, op);
             auto pipe = (op == Opcode::send || op == Opcode::sendc) ? Pipe::A : Pipe::Default;
             return SWSBInfo(combined.sbid, vl, true) | SWSBInfo(pipe, combined.dist);
         } else if (isPipeline()) {

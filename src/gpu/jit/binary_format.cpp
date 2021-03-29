@@ -152,8 +152,8 @@ public:
                     kernel = binary_format_kernel_t<HW::Gen9>::make_kernel(
                             engine);
                     break;
-                case compute::gpu_arch_t::gen12lp:
-                    kernel = binary_format_kernel_t<HW::Gen12LP>::make_kernel(
+                case compute::gpu_arch_t::xe_lp:
+                    kernel = binary_format_kernel_t<HW::Xe_LP>::make_kernel(
                             engine);
                     break;
 #if DNNL_WITH_XE_HP

@@ -52,7 +52,7 @@ uint64_t get_future_extensions(compute::gpu_arch_t gpu_arch) {
                     |= (uint64_t)device_ext_t::intel_variable_eu_thread_count;
             extensions |= (uint64_t)device_ext_t::future_bf16_cvt;
 #endif
-        case gpu_arch_t::gen12lp:
+        case gpu_arch_t::xe_lp:
             extensions |= (uint64_t)device_ext_t::intel_dot_accumulate;
             break;
         default: break;
@@ -65,7 +65,7 @@ inline gpu_arch_t str2gpu_arch(const char *str) {
     if (!strcmp(STRINGIFY(_case), str)) return gpu_arch_t::_case
 
     CASE(gen9);
-    CASE(gen12lp);
+    CASE(xe_lp);
 #if DNNL_WITH_XE_HP
     CASE(xe_hp);
 #endif
@@ -107,7 +107,7 @@ status_t device_info_t::init_attributes_common(engine_t *engine) {
     int32_t threads_per_eu[2] = {7, 7};
     switch (gpu_arch_) {
         case gpu::compute::gpu_arch_t::gen9:
-        case gpu::compute::gpu_arch_t::gen12lp:
+        case gpu::compute::gpu_arch_t::xe_lp:
             threads_per_eu[0] = 7;
             threads_per_eu[1] = 7;
             break;

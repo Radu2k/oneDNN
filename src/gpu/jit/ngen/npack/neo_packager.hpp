@@ -172,7 +172,7 @@ inline HW decodeGfxCoreFamily(GfxCoreFamily family)
         case GfxCoreFamily::Gen11LP:  return HW::Gen11;
         case GfxCoreFamily::Gen12:
         case GfxCoreFamily::XeHP:     return HW::Xe_HP;
-        case GfxCoreFamily::Gen12LP:  return HW::Gen12LP;
+        case GfxCoreFamily::Xe_LP:  return HW::Xe_LP;
 #if NGEN_XE_HPG
         case GfxCoreFamily::Xe_HPG:  return HW::Xe_HPG;
 #endif
@@ -190,7 +190,7 @@ inline GfxCoreFamily encodeGfxCoreFamily(HW hw)
         case HW::Gen10:   return GfxCoreFamily::Gen10;
         case HW::Gen11:   return GfxCoreFamily::Gen11LP;
         case HW::Xe_HP: return GfxCoreFamily::Gen12;
-        case HW::Gen12LP: return GfxCoreFamily::Gen12LP;
+        case HW::Xe_LP: return GfxCoreFamily::Xe_LP;
 #if NGEN_XE_HPG
         case HW::Xe_HPG: return GfxCoreFamily::Xe_HPG;
 #endif
@@ -206,7 +206,7 @@ inline HW decodeProductFamily(ProductFamily family)
     if (family >= ProductFamily::SKL && family < ProductFamily::CNL) return HW::Gen9;
     if (family >= ProductFamily::CNL && family < ProductFamily::ICL) return HW::Gen10;
     if (family >= ProductFamily::ICL && family < ProductFamily::TGLLP) return HW::Gen11;
-    if (family >= ProductFamily::TGLLP && family <= ProductFamily::DG1) return HW::Gen12LP;
+    if (family >= ProductFamily::TGLLP && family <= ProductFamily::DG1) return HW::Xe_LP;
     if (family == ProductFamily::TGLHP) return HW::Xe_HP;
 #if NGEN_XE_HPG
     if (family == ProductFamily::DG2) return HW::Xe_HPG;
