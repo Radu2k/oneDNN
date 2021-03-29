@@ -33,8 +33,8 @@ int Bundle::first_reg(HW hw) const
     case HW::Gen11:
         return (bundle0 << 8) | (bank0 << 1);
     case HW::Gen12LP:
-#if NGEN_GEN12P8
-    case HW::Gen12p8:
+#if NGEN_XE_HPC
+    case HW::Xe_HPC:
 #endif
         return (bundle0 << 1) | bank0;
     case HW::Xe_HP:
@@ -80,8 +80,8 @@ int Bundle::stride(HW hw) const
     case HW::Gen12p7:
 #endif
         return 64;
-#if NGEN_GEN12P8
-    case HW::Gen12p8:
+#if NGEN_XE_HPC
+    case HW::Xe_HPC:
         return 32;
 #endif
     default:
@@ -116,8 +116,8 @@ int64_t Bundle::reg_mask(HW hw, int offset) const
         if (bundle_id != any)                           base_mask  = 0x000000000000000F;
         if (bank_id != any)                             base_mask &= 0x3333333333333333;
         return base_mask << ((bank0 << 1) + (bundle0 << 2));
-#if NGEN_GEN12P8
-    case HW::Gen12p8:
+#if NGEN_XE_HPC
+    case HW::Xe_HPC:
         if (bundle_id != any)                           base_mask  = 0x0000000300000003;
         if (bank_id != any)                             base_mask &= 0x5555555555555555;
         return base_mask << (bank0 + (bundle0 << 1));
@@ -144,8 +144,8 @@ Bundle Bundle::locate(HW hw, RegData reg)
         case HW::Gen12p7:
 #endif
             return Bundle((base >> 1) & 1, (base >> 2) & 0xF);
-#if NGEN_GEN12P8
-        case HW::Gen12p8:
+#if NGEN_XE_HPC
+        case HW::Xe_HPC:
             return Bundle(base & 1, (base >> 1) & 0xF);
 #endif
         default:
@@ -343,7 +343,7 @@ Subregister RegisterAllocator::try_alloc_sub(DataType type, Bundle bundle)
     int r_alloc, o_alloc;
 
     auto find_alloc_sub = [&,bundle,dwords](bool search_full_grf) -> bool {
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         static const uint16_t alloc_patterns[4] = {0b1111111111111111, 0b0101010101010101, 0, 0b0001000100010001};
 #else
         static const uint8_t alloc_patterns[4] = {0b11111111, 0b01010101, 0, 0b00010001};
@@ -430,7 +430,7 @@ void RegisterAllocator::dump(std::ostream &str)
             str << "// Inconsistent bitmaps at r" << r << std::endl;
         if (free_sub[r] != 0x00 && free_sub[r] != fullSubMask) {
             str << "//  r" << std::setw(3) << r << "   ";
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
             for (int s = 0; s < (GRF::bytes(hw) >> 2); s++)
 #else
             for (int s = 0; s < 8; s++)

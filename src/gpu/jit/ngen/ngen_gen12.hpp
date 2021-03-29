@@ -21,12 +21,12 @@
 // Gen12 binary encoding.
 
 struct EncodingTag12 {};
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 struct EncodingTag12p8 {};
 #endif
 template <HW hw> struct EncodingTag12Dispatch { using tag = EncodingTag12; };
-#if NGEN_GEN12P8
-template <> struct EncodingTag12Dispatch<HW::Gen12p8> { using tag = EncodingTag12p8; };
+#if NGEN_XE_HPC
+template <> struct EncodingTag12Dispatch<HW::Xe_HPC> { using tag = EncodingTag12p8; };
 #endif
 
 class SWSBInfo12
@@ -97,7 +97,7 @@ public:
     static constexpr14 SWSBInfo12 createFromRaw(uint8_t all_) { return SWSBInfo12(all_, false); }
 };
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 class SWSBInfo12p8
 {
     friend class InstructionModifier;
@@ -205,7 +205,7 @@ public:
     constexpr uint16_t raw() const { return all; }
     static constexpr14 SWSBInfo12p8 createFromRaw(uint16_t all_) { return SWSBInfo12p8(all_, false); }
 };
-#endif /* NGEN_GEN12P8 */
+#endif /* NGEN_XE_HPC */
 
 // 24 bits of data common between src0 and src1 (lower 16 bits common with dst)
 union BinaryOperand12 {
@@ -227,7 +227,7 @@ union BinaryOperand12 {
         unsigned width : 3;
         unsigned vs : 4;
     } indirect;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     struct {
         unsigned : 20;
         unsigned vs : 3;
@@ -274,7 +274,7 @@ struct Instruction12 {
             unsigned : 32;
             unsigned : 32;
         } common;
-    #if NGEN_GEN12P8
+    #if NGEN_XE_HPC
         struct {
             unsigned : 8;
             unsigned swsb : 10;
@@ -441,7 +441,7 @@ struct Instruction12 {
     void shiftUIP(int32_t shift) { branches.uip += shift * sizeof(Instruction12); }
 
     inline autoswsb::DestinationMask destinations(int &jip, int &uip) const;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     template <bool p8 = false>
 #endif
     inline bool getOperandRegion(autoswsb::DependencyRegion &region, int opNum) const;
@@ -461,7 +461,7 @@ protected:
 
 static_assert(sizeof(Instruction12) == 16, "Internal error: Instruction12 has been padded by the compiler.");
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 struct Instruction12p8 : public Instruction12 {
     SWSBInfo swsb() const        { return SWSBInfo12p8::createFromRaw(common12p8.swsb).decode(opcode()); }
     void setSWSB(SWSBInfo swsb)  { common12p8.swsb = SWSBInfo12p8(swsb, opcode()).raw(); }
@@ -479,7 +479,7 @@ static_assert(sizeof(Instruction12p8) == 16, "Internal error: Instruction12p8 ha
 
 static inline unsigned getTypecode12(DataType type)
 {
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     static const uint8_t conversionTable[32] = {2,6,1,5,0,4,11,10,3,7,9,13,8,0,4,8,
                                                 14,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2};
     return conversionTable[static_cast<unsigned>(type) & 0x1F];
@@ -526,7 +526,7 @@ static inline constexpr14 BinaryOperand12 encodeBinaryOperand12(const RegData &r
     return op;
 }
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 template <bool dest, bool encodeHS = true>
 static inline constexpr14 BinaryOperand12 encodeBinaryOperand12(const RegData &rd, EncodingTag12p8 tag)
 {
@@ -593,7 +593,7 @@ static inline constexpr14 TernaryOperand12 encodeTernaryOperand12(const RegData 
     return op;
 }
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 template <bool dest, bool encodeHS = true>
 static inline constexpr14 TernaryOperand12 encodeTernaryOperand12(const RegData &rd, EncodingTag12p8 tag)
 {
@@ -641,7 +641,7 @@ static inline void encodeCommon12(Instruction12 &i, Opcode opcode, const Instruc
     i.common.saturate = mod.parts.saturate;
 }
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 static inline void encodeCommon12(Instruction12 &i, Opcode opcode, const InstructionModifier &mod, const RegData &dst, EncodingTag12p8 tag)
 {
     i.common.opcode = static_cast<unsigned>(opcode) | (mod.parts.autoSWSB << 7);
@@ -802,7 +802,7 @@ static inline DataType decodeRegTypecode12(unsigned dt)
         DataType::ub,      DataType::uw,      DataType::ud,      DataType::uq,
         DataType::b,       DataType::w,       DataType::d,       DataType::q,
         DataType::invalid, DataType::hf,      DataType::f,       DataType::df,
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         DataType::invalid, DataType::bf,      DataType::tf32,    DataType::bf8
 #else
         DataType::invalid, DataType::bf,      DataType::invalid, DataType::invalid
@@ -811,7 +811,7 @@ static inline DataType decodeRegTypecode12(unsigned dt)
     return conversionTable[dt & 0xF];
 }
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 template <bool p8>
 #endif
 bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opNum) const
@@ -848,7 +848,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                     if (op == Opcode::dpasw) rcount = (rcount + 1) >> 1;
                     o.bits = ternary.src2;
                     auto sr = o.direct.subRegNum;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
                     if (p8) sr <<= 1;
 #endif
                     len = (sr + sdepth * rcount * 4 + 31) >> 5;
@@ -868,7 +868,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                     if (send.dstRegFile == RegFileARF) return false;
                     base = send.dstReg;
                     len = send.descIsReg ? -1 : send.desc20_24;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
                     if (len == 31) len++;
 #endif
                     break;
@@ -931,7 +931,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
             if (op == Opcode::madm) o.direct.subRegNum = 0;
             auto base = GRF(o.direct.regNum).retype(decodeRegTypecode12(dt));
             auto sr = o.direct.subRegNum;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
             if (p8) sr <<= 1;
 #endif
             auto sub = base[sr / getBytes(base.getType())];
@@ -967,7 +967,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
             if (o.direct.regFile == RegFileARF) return false;
             if (isMathMacro())
                 o.direct.subRegNum = 0;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
             auto sr = p8 ? ((o.direct.subRegNum << 1) | o.direct12p8.subRegNum0)
                          : o.direct.subRegNum;
             auto vs = p8 ? o.direct12p8.vs : o.direct.vs;
@@ -986,8 +986,8 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
         }
     }
 
-#if NGEN_GEN12P8
-    auto esize = 1 << ((hw >= HW::Gen12p8) ? common12p8.execSize : common.execSize);
+#if NGEN_XE_HPC
+    auto esize = 1 << ((hw >= HW::Xe_HPC) ? common12p8.execSize : common.execSize);
 #else
     auto esize = 1 << common.execSize;
 #endif

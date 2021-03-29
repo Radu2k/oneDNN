@@ -397,11 +397,11 @@ void barriersignal(const InstructionModifier &mod, const GRF &temp, uint32_t thr
 void barriersignal(const GRF &temp, const GRF &r0_info = r0) { barriersignal(InstructionModifier(), temp, r0_info); }
 void barriersignal(const GRF &temp, uint32_t threadCount, const GRF &r0_info = r0) { barriersignal(InstructionModifier(), temp, threadCount, r0_info); }
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 void barriersignal(const InstructionModifier &mod, uint32_t barrierID, const GRF &temp, const GRF &r0_info = r0)
 {
 #ifdef NGEN_SAFE
-    if (hardware != HW::Gen12p8)
+    if (hardware != HW::Xe_HPC)
         throw unsupported_message();
 #endif
     mov(1 | NoMask, temp.uw(4), uint8_t(barrierID));
@@ -412,7 +412,7 @@ void barriersignal(const InstructionModifier &mod, uint32_t barrierID, const GRF
 void barriersignal(const InstructionModifier &mod, uint32_t barrierID, const GRF &temp, BarrierType barrierType, uint32_t producers, uint32_t consumers)
 {
 #ifdef NGEN_SAFE
-    if (hardware != HW::Gen12p8)
+    if (hardware != HW::Xe_HPC)
         throw unsupported_message();
 #endif
     mov(1 | NoMask, temp.ud(2), (barrierID & 0xFF) | (static_cast<uint32_t>(barrierType) << 14) | ((producers & 0xFF) << 16) | ((consumers & 0xFF) << 24));
@@ -478,7 +478,7 @@ void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127)
     if (hardware >= HW::Xe_HP) {
         const int grfSize = GRF::bytes(hardware);
         const int grfOW = grfSize / 16;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         int simdGRFs = (simd > 16 && grfSize < 64) ? 2 : 1;
 #else
         int simdGRFs = (simd > 16) ? 2 : 1;

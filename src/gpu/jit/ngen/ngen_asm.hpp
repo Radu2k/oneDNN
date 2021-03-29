@@ -21,8 +21,8 @@
 #define NGEN_GEN12P7 1
 #endif
 
-#ifndef NGEN_GEN12P8
-#define NGEN_GEN12P8 1
+#ifndef NGEN_XE_HPC
+#define NGEN_XE_HPC 1
 #endif
 
 #include <array>
@@ -337,7 +337,7 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
                 MessageDescriptor desc;
                 desc.all = static_cast<uint64_t>(src[3].imm);
                 len = (opNum < 0) ? desc.parts.responseLen : desc.parts.messageLen;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
                 if (len == 31) len++;       // 32 GRF responses are encoded as 31. Conservatively use the higher value.
 #endif
             } else
@@ -921,16 +921,16 @@ protected:
     }
     template <typename DT = void>
     void mach(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-#if NGEN_GEN12P8
-        opX(Opcode::mach, getDataType<DT>(), (hardware >= HW::Gen12p8) ? mod : (mod | AccWrEn), dst, src0, src1);
+#if NGEN_XE_HPC
+        opX(Opcode::mach, getDataType<DT>(), (hardware >= HW::Xe_HPC) ? mod : (mod | AccWrEn), dst, src0, src1);
 #else
         opX(Opcode::mach, getDataType<DT>(), mod | AccWrEn, dst, src0, src1);
 #endif
     }
     template <typename DT = void>
     void mach(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-#if NGEN_GEN12P8
-        opX(Opcode::mach, getDataType<DT>(), (hardware >= HW::Gen12p8) ? mod : (mod | AccWrEn), dst, src0, src1);
+#if NGEN_XE_HPC
+        opX(Opcode::mach, getDataType<DT>(), (hardware >= HW::Xe_HPC) ? mod : (mod | AccWrEn), dst, src0, src1);
 #else
         opX(Opcode::mach, getDataType<DT>(), mod | AccWrEn, dst, src0, src1);
 #endif
@@ -940,8 +940,8 @@ protected:
 #ifdef NGEN_SAFE
         if (hardware < HW::Gen10) unsupported();
 #endif
-#if NGEN_GEN12P8
-        opX((hardware >= HW::Gen12p8) ? Opcode::macl : Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
+#if NGEN_XE_HPC
+        opX((hardware >= HW::Xe_HPC) ? Opcode::macl : Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
 #else
         opX(Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
 #endif
@@ -951,8 +951,8 @@ protected:
 #ifdef NGEN_SAFE
         if (hardware < HW::Gen10) unsupported();
 #endif
-#if NGEN_GEN12P8
-        opX((hardware >= HW::Gen12p8) ? Opcode::macl : Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
+#if NGEN_XE_HPC
+        opX((hardware >= HW::Xe_HPC) ? Opcode::macl : Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
 #else
         opX(Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
 #endif
@@ -1285,7 +1285,7 @@ protected:
     void smov(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
         opX(isGen12 ? Opcode::smov_gen12 : Opcode::smov, getDataType<DT>(), mod, dst, src0, src1);
     }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     template <typename DT = void>
     void srnd(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
         opX(Opcode::srnd, getDataType<DT>(), mod, dst, src0, src1);
@@ -1389,7 +1389,7 @@ private:
         void bar(const InstructionModifier &mod = InstructionModifier()) {
             this->operator()(SyncFunction::bar, mod);
         }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         void bar(const InstructionModifier &mod, uint32_t src0) {
             this->operator()(SyncFunction::bar, mod, src0);
         }

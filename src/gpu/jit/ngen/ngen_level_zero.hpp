@@ -21,8 +21,8 @@
 #define NGEN_GEN12P7 1
 #endif
 
-#ifndef NGEN_GEN12P8
-#define NGEN_GEN12P8 1
+#ifndef NGEN_XE_HPC
+#define NGEN_XE_HPC 1
 #endif
 
 #include <ze_api.h>

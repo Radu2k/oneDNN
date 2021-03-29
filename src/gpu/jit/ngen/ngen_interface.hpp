@@ -414,8 +414,8 @@ void InterfaceHandler::generatePrologue(CodeGenerator &generator, const GRF &tem
 #else
     if (needLocalID)
         generator.loadlid(getCrossthreadGRFs(), needLocalID, simd, temp, 12*16);
-#if NGEN_GEN12P8
-    if (hw >= HW::Gen12p8)
+#if NGEN_XE_HPC
+    if (hw >= HW::Xe_HPC)
         generator.loadargs(getCrossthreadBase(), getCrossthreadGRFs(), temp);
     else
 #endif

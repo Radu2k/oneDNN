@@ -73,7 +73,7 @@ static constexpr_reg SpecialAccumulatorRegister nomme = SpecialAccumulatorRegist
 static constexpr_reg SpecialAccumulatorRegister noacc = nomme;
 static constexpr_reg FlagRegister f0{0}, f1{1};
 static constexpr_reg FlagRegister f0_0{0,0}, f0_1{0,1}, f1_0{1,0}, f1_1{1,1};
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 static constexpr_reg FlagRegister f2{2}, f3{3};
 #endif
 static constexpr_reg ChannelEnableRegister ce0{0};
@@ -125,7 +125,7 @@ static constexpr_reg PredCtrl any16h = PredCtrl::any16h;
 static constexpr_reg PredCtrl all16h = PredCtrl::all16h;
 static constexpr_reg PredCtrl any32h = PredCtrl::any32h;
 static constexpr_reg PredCtrl all32h = PredCtrl::all32h;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 static constexpr_reg PredCtrl any = PredCtrl::any;
 static constexpr_reg PredCtrl all = PredCtrl::all;
 #endif
@@ -162,7 +162,7 @@ static inline InstructionModifier M(int off) { return ExecutionOffset(off); }
 
 static constexpr_reg SBID sb0{0}, sb1{1}, sb2{2}, sb3{3}, sb4{4}, sb5{5}, sb6{6}, sb7{7};
 static constexpr_reg SBID sb8{8}, sb9{9}, sb10{10}, sb11{11}, sb12{12}, sb13{13}, sb14{14}, sb15{15};
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 static constexpr_reg SBID sb16{16}, sb17{17}, sb18{18}, sb19{19}, sb20{20}, sb21{21}, sb22{22}, sb23{23};
 static constexpr_reg SBID sb24{24}, sb25{25}, sb26{16}, sb27{27}, sb28{28}, sb29{29}, sb30{30}, sb31{31};
 #endif
@@ -215,7 +215,7 @@ static constexpr_reg DataSpec12p7 V32T = DataSpec12p7::createV(32,6) | DataSpec1
 static constexpr_reg DataSpec12p7 V64T = DataSpec12p7::createV(64,7) | DataSpec12p7::createTranspose();
 
 static constexpr_reg DataSpec12p7 transpose = DataSpec12p7::createTranspose();
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 static constexpr_reg DataSpec12p7 vnni = DataSpec12p7::createVNNI();
 #endif
 

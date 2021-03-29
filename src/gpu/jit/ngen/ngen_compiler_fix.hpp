@@ -173,7 +173,7 @@ void _workaround_() {
     (void) SWSBInfo(sb4).hasDist();  (void) SWSBInfo(sb5).hasDist();  (void) SWSBInfo(sb6).hasDist();  (void) SWSBInfo(sb7).hasDist();
     (void) SWSBInfo(sb8).hasDist();  (void) SWSBInfo(sb9).hasDist();  (void) SWSBInfo(sb10).hasDist(); (void) SWSBInfo(sb11).hasDist();
     (void) SWSBInfo(sb12).hasDist(); (void) SWSBInfo(sb13).hasDist(); (void) SWSBInfo(sb14).hasDist(); (void) SWSBInfo(sb15).hasDist();
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     (void) SWSBInfo(sb16).hasDist(); (void) SWSBInfo(sb17).hasDist(); (void) SWSBInfo(sb18).hasDist(); (void) SWSBInfo(sb19).hasDist();
     (void) SWSBInfo(sb20).hasDist(); (void) SWSBInfo(sb21).hasDist(); (void) SWSBInfo(sb22).hasDist(); (void) SWSBInfo(sb23).hasDist();
     (void) SWSBInfo(sb24).hasDist(); (void) SWSBInfo(sb25).hasDist(); (void) SWSBInfo(sb26).hasDist(); (void) SWSBInfo(sb27).hasDist();
@@ -202,7 +202,7 @@ void _workaround_() {
     (void) V64.desc;    (void) V64T.desc;
     (void) transpose.desc;
 #endif
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     (void) vnni.desc;
 #endif
 }

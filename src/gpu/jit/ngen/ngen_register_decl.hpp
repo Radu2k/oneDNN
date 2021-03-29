@@ -459,7 +459,7 @@ PREFIX constexpr ngen::CacheSettings12p7 CG::L1S_L3WB; \
 PREFIX constexpr ngen::CacheSettings12p7 CG::L1WB_L3WB;
 #endif
 
-#if !NGEN_GEN12P8
+#if !NGEN_XE_HPC
 #define NGEN_REGISTER_DECL_EXTRA3(CG,PREFIX)
 #else
 #define NGEN_REGISTER_DECL_EXTRA3(CG,PREFIX) \
@@ -517,8 +517,8 @@ template class ngen::BinaryCodeGenerator<ngen::HW::Xe_HP>;
 #if NGEN_GEN12P7
 template class ngen::BinaryCodeGenerator<ngen::HW::Gen12p7>;
 #endif
-#if NGEN_GEN12P8
-template class ngen::BinaryCodeGenerator<ngen::HW::Gen12p8>;
+#if NGEN_XE_HPC
+template class ngen::BinaryCodeGenerator<ngen::HW::Xe_HPC>;
 #endif
 
 #endif /* (defined(NGEN_CPP11) || defined(NGEN_CPP14)) && !defined(NGEN_GLOBAL_REGS) */

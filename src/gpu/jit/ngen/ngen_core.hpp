@@ -101,7 +101,7 @@ enum class Opcode;
 
 struct EncodingTag12;
 static inline void encodeCommon12(Instruction12 &i, Opcode opcode, const InstructionModifier &mod, const RegData &dst, EncodingTag12 tag);
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 struct EncodingTag12p8;
 static inline void encodeCommon12(Instruction12 &i, Opcode opcode, const InstructionModifier &mod, const RegData &dst, EncodingTag12p8 tag);
 #endif
@@ -214,8 +214,8 @@ enum class HW {
 #if NGEN_GEN12P7
     Gen12p7,
 #endif
-#if NGEN_GEN12P8
-    Gen12p8,
+#if NGEN_XE_HPC
+    Xe_HPC,
 #endif
 };
 
@@ -236,7 +236,7 @@ enum class DataType : uint8_t {
     uv = 0x4D,
     v  = 0x4E,
     vf = 0x4F,
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     bf8 = 0x0C,
     tf32 = 0x50,
 #endif
@@ -246,7 +246,7 @@ enum class DataType : uint8_t {
 #ifdef NGEN_ASM
 static inline std::ostream &operator<<(std::ostream &str, DataType type)
 {
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     static const char *names[32] = {"ud",   "d", "uw", "w", "ub", "b", "df", "f", "uq", "q", "hf", "bf", "bf8", "uv", "v", "vf",
                                     "tf32", "",  "",   "",  "",   "",  "",   "",  "",   "",  "",   "",   "",    "",   "",  ""};
     str << names[static_cast<uint8_t>(type) & 0x1F];
@@ -285,7 +285,7 @@ template <> inline DataType getDataType<half>()     { return DataType::hf; }
 #ifdef NGEN_BFLOAT16_TYPE
 template <> inline DataType getDataType<bfloat16>() { return DataType::bf; }
 #endif
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 #ifdef NGEN_BFLOAT8_TYPE
 template <> inline DataType getDataType<bfloat8>() { return DataType::bf8; }
 #endif
@@ -770,7 +770,7 @@ public:
     Subregister  f(int offset = 0) const { return reinterpret(offset, DataType::f);  }
     Subregister hf(int offset = 0) const { return reinterpret(offset, DataType::hf); }
     Subregister bf(int offset = 0) const { return reinterpret(offset, DataType::bf); }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     Subregister tf32(int offset = 0) const { return reinterpret(offset, DataType::tf32); }
     Subregister bf8(int offset = 0)  const { return reinterpret(offset, DataType::bf8); }
 #endif
@@ -810,7 +810,7 @@ public:
     constexpr14 Subregister  f(int offset) const { return sub(offset, DataType::f);  }
     constexpr14 Subregister hf(int offset) const { return sub(offset, DataType::hf); }
     constexpr14 Subregister bf(int offset) const { return sub(offset, DataType::bf); }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     constexpr14 Subregister tf32(int offset) const { return sub(offset, DataType::tf32); }
     constexpr14 Subregister bf8(int offset)  const { return sub(offset, DataType::bf8); }
 #endif
@@ -827,7 +827,7 @@ public:
     constexpr14 Register  f() const { return retype(DataType::f);  }
     constexpr14 Register hf() const { return retype(DataType::hf); }
     constexpr14 Register bf() const { return retype(DataType::bf); }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     constexpr14 Register tf32() const { return retype(DataType::tf32); }
     constexpr14 Register bf8()  const { return retype(DataType::bf8); }
 #endif
@@ -866,7 +866,7 @@ public:
     constexpr14 Subregister  f(int offset) const { return sub(offset, DataType::f);  }
     constexpr14 Subregister hf(int offset) const { return sub(offset, DataType::hf); }
     constexpr14 Subregister bf(int offset) const { return sub(offset, DataType::bf); }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     constexpr14 Subregister bf8(int offset)  const { return sub(offset, DataType::bf8); }
     constexpr14 Subregister tf32(int offset) const { return sub(offset, DataType::tf32); }
 #endif
@@ -883,7 +883,7 @@ public:
     constexpr14 GRF  f() const { return retype(DataType::f);  }
     constexpr14 GRF hf() const { return retype(DataType::hf); }
     constexpr14 GRF bf() const { return retype(DataType::bf); }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     constexpr14 GRF bf8()  const { return retype(DataType::bf8); }
     constexpr14 GRF tf32() const { return retype(DataType::tf32); }
 #endif
@@ -920,8 +920,8 @@ public:
     inline GRFDisp operator+(int offset) const;
     inline GRFDisp operator-(int offset) const;
 
-#if NGEN_GEN12P8
-    static constexpr int log2Bytes(HW hw)                  { return (hw == HW::Gen12p8) ? 6 : 5;  }
+#if NGEN_XE_HPC
+    static constexpr int log2Bytes(HW hw)                  { return (hw == HW::Xe_HPC) ? 6 : 5;  }
 #else
     static constexpr int log2Bytes(HW hw)                  { return 5; }
 #endif
@@ -1057,8 +1057,8 @@ public:
     int index() const { return (getARFBase() << 1) + getOffset(); }
 
     static inline constexpr int count(HW hw) {
-    #if NGEN_GEN12P8
-        return (hw == HW::Gen12p8) ? 4 : 2;
+    #if NGEN_XE_HPC
+        return (hw == HW::Xe_HPC) ? 4 : 2;
     #else
         return 2;
     #endif
@@ -1307,7 +1307,7 @@ enum class PredCtrl {
     all16h = 11,
     any32h = 12,
     all32h = 13,
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     any = 14,
     all = 15,
 #endif
@@ -1319,7 +1319,7 @@ enum class PredCtrl {
 
 #ifdef NGEN_ASM
 static const char *toText(PredCtrl ctrl, bool align16) {
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     const char *names[2][16] = {{"", "", "anyv", "allv", "any2h", "all2h", "any4h", "all4h", "any8h", "all8h", "any16h", "all16h", "any32h", "all32h", "any", "all"},
 #else
     const char *names[2][16] = {{"", "", "anyv", "allv", "any2h", "all2h", "any4h", "all4h", "any8h", "all8h", "any16h", "all16h", "any32h", "all32h", "",    ""},
@@ -1399,7 +1399,7 @@ enum class Opcode {
     sad2 = 0x50,
     sada2 = 0x51,
     add3 = 0x52,
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     macl = 0x53,
     srnd = 0x54,
 #endif
@@ -1445,8 +1445,8 @@ static inline bool isVariableLatency(HW hw, Opcode op)
 {
     switch (op) {
         case Opcode::math:
-#if NGEN_GEN12P8
-            if (hw >= HW::Gen12p8) return false;
+#if NGEN_XE_HPC
+            if (hw >= HW::Xe_HPC) return false;
 #endif
         case Opcode::send:
         case Opcode::sendc:
@@ -1477,7 +1477,7 @@ static const char *getMnemonic(Opcode op, HW hw)
         "math", "", "", "", "", "", "", "",
         "add", "mul", "avg", "frc", "rndu", "rndd", "rnde", "rndz",
         "mac", "mach", "lzd", "fbh", "fbl", "cbit", "addc", "subb",
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         "sad2", "sada2", "add3", "macl", "srnd", "dph", "dp3", "dp2",
 #else
         "sad2", "sada2", "add3", "", "dp4", "dph", "dp3", "dp2",
@@ -1495,7 +1495,7 @@ static const char *getMnemonic(Opcode op, HW hw)
         case Opcode::mov:   mnemonic = "mov";   break;
         case Opcode::line:  mnemonic = "line";  break;
         case Opcode::pln:   mnemonic = "pln";   break;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         case Opcode::dp4:   mnemonic = "dp4";   break;
 #endif
         default: break;
@@ -1512,7 +1512,7 @@ enum class Pipe : uint8_t {
     F = 2, Float = F,
     I = 3, Integer = I,
     L = 4, Long = L,
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     M = 5, Math = M,
 #endif
 };
@@ -1520,7 +1520,7 @@ enum class Pipe : uint8_t {
 #ifdef NGEN_ASM
 static inline std::ostream &operator<<(std::ostream &str, Pipe pipe)
 {
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     static const char *names[8] = {"", "A", "F", "I", "L", "M", "", ""};
 #else
     static const char *names[8] = {"", "A", "F", "I", "L", "", "", ""};
@@ -1569,8 +1569,8 @@ public:
 // Token count.
 constexpr inline int tokenCount(HW hw)
 {
-#if NGEN_GEN12P8
-    return (hw >= HW::Gen12p8) ? 32 : 16;
+#if NGEN_XE_HPC
+    return (hw >= HW::Xe_HPC) ? 32 : 16;
 #else
     return 16;
 #endif
@@ -1620,7 +1620,7 @@ protected:
             unsigned flagSubRegNum : 1;
             unsigned flagRegNum : 1;
             unsigned maskCtrl : 1;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
             unsigned _zeros_: 9;
             unsigned flagRegNum1 : 1;
 #else
@@ -1637,7 +1637,7 @@ protected:
     constexpr InstructionModifier(uint64_t all_) : all(all_) {}
 
     friend inline void encodeCommon12(Instruction12 &i, Opcode opcode, const InstructionModifier &mod, const RegData &dst, EncodingTag12 tag);
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     friend inline void encodeCommon12(Instruction12 &i, Opcode opcode, const InstructionModifier &mod, const RegData &dst, EncodingTag12p8 tag);
 #endif
 
@@ -1657,7 +1657,7 @@ public:
     constexpr bool isCompact()             const { return parts.cmptCtrl; }
     constexpr bool isBreakpoint()          const { return parts.debugCtrl; }
     constexpr bool isSaturate()            const { return parts.saturate; }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     constexpr14 FlagRegister getFlagReg()  const { return FlagRegister((parts.flagRegNum1 << 1) | parts.flagRegNum, parts.flagSubRegNum); }
 #else
     constexpr14 FlagRegister getFlagReg()  const { return FlagRegister(parts.flagRegNum, parts.flagSubRegNum); }
@@ -1674,7 +1674,7 @@ public:
     constexpr14 void setPredInv(bool predInv_)               { parts.predInv = predInv_; }
     constexpr14 void setCMod(const ConditionModifier &cmod_) { parts.cmod = static_cast<unsigned>(cmod_); }
     constexpr14 void setBranchCtrl(bool branchCtrl)          { parts.accWrCtrl = branchCtrl; }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     constexpr14 void setFlagReg(FlagRegister &flag)          { parts.flagRegNum1 = flag.getBase() >> 1; parts.flagRegNum = flag.getBase() & 1; parts.flagSubRegNum = flag.getOffset(); }
 #else
     constexpr14 void setFlagReg(FlagRegister &flag)          { parts.flagRegNum = flag.getBase(); parts.flagSubRegNum = flag.getOffset(); }
@@ -1780,7 +1780,7 @@ inline constexpr14 InstructionModifier operator|(const InstructionModifier &mod1
 {
     InstructionModifier mod = mod1;
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     mod.parts.flagRegNum1 = flag.getBase() >> 1;
 #endif
     mod.parts.flagRegNum = flag.getBase() & 1;
@@ -2014,7 +2014,7 @@ public:
 template <typename F>
 inline uint8_t getBFNCtrl(F func) { return func(0xAA, 0xCC, 0xF0); }
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 enum class BarrierType : uint8_t {
     ProducerConsumer = 0,
     Producer = 1,
@@ -2182,7 +2182,7 @@ enum class AtomicOp : uint16_t {
     fcmpwr = 0x1713,
     fadd = 0x1314,
     fsub = 0x1415,
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     fadd_64b = 0x1316,
     fsub_64b = 0x1417,
 #endif
@@ -2327,7 +2327,7 @@ public:
     template <Access access> void getDescriptors(HW hw, const InstructionModifier &mod, AddressBase base, MessageDescriptor &desc, ExtendedMessageDescriptor &exdesc, const RegData &addr) const
     {
         int dataGRFCount = count;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         if (GRF::bytes(hw) == 64) dataGRFCount = (dataGRFCount + 1) >> 1;
 #endif
 
@@ -2364,7 +2364,7 @@ public:
 
     template <Access access> void getDescriptors(HW hw, const InstructionModifier &mod, AddressBase base, MessageDescriptor &desc, ExtendedMessageDescriptor &exdesc, const RegData &addr) const
     {
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         int dataGRFCount = (GRF::bytes(hw) == 64) ? (count + 3) >> 2 : (count + 1) >> 1;
 #else
         int dataGRFCount = (count + 1) >> 1;
@@ -2402,7 +2402,7 @@ public:
 
     template <Access access> void getDescriptors(HW hw, const InstructionModifier &mod, AddressBase base, MessageDescriptor &desc, ExtendedMessageDescriptor &exdesc, const RegData &addr) const
     {
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         int dataGRFCount = (GRF::bytes(hw) == 64) ? (count + 3) >> 2 : (count + 1) >> 1;
 #else
         int dataGRFCount = (count + 1) >> 1;
@@ -2443,7 +2443,7 @@ public:
         int simd16 = mod.getExecSize() >> 4;
         int dataGRFCount = 1 + simd16;
         int addrGRFCount = dataGRFCount << int(a64);
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         if (GRF::bytes(hw) == 64) {
             dataGRFCount = 1;
             addrGRFCount = 1 << int(a64);
@@ -2493,7 +2493,7 @@ public:
         int simd16 = mod.getExecSize() >> 4;
         int addrGRFCount = (1 + simd16) << int(a64);
         int dataGRFCount = 1 + simd16;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         if (GRF::bytes(hw) == 64) {
             addrGRFCount = 1 << int(a64);
             dataGRFCount = 1;
@@ -2535,7 +2535,7 @@ public:
         int simd16 = mod.getExecSize() >> 4;
         int addrGRFCount = (1 + simd16) << int(a64);
         int dataGRFCount = count * (1 + simd16);
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         if (GRF::bytes(hw) == 64) {
             addrGRFCount = 1 << int(a64);
             dataGRFCount = count;
@@ -2587,7 +2587,7 @@ public:
         int simd16 = mod.getExecSize() >> 4;
         int addrGRFCount = (1 + simd16) << int(a64);
         int dataGRFCount = count * 2 * (1 + simd16);
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         if (GRF::bytes(hw) == 64) {
             addrGRFCount = 1 << int(a64);
             dataGRFCount = count * 2;
@@ -2640,14 +2640,14 @@ public:
     template <Access access> void getDescriptors(HW hw, const InstructionModifier &mod, AddressBase base, MessageDescriptor &desc, ExtendedMessageDescriptor &exdesc, const RegData &addr) const
     {
         int simd16 = mod.getExecSize() >> 4;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         if (GRF::bytes(hw) == 64) simd16 = 1;
 #endif
         int nChannels = utils::popcnt(0xF ^ static_cast<int8_t>(cmask));
         bool isA64 = base.getModel() == ModelA64;
         int addrGRFCount = (1 + simd16) << int(isA64) << int(structured);
         int dataGRFCount = nChannels * (1 + simd16);
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         if (GRF::bytes(hw) == 64) {
             addrGRFCount = (addrGRFCount + 1) >> 1;
             dataGRFCount = (dataGRFCount + 1) >> 1;
@@ -2738,7 +2738,7 @@ enum class DPOpcode12p7 : uint8_t {
     ccs_update = 0x1D,
     rsi = 0x1E,
     fence = 0x1F,
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     load_block = 1,
     load_2dblock = 3,
     store_block = 5,
@@ -2801,7 +2801,7 @@ struct DataSpec12p7 {
 
     static constexpr DataSpec12p7 createV(unsigned vcount, unsigned venc) { return DataSpec12p7{MessageDescriptor(venc << 12), uint8_t(vcount), 0}; }
     static constexpr DataSpec12p7 createTranspose()                       { return DataSpec12p7{MessageDescriptor(1 << 15)}; }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     static constexpr DataSpec12p7 createVNNI()                            { return DataSpec12p7{MessageDescriptor(1 << 7)}; }
 #endif
 
@@ -2866,7 +2866,7 @@ inline constexpr DataSpec12p7 operator|(const DataSpec12p7 &s1, const DataSpec12
 }
 #endif /* NGEN_GEN12P7 */
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 class block_2d : public DataSpec12p7 {
 protected:
     uint8_t width, height, count;

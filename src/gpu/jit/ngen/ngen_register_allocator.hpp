@@ -140,7 +140,7 @@ public:
 
 protected:
     static constexpr int max_regs = 256;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     using mtype = uint16_t;
 #else
     using mtype = uint8_t;

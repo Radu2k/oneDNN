@@ -176,8 +176,8 @@ inline HW decodeGfxCoreFamily(GfxCoreFamily family)
 #if NGEN_GEN12P7
         case GfxCoreFamily::Gen12p7:  return HW::Gen12p7;
 #endif
-#if NGEN_GEN12P8
-        case GfxCoreFamily::Gen12p8:  return HW::Gen12p8;
+#if NGEN_XE_HPC
+        case GfxCoreFamily::Xe_HPC:  return HW::Xe_HPC;
 #endif
         default:                      return HW::Unknown;
     }
@@ -194,8 +194,8 @@ inline GfxCoreFamily encodeGfxCoreFamily(HW hw)
 #if NGEN_GEN12P7
         case HW::Gen12p7: return GfxCoreFamily::Gen12p7;
 #endif
-#if NGEN_GEN12P8
-        case HW::Gen12p8: return GfxCoreFamily::Gen12p8;
+#if NGEN_XE_HPC
+        case HW::Xe_HPC: return GfxCoreFamily::Xe_HPC;
 #endif
         default:          return GfxCoreFamily::Unknown;
     }
@@ -211,8 +211,8 @@ inline HW decodeProductFamily(ProductFamily family)
 #if NGEN_GEN12P7
     if (family == ProductFamily::DG2) return HW::Gen12p7;
 #endif
-#if NGEN_GEN12P8
-    if (family == ProductFamily::PVC) return HW::Gen12p8;
+#if NGEN_XE_HPC
+    if (family == ProductFamily::PVC) return HW::Xe_HPC;
 #endif
     return HW::Unknown;
 }

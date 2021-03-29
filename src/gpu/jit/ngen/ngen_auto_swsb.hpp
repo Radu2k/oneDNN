@@ -40,7 +40,7 @@ namespace autoswsb {
 typedef uint8_t PipeMask;
 enum {
     PipeMaskNone = 0,
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     PipeMaskA = 1,      // All in-order pipes
     PipeMaskF = 2,
     PipeMaskI = 4,
@@ -66,7 +66,7 @@ enum {
     PipeBitO = 4,
 #endif
 };
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
 static constexpr int NPipes = 5;
 #else
 static constexpr int NPipes = 4;
@@ -120,7 +120,7 @@ struct DependencyRegion {
     uint8_t base, size;
     bool unspecified;
     HW hw;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     std::array<uint64_t, 32> masks;
 #elif NGEN_GEN12P7
     std::array<uint32_t, 16> masks;
@@ -256,8 +256,8 @@ inline PipeMask allPipes(HW hw)
 {
     PipeMask mask = PipeMaskA | PipeMaskO;
     if (hw >= HW::Xe_HP) mask |= PipeMaskF | PipeMaskI | PipeMaskL;
-#if NGEN_GEN12P8
-    if (hw >= HW::Gen12p8) mask |= PipeMaskM;
+#if NGEN_XE_HPC
+    if (hw >= HW::Xe_HPC) mask |= PipeMaskM;
 #endif
 
     return mask;
@@ -290,8 +290,8 @@ inline GeneralizedPipe getPipe(HW hw, const Instruction &insn, bool checkOOO = t
         }
     }
 
-#if NGEN_GEN12P8
-    if (hw >= HW::Gen12p8 && (op == Opcode::math))
+#if NGEN_XE_HPC
+    if (hw >= HW::Xe_HPC && (op == Opcode::math))
         return PipeMaskM;
 #endif
 
@@ -302,8 +302,8 @@ inline GeneralizedPipe getPipe(HW hw, const Instruction &insn, bool checkOOO = t
     // Exception: if there are any long operands, it's a long pipe instruction.
     if (hw >= HW::Xe_HP) {
         auto dt = insn.dstTypecode();
-#if NGEN_GEN12P8 && !NGEN_PVC_A
-        unsigned lmask = (hw == HW::Gen12p8) ? 0b1011 : 0b0011;
+#if NGEN_XE_HPC && !NGEN_PVC_A
+        unsigned lmask = (hw == HW::Xe_HPC) ? 0b1011 : 0b0011;
 #else
         unsigned lmask = 3;
 #endif
@@ -356,8 +356,8 @@ DependencyRegion::DependencyRegion(HW hw_, GRFRange r)
     unspecified = false;
     base = r.getBase();
     size = r.getLen();
-#if NGEN_GEN12P8
-    auto fullMask = (hw_ >= HW::Gen12p8) ? ~uint64_t(0) : ~uint32_t(0);
+#if NGEN_XE_HPC
+    auto fullMask = (hw_ >= HW::Xe_HPC) ? ~uint64_t(0) : ~uint32_t(0);
 #else
     auto fullMask = ~uint32_t(0);
 #endif
@@ -478,7 +478,7 @@ inline int timeout(GeneralizedPipe pipe)
         case PipeMaskI: return 11;
         case PipeMaskF: return 11;
         case PipeMaskL: return 15;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         case PipeMaskM: return 19;
 #endif
         default:        return std::numeric_limits<int>::max();
@@ -783,7 +783,7 @@ inline void dumpPipeMask(PipeMask mask, bool spacers = true)
         std::cerr << char((mask & PipeMaskF) ? 'F' : ' ');
         std::cerr << char((mask & PipeMaskI) ? 'I' : ' ');
         std::cerr << char((mask & PipeMaskL) ? 'L' : ' ');
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         std::cerr << char((mask & PipeMaskM) ? 'M' : ' ');
 #endif
         std::cerr << char((mask & PipeMaskO) ? 'O' : ' ');
@@ -792,7 +792,7 @@ inline void dumpPipeMask(PipeMask mask, bool spacers = true)
         if (mask & PipeMaskF) std::cerr << 'F';
         if (mask & PipeMaskI) std::cerr << 'I';
         if (mask & PipeMaskL) std::cerr << 'L';
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         if (mask & PipeMaskM) std::cerr << 'M';
 #endif
         if (mask & PipeMaskO) std::cerr << 'O';
@@ -822,8 +822,8 @@ void DependencyRegion::dump() const
         if (size > 1)
             std::cerr << "-r" << int(base + size - 1);
 
-#if NGEN_GEN12P8
-    auto fullMask = (hw >= HW::Gen12p8) ? ~uint64_t(0) : ~uint32_t(0);
+#if NGEN_XE_HPC
+    auto fullMask = (hw >= HW::Xe_HPC) ? ~uint64_t(0) : ~uint32_t(0);
 #else
     auto fullMask = ~uint32_t(0);
 #endif
@@ -1094,8 +1094,8 @@ inline bool arfNeedsSync(ARFType type)
 // Get preferred SBID for a given GRF.
 inline uint8_t preferredSBID(HW hw, uint8_t base)
 {
-#if NGEN_GEN12P8
-    if (hw >= HW::Gen12p8)
+#if NGEN_XE_HPC
+    if (hw >= HW::Xe_HPC)
         return (base >> 2) & 0x1F;
 #endif
     return (base >> 3) & 0xF;
@@ -1106,7 +1106,7 @@ template <typename Program>
 inline uint8_t chooseSBID(HW hw, Program &program, int32_t inum, int32_t counterA, const DependencyTable<false> &incoming, const DependencyTable<false> &producers, uint32_t maskDst)
 {
     uint32_t unclaimed = (uint64_t(1) << tokenCount(hw)) - 1;
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
     std::array<int32_t, 32> pastExpiration;
 #else
     std::array<int32_t, 16> pastExpiration;
@@ -1422,8 +1422,8 @@ inline void analyze(HW hw, Program &program, BasicBlock &bb, int phase)
                 // If dual dependency (token + pipe) on OOO instruction, use A pipe for send, sync for others.
                 if ((generated.hasToken() || tokenAssigned) && generated.hasDist()) {
                     if (insn.opcode() == Opcode::send || insn.opcode() == Opcode::sendc) {
-#if NGEN_GEN12P8
-                        if (!(hw >= HW::Gen12p8 && (generated.depPipe == PipeMaskI || generated.depPipe == PipeMaskF)))
+#if NGEN_XE_HPC
+                        if (!(hw >= HW::Xe_HPC && (generated.depPipe == PipeMaskI || generated.depPipe == PipeMaskF)))
 #endif
                             generated.depPipe = PipeMaskA;
                     } else {
@@ -1449,10 +1449,10 @@ inline void analyze(HW hw, Program &program, BasicBlock &bb, int phase)
                 bool defaultPipe = generated.pipe.inOrder() && (generated.depPipe == generated.pipe.inOrderPipe())
                                                             && canDefaultPipe(hw, insn);
 
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
                 bool acceptsSrc = false, acceptsDst = false;
                 if (generated.pipe.inOrder() || !tokenAssigned) {
-                    if (hw >= HW::Gen12p8) {
+                    if (hw >= HW::Xe_HPC) {
                         acceptsSrc = (generated.depPipe == PipeMaskNone || defaultPipe);
                         acceptsDst = acceptsSrc || (generated.depPipe == PipeMaskA);
                     } else {
