@@ -20,6 +20,7 @@
 #include "gpu/jit/conv/config.hpp"
 #include "gpu/jit/conv/fma_support.hpp"
 #include "gpu/jit/conv/ir.hpp"
+#include "gpu/jit/conv/kernel_arg_info.hpp"
 #include "gpu/jit/conv/kernel_builder.hpp"
 #include "gpu/jit/conv/message_support.hpp"
 #include "gpu/jit/conv/ngen_proxy.hpp"
@@ -414,9 +415,11 @@ public:
     friend class ir_to_ngen_t<hw>;
     friend class send_impl_t;
 
-    conv_kernel_t(const conv_config_t &cfg);
+    conv_kernel_t(const conv_config_t &cfg, const convolution_pd_t *pd,
+            kernel_arg_info_t &kernel_arg_info);
 
-    void setup_interface(const stmt_t &kernel_body) {
+    void setup_interface(const stmt_t &kernel_body,
+            const kernel_arg_info_t &kernel_arg_info) {
         externalName("gen_conv");
         requireLocalID(3);
         requireLocalSize();
@@ -425,8 +428,15 @@ public:
         requireBarrier();
         requireDPAS();
 
-        for (auto &name : global_ptr_names_)
-            newArgument(name.c_str(), ngen::ExternalArgumentType::GlobalPtr);
+        for (int i = 0; i < kernel_arg_info.nargs(); i++) {
+            auto &name = kernel_arg_info.arg_name(i);
+            auto &type = kernel_arg_info.arg_type(i);
+            if (type.is_ptr()) {
+                newArgument(name, ngen::ExternalArgumentType::GlobalPtr);
+            } else {
+                newArgument(name, to_ngen(type));
+            }
+        }
 
         int slm_size
                 = alloc_manager_t(kernel_body).total_size(alloc_kind_t::slm);
@@ -635,10 +645,20 @@ public:
     }
 
 private:
+    void init_kernel_arg_info(kernel_arg_info_t &kernel_arg_info) {
+        // TODO: Update for backward.
+        ir_assert(cfg_.is_fwd);
+        kernel_arg_info.register_user_arg(
+                make_buffer("src"), DNNL_ARG_SRC, /*is_input=*/true);
+        kernel_arg_info.register_user_arg(
+                make_buffer("wei"), DNNL_ARG_WEIGHTS, /*is_input=*/true);
+        kernel_arg_info.register_user_arg(
+                make_buffer("dst"), DNNL_ARG_DST, /*is_input=*/false);
+    }
+
     const conv_config_t &cfg_;
     ngen::RegisterAllocator ra_;
     ngen::GRF signal_header_;
-    std::vector<std::string> global_ptr_names_;
 
     EmulationStrategy emu_strategy = EmulationStrategy(hw);
     EmulationState emu_state;
@@ -1187,20 +1207,19 @@ private:
 };
 
 template <ngen::HW hw>
-conv_kernel_t<hw>::conv_kernel_t(const conv_config_t &cfg)
+conv_kernel_t<hw>::conv_kernel_t(const conv_config_t &cfg,
+        const convolution_pd_t *pd, kernel_arg_info_t &kernel_arg_info)
     : cfg_(cfg), ra_(hw) {
 
+    init_kernel_arg_info(kernel_arg_info);
+
     // Build IR for the kernel.
-    kernel_builder_t builder(cfg);
+    kernel_builder_t builder(cfg, pd, kernel_arg_info);
     stmt_t body = builder.stmt();
 
     alloc_manager_t alloc_mgr(body);
 
-    global_ptr_names_.push_back("src");
-    global_ptr_names_.push_back("wei");
-    global_ptr_names_.push_back("dst");
-
-    setup_interface(body);
+    setup_interface(body, kernel_arg_info);
 
     setDefaultNoMask();
     setDefaultAutoSWSB(true);
@@ -1212,14 +1231,14 @@ conv_kernel_t<hw>::conv_kernel_t(const conv_config_t &cfg)
     for (int i = 0; i < 3; i++)
         ra_.claim(getLocalID(i));
 
-    for (auto &name : global_ptr_names_)
-        ra_.claim(getArgument(name));
+    for (int i = 0; i < kernel_arg_info.nargs(); i++) {
+        ra_.claim(getArgument(kernel_arg_info.arg_name(i)));
+    }
 
     if (emu_strategy.emulate64) {
         emu_state.temp[0] = ra_.alloc();
         emu_state.temp[1] = ra_.alloc();
     }
-
     // Enable IEEE f32 -> s32 rounding and f32/f16 denormals.
     or_(1, cr0, cr0, uint16_t(0x1480));
 
@@ -1240,10 +1259,15 @@ conv_kernel_t<hw>::conv_kernel_t(const conv_config_t &cfg)
         expr_binding.bind(builder.local_id(i), getLocalID(i).uw(0));
     }
 
-    // Bind global memory buffers.
-    for (auto &name : global_ptr_names_) {
-        auto buf = alloc_mgr.find_buffer(name);
-        expr_binding.bind(buf, getArgument(name));
+    // Bind arguments.
+    for (int i = 0; i < kernel_arg_info.nargs(); i++) {
+        auto &arg_var = kernel_arg_info.arg_var(i);
+        auto &name = kernel_arg_info.arg_name(i);
+        if (arg_var.type().is_ptr()) {
+            auto alloc_buf = alloc_mgr.find_buffer(name);
+            ir_assert(alloc_buf.is_same(arg_var));
+        }
+        expr_binding.bind(arg_var, getArgument(name));
     }
 
     // Bind SLM buffer (SLM loads/stores use 0-based offsets).

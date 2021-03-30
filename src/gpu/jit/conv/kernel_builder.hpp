@@ -17,6 +17,7 @@
 #ifndef GPU_JIT_CONV_KERNEL_BUILDER_HPP
 #define GPU_JIT_CONV_KERNEL_BUILDER_HPP
 
+#include "common/convolution_pd.hpp"
 #include "gpu/jit/conv/config.hpp"
 #include "gpu/jit/conv/ir.hpp"
 #include "gpu/jit/conv/tensor.hpp"
@@ -28,7 +29,11 @@ namespace jit {
 
 class kernel_builder_t {
 public:
-    kernel_builder_t(const conv_config_t &cfg) : cfg_(cfg) { build(); }
+    kernel_builder_t(const conv_config_t &cfg, const convolution_pd_t *pd,
+            kernel_arg_info_t &kernel_arg_info)
+        : cfg_(cfg), pd_(pd), kernel_arg_info_(kernel_arg_info) {
+        build();
+    }
 
     const stmt_t &stmt() const { return stmt_; }
 
@@ -45,6 +50,8 @@ private:
             view_t &wei_tg_view, view_t &dst_tg_view);
 
     const conv_config_t &cfg_;
+    const convolution_pd_t *pd_;
+    kernel_arg_info_t &kernel_arg_info_;
 
     expr_t local_id_[3]; // Local IDs (OpenCL) for the 0-th lane.
     grid_info_t kernel_grid_; // Kernel grid (consisting of thread groups).

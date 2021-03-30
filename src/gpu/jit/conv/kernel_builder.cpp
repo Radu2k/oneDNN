@@ -3415,9 +3415,9 @@ void kernel_builder_t::build() {
     }
 
     // Initialize memory buffers.
-    expr_t src_buf = make_buffer("src");
-    expr_t wei_buf = make_buffer("wei");
-    expr_t dst_buf = make_buffer("dst");
+    auto src_buf = kernel_arg_info_.find_arg("src");
+    auto wei_buf = kernel_arg_info_.find_arg("wei");
+    auto dst_buf = kernel_arg_info_.find_arg("dst");
 
     std::vector<stmt_t> reduction_loops;
     view_t ap_tg_view;
@@ -3443,9 +3443,11 @@ void kernel_builder_t::build() {
     cb.build();
 
     std::vector<stmt_t> allocs;
-    allocs.push_back(alloc_t::make(src_buf, 0, alloc_kind_t::global));
-    allocs.push_back(alloc_t::make(wei_buf, 0, alloc_kind_t::global));
-    allocs.push_back(alloc_t::make(dst_buf, 0, alloc_kind_t::global));
+    for (int i = 0; i < kernel_arg_info_.nargs(); i++) {
+        auto &var = kernel_arg_info_.arg_var(i);
+        if (!var.type().is_ptr()) continue;
+        allocs.push_back(alloc_t::make(var, 0, alloc_kind_t::global));
+    }
     allocs.insert(allocs.end(), cb.allocs().begin(), cb.allocs().end());
 
     // Create IR statements.

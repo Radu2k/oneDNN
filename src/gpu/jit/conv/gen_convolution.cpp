@@ -21,6 +21,7 @@
 #include "common/utils.hpp"
 #include "gpu/jit/conv/config.hpp"
 #include "gpu/jit/conv/conv_kernel.hpp"
+#include "gpu/jit/conv/kernel_arg_info.hpp"
 #include "gpu/jit/conv/utils.hpp"
 
 namespace dnnl {
@@ -67,12 +68,12 @@ public:
         std::unique_ptr<jit::jit_generator_base> jit_gen_convolution;
         switch (device_info->gpu_arch()) {
             case gpu_arch_t::gen12hp:
-                jit_gen_convolution.reset(
-                        new conv_kernel_t<gpu_gen12hp>(cfg(primitive)));
+                jit_gen_convolution.reset(new conv_kernel_t<gpu_gen12hp>(
+                        cfg(primitive), primitive->pd(), kernel_arg_info_));
                 break;
             case gpu_arch_t::gen12p7:
-                jit_gen_convolution.reset(
-                        new conv_kernel_t<gpu_gen12p7>(cfg(primitive)));
+                jit_gen_convolution.reset(new conv_kernel_t<gpu_gen12p7>(
+                        cfg(primitive), primitive->pd(), kernel_arg_info_));
                 break;
             default: return status::unimplemented;
         }
@@ -83,14 +84,8 @@ public:
 
     template <typename T>
     status_t execute(const T *primitive, const exec_ctx_t &ctx) const {
-        auto &src = CTX_IN_STORAGE(DNNL_ARG_SRC);
-        auto &wei = CTX_IN_STORAGE(DNNL_ARG_WEIGHTS);
-        auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
-
         compute::kernel_arg_list_t arg_list;
-        arg_list.set(0, src);
-        arg_list.set(1, wei);
-        arg_list.set(2, dst);
+        kernel_arg_info_.set_args(ctx, primitive, arg_list);
 
         auto nd_range = cfg(primitive).nd_range();
         CHECK(primitive->parallel_for(ctx, nd_range, kernel_, arg_list));
@@ -105,6 +100,7 @@ private:
     }
 
     compute::kernel_t kernel_;
+    kernel_arg_info_t kernel_arg_info_;
 };
 
 status_t gen_convolution_fwd_t::pd_t::init(engine_t *engine) {

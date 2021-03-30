@@ -540,7 +540,7 @@ public:
             auto &a = _a.as<alloc_t>();
             auto ret = buf2alloc_.insert({a.buf, _a});
             buffers_.push_back(a.buf);
-            ir_assert(ret.second);
+            ir_assert(ret.second) << "Buffer already exists: " << a.buf;
             MAYBE_UNUSED(ret);
         }
 
