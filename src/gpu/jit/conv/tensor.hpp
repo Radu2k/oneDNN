@@ -195,7 +195,7 @@ public:
         if (is_fixed()) {
             oss << stride_;
         } else {
-            oss << "<unknown>";
+            oss << "(unknown)";
         }
         return oss.str();
     }
@@ -318,7 +318,8 @@ public:
 
     // Storage size in bytes.
     dim_t size() const {
-        dim_t max_stride = 0;
+        if (is_empty()) return 0;
+        dim_t max_stride = 1;
         for (auto &b : blocks_) {
             max_stride = std::max(max_stride, dim_t(b.block * b.stride));
         }
@@ -394,6 +395,8 @@ public:
     }
 
     std::string desc_str(bool dnnl_style = false) const {
+        if (is_empty()) return "(nil)";
+        if (!dnnl_style && blocks_.empty()) return "(scalar)";
         std::string ret;
         stride_t dense_stride(1);
         std::vector<bool> seen(ndims());
