@@ -805,8 +805,8 @@ public:
         }
 
         // Handle integer down-conversion preserving signedness.
-        if (from_type.is_signed(1) && to_type.is_signed(1)) {
-            ir_assert(from_type.size() > to_type.size());
+        if (from_type.is_signed(1) && to_type.is_signed(1)
+                && (from_type.size() > to_type.size())) {
             bind(obj, expr_op.reinterpret(to_type));
             return;
         }
@@ -874,7 +874,13 @@ public:
                 flag_mask <<= 1;
                 flag_mask |= (to_cpp<bool>(e_shuffle[i]) ? 1 : 0);
             }
-            host_->emov(1, dst_op, ngen::Immediate(flag_mask));
+            if (dst_op.mod().getPredCtrl() == ngen::PredCtrl::None) {
+                host_->emov(1, dst_op, ngen::Immediate(flag_mask));
+            } else {
+                ir_assert(dst_op.mod().getFlagReg() == dst_op.flag_register());
+                host_->and_(1, dst_op.flag_register(), dst_op.flag_register(),
+                        ngen::Immediate(flag_mask));
+            }
             expr_binding_.mark_as_evaluated(obj);
             return;
         }
@@ -1240,23 +1246,23 @@ private:
         if (send_func.address_model != ngen_proxy::AddressModel::ModelSLM) {
             mem_buf = mem_buf_op.reg_data();
         }
-        ngen::InstructionModifier mod = send_func.mask_count();
+        ngen::InstructionModifier mod = send_func.eff_mask_count;
+        ir_assert(math::is_pow2(mod.getExecSize()));
         if (!attr.is_empty())
             mod |= to_ngen(attr.as<instruction_modifier_attr_t>().mod);
-        if (!mask_op.is_invalid()) mod |= mask_op.flag_register();
+        if (!mask_op.is_invalid()) mod |= mask_op.flag_register_mod();
         auto rd = reg_buf_op.reg_data();
 
         // Zero-out inactive channels.
-        if (send_func.is_read()
-                && send_func.mask_granularity() == mask_granularity_t::per_dword
-                && mod.getPredCtrl() != ngen::PredCtrl::None) {
+        if (send_func.is_read() && mod.getPredCtrl() != ngen::PredCtrl::None) {
             auto rd_mov = rd;
             rd_mov.setType(ngen::DataType::f);
             auto mod_mov = ~mod;
             mod_mov.setSWSB({});
-            for (int i = 0; i < send_func.register_size(); i += 64) {
-                auto sub_rd_mov
-                        = ngen_reg_data(rd_mov, i, ngen::DataType::d, 16);
+            int step = send_func.mask_count() * sizeof(uint32_t);
+            for (int i = 0; i < send_func.register_size(); i += step) {
+                auto sub_rd_mov = ngen_reg_data(
+                        rd_mov, i, ngen::DataType::f, send_func.eff_mask_count);
                 host_->emov(mod_mov, sub_rd_mov, ngen::Immediate(0.0f));
             }
         }

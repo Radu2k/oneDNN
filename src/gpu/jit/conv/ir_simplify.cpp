@@ -1620,6 +1620,43 @@ expr_t simplify_cmp_reduce_lhs_rhs(const expr_t &e) {
     return binary_op_t::make(new_op_kind, x, (sign ? -1 : 1) * div);
 }
 
+expr_t simplify_propagate_shuffle(const expr_t &e) {
+    if (!e.type().is_bool()) return e;
+
+    auto *shuffle = e.as_ptr<shuffle_t>();
+    if (!shuffle) return e;
+
+    // Handle binary operation.
+    {
+        op_kind_t op_kind = op_kind_t::undef;
+        bool ok = true;
+        std::vector<expr_t> a;
+        std::vector<expr_t> b;
+        for (int i : shuffle->idx) {
+            if (!is_binary_op(shuffle->vec[i])) {
+                ok = false;
+                break;
+            }
+            auto &op = shuffle->vec[i].as<binary_op_t>();
+            if (op_kind == op_kind_t::undef) {
+                op_kind = op.op_kind;
+            } else if (op.op_kind != op_kind) {
+                ok = false;
+                break;
+            }
+            a.push_back(op.a);
+            b.push_back(op.b);
+        }
+        if (ok) {
+            auto _a = simplify_propagate_shuffle(shuffle_t::make(a));
+            auto _b = simplify_propagate_shuffle(shuffle_t::make(b));
+            return binary_op_t::make(op_kind, _a, _b);
+        }
+    }
+
+    return e;
+}
+
 expr_t const_fold_non_recursive(const expr_t &e) {
     auto *unary_op = e.as_ptr<unary_op_t>();
     if (unary_op) {

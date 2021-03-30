@@ -924,6 +924,9 @@ expr_t simplify_cmp_move_const_to_rhs(const expr_t &e);
 // Example: A * x < A * B -> x < B (if A > 0).
 expr_t simplify_cmp_reduce_lhs_rhs(const expr_t &e);
 
+// Propagates shuffle down the expression tree for more effective vectorization.
+expr_t simplify_propagate_shuffle(const expr_t &e);
+
 // Pre-defined functions.
 namespace funcs {
 

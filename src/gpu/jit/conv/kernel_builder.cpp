@@ -2481,14 +2481,16 @@ stmt_t inject_slm_buffering(
 class linear_reorder_builder_t {
 public:
     linear_reorder_builder_t(ir_context_t &ir_ctx, int elems,
-            const type_t &src_type, const expr_t &src_buf,
-            const type_t &dst_type, const expr_t &dst_buf)
+            const type_t &src_type, const expr_t &src_buf, int src_stride,
+            const type_t &dst_type, const expr_t &dst_buf, int dst_stride)
         : ir_ctx_(ir_ctx)
         , elems_(elems)
         , src_type_(src_type)
         , src_buf_(src_buf)
+        , src_stride_bytes_(src_stride * src_type.size())
         , dst_type_(dst_type)
-        , dst_buf_(dst_buf) {
+        , dst_buf_(dst_buf)
+        , dst_stride_bytes_(dst_stride * dst_type.size()) {
         ir_assert(src_type_.is_scalar()) << "Vector types are unsupported.";
         ir_assert(dst_type_.is_scalar()) << "Vector types are unsupported.";
         build();
@@ -2498,67 +2500,120 @@ public:
 
 private:
     void build() {
-        if (src_type_ == dst_type_) {
+        // bf16 -> f32:
+        // - bf16 must be packed: use left shift instead.
+        if (src_type_ == type_t::bf16() && dst_type_ == type_t::f32()) {
             int step = (elems_ < 16 ? 8 : 16);
-            ir_assert(elems_ % step == 0) << "Unsupported elems: " << elems_;
-
-            auto vec_type = src_type_.with_elems(step);
             for (int i = 0; i < elems_; i += step) {
-                int off = (i / step) * vec_type.size();
-                auto load = load_t::make(vec_type, src_buf_, off);
-                auto store = store_t::make(dst_buf_, off, load);
+                int cur_elems = std::min(step, elems_ - i);
+                ir_assert(math::is_pow2(cur_elems));
+                auto src_vec_type = type_t::u16(cur_elems);
+                auto dst_vec_type = type_t::u32(cur_elems);
+                int src_off = i * src_stride_bytes_;
+                int dst_off = i * dst_stride_bytes_;
+                auto load = load_t::make(
+                        src_vec_type, src_buf_, src_off, src_stride_bytes_);
+                auto shifted = binary_op_t::make(op_kind_t::_shl, load,
+                        shuffle_t::make_broadcast(16, cur_elems));
+                auto store = store_t::make(dst_buf_, dst_off,
+                        cast(shifted, dst_vec_type), dst_stride_bytes_);
                 stmt_ = stmt_.append(store);
             }
             return;
         }
-        // f32/s32 -> s8/u8:
+
+        bool is_src_dw = (src_type_.size() == 4);
+        bool is_src_b = (src_type_.size() == 1);
+        bool is_dst_dw = (dst_type_.size() == 4);
+        bool is_dst_b = (dst_type_.size() == 1);
+
+        // f32/s32 -> s8/u8 and s8/u8 -> f32/s32
         // - Use saturation
         // - s8/u8 must be DW-strided: use temporary
-        if (src_type_.size() == 4 && dst_type_.size() == 1) {
+        if ((is_src_dw && is_dst_b) || (is_src_b && is_dst_dw)) {
+            if (is_dst_dw) ir_assert(dst_stride_bytes_ == 4);
+            if (is_src_dw) ir_assert(src_stride_bytes_ == 4);
+            if (is_dst_b) ir_assert(utils::one_of(dst_stride_bytes_, 1, 4));
+            if (is_src_b) ir_assert(utils::one_of(src_stride_bytes_, 1, 4));
             int step = (elems_ < 16 ? 8 : 16);
             auto tmp_buf = ir_ctx_.create_tmp_var(type_t::byte_ptr());
-            int tmp_size = dst_type_.size() * step;
+            int tmp_size = 4 * step;
             for (int i = 0; i < elems_; i += step) {
                 int cur_elems = std::min(step, elems_ - i);
                 ir_assert(math::is_pow2(cur_elems));
                 auto src_vec_type = src_type_.with_elems(cur_elems);
                 auto dst_vec_type = dst_type_.with_elems(cur_elems);
-                int off = i * src_type_.size();
-                auto load_src = load_t::make(src_vec_type, src_buf_, off);
-                auto cvt_strided
-                        = cast(load_src, dst_vec_type, /*saturate=*/true);
-                auto store_strided = store_t::make(tmp_buf, 0, cvt_strided, 4);
-                auto load_strided = load_t::make(dst_vec_type, tmp_buf, 0, 4);
-                auto store_dense = store_t::make(dst_buf_, off, load_strided);
-                auto step_stmt = stmt_seq_t::make(store_strided, store_dense);
-                stmt_ = stmt_.append(alloc_t::make(
-                        tmp_buf, tmp_size, alloc_kind_t::grf, {}, step_stmt));
+                int src_off = i * src_stride_bytes_;
+                int dst_off = i * dst_stride_bytes_;
+
+                expr_t L0, L1; // Loads.
+                expr_t C; // Cast.
+                stmt_t S0, S1; // Stores.
+
+                L0 = load_t::make(
+                        src_vec_type, src_buf_, src_off, src_stride_bytes_);
+                if (is_src_dw) {
+                    C = cast(L0, dst_vec_type, /*saturate=*/true);
+                    if (dst_stride_bytes_ == 1) {
+                        S0 = store_t::make(tmp_buf, 0, C, 4);
+                        L1 = load_t::make(dst_vec_type, tmp_buf, 0, 4);
+                        S1 = store_t::make(
+                                dst_buf_, dst_off, L1, dst_stride_bytes_);
+                    } else {
+                        S0 = store_t::make(
+                                dst_buf_, dst_off, C, dst_stride_bytes_);
+                    }
+                } else {
+                    if (elems_ == 1) {
+                        // Direct x8 -> x32 scalar cast is not always
+                        // supported. Use intermediate cast to s16.
+                        C = cast(L0, type_t::s16());
+                        S0 = store_t::make(tmp_buf, 0, C);
+                        L1 = load_t::make(type_t::s16(), tmp_buf, 0);
+                        S1 = store_t::make(dst_buf_, dst_off,
+                                cast(L1, dst_type_), dst_stride_bytes_);
+                    } else if (src_stride_bytes_ == 1) {
+                        S0 = store_t::make(tmp_buf, 0, L0, 4);
+                        L1 = load_t::make(src_vec_type, tmp_buf, 0, 4);
+                        C = cast(L1, dst_vec_type);
+                        S1 = store_t::make(
+                                dst_buf_, dst_off, C, dst_stride_bytes_);
+                    } else {
+                        C = cast(L0, dst_vec_type);
+                        S0 = store_t::make(
+                                dst_buf_, dst_off, C, dst_stride_bytes_);
+                    }
+                }
+                stmt_ = stmt_.append(S0.append(S1));
             }
-            return;
-        }
-        // f32 -> bf16 or f32 -> f16:
-        // - SIMD16 does not support mixed mode move.
-        if (src_type_ == type_t::f32()
-                && utils::one_of(dst_type_, type_t::bf16(), type_t::f16())) {
-            int step = 8;
-            for (int i = 0; i < elems_; i += step) {
-                int cur_elems = std::min(step, elems_ - i);
-                ir_assert(math::is_pow2(cur_elems));
-                ir_assert(utils::one_of(i % 16, 0, 8))
-                        << "Not supported in HW.";
-                auto src_vec_type = src_type_.with_elems(cur_elems);
-                auto dst_vec_type = dst_type_.with_elems(cur_elems);
-                int src_off = i * src_type_.size();
-                int dst_off = i * dst_type_.size();
-                auto load = load_t::make(src_vec_type, src_buf_, src_off);
-                auto store = store_t::make(
-                        dst_buf_, dst_off, cast(load, dst_vec_type));
-                stmt_ = stmt_.append(store);
-            }
+            stmt_ = alloc_t::make(
+                    tmp_buf, tmp_size, alloc_kind_t::grf, {}, stmt_);
             return;
         }
 
-        ir_error_not_expected();
+        // Perform regular move.
+        int step = (elems_ < 16 ? 8 : 16);
+
+        // f32 -> bf16 or f32 -> f16: SIMD16 does not support mixed mode move.
+        if (src_type_ == type_t::f32()
+                && utils::one_of(dst_type_, type_t::bf16(), type_t::f16())) {
+            step = std::min(step, 8);
+        }
+        for (int i = 0; i < elems_; i += step) {
+            int cur_elems = std::min(step, elems_ - i);
+            ir_assert(math::is_pow2(cur_elems));
+            ir_assert(utils::one_of(i % 16, 0, 8))
+                    << "Not always supported in HW.";
+            auto src_vec_type = src_type_.with_elems(cur_elems);
+            auto dst_vec_type = dst_type_.with_elems(cur_elems);
+            int src_off = i * src_stride_bytes_;
+            int dst_off = i * dst_stride_bytes_;
+            auto load = load_t::make(
+                    src_vec_type, src_buf_, src_off, src_stride_bytes_);
+            auto store = store_t::make(dst_buf_, dst_off,
+                    cast(load, dst_vec_type), dst_stride_bytes_);
+            stmt_ = stmt_.append(store);
+        }
     }
 
     ir_context_t &ir_ctx_;
@@ -2566,8 +2621,10 @@ private:
     int elems_;
     type_t src_type_;
     expr_t src_buf_;
+    int src_stride_bytes_;
     type_t dst_type_;
     expr_t dst_buf_;
+    int dst_stride_bytes_;
 
     stmt_t stmt_;
 };
@@ -2602,14 +2659,21 @@ private:
         auto b_blocks = b.blocks();
 
         std::vector<dim_t> tile_dims(a.ndims(), 1);
+        stride_t src_stride
+                = (a_blocks.empty() ? stride_t(1) : a_blocks[0].stride);
+        stride_t dst_stride
+                = (b_blocks.empty() ? stride_t(1) : b_blocks[0].stride);
+        stride_t src_cur_stride = src_stride;
+        stride_t dst_cur_stride = dst_stride;
         for (size_t i = 0; i < std::min(a_blocks.size(), b_blocks.size());
                 i++) {
             auto &ab = a_blocks[i];
             auto &bb = b_blocks[i];
-            if (ab.dim_idx != bb.dim_idx || ab.block != bb.block
-                    || ab.stride != bb.stride) {
-                break;
-            }
+            if (ab.dim_idx != bb.dim_idx || ab.block != bb.block) break;
+            if (src_cur_stride != ab.stride) break;
+            src_cur_stride = ab.block * ab.stride;
+            if (dst_cur_stride != bb.stride) break;
+            dst_cur_stride = bb.block * bb.stride;
             tile_dims[ab.dim_idx] *= ab.block;
         }
 
@@ -2624,7 +2688,8 @@ private:
             auto src_sub_buf = src_buf_[src_off * src_.type().size()];
             auto dst_sub_buf = dst_buf_[dst_off * dst_.type().size()];
             linear_reorder_builder_t b(ir_ctx_, tile_elems, src_.type(),
-                    src_sub_buf, dst_.type(), dst_sub_buf);
+                    src_sub_buf, int(src_stride), dst_.type(), dst_sub_buf,
+                    int(dst_stride));
             stmt_ = stmt_.append(b.stmt());
         });
     }
@@ -2689,25 +2754,31 @@ private:
                     ? (s.address_model == ngen_proxy::AddressModel::ModelSLM)
                     : (s.address_model == ngen_proxy::AddressModel::ModelA64);
             ok &= (is_load_ == is_read);
-            // XXX: Generate only block messages for now.
-            ok &= (s.type == message_type_t::block);
             return ok;
         });
 
         // Find the first send candidate matching the layout.
         func_t _send;
         tensor_t send_tensor;
-        for (auto &_s : send_list) {
-            auto &s = _s.as<send_t>();
-            int block_bytes = s.block_size();
-            if (block_bytes % mem_view_.type().size() != 0) continue;
+        for (auto &_s_base : send_list) {
+            auto &s_base = _s_base.as<send_t>();
+            int type_size = mem_view_.type().size();
+            int block_bytes_base = s_base.block_size();
+            if (block_bytes_base % type_size != 0) continue;
+            int elems_per_block_base = block_bytes_base / type_size;
 
-            int elems_per_block = block_bytes / mem_view_.type().size();
+            dim_t elems_per_block = elems_per_block_base;
+            dim_t slots = s_base.slots;
 
             // Check if the view can be decomposed for this send.
             auto tensor
-                    = mem_view_.split_into_dense_tile(elems_per_block, s.slots);
+                    = mem_view_.split_into_dense_tile(elems_per_block, slots);
             if (tensor.is_empty()) continue;
+
+            auto _s = s_base.adjust(
+                    int(elems_per_block * type_size), int(slots));
+            if (_s.is_empty()) continue;
+            auto &s = _s.as<send_t>();
 
             // Check if this send supports the required mask.
             if (!has_compatible_mask(
@@ -2727,16 +2798,15 @@ private:
         reg_view_ = create_register_view_for_message(
                 send, mem_view_, reg_buf_size_);
 
-        int64_t reg_buf_off = 0;
         mem_view_.for_each_tile(
                 send_tensor, [&](const std::vector<dim_t> &start) {
                     auto tile = tensor_t(send_tensor.dims(), start);
                     auto sub_view = mem_view_.create_sub_view(tile);
-                    auto reg_sub_buf = reg_buf_[reg_buf_off];
+                    auto reg_sub_buf = reg_buf_[reg_view_(start)
+                            * reg_view_.type().size()];
                     stmt_ = stmt_seq_t::make(stmt_,
                             create_send_stmt(*cset_, send, mem_buf_,
                                     reg_sub_buf, sub_view));
-                    reg_buf_off += send.register_size();
                 });
     }
 
@@ -3588,17 +3658,17 @@ void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
     bool check_id = need_src_check(
             cfg_.od, cfg_.id, cfg_.kd, cfg_.pd, cfg_.sd, cfg_.dd);
 
-    int wei_oc = int(wei_layout.dim(cfg_.with_groups ? 1 : 0));
-    int dst_oc = int(dst_layout.dim(1));
+    int wei_oc = int(cfg_.wei_layout.dim(cfg_.with_groups ? 1 : 0));
+    int dst_oc = int(cfg_.dst_layout.dim(1));
     int wei_oc_inner_blk
-            = wei_oc / int(wei_layout.outer_block(cfg_.with_groups ? 1 : 0));
-    int dst_oc_inner_blk = dst_oc / int(dst_layout.outer_block(1));
+            = int(cfg_.wei_layout.inner_block(cfg_.with_groups ? 1 : 0));
+    int dst_oc_inner_blk = int(cfg_.dst_layout.inner_block(1));
 
     bool check_wei_oc = (wei_oc % cfg_.oc_tg_blk != 0);
     bool check_dst_oc = (dst_oc % cfg_.oc_tg_blk != 0);
 
-    int src_mb = int(src_layout.dim(0));
-    int dst_mb = int(src_layout.dim(0));
+    int src_mb = int(cfg_.src_layout.dim(0));
+    int dst_mb = int(cfg_.src_layout.dim(0));
 
     bool check_src_mb = (src_mb % cfg_.mb_tg_blk != 0);
     bool check_dst_mb = (dst_mb % cfg_.mb_tg_blk != 0);

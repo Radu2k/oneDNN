@@ -364,14 +364,9 @@ void layout_t::sanity_check() const {
 #endif
     if (is_empty()) return;
 
-    stride_t stride(1);
-    MAYBE_UNUSED(stride);
     for (auto &b : blocks_) {
         ir_assert(b.block > 0) << "Incorrect block size.";
-        if (b.stride.is_fixed() && stride.is_fixed()
-                && dim_t(b.stride) < dim_t(stride))
-            ir_trace() << "Warning: overlapping blocks.";
-        stride = b.block * b.stride;
+        MAYBE_UNUSED(b);
     }
 }
 
@@ -467,7 +462,10 @@ expr_t mask_vector_t::to_expr(int nmasks) const {
         }
         if (!channel_mask.is_equal(cur_mask)) return expr_t();
     }
-    return shuffle_t::make(vec);
+    auto e = shuffle_t::make(vec);
+    e = jit::simplify(e);
+    e = jit::simplify_propagate_shuffle(e);
+    return e;
 }
 
 stride_t tdim_info_t::compute_stride(

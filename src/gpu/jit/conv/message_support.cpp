@@ -28,7 +28,7 @@ expr_t create_mask_expr(
     auto mask_vec = view.create_mask_vector();
     mask_vec.simplify(cset);
 
-    ir_assert(mask_vec.elems() * mask_vec.type().size() == send.size())
+    ir_assert(mask_vec.elems() * mask_vec.type().size() == send.eff_size())
             << "Unexpected mask.";
 
     type_t mask_type = (send.mask_granularity() == mask_granularity_t::per_dword
@@ -39,77 +39,7 @@ expr_t create_mask_expr(
     // Couldn't reinterpret.
     if (mask_vec_retyped.is_empty()) return expr_t();
 
-    return mask_vec_retyped.to_expr(send.mask_count());
-}
-
-expr_t propagate_shuffle_impl(const expr_t &e, int elems) {
-    ir_assert(elems > 1);
-
-    auto *binary_op = e.as_ptr<binary_op_t>();
-    if (!binary_op) return shuffle_t::make_broadcast(e, elems);
-
-    auto a = binary_op->a;
-    auto b = binary_op->b;
-
-    ir_assert(a.type().is_scalar());
-    ir_assert(b.type().is_scalar());
-
-    // Propagate broadcast down to non-bool operands.
-    if (e.type().is_bool()) {
-        a = propagate_shuffle_impl(a, elems);
-        b = propagate_shuffle_impl(b, elems);
-        return binary_op_t::make(binary_op->op_kind, a, b);
-    }
-
-    return shuffle_t::make_broadcast(e, elems);
-}
-
-expr_t propagate_shuffle(const expr_t &e) {
-    if (!e.type().is_bool()) return e;
-
-    auto *shuffle = e.as_ptr<shuffle_t>();
-    if (!shuffle) return e;
-
-    // Handle binary operation.
-    {
-        op_kind_t op_kind = op_kind_t::undef;
-        bool ok = true;
-        std::vector<expr_t> a;
-        std::vector<expr_t> b;
-        for (int i : shuffle->idx) {
-            if (!is_binary_op(shuffle->vec[i])) {
-                ok = false;
-                break;
-            }
-            auto &op = shuffle->vec[i].as<binary_op_t>();
-            if (op_kind == op_kind_t::undef) {
-                op_kind = op.op_kind;
-            } else if (op.op_kind != op_kind) {
-                ok = false;
-                break;
-            }
-            a.push_back(op.a);
-            b.push_back(op.b);
-        }
-        if (ok) {
-            auto _a = propagate_shuffle(shuffle_t::make(a));
-            auto _b = propagate_shuffle(shuffle_t::make(b));
-            return binary_op_t::make(op_kind, _a, _b);
-        }
-    }
-
-    return e;
-}
-
-expr_t simplify_mask_expr(const expr_t &_e) {
-    auto e = _e;
-
-    if (e.is_empty()) return e;
-
-    e = simplify(e);
-    e = propagate_shuffle(e);
-
-    return e;
+    return mask_vec_retyped.to_expr(send.eff_mask_count);
 }
 
 stmt_t create_send_stmt(const constraint_set_t &cset, const send_t &send,
@@ -119,7 +49,6 @@ stmt_t create_send_stmt(const constraint_set_t &cset, const send_t &send,
     ir_assert(reg_buf.type().is_ptr()) << reg_buf;
 
     expr_t mask_expr = create_mask_expr(cset, send, view);
-    mask_expr = simplify_mask_expr(mask_expr);
 
     // Do not use mask if all its elements are true.
     if (!mask_expr.is_empty()
@@ -129,11 +58,24 @@ stmt_t create_send_stmt(const constraint_set_t &cset, const send_t &send,
     }
 
     // TODO: Check alignment.
-    if (send.slots == 1) {
-        expr_t off_in_bytes = simplify(view.offset_in_bytes());
-        return send(mem_buf, off_in_bytes, reg_buf, mask_expr);
+    switch (send.type) {
+        case message_type_t::block: {
+            expr_t off_in_bytes = simplify(view.offset_in_bytes());
+            return send(mem_buf, off_in_bytes, reg_buf, mask_expr);
+        }
+        case message_type_t::scattered: {
+            int elems_per_slot = send.block_size() / view.type().size();
+            auto slot_tile = view.split_into_max_tile(
+                    elems_per_slot, /*is_dense=*/true);
+            std::vector<expr_t> off_vec;
+            view.for_each_tile(slot_tile, [&](const std::vector<dim_t> &start) {
+                auto estart = expr_cast<expr_t>(start);
+                off_vec.push_back(simplify(view.offset_in_bytes(estart)));
+            });
+            return send(mem_buf, shuffle_t::make(off_vec), reg_buf, mask_expr);
+        }
+        default: ir_error_not_expected();
     }
-    ir_error_not_implemented();
     return stmt_t();
 }
 
@@ -154,7 +96,12 @@ layout_t create_raw_register_layout(const send_t &send) {
 
 // Returns dense memory layout corresponding to the message.
 layout_t create_raw_memory_layout(const send_t &send) {
-    std::vector<dim_t> dims = {send.slots, send.data_elems};
+    if (send.type == message_type_t::block
+            && send.eff_mask_count != send.mask_count()) {
+        std::vector<dim_t> dims = {1, send.eff_mask_count};
+        return layout_t(type_t::dword(), 0, dims);
+    }
+    std::vector<dim_t> dims = {send.eff_slots(), send.data_elems};
     return layout_t(send.data_type, 0, dims);
 }
 

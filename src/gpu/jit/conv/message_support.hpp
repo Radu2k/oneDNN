@@ -47,9 +47,10 @@ public:
 
     static func_t make(ngen_proxy::Access access_type, message_type_t type,
             const type_t &data_type, int data_elems, int slots,
-            const type_t &alignment, ngen_proxy::AddressModel address_model) {
+            const type_t &alignment, ngen_proxy::AddressModel address_model,
+            int eff_mask_count = -1) {
         return func_t(new send_t(access_type, type, data_type, data_elems,
-                slots, alignment, address_model));
+                slots, alignment, address_model, eff_mask_count));
     }
 
     bool is_equal(const object_impl_t *obj) const override {
@@ -60,7 +61,8 @@ public:
                 && (data_type == other.data_type)
                 && (data_elems == other.data_elems) && (slots == other.slots)
                 && (alignment == other.alignment)
-                && (address_model == other.address_model);
+                && (address_model == other.address_model)
+                && (eff_mask_count == other.eff_mask_count);
     }
 
     size_t get_hash() const override {
@@ -89,7 +91,9 @@ public:
     bool is_write() const { return access_type == ngen_proxy::Access::Write; }
 
     // Size of elements to read/write in bytes.
-    int size() const { return data_type.size() * data_elems * slots; }
+    int size() const { return block_size() * slots; }
+
+    int eff_size() const { return eff_block_size() * eff_slots(); }
 
     mask_granularity_t mask_granularity() const {
         switch (type) {
@@ -100,6 +104,13 @@ public:
         return mask_granularity_t::undef;
     }
 
+    bool is_per_dword_mask() {
+        return mask_granularity() == mask_granularity_t::per_dword;
+    }
+    bool is_per_slot_mask() {
+        return mask_granularity() == mask_granularity_t::per_slot;
+    }
+
     int mask_count() const {
         switch (type) {
             case message_type_t::block:
@@ -108,6 +119,13 @@ public:
             default: ir_error_not_expected();
         }
         return -1;
+    }
+
+    int eff_slots() const {
+        if (eff_mask_count == mask_count()) return slots;
+        if (mask_granularity() == mask_granularity_t::per_slot)
+            return eff_mask_count;
+        return slots;
     }
 
     // Stride between slots in elements of data_type (in memory).
@@ -127,6 +145,19 @@ public:
     // Size of the innermost dense block in bytes (in memory).
     int block_size() const { return data_type.size() * data_elems; }
 
+    // Effective size of the innermost dense block in bytes (in memory).
+    int eff_block_size() const {
+        if (eff_mask_count == mask_count()) return block_size();
+        if (mask_granularity() == mask_granularity_t::per_dword) {
+            int max_mask_count = 16;
+            // Do not allow strided blocks.
+            ir_assert(block_size() <= max_mask_count * int(sizeof(uint32_t)));
+            MAYBE_UNUSED(max_mask_count);
+            return eff_mask_count * int(sizeof(uint32_t));
+        }
+        return data_type.size() * data_elems;
+    }
+
     // Size of the register buffer in bytes.
     int register_size() const {
         int sz;
@@ -145,9 +176,9 @@ public:
         return (address_model == ngen_proxy::AddressModel::ModelA64) ? 8 : 4;
     }
 
-    type_t address_type(bool is_signed = false) const {
+    type_t address_type(bool is_signed = false, int elems = 1) const {
         int bits = address_size() * 8;
-        return is_signed ? type_t::s(bits) : type_t::u(bits);
+        return is_signed ? type_t::s(bits, elems) : type_t::u(bits, elems);
     }
 
     // Size of header in bytes.
@@ -158,18 +189,41 @@ public:
 
     bool is_transposing() const { return data_elems_stride() > slots_stride(); }
 
+    func_t adjust(int new_block_size, int new_slots) const {
+        ir_assert(new_block_size > 0 && new_slots > 0);
+        if (new_block_size == block_size() && new_slots == slots) return this;
+        int max_mask_count = 16;
+        int new_mask_count = -1;
+        switch (mask_granularity()) {
+            case mask_granularity_t::per_dword: {
+                if (block_size() > max_mask_count * int(sizeof(uint32_t)))
+                    return func_t();
+                if (new_block_size > max_mask_count * int(sizeof(uint32_t)))
+                    return func_t();
+                if (new_block_size % int(sizeof(uint32_t)) != 0)
+                    return func_t();
+                new_mask_count = new_block_size / int(sizeof(uint32_t));
+                break;
+            }
+            case mask_granularity_t::per_slot:
+                if (new_block_size != block_size()) return func_t();
+                if (new_slots > max_mask_count) return func_t();
+                new_mask_count = new_slots;
+                break;
+            default: ir_error_not_expected(); return func_t();
+        }
+        return send_t::make(access_type, type, data_type, data_elems, slots,
+                alignment, address_model, new_mask_count);
+    }
+
     // Generates a statement to store (and maybe convert) the offset to the
     // message header according to the message description.
     stmt_t create_offset_store(const expr_t &header_buf, const expr_t &mem_buf,
             const expr_t &mem_off, bool is_signed_offset = false) const {
         bool is_block = (type == message_type_t::block);
-        bool is_scattered = (type == message_type_t::scattered);
         bool is_a64 = (address_model == ngen_proxy::AddressModel::ModelA64);
         bool is_bts = (address_model == ngen_proxy::AddressModel::ModelBTS);
         bool is_slm = (address_model == ngen_proxy::AddressModel::ModelSLM);
-
-        ir_assert(!is_scattered) << "Not implemented";
-        MAYBE_UNUSED(is_scattered);
 
         expr_t header_sub_buf;
         expr_t off;
@@ -179,10 +233,15 @@ public:
             header_sub_buf = header_buf[2 * sizeof(uint32_t)];
         } else if (is_a64) {
             // Convert buffer to 64-bit integer.
-            off = cast(mem_buf, type_t::u64()) + mem_off;
+            off = cast(mem_buf, type_t::u64());
+            if (mem_off.type().is_vector())
+                off = shuffle_t::make_broadcast(off, mem_off.type().elems());
+            off += mem_off;
             header_sub_buf = header_buf[0];
+        } else {
+            ir_error_not_expected();
         }
-        off = cast(off, address_type(is_signed_offset));
+        off = cast(off, address_type(is_signed_offset, off.type().elems()));
         return store_t::make(header_sub_buf, 0, off);
     }
 
@@ -285,9 +344,8 @@ public:
                         size_t a_sz = a.size();
                         size_t b_sz = b.size();
                         // Put block messages first.
-                        if (a_sz == b_sz)
-                            return a.type == message_type_t::block
-                                    && b.type != message_type_t::block;
+                        if (a.type != b.type)
+                            return a.type == message_type_t::block;
                         return a_sz > b_sz;
                     });
         });
@@ -310,18 +368,23 @@ public:
     int slots;
     type_t alignment;
     ngen_proxy::AddressModel address_model;
+    int eff_mask_count;
 
 private:
     send_t(ngen_proxy::Access access_type, message_type_t type,
             const type_t &data_type, int data_elems, int slots,
-            const type_t &alignment, ngen_proxy::AddressModel address_model)
+            const type_t &alignment, ngen_proxy::AddressModel address_model,
+            int eff_mask_count)
         : access_type(access_type)
         , type(type)
         , data_type(data_type)
         , data_elems(data_elems)
         , slots(slots)
         , alignment(alignment)
-        , address_model(address_model) {}
+        , address_model(address_model)
+        , eff_mask_count(eff_mask_count == -1 ? mask_count() : eff_mask_count) {
+        ir_assert(eff_mask_count <= mask_count());
+    }
 };
 
 // Creates send statement for a memory view.
