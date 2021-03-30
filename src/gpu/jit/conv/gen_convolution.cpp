@@ -93,6 +93,16 @@ public:
         return status::success;
     }
 
+    int find_output_scales_resource_key() const {
+        for (int i = 0; i < kernel_arg_info_.nargs(); i++) {
+            if (kernel_arg_info_.is_resource(i)) {
+                auto &arg_name = kernel_arg_info_.arg_name(i);
+                if (arg_name == "oscales") return kernel_arg_info_.dnnl_arg(i);
+            }
+        }
+        return -1;
+    }
+
 private:
     template <typename T>
     const conv_config_t &cfg(const T *primitive) const {
@@ -117,6 +127,13 @@ status_t gen_convolution_fwd_t::init(engine_t *engine) {
 
 status_t gen_convolution_fwd_t::execute(const exec_ctx_t &ctx) const {
     return impl_->execute(this, ctx);
+}
+
+status_t gen_convolution_fwd_t::init_res_storage(
+        engine_t *engine, gpu_resource_t *r) const {
+    int key = impl_->find_output_scales_resource_key();
+    if (key == -1) return status::success;
+    return init_output_scales_res_storage(engine, r, key);
 }
 
 } // namespace jit

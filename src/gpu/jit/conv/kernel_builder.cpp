@@ -27,6 +27,7 @@
 #include "gpu/jit/conv/fma_support.hpp"
 #include "gpu/jit/conv/ir.hpp"
 #include "gpu/jit/conv/message_support.hpp"
+#include "gpu/jit/conv/post_op_support.hpp"
 #include "gpu/jit/conv/tensor.hpp"
 
 namespace dnnl {
@@ -2883,77 +2884,553 @@ public:
                 cset, view, mem_buf, reg_buf, is_slm, /*is_load=*/false) {}
 };
 
-// Performs the following steps after the computation:
-// - Conversion
-// - GRF reorder to match the memory layout
-// - Store to the destination
-class epilogue_builder_t {
+// Generates loads to the post-op buffer and applies a single post-op.
+// There are two types of post-ops:
+// - Eltwise: lhs = F(lhs)
+// - Binary:  lhs = F(lhs, rhs)
+// Binary requires rhs load which may be either:
+// - Pre-loaded and used for all updates (preferred approach)
+// - Loaded for every tile
+// Righ-hand side tensor supports implicit broadcasting: value is broadcasted
+// across a size one dimension.
+class post_op_builder_t {
 public:
-    epilogue_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
-            const view_t &mem_view, const view_t &reg_view,
-            const expr_t &mem_buf, const expr_t &reg_buf)
-        : ir_ctx_(ir_ctx)
-        , cset_(cset)
-        , mem_view_(mem_view)
-        , reg_view_(reg_view)
-        , mem_buf_(mem_buf)
-        , reg_buf_(reg_buf)
-        , tmp_reg_buf_(make_buffer("c_tmp")) {
-        build();
+    post_op_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
+            const post_op_t &post_op, int &available_pre_load_size)
+        : ir_ctx_(ir_ctx), cset_(cset), post_op_(post_op) {
+        if (!post_op_.needs_load()) return;
+
+        // Estimate buffer size required to load full rhs, do not do pre-load
+        // if it requires too much GRF memory.
+        int estimated_rhs_bytes = 0;
+
+        rhs_orig_reg_buf_ = make_tmp_rhs_buffer();
+        estimated_rhs_bytes
+                += int(post_op.rhs_view().create_dense_vlayout().size());
+
+        if (needs_rhs_convert()) {
+            rhs_f32_reg_buf_ = make_tmp_rhs_buffer();
+            estimated_rhs_bytes += int(post_op.rhs_view()
+                                               .create_dense_vlayout()
+                                               .retype(type_t::f32())
+                                               .size());
+        }
+
+        if (estimated_rhs_bytes <= available_pre_load_size) {
+            available_pre_load_size -= estimated_rhs_bytes;
+            do_preload_ = true;
+        }
     }
 
-    const expr_t &tmp_reg_buf() const { return tmp_reg_buf_; }
+    // Original buffer to load rhs.
+    const expr_t &rhs_orig_reg_buf() const { return rhs_orig_reg_buf_; }
+    int rhs_orig_reg_buf_size() const { return rhs_orig_reg_buf_size_; }
 
-    int tmp_buf_size() const { return tmp_buf_size_; }
+    // Buffer with rhs converted to f32.
+    const expr_t &rhs_f32_reg_buf() const { return rhs_f32_reg_buf_; }
+    int rhs_f32_reg_buf_size() const { return rhs_f32_reg_buf_size_; }
+
+    // Pre-loads rhs data for the whole update.
+    stmt_t build_pre_load() {
+        if (!do_preload_) return stmt_t();
+
+        read_builder_t read(cset_, post_op_.rhs_view(), post_op_.rhs_buf(),
+                rhs_orig_reg_buf_, /*is_slm=*/false);
+        pre_load_rhs_reg_view_ = read.reg_view();
+        rhs_reg_buf_ = rhs_orig_reg_buf_;
+        rhs_orig_reg_buf_size_ = read.reg_buf_size();
+        return read.stmt();
+    }
+
+    // Converts the pre-loaded rhs data to f32.
+    stmt_t build_pre_convert() {
+        if (!do_preload_ || !needs_rhs_convert()) return stmt_t();
+
+        auto f32_view
+                = pre_load_rhs_reg_view_.make_dense().retype(type_t::f32());
+        rhs_f32_reg_buf_size_ = int(f32_view.vlayout_size());
+
+        // Reorder to f32.
+        reorder_builder_t reorder(ir_ctx_, pre_load_rhs_reg_view_, f32_view,
+                rhs_orig_reg_buf_, rhs_f32_reg_buf_);
+
+        // Now rhs is converted to f32.
+        pre_load_rhs_reg_view_ = f32_view;
+        rhs_reg_buf_ = rhs_f32_reg_buf_;
+
+        return reorder.stmt();
+    }
+
+    // Loads rhs data for one tile.
+    stmt_t build_tile_load(const tensor_t &tile) {
+        if (!post_op_.needs_load()) return stmt_t();
+
+        stmt_t stmt;
+        auto rhs_tile = post_op_.apply_mask(tile);
+        if (post_op_.needs_load() && !do_preload_) {
+            // Load and convert now.
+            auto po = post_op_.create_sub_post_op(rhs_tile);
+            read_builder_t read(cset_, po.rhs_view(), po.rhs_buf(),
+                    rhs_orig_reg_buf_,
+                    /*is_slm=*/false);
+            stmt = stmt.append(read.stmt());
+
+            rhs_reg_view_ = read.reg_view();
+            rhs_reg_buf_ = rhs_orig_reg_buf_;
+            rhs_orig_reg_buf_size_
+                    = std::max(rhs_orig_reg_buf_size_, read.reg_buf_size());
+            if (needs_rhs_convert()) {
+                // Reorder to f32.
+                auto f32_view
+                        = rhs_reg_view_.make_dense().retype(type_t::f32());
+                rhs_f32_reg_buf_size_ = std::max(
+                        rhs_f32_reg_buf_size_, int(f32_view.vlayout_size()));
+                reorder_builder_t reorder(ir_ctx_, rhs_reg_view_, f32_view,
+                        rhs_orig_reg_buf_, rhs_f32_reg_buf_);
+                stmt = stmt.append(reorder.stmt());
+
+                // Now rhs is converted to f32.
+                rhs_reg_view_ = f32_view;
+                rhs_reg_buf_ = rhs_f32_reg_buf_;
+            }
+        } else {
+            // Already pre-loaded and pre-converted.
+            rhs_reg_view_ = pre_load_rhs_reg_view_.create_sub_view(rhs_tile);
+        }
+        return stmt;
+    }
+
+    // Applies post-op for a single tile.
+    stmt_t build_tile_stmt(const tensor_t &tile, const view_t &lhs_reg_view,
+            const expr_t &lhs_buf) {
+        auto po = post_op_.create_sub_post_op(tile);
+        if (!po.has_rhs()) {
+            // Apply eltwise post-op.
+            int lhs_size = lhs_reg_view.create_vlayout().size();
+            int lhs_elems = lhs_size / int(sizeof(float));
+            return po.eltwise().call({expr_t(lhs_elems), lhs_buf});
+        }
+
+        auto lhs_layout = lhs_reg_view.create_vlayout();
+        auto rhs_layout = (po.needs_load()
+                        ? rhs_reg_view_.create_vlayout()
+                        : lhs_layout.map(
+                                tensor_t(std::vector<dim_t>(tile.ndims(), 1))));
+
+        int inner_dim_idx = lhs_layout.blocks().front().dim_idx;
+        bool do_broadcast = po.is_broadcast_dim(inner_dim_idx);
+        if (!do_broadcast) layout_t::align_layouts(lhs_layout, rhs_layout);
+
+        auto lhs_blocks = lhs_layout.blocks();
+        auto rhs_blocks = rhs_layout.blocks();
+
+        auto &lhs0 = lhs_blocks[0];
+
+        ir_assert(lhs0.dim_idx == inner_dim_idx);
+        ir_assert(dim_t(lhs0.stride) == 1);
+
+        if (!do_broadcast) {
+            auto &rhs0 = rhs_blocks[0];
+            ir_assert(lhs0.dim_idx == rhs0.dim_idx);
+            ir_assert(lhs0.block == rhs0.block);
+            MAYBE_UNUSED(rhs0);
+        }
+
+        std::vector<dim_t> inner_tile_dims(tile.ndims(), 1);
+        inner_tile_dims[inner_dim_idx] = lhs0.block;
+
+        auto &lhs_type = lhs_layout.type();
+        auto &rhs_type = rhs_layout.type();
+        ir_assert(lhs_type == type_t::f32());
+        ir_assert(rhs_type == type_t::f32());
+
+        // Handle one inner tile at a time. Inner tile covers a single block
+        // with a single dimension.
+        stmt_t stmt;
+        lhs_layout.for_each_tile(tensor_t(inner_tile_dims),
+                [&](const std::vector<dim_t> &lhs_start) {
+                    auto rhs_start = po.apply_mask(lhs_start, 0);
+                    int lhs_off0 = lhs_layout(lhs_start) * lhs_type.size();
+                    int rhs_off0 = rhs_layout(rhs_start) * rhs_type.size();
+
+                    int elems = lhs0.block;
+                    int step = (elems < 16 ? 8 : 16);
+                    for (int i = 0; i < elems; i += step) {
+                        int cur_elems = std::min(step, elems - i);
+                        ir_assert(math::is_pow2(cur_elems));
+                        auto lhs_vec_type = lhs_type.with_elems(cur_elems);
+                        auto rhs_vec_type = rhs_type.with_elems(
+                                do_broadcast ? 1 : cur_elems);
+
+                        int lhs_off = lhs_off0 + i * lhs_type.size();
+                        int rhs_off = rhs_off0;
+                        if (!do_broadcast) rhs_off += i * rhs_type.size();
+
+                        auto lhs = load_t::make(lhs_vec_type, lhs_buf, lhs_off);
+                        expr_t rhs;
+                        if (po.needs_load()) {
+                            int stride
+                                    = (do_broadcast ? load_t::default_stride
+                                                    : int(rhs_blocks[0].stride)
+                                                            * rhs_type.size());
+                            rhs = load_t::make(rhs_vec_type, rhs_reg_buf_,
+                                    rhs_off, stride);
+                        } else {
+                            // rhs is scalar and passed in the kernel arguments.
+                            rhs = po.rhs_buf();
+                            ir_assert(rhs.type().is_scalar());
+                        }
+
+                        if (rhs.type().elems() != cur_elems) {
+                            rhs = shuffle_t::make_broadcast(rhs, cur_elems);
+                        }
+
+                        if (po.rhs_scale() != 1) {
+                            // Scale rhs first.
+                            rhs = binary_op_t::make(op_kind_t::_mul, rhs,
+                                    shuffle_t::make_broadcast(
+                                            po.rhs_scale(), cur_elems));
+                        }
+
+                        auto new_lhs
+                                = binary_op_t::make(po.op_kind(), lhs, rhs);
+                        if (new_lhs.type().is_bool()) {
+                            // Apply bool -> f32 cast when binary is a comparison op.
+                            new_lhs = cast(new_lhs, type_t::f32(cur_elems));
+                        }
+                        auto store = store_t::make(lhs_buf, lhs_off, new_lhs);
+                        stmt = stmt.append(store);
+                    }
+                });
+
+        // Reset rhs view.
+        rhs_reg_view_ = view_t();
+        return stmt;
+    }
+
+private:
+    expr_t make_tmp_rhs_buffer() const {
+        auto &rhs_name = post_op_.rhs_buf().as<var_t>().name;
+        return ir_ctx_.create_tmp_var(
+                type_t::byte_ptr(), "tmp_" + rhs_name + "_");
+    }
+
+    bool needs_rhs_convert() const {
+        if (!post_op_.has_rhs()) return false;
+        return post_op_.rhs_view().type() != type_t::f32();
+    }
+
+    ir_context_t &ir_ctx_;
+    const constraint_set_t &cset_;
+    post_op_t post_op_;
+
+    bool do_preload_ = false;
+
+    expr_t rhs_orig_reg_buf_;
+    int rhs_orig_reg_buf_size_ = 0;
+
+    expr_t rhs_f32_reg_buf_;
+    int rhs_f32_reg_buf_size_ = 0;
+
+    view_t pre_load_rhs_reg_view_;
+    view_t rhs_reg_view_;
+    expr_t rhs_reg_buf_;
+};
+
+// Zero pads a register buffer of f32 type.
+class zero_pad_builder_t {
+public:
+    zero_pad_builder_t(const constraint_set_t &cset,
+            const post_op_context_t &post_op_ctx, const view_t &view,
+            const expr_t &buf)
+        : cset_(cset), post_op_ctx_(post_op_ctx), view_(view), buf_(buf) {
+        build();
+    }
 
     const stmt_t &stmt() const { return stmt_; }
 
 private:
     void build() {
-        auto &mem_type = mem_view_.type();
-        int tmp_buf_elems = tmp_buf_size_ / mem_view_.type().size();
-        auto base_tile = mem_view_.split_into_max_innermost_tile(tmp_buf_elems);
+        int max_step = 16; // Handle 16 elements at most in one step.
+        auto tile = view_.split_into_max_tile(max_step, /*is_dense_tile=*/true);
+        view_.for_each_tile(tile, [&](const std::vector<dim_t> &start) {
+            auto sub_view = view_.create_sub_view(tensor_t(tile.dims(), start));
+            int elems = tile.elems();
+            int off = view_(start) * view_.type().size();
+            auto mask_vec = create_mask(sub_view, tile);
+            auto mask = mask_vec.to_expr(elems);
+            auto store = store_t::make(buf_, off,
+                    shuffle_t::make_broadcast(expr_t(0.0f), elems),
+                    store_t::default_stride, -mask);
+            stmt_ = stmt_.append(store);
+        });
+    }
+
+    mask_vector_t create_mask(const view_t &view, const tensor_t &tile) const {
+        mask_vector_t mask_vec(view.type(), tile.elems());
+        std::vector<dim_t> args(tile.ndims());
+        int off = 0;
+        fill_mask_impl(mask_vec, 0, off, args, view, tile);
+        mask_vec.simplify(cset_);
+        return mask_vec;
+    }
+
+    void fill_mask_impl(mask_vector_t &mask_vec, int idx, int &off,
+            std::vector<dim_t> &args, const view_t &view,
+            const tensor_t &tile) const {
+        if (idx == tile.ndims()) {
+            expr_t mask = bool_imm_t::make(true);
+            for (int i = 0; i < tile.ndims(); i++) {
+                if (!post_op_ctx_.is_lhs_dim_zero_padded(i)) continue;
+                mask &= (view.vstart(i) + args[i] < post_op_ctx_.lhs_dim(i));
+            }
+            mask_vec.set_mask(off, mask);
+            off++;
+            return;
+        }
+
+        for (int i = 0; i < int(tile.dims()[idx]); i++) {
+            args[idx] = i;
+            fill_mask_impl(mask_vec, idx + 1, off, args, view, tile);
+        }
+    }
+
+    const constraint_set_t &cset_;
+    const post_op_context_t &post_op_ctx_;
+
+    view_t view_;
+    expr_t buf_;
+
+    stmt_t stmt_;
+};
+
+// Performs the following steps after the computation:
+// - Conversion
+// - Applying post-ops
+// - GRF reorder to match the memory layout
+// - Store to the destination
+class epilogue_builder_t {
+public:
+    epilogue_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
+            const post_op_context_t &post_op_ctx, const view_t &mem_view,
+            const view_t &reg_view, const expr_t &mem_buf,
+            const expr_t &reg_buf)
+        : ir_ctx_(ir_ctx)
+        , cset_(cset)
+        , post_op_ctx_(post_op_ctx)
+        , mem_view_(mem_view)
+        , reg_view_(reg_view)
+        , mem_buf_(mem_buf)
+        , reg_buf_(reg_buf) {
+
+        int pre_load_size = pre_load_max_size_;
+        for (auto &po : post_op_ctx_.post_ops()) {
+            auto sub_po = po.create_sub_post_op(mem_view.vtensor());
+            post_op_builders_.emplace_back(
+                    ir_ctx, cset_, sub_po, pre_load_size);
+        }
+        build();
+    }
+
+    const stmt_t &stmt() const { return stmt_; }
+
+private:
+    // Represents one stage in the flow between multiplication and storing the
+    // updated result to memory.
+    //
+    // Flow with post-ops:
+    //   Multiplication ->
+    //     M_x -> [R_f32] -> P0_f32 -> ... -> Pn_f32 -> [Z_f32] -> S_y ->
+    //   GMEM
+    // Flow without post-ops:
+    //   Multiplication ->
+    //     M_x -> S_y ->
+    //   GMEM
+    // Where:
+    // - x      is data type after multiplication
+    // - y      is destination data type
+    // - M_x    is a stage after multiplication
+    // - R_f32  is a stage after reordering from M_x to f32 (optional)
+    // - Pi_f32 is a stage after applying Pi post-op
+    // - Z_f32  is a stage after restoring zero padding (optional)
+    // - S_y    is a stage before storing data to destination
+    struct stage_t {
+        stage_t(const view_t &view, const expr_t &buf,
+                const stmt_t &stmt = stmt_t())
+            : view(view), buf(buf), stmt(stmt) {
+            ir_assert(view.is_direct()) << "Expected direct view.";
+        }
+
+        void set_next(ir_context_t &ir_ctx, stage_t *next) {
+            if (!next) return;
+            if (!view.has_same_vlayout(next->view, /*compare_offset=*/false)) {
+                // Generate reorder between stages.
+                reorder_builder_t reorder(
+                        ir_ctx, view, next->view, buf, next->buf);
+                ir_assert(stmt.is_empty());
+                stmt = reorder.stmt();
+            } else {
+                // Reuse the same GRF buffer for the next stage.
+                int this_off = to_cpp<int>(view.offset_in_bytes());
+                int next_off = to_cpp<int>(next->view.offset_in_bytes());
+                ir_assert(next_off == 0);
+                MAYBE_UNUSED(next_off);
+                next->set_buf(buf[this_off]);
+            }
+        }
+
+        void set_buf(const expr_t &buf) {
+            // Replace old buffer if there is an assigned statement.
+            if (!stmt.is_empty()) { stmt = substitute(stmt, this->buf, buf); }
+            this->buf = buf;
+        }
+
+        const expr_t &buf_base() const {
+            if (buf.is<var_t>()) return buf;
+            return buf.as<ptr_t>().base;
+        }
+
+        int buf_size() const {
+            ir_assert(buf.is_same(buf_base()))
+                    << "Size must be queried from another stage.";
+            return int(view.vlayout_size());
+        }
+
+        void prepend_stmt(const stmt_t &stmt) {
+            this->stmt = stmt.append(this->stmt);
+        }
+
+        view_t view;
+        expr_t buf;
+        stmt_t stmt;
+    };
+
+    void build() {
+        for (auto &po_builder : post_op_builders_) {
+            stmt_ = stmt_.append(po_builder.build_pre_load());
+        }
+
+        for (auto &po_builder : post_op_builders_) {
+            stmt_ = stmt_.append(po_builder.build_pre_convert());
+        }
+
+        auto tmp_type = (post_op_builders_.empty() ? mem_view_.type()
+                                                   : type_t::f32());
+        int tmp_buf_elems = tmp_buf_size_ / tmp_type.size();
+        auto base_tile = mem_view_.split_into_max_tile(
+                tmp_buf_elems, /*is_dense=*/false);
         mem_view_.for_each_tile(
                 base_tile, [&](const std::vector<dim_t> &start) {
-                    auto tile = tensor_t(base_tile.dims(), start);
-                    auto mem_sub_view = mem_view_.create_sub_view(tile);
-                    auto reg_sub_view = reg_view_.create_sub_view(tile);
-
-                    write_builder_t r2g(cset_, mem_sub_view, mem_buf_,
-                            tmp_reg_buf_,
-                            /*is_slm=*/false);
-                    auto chunk_stmt = r2g.stmt();
-
-                    if (!reg_sub_view.has_same_vlayout(r2g.reg_view())) {
-                        // Generate reorder between layouts.
-                        reorder_builder_t reorder(ir_ctx_, reg_sub_view,
-                                r2g.reg_view(), reg_buf_, tmp_reg_buf_);
-                        chunk_stmt
-                                = stmt_seq_t::make(reorder.stmt(), chunk_stmt);
-                    } else {
-                        // Layouts are the same, no need to reorder. Use the register
-                        // buffer directly.
-                        auto reg_sub_off = reg_view_(start) * mem_type.size();
-                        auto reg_sub_buf = reg_buf_[reg_sub_off];
-                        chunk_stmt = substitute(
-                                chunk_stmt, tmp_reg_buf_, reg_sub_buf);
-                    }
-                    stmt_ = stmt_.append(chunk_stmt);
+                    build_tile(tensor_t(base_tile.dims(), start));
                 });
+
+        // Generate alloc statements for rhs post-op buffers.
+        for (auto &po_builder : post_op_builders_) {
+            auto &buf = po_builder.rhs_orig_reg_buf();
+            int size = po_builder.rhs_orig_reg_buf_size();
+            if (!buf.is_empty()) {
+                stmt_ = alloc_t::make(buf, size, alloc_kind_t::grf, {}, stmt_);
+            }
+
+            auto &f32_buf = po_builder.rhs_f32_reg_buf();
+            int f32_size = po_builder.rhs_f32_reg_buf_size();
+            if (!f32_buf.is_empty()) {
+                stmt_ = alloc_t::make(
+                        f32_buf, f32_size, alloc_kind_t::grf, {}, stmt_);
+            }
+        }
+    }
+
+    // Builds statements for a tile iterating through all stages (see stage_t
+    // description).
+    void build_tile(const tensor_t &tile) {
+        auto mem_sub_view = mem_view_.create_sub_view(tile);
+        auto reg_sub_view = reg_view_.create_sub_view(tile);
+
+        auto tmp_reg_buf = ir_ctx_.create_tmp_var(type_t::byte_ptr(), "c_tmp");
+        bool restore_zero_padding = post_op_ctx_.need_to_restore_zero_padding();
+
+        // S_y -> GMEM.
+        write_builder_t r2g(
+                cset_, mem_sub_view, mem_buf_, tmp_reg_buf, /*is_slm=*/false);
+
+        // Initialize stages.
+        std::vector<stage_t> stages;
+        stages.emplace_back(reg_sub_view, reg_buf_); // M_x
+        if (!post_op_builders_.empty()) {
+            auto po_view = r2g.reg_view().retype(type_t::f32());
+            for (int i = 0; i < int(post_op_builders_.size()); i++) {
+                auto buf = ir_ctx_.create_tmp_var(type_t::byte_ptr(), "c_tmp");
+                stages.emplace_back(po_view, buf); // Pi_f32
+            }
+            if (restore_zero_padding) {
+                auto &last = stages.back();
+                stages.emplace_back(last.view, last.buf); // Z_f32.
+            }
+        }
+        stages.emplace_back(r2g.reg_view(), tmp_reg_buf, r2g.stmt()); // S_y
+
+        // Generate reorders between stages and create buffers.
+        int nstages = int(stages.size());
+        for (int i = 0; i < nstages; i++) {
+            auto *next_stage = (i + 1 < nstages ? &stages[i + 1] : nullptr);
+            stages[i].set_next(ir_ctx_, next_stage);
+        }
+
+        stmt_t tile_stmt;
+
+        // Generate loads for post-ops.
+        for (auto &po_builder : post_op_builders_) {
+            tile_stmt = tile_stmt.append(po_builder.build_tile_load(tile));
+        }
+
+        // Generate post-op statements.
+        for (int i = 1; i < int(post_op_builders_.size()) + 1; i++) {
+            auto &po_builder = post_op_builders_[i - 1];
+            auto &s = stages[i];
+            s.prepend_stmt(po_builder.build_tile_stmt(tile, s.view, s.buf));
+        }
+
+        if (restore_zero_padding) {
+            auto &s = stages[nstages - 2];
+            zero_pad_builder_t builder(cset_, post_op_ctx_, s.view, s.buf);
+            s.prepend_stmt(builder.stmt());
+        }
+
+        // Add stage statements.
+        for (auto &s : stages) {
+            tile_stmt = tile_stmt.append(s.stmt);
+        }
+
+        // Generate alloc statements for stage buffers.
+        object_set_t<expr_t> seen;
+        for (int i = 1; i < nstages; i++) {
+            auto &s = stages[i];
+            auto &buf = s.buf_base();
+            auto ret = seen.insert(buf);
+            if (!ret.second) continue;
+            tile_stmt = alloc_t::make(
+                    buf, s.buf_size(), alloc_kind_t::grf, {}, tile_stmt);
+        }
+
+        stmt_ = stmt_.append(tile_stmt);
     }
 
     ir_context_t &ir_ctx_;
     const constraint_set_t &cset_;
+    const post_op_context_t &post_op_ctx_;
 
     view_t mem_view_;
     view_t reg_view_;
 
     expr_t mem_buf_;
     expr_t reg_buf_;
-    expr_t tmp_reg_buf_;
 
     // TODO: Add logic to determine blocking bytes, hard-coding for now.
-    int tmp_buf_size_ = 128;
+    static const int tmp_buf_size_ = 128;
+    static const int pre_load_max_size_ = 256;
+
+    std::vector<post_op_builder_t> post_op_builders_;
 
     stmt_t stmt_;
 };
@@ -3118,6 +3595,10 @@ public:
     void set_n_tg_blk(int b) { n_tg_blk_ = b; }
     void set_k_tg_blk(int b) { k_tg_blk_ = b; }
 
+    void set_post_op_context(const post_op_context_t &post_op_ctx) {
+        post_op_ctx_ = post_op_ctx;
+    }
+
     void build() {
         // Initialize SLM buffers.
         expr_t a_slm_buf = make_buffer("a_slm");
@@ -3268,12 +3749,10 @@ public:
 
         auto cp_thr_reg_view = view_t(cp_thr_mem_view, cp_thr_reg_layout);
 
-        epilogue_builder_t c_m2g(ir_ctx_, cset_, cp_thr_mem_view,
+        epilogue_builder_t c_m2g(ir_ctx_, cset_, post_op_ctx_, cp_thr_mem_view,
                 cp_thr_reg_view, cp_buf_, c_buf);
         ir_trace() << "C GRF to GMEM store:\n" << c_m2g.stmt() << std::endl;
 
-        register_buffer(
-                c_m2g.tmp_reg_buf(), c_m2g.tmp_buf_size(), alloc_kind_t::grf);
         register_buffer(c_buf, c_layout.size(), alloc_kind_t::grf, c_attr);
 
         int step_bytes = 2 * reg_bytes;
@@ -3369,7 +3848,7 @@ private:
         ir_assert(layout.elems() % tg_dim0 == 0) << layout;
 
         dim_t inner_block = layout.elems() / tg_grid_.dim(0);
-        std::vector<dim_t> multi_blocks = {tg_dim0, inner_block};
+        std::vector<dim_t> multi_blocks = {inner_block, tg_dim0};
         auto l = layout.split_into_multi_blocks(multi_blocks);
 
         auto padded_blocks = l.blocks();
@@ -3472,6 +3951,7 @@ private:
     const conv_config_t &cfg_;
     ir_context_t &ir_ctx_;
     const constraint_set_t &cset_;
+    post_op_context_t post_op_ctx_;
 
     grid_info_t tg_grid_;
 
@@ -3539,10 +4019,12 @@ void kernel_builder_t::build() {
     view_t ap_tg_view;
     view_t bp_tg_view;
     view_t cp_tg_view;
+    view_t cp_view;
 
     init_fwd(init_cset, init_stmts, reduction_loops, ap_tg_view, bp_tg_view,
-            cp_tg_view);
+            cp_tg_view, cp_view);
 
+    post_op_context_t post_op_ctx(pd_, cfg_, cp_view, kernel_arg_info_);
     compute_builder_t cb(cfg_, ir_ctx, init_cset);
 
     cb.set_thread_group(tg_grid_);
@@ -3555,6 +4037,7 @@ void kernel_builder_t::build() {
     cb.set_m_tg_blk(cfg_.m_tg_blk);
     cb.set_n_tg_blk(cfg_.n_tg_blk);
     cb.set_k_tg_blk(cfg_.k_tg_blk);
+    cb.set_post_op_context(post_op_ctx);
 
     cb.build();
 
@@ -3615,7 +4098,8 @@ void kernel_builder_t::build() {
 
 void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
         std::vector<stmt_t> &init_stmts, std::vector<stmt_t> &reduction_loops,
-        view_t &src_tg_view, view_t &wei_tg_view, view_t &dst_tg_view) {
+        view_t &src_tg_view, view_t &wei_tg_view, view_t &dst_tg_view,
+        view_t &dst_view) {
     // Reduction variables.
     auto ic_blk_idx = var_t::make(type_t::s32(), "ic_blk_idx");
     auto ic_idx = ic_blk_idx * cfg_.ic_blk;
@@ -3762,18 +4246,24 @@ void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
     wei_tg_view.set_tlayout(wei_layout);
 
     // Destination.
-    dst_tg_view = view_t({mb, oc, od, oh, ow}, 5);
-    dst_tg_view.set_vdim(mb, cfg_.mb_tg_blk, mb_tg_idx, mnk_kind_t::m);
-    dst_tg_view.set_vdim(oc, cfg_.oc_tg_blk, oc_tg_idx, mnk_kind_t::n);
-    dst_tg_view.set_vdim(od, 1, od_tg_idx, mnk_kind_t::m);
-    dst_tg_view.set_vdim(oh, 1, oh_tg_idx, mnk_kind_t::m);
-    dst_tg_view.set_vdim(ow, cfg_.ow_tg_blk, ow_tg_idx, mnk_kind_t::m);
-    dst_tg_view.set_tdim(0, mb, dst_mb_mask); // mb
-    dst_tg_view.set_tdim(1, oc, dst_oc_mask); // oc
-    dst_tg_view.set_tdim(2, od, od_mask); // od
-    dst_tg_view.set_tdim(3, oh, oh_mask); // oh
-    dst_tg_view.set_tdim(4, ow, ow_mask); // ow
-    dst_tg_view.set_tlayout(dst_layout);
+    dst_view = view_t({mb, oc, od, oh, ow}, 5);
+    dst_view.set_vdim(mb, cfg_.mb, 0, mnk_kind_t::m);
+    dst_view.set_vdim(oc, cfg_.oc, 0, mnk_kind_t::n);
+    dst_view.set_vdim(od, cfg_.od, 0, mnk_kind_t::m);
+    dst_view.set_vdim(oh, cfg_.oh, 0, mnk_kind_t::m);
+    dst_view.set_vdim(ow, cfg_.ow, 0, mnk_kind_t::m);
+    dst_view.set_tdim(0, mb, dst_mb_mask); // mb
+    dst_view.set_tdim(1, oc, dst_oc_mask); // oc
+    dst_view.set_tdim(2, od, od_mask); // od
+    dst_view.set_tdim(3, oh, oh_mask); // oh
+    dst_view.set_tdim(4, ow, ow_mask); // ow
+    dst_view.set_tlayout(dst_layout);
+
+    std::vector<dim_t> dst_tg_dims
+            = {cfg_.mb_tg_blk, cfg_.oc_tg_blk, 1, 1, cfg_.ow_tg_blk};
+    std::vector<expr_t> dst_tg_start
+            = {mb_tg_idx, oc_tg_idx, od_tg_idx, oh_tg_idx, ow_tg_idx};
+    dst_tg_view = dst_view.create_sub_view(tensor_t(dst_tg_dims, dst_tg_start));
 }
 
 } // namespace jit

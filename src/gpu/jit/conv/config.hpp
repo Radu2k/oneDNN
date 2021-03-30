@@ -28,6 +28,7 @@
 #include "gpu/compute/compute.hpp"
 #include "gpu/jit/conv/tensor.hpp"
 #include "gpu/jit/conv/utils.hpp"
+#include "gpu/jit/jit_eltwise_injector.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -187,10 +188,8 @@ public:
 
         // Cases below are not supported yet.
         if (!is_fwd) return status::unimplemented;
-        if (with_bias) return status::unimplemented;
         if (with_groups) return status::unimplemented;
-        if (!conv_pd->attr()->has_default_values())
-            return status::unimplemented;
+        if (!post_ops_ok(conv_pd)) return status::unimplemented;
         if (utils::one_of(data_type::f32, src_data_type, wei_data_type))
             return status::unimplemented;
 
@@ -337,6 +336,40 @@ public:
         if (!is_src_nhwc && mb >= 16) return status::unimplemented;
 
         return status::success;
+    }
+
+    bool post_ops_ok(const convolution_pd_t *pd) const {
+        auto *attr = pd->attr();
+        if (!attr->output_scales_.has_default_values()) {
+            // Only common and per_oc output scales were tested.
+            if (!utils::one_of(attr->output_scales_.mask_, 0, (1 << 1)))
+                return false;
+        }
+        for (int i = 0; i < attr->post_ops_.len(); i++) {
+            auto &po = attr->post_ops_.entry_[i];
+            if (po.is_eltwise()) {
+                if (!jit_eltwise_injector_f32_is_supported(po.eltwise.alg))
+                    return false;
+            } else if (po.is_binary()) {
+                // Division is not supported.
+                if (po.binary.alg == alg_kind::binary_div) return false;
+                int mask = utils::get_dims_mask(pd->invariant_dst_md()->dims,
+                        po.binary.src1_desc.dims, ndims);
+                // per_oc broadcast is always supported.
+                if ((mask & (1 << 1)) == 0) continue;
+                auto rhs_layout = layout_t(po.binary.src1_desc).normalize();
+                auto rhs0 = rhs_layout.blocks()[0];
+                int block_bytes = rhs0.block * rhs_layout.type().size();
+                // Innermost block must:
+                // - be across output channels
+                // - be dense
+                // - aligned to 32 bytes (for HWord loads)
+                if (rhs0.dim_idx != 1 || dim_t(rhs0.stride) != 1
+                        || block_bytes % 32 != 0)
+                    return false;
+            }
+        }
+        return true;
     }
 
     bool is_s32_accumulator() const { return acc_data_type == data_type::s32; }

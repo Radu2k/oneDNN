@@ -20,6 +20,7 @@
 #include "common/convolution_pd.hpp"
 #include "gpu/jit/conv/config.hpp"
 #include "gpu/jit/conv/ir.hpp"
+#include "gpu/jit/conv/post_op_support.hpp"
 #include "gpu/jit/conv/tensor.hpp"
 
 namespace dnnl {
@@ -47,7 +48,7 @@ private:
     void build();
     void init_fwd(constraint_set_t &init_cset, std::vector<stmt_t> &init_stmts,
             std::vector<stmt_t> &reduction_loops, view_t &src_tg_view,
-            view_t &wei_tg_view, view_t &dst_tg_view);
+            view_t &wei_tg_view, view_t &dst_tg_view, view_t &dst_view);
 
     const conv_config_t &cfg_;
     const convolution_pd_t *pd_;

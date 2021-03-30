@@ -24,6 +24,8 @@
 #include "gpu/jit/conv/kernel_builder.hpp"
 #include "gpu/jit/conv/message_support.hpp"
 #include "gpu/jit/conv/ngen_proxy.hpp"
+#include "gpu/jit/conv/post_op_support.hpp"
+#include "gpu/jit/jit_eltwise_injector.hpp"
 #include "gpu/jit/jit_generator.hpp"
 #include "gpu/jit/ngen/ngen_core.hpp"
 #include "gpu/jit/ngen/ngen_register_allocator.hpp"
@@ -174,8 +176,17 @@ bool ngen_is_qw(ngen::DataType type) {
     return utils::one_of(type, ngen::DataType::q, ngen::DataType::uq);
 }
 
+bool ngen_is_dw(ngen::DataType type) {
+    return utils::one_of(type, ngen::DataType::d, ngen::DataType::ud);
+}
+
 bool ngen_is_w(ngen::DataType type) {
     return utils::one_of(type, ngen::DataType::w, ngen::DataType::uw);
+}
+
+bool ngen_is_xf(ngen::DataType type) {
+    return utils::one_of(
+            type, ngen::DataType::bf, ngen::DataType::hf, ngen::DataType::f);
 }
 
 enum class ngen_operand_kind_t { invalid, immediate, reg_data, flag_register };
@@ -524,10 +535,15 @@ public:
                 emul(mod, dst.reg_data(), src0.reg_data(), src1.immediate());
                 return;
             }
-            auto tmp = ra_.alloc_sub<int64_t>();
-            emul(1, tmp.q(0), src0.reg_data(), src1_imm);
-            emov(1, dst.reg_data(), tmp.reinterpret(0, dst.type()));
-            ra_.safeRelease(tmp);
+            if (ngen_is_dw(src1_imm.getType())) {
+                ir_assert(mod.getExecSize() == 1);
+                auto tmp = ra_.alloc_sub<int64_t>();
+                emul(mod, tmp.q(0), src0.reg_data(), src1_imm);
+                emov(mod, dst.reg_data(), tmp.reinterpret(0, dst.type()));
+                ra_.safeRelease(tmp);
+                return;
+            }
+            emul(mod, dst.reg_data(), src0.reg_data(), src1.immediate());
         }
     }
 
@@ -681,12 +697,20 @@ public:
     template <typename DT = void>
     void emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
             const ngen::RegData &src0, const ngen::RegData &src1) {
+        if (ngen_is_xf(dst.getType())) {
+            mul(mod, dst, src0, src1);
+            return;
+        }
         EmulationImplementation::emul<DT>(
                 *this, mod, dst, src0, src1, emu_strategy, emu_state);
     }
     template <typename DT = void>
     void emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
             const ngen::RegData &src0, ngen::Immediate src1) {
+        if (ngen_is_xf(dst.getType())) {
+            mul(mod, dst, src0, src1);
+            return;
+        }
         EmulationImplementation::emul<DT>(
                 *this, mod, dst, src0, src1, emu_strategy, emu_state);
     }
@@ -1106,6 +1130,10 @@ public:
             if (is_const_broadcast(mask, expr_t(true))) { mask = expr_t(); }
             auto arg_ops = eval(args, scope);
             send(scope, func.as<send_t>(), arg_ops, obj->attr);
+        } else if (func.is<eltwise_t>()) {
+            auto &eltwise_func = func.as<eltwise_t>();
+            auto arg_ops = eval(obj->args, scope);
+            eltwise(scope, eltwise_func, arg_ops);
         } else if (func.is_equal(funcs::barrier_func())) {
             barrier(obj->attr);
         } else if (func.is_equal(funcs::barrier_wait_func())) {
@@ -1270,6 +1298,26 @@ private:
         // Emit send instruction.
         spec_impl.emit(
                 host_, scope, mod, mem_buf, 0, mem_off_op.reg_data(), rd);
+    }
+
+    void eltwise(ngen_register_scope_t &scope, const eltwise_t &func,
+            const std::vector<ngen_operand_t> &args) {
+        int elems = to_cpp<int>(eltwise_t::arg_elems(args));
+        auto &data_op = eltwise_t::arg_data(args);
+        auto &data_rd = data_op.reg_data();
+
+        ir_assert(elems * sizeof(float) % reg_bytes == 0)
+                << "Partial GRF updates are not supported.";
+        ir_assert(data_rd.getOffset() == 0)
+                << "Data must be aligned to GRF boundary.";
+
+        jit_eltwise_injector_f32<hw> inj(
+                host_, func.alg_kind, func.alpha, func.beta, func.scale);
+        auto scratch = scope.alloc_range(inj.preferred_scratch_regs());
+        inj.set_scratch(scratch);
+        inj.prepare();
+        inj.compute(ngen::GRFRange(
+                data_rd.getBase(), elems * sizeof(float) / reg_bytes));
     }
 
     ngen_operand_t eval(const expr_t &e, ngen_register_scope_t &scope,
