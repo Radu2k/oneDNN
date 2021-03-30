@@ -125,6 +125,7 @@ public:
         visit(obj->buf);
         visit(obj->off);
         visit(obj->value);
+        visit(obj->mask);
     }
 
     virtual void _visit(const unary_op_t *obj) { visit(obj->a); }
@@ -349,12 +350,13 @@ public:
         auto buf = mutate(obj->buf);
         auto off = mutate(obj->off);
         auto value = mutate(obj->value);
+        auto mask = mutate(obj->mask);
 
         if (buf.is_same(obj->buf) && off.is_same(obj->off)
-                && value.is_same(obj->value))
+                && value.is_same(obj->value) && mask.is_same(obj->mask))
             return obj;
 
-        return store_t::make(buf, off, value, obj->stride);
+        return store_t::make(buf, off, value, obj->stride, mask);
     }
 
     virtual object_t _mutate(const unary_op_t *obj) {
@@ -633,11 +635,13 @@ object_t substitute(const object_t &root, const object_t &from,
 // Returns leaf statements of `root`. Uses inorder traversal.
 std::vector<stmt_t> flatten_statements(const stmt_t &root);
 
-template <typename T, bool find_unique>
+template <typename T, bool find_unique = false, bool save_objects = true>
 class object_finder_t : public ir_visitor_t {
 public:
     void _visit(const T *obj) override {
         ir_visitor_t::_visit(obj);
+        occurrences++;
+        if (!save_objects) return;
         if (find_unique) {
             found_unique.insert(obj);
         } else {
@@ -647,6 +651,7 @@ public:
 
     std::vector<object_t> found;
     object_set_t<object_t> found_unique;
+    int occurrences = 0;
 };
 
 // Returns all IR objects of type `T` found in `root`.
@@ -655,6 +660,13 @@ std::vector<object_t> find_objects(const object_t &root) {
     object_finder_t<T, /*find_unique=*/false> finder;
     finder.visit(root);
     return finder.found;
+}
+
+template <typename T>
+int count_objects(const object_t &root) {
+    object_finder_t<T, /*find_unique=*/false, /*save_objects=*/false> finder;
+    finder.visit(root);
+    return finder.occurrences;
 }
 
 // Returns unique IR objects of type `T` found in `root`.
@@ -907,6 +919,10 @@ object_t simplify(const object_t &obj, const constraint_set_t &cset = {});
 // Moves constants to the right hand side of an expression.
 // Example: (c0 + x) op c1 -> x op (c1 - c0)
 expr_t simplify_cmp_move_const_to_rhs(const expr_t &e);
+
+// Reduces left and right hand sides of an expression.
+// Example: A * x < A * B -> x < B (if A > 0).
+expr_t simplify_cmp_reduce_lhs_rhs(const expr_t &e);
 
 // Pre-defined functions.
 namespace funcs {

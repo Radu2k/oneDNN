@@ -180,7 +180,8 @@ bool ngen_is_w(ngen::DataType type) {
 
 enum class ngen_operand_kind_t { invalid, immediate, reg_data, flag_register };
 
-// Wrapper to generalize ngen::RegData and ngen::Immediate.
+// Wrapper to generalize ngen::FlagRegister, ngen::RegData and ngen::Immediate
+// operands.
 class ngen_operand_t {
 public:
     ngen_operand_t() : kind_(ngen_operand_kind_t::invalid) {}
@@ -221,6 +222,12 @@ public:
         return *(const ngen::FlagRegister *)ptr_.get();
     }
 
+    ngen::InstructionModifier flag_register_mod() const {
+        ngen::InstructionModifier mod;
+        mod |= flag_register();
+        return !is_negated() ? mod : ~mod;
+    }
+
     const ngen::InstructionModifier &mod() const { return mod_; }
 
     bool is_invalid() const { return kind_ == ngen_operand_kind_t::invalid; }
@@ -235,6 +242,8 @@ public:
         return kind_ == ngen_operand_kind_t::flag_register;
     }
 
+    bool is_negated() const { return is_negated_; }
+
     ngen::DataType type() const {
         if (is_immediate()) return immediate().getType();
         if (is_reg_data()) return reg_data().getType();
@@ -245,6 +254,11 @@ public:
     ngen_operand_t operator-() const {
         if (is_immediate()) { return ngen_operand_t(ngen_negate(immediate())); }
         if (is_reg_data()) { return ngen_operand_t(-reg_data()); }
+        if (is_flag_register()) {
+            auto ret = *this;
+            ret.is_negated_ = !ret.is_negated_;
+            return ret;
+        }
         ir_error_not_expected();
         return ngen_operand_t();
     }
@@ -277,6 +291,11 @@ private:
     ngen_operand_kind_t kind_;
     std::shared_ptr<void> ptr_;
     ngen::InstructionModifier mod_;
+
+    // Whether the operand is negated. Applicable to flag registers only.
+    // Negation of register data and immediate operands is directly supported
+    // through nGEN API.
+    bool is_negated_ = false;
 };
 
 template <typename T>
@@ -469,11 +488,15 @@ public:
         if (dst.is_reg_data()) {
             if (src0.is_reg_data()) {
                 emov(mod, dst.reg_data(), src0.reg_data());
-            } else {
+            } else if (src0.is_immediate()) {
                 emov(mod, dst.reg_data(), src0.immediate());
+            } else {
+                emov(mod | src0.flag_register_mod(), dst.reg_data(), 1);
+                emov(mod | ~src0.flag_register_mod(), dst.reg_data(), 0);
             }
         } else {
             // dst is a flag register.
+            ir_assert(!dst.is_negated());
             if (src0.is_reg_data()) {
                 emov(mod, dst.flag_register(), src0.reg_data());
             } else {
@@ -524,6 +547,42 @@ public:
         int32_t src1_value = to_cpp<int32_t>(src1_imm);
         ir_assert(0 < src1_value && src1_value <= INT32_MAX) << src1_value;
         eidiv(ngen::Subregister(), dst.reg_data(), src0.reg_data(), src1_value);
+    }
+
+    void eshl(const ngen::InstructionModifier &mod, const ngen_operand_t &dst,
+            const ngen_operand_t &src0, const ngen_operand_t &src1) {
+        if (src1.is_reg_data()) {
+            shl(mod, dst.reg_data(), src0.reg_data(), src1.reg_data());
+        } else {
+            shl(mod, dst.reg_data(), src0.reg_data(), src1.immediate());
+        }
+    }
+
+    void eshr(const ngen::InstructionModifier &mod, const ngen_operand_t &dst,
+            const ngen_operand_t &src0, const ngen_operand_t &src1) {
+        if (src1.is_reg_data()) {
+            shr(mod, dst.reg_data(), src0.reg_data(), src1.reg_data());
+        } else {
+            shr(mod, dst.reg_data(), src0.reg_data(), src1.immediate());
+        }
+    }
+
+    void emin(const ngen::InstructionModifier &mod, const ngen_operand_t &dst,
+            const ngen_operand_t &src0, const ngen_operand_t &src1) {
+        if (src1.is_reg_data()) {
+            min_(mod, dst.reg_data(), src0.reg_data(), src1.reg_data());
+        } else {
+            min_(mod, dst.reg_data(), src0.reg_data(), src1.immediate());
+        }
+    }
+
+    void emax(const ngen::InstructionModifier &mod, const ngen_operand_t &dst,
+            const ngen_operand_t &src0, const ngen_operand_t &src1) {
+        if (src1.is_reg_data()) {
+            max_(mod, dst.reg_data(), src0.reg_data(), src1.reg_data());
+        } else {
+            max_(mod, dst.reg_data(), src0.reg_data(), src1.immediate());
+        }
     }
 
     void ecmp(const ngen::InstructionModifier &mod, const ngen_operand_t &src0,
@@ -707,7 +766,8 @@ public:
             case op_kind_t::_and: {
                 auto src0_op = eval(obj->a, dst_op);
                 eval(obj->b,
-                        ngen_operand_t(dst_op, mod | src0_op.flag_register()));
+                        ngen_operand_t(
+                                dst_op, mod | src0_op.flag_register_mod()));
                 break;
             }
             default: {
@@ -807,6 +867,7 @@ public:
         if (obj->type.is_bool()) {
             auto e_shuffle = expr_t(obj);
             ir_assert(dst_op.is_flag_register()) << e_shuffle;
+            ir_assert(!dst_op.is_negated()) << e_shuffle;
             ir_assert(is_shuffle_const(obj)) << e_shuffle;
             uint16_t flag_mask = 0;
             for (int i = obj->elems() - 1; i >= 0; i--) {
@@ -838,6 +899,12 @@ public:
             eval(obj->vec[idx], ngen_operand_t(rd, exec_size));
         }
         expr_binding_.mark_as_evaluated(obj);
+    }
+
+    void _visit(const unary_op_t *obj) override {
+        ir_assert(obj->op_kind == op_kind_t::_minus);
+        auto a_op = eval(obj->a);
+        bind(obj, -a_op);
     }
 
     void _visit(const var_t *obj) override {
@@ -881,10 +948,17 @@ private:
             case op_kind_t::_mul: host_->emul(mod, dst, src0, src1); break;
             case op_kind_t::_div: host_->ediv(mod, dst, src0, src1); break;
             case op_kind_t::_mod: host_->emod(mod, dst, src0, src1); break;
+            case op_kind_t::_shl: host_->eshl(mod, dst, src0, src1); break;
+            case op_kind_t::_shr: host_->eshr(mod, dst, src0, src1); break;
+            case op_kind_t::_min: host_->emin(mod, dst, src0, src1); break;
+            case op_kind_t::_max: host_->emax(mod, dst, src0, src1); break;
             case op_kind_t::_ge:
             case op_kind_t::_gt:
             case op_kind_t::_le:
-            case op_kind_t::_lt: {
+            case op_kind_t::_lt:
+            case op_kind_t::_eq:
+            case op_kind_t::_ne: {
+                ir_assert(!dst.is_negated()) << "Destination can't be negated.";
                 ngen::InstructionModifier cmp_mod = mod;
                 cmp_mod |= cmp_op_to_ngen(obj->op_kind);
                 cmp_mod |= dst.flag_register();
@@ -1065,6 +1139,7 @@ public:
         auto scope = register_scope();
         auto buf_op = eval(obj->buf, scope);
         auto off = to_cpp<int>(obj->off);
+        auto mask_op = eval(obj->mask, scope);
 
         auto &type = obj->value.type();
 
@@ -1076,9 +1151,11 @@ public:
             stride = obj->stride / type.scalar().size();
         }
 
+        ngen::InstructionModifier mod = type.elems();
+        if (!mask_op.is_invalid()) mod |= mask_op.flag_register_mod();
         auto dst_rd = ngen_reg_data(buf_op.reg_data(), off,
                 to_ngen(type.scalar()), type.elems(), stride);
-        ngen_operand_t dst(dst_rd, type.elems());
+        ngen_operand_t dst(dst_rd, mod);
         eval(obj->value, scope, dst);
     }
 

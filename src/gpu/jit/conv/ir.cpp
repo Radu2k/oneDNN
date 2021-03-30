@@ -49,6 +49,11 @@ public:
     }
 
     void _visit(const binary_op_t *obj) override {
+        if (utils::one_of(obj->op_kind, op_kind_t::_min, op_kind_t::_max)) {
+            out_ << to_string(obj->op_kind) << "(" << obj->a << ", " << obj->b
+                 << ")";
+            return;
+        }
         out_ << "(";
         visit(obj->a);
         out_ << " " << to_string(obj->op_kind) << " ";
@@ -181,7 +186,9 @@ public:
         print_indent();
         out_ << load_t::make(
                 obj->value.type(), obj->buf, obj->off, obj->stride);
-        out_ << " = " << obj->value << "\n";
+        out_ << " = " << obj->value;
+        if (!obj->mask.is_empty()) out_ << " [masked]";
+        out_ << "\n";
     }
 
     void _visit(const unary_op_t *obj) override {
@@ -558,8 +565,9 @@ bool constraint_set_t::can_prove_impl(
     }
 
     if (do_simplify) {
-        // Moving constants to the right helps to prove more inequalities.
+        // These passes for comparison help to prove more inequalities.
         e = simplify_cmp_move_const_to_rhs(e);
+        e = simplify_cmp_reduce_lhs_rhs(e);
         e = simplify(e);
         if (is_const(e)) {
             ir_assert(e.type() == type_t::_bool()) << e;

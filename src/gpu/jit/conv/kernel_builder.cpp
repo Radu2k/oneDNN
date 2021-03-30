@@ -768,13 +768,18 @@ public:
 private:
     template <typename T>
     void visit_expr(const T *obj) {
+        // Exclude loads as they may have side effects.
+        if (count_objects<load_t>(obj) > 0) {
+            ir_visitor_t::_visit(obj);
+            return;
+        }
+
         if (propagate_path_) {
             if (ctx_.has(obj))
                 ctx_.add_usage(obj, root_path_, /*do_increment=*/false);
             ir_visitor_t::_visit(obj);
             return;
         }
-        // FIXME: Exclude loads as they may have side effects.
         if (ctx_.has(obj)) {
             ctx_.add_usage(obj, root_path_);
             propagate_path_ = true;

@@ -656,6 +656,10 @@ enum class op_kind_t {
     _mul,
     _div,
     _mod,
+    _shl,
+    _shr,
+    _min,
+    _max,
 
     _lt,
     _le,
@@ -924,19 +928,20 @@ public:
 
     bool has_default_stride() const { return stride == default_stride; }
 
+    static const int default_stride = -1;
+
     expr_t buf;
     expr_t off;
     int stride;
 
 private:
-    static const int default_stride = -1;
-
     load_t(const type_t &_type, const expr_t &_buf, const expr_t &_off,
             int _stride)
         : expr_impl_t(_type), buf(_buf), off(_off), stride(_stride) {
         normalize_ptr(type, buf, off);
         ir_assert(is_var(buf)) << buf;
         ir_assert(buf.type().is_ptr()) << buf;
+        if (stride == type.scalar().size()) stride = default_stride;
     }
 };
 
@@ -1056,6 +1061,27 @@ public:
     static expr_t make_broadcast(const expr_t &expr, int elems) {
         ir_assert(expr.type().is_scalar()) << expr;
         return make({expr}, std::vector<int>(elems, 0));
+    }
+
+    // Slices the existing shuffle expression. For inputs (S, beg, end) returns
+    // (S[beg], S[beg + 1], ..., S[end - 1]) vector.
+    static expr_t make(const expr_t &_shuffle, int beg, int end) {
+        auto &shuffle = _shuffle.as<shuffle_t>();
+        ir_assert(beg >= 0 && beg <= shuffle.elems());
+        ir_assert(end >= 0 && end <= shuffle.elems());
+        ir_assert(beg < end);
+        std::vector<expr_t> vec;
+        std::vector<int> idx(end - beg, -1);
+        for (int i = beg; i < end; i++) {
+            if (idx[i - beg] != -1) continue;
+            int old_idx = shuffle.idx[i];
+            vec.push_back(shuffle.vec[old_idx]);
+            for (int j = i; j < end; j++) {
+                if (shuffle.idx[j] == old_idx)
+                    idx[j - beg] = int(vec.size()) - 1;
+            }
+        }
+        return make(vec, idx);
     }
 
     bool is_equal(const object_impl_t *obj) const override {
@@ -1232,6 +1258,8 @@ DECLARE_BINARY_OPERATOR(-, op_kind_t::_sub)
 DECLARE_BINARY_OPERATOR(*, op_kind_t::_mul)
 DECLARE_BINARY_OPERATOR(/, op_kind_t::_div)
 DECLARE_BINARY_OPERATOR(%, op_kind_t::_mod)
+DECLARE_BINARY_OPERATOR(<<, op_kind_t::_shl)
+DECLARE_BINARY_OPERATOR(>>, op_kind_t::_shr)
 
 DECLARE_BINARY_OPERATOR(==, op_kind_t::_eq)
 DECLARE_BINARY_OPERATOR(!=, op_kind_t::_ne)
@@ -1397,8 +1425,9 @@ public:
     // default stride means unit stride (in terms of value.type().scalar()
     // elements).
     static stmt_t make(const expr_t &buf, const expr_t &off,
-            const expr_t &value, int stride = default_stride) {
-        return stmt_t(new store_t(buf, off, value, stride));
+            const expr_t &value, int stride = default_stride,
+            const expr_t &mask = expr_t()) {
+        return stmt_t(new store_t(buf, off, value, stride, mask));
     }
 
     bool is_equal(const object_impl_t *obj) const override {
@@ -1406,29 +1435,34 @@ public:
         auto &other = obj->as<self_type>();
 
         return buf.is_equal(other.buf) && off.is_equal(other.off)
-                && value.is_equal(other.value) && (stride == other.stride);
+                && value.is_equal(other.value) && (stride == other.stride)
+                && mask.is_equal(other.mask);
     }
 
     size_t get_hash() const override {
-        return ir_utils::get_hash(buf, off, value, stride);
+        return ir_utils::get_hash(buf, off, value, stride, mask);
     }
 
     bool has_default_stride() const { return stride == default_stride; }
+
+    static const int default_stride = -1;
 
     expr_t buf;
     expr_t off;
     expr_t value;
     int stride;
+    expr_t mask;
 
 private:
-    static const int default_stride = -1;
-
     store_t(const expr_t &_buf, const expr_t &_off, const expr_t &_value,
-            int _stride)
-        : buf(_buf), off(_off), value(_value), stride(_stride) {
+            int _stride, const expr_t &_mask)
+        : buf(_buf), off(_off), value(_value), stride(_stride), mask(_mask) {
         normalize_ptr(value.type(), buf, off);
         ir_assert(is_var(buf)) << buf;
         ir_assert(buf.type().is_ptr()) << buf;
+        if (stride == value.type().scalar().size()) stride = default_stride;
+        if (!mask.is_empty())
+            ir_assert(mask.type() == type_t::_bool(value.type().elems()));
     }
 };
 

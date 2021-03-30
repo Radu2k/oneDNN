@@ -105,6 +105,10 @@ std::string to_string(op_kind_t kind) {
         case op_kind_t::_mul: return "*";
         case op_kind_t::_div: return "/";
         case op_kind_t::_mod: return "%";
+        case op_kind_t::_shl: return "<<";
+        case op_kind_t::_shr: return ">>";
+        case op_kind_t::_min: return "min";
+        case op_kind_t::_max: return "max";
 
         case op_kind_t::_lt: return "<";
         case op_kind_t::_le: return "<=";
@@ -209,6 +213,11 @@ type_t binary_op_type(op_kind_t op_kind, const expr_t &a, const expr_t &b) {
     ir_assert(a.type().elems() == b.type().elems())
             << "Types must have the same number of components.";
     if (is_cmp_op(op_kind)) return type_t::_bool(a.type().elems());
+    if (utils::one_of(op_kind, op_kind_t::_shl, op_kind_t::_shr)) {
+        ir_assert(a.type().is_unsigned())
+                << "a must be unsigned for shift left/right.";
+        return type_t::u32(a.type().elems());
+    }
     return common_type(a, b);
 }
 
@@ -292,6 +301,8 @@ DEFINE_BINARY_OPERATOR(-, op_kind_t::_sub)
 DEFINE_BINARY_OPERATOR(*, op_kind_t::_mul)
 DEFINE_BINARY_OPERATOR(/, op_kind_t::_div)
 DEFINE_BINARY_OPERATOR(%, op_kind_t::_mod)
+DEFINE_BINARY_OPERATOR(<<, op_kind_t::_shl)
+DEFINE_BINARY_OPERATOR(>>, op_kind_t::_shr)
 
 DEFINE_BINARY_OPERATOR(==, op_kind_t::_eq)
 DEFINE_BINARY_OPERATOR(!=, op_kind_t::_ne)

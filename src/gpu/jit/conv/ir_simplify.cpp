@@ -363,7 +363,6 @@ public:
         auto e = ir_mutator_t::_mutate(obj);
         if (!is_binary_cmp_op(e)) return e;
 
-        e = reduce_lhs_rhs(e);
         e = simplify_mod_comparison(e);
 
         return e;
@@ -584,6 +583,8 @@ public:
     using nary_op_mutator_t::_mutate;
 
     object_t _mutate(const binary_op_t *obj) override {
+        // Skip vector types.
+        if (!obj->type.is_scalar()) return nary_op_mutator_t::_mutate(obj);
         switch (obj->op_kind) {
             case op_kind_t::_add:
             case op_kind_t::_sub:
@@ -659,6 +660,11 @@ public:
     bool is_canonical() const { return is_canonical_; }
 
     void _visit(const binary_op_t *obj) override {
+        // Skip vector types.
+        if (!obj->type.is_scalar()) {
+            visit_new_scope(obj);
+            return;
+        }
         switch (obj->op_kind) {
             // These operations must be converted to nary_op_t at this point.
             case op_kind_t::_add:
@@ -1423,6 +1429,33 @@ bool is_const_or_shuffle_const(const expr_t &e) {
     return is_const(e) || is_shuffle_const(e);
 }
 
+expr_t const_fold_unary(op_kind_t op_kind, const expr_t &a) {
+    ir_assert(op_kind == op_kind_t::_minus);
+    if (!a.type().is_scalar()) {
+        int elems = a.type().elems();
+        std::vector<expr_t> ret;
+        for (int i = 0; i < elems; i++) {
+            ret.push_back(const_fold_unary(op_kind, a[i]));
+        }
+        return shuffle_t::make(ret);
+    }
+
+#define CASE(ir_type, cpp_type) \
+    if (a.type() == type_t::ir_type()) return to_expr(-to_cpp<cpp_type>(a))
+
+    CASE(f32, float);
+    CASE(s16, int16_t);
+    CASE(s32, int32_t);
+    CASE(s64, int64_t);
+
+    if (a.type().is_bool()) return to_expr(!to_cpp<bool>(a));
+
+#undef CASE
+
+    ir_error_not_expected() << "Cannot handle type: " << a;
+    return expr_t();
+}
+
 expr_t const_fold_binary(const type_t &compute_type, op_kind_t op_kind,
         const expr_t &a, const expr_t &b) {
     if (!compute_type.is_scalar()) {
@@ -1525,25 +1558,74 @@ expr_t simplify_cmp_move_const_to_rhs(const expr_t &e) {
     return binary_op_t::make(op_kind, lhs, rhs);
 }
 
+expr_t simplify_cmp_reduce_lhs_rhs(const expr_t &e) {
+    if (!is_binary_cmp_op(e)) return e;
+
+    auto &op = e.as<binary_op_t>();
+
+    // Rule:
+    //     (c0 * x op c1) or (x * c0 op c1) ->
+    //     x new_op (c1 / c0) if abs(c1) % abs(c0) == 0
+    //     new_op == op or new_op == negate_cmp_op(op)
+    expr_t c0;
+    expr_t c1 = op.b;
+    expr_t x;
+
+    if (!is_const(c1)) return e;
+    if (!is_binary_op(op.a, op_kind_t::_mul)) return e;
+
+    auto &a_op = op.a.as<binary_op_t>();
+    if (is_const(a_op.a)) {
+        c0 = a_op.a;
+        x = a_op.b;
+    } else if (is_const(a_op.b)) {
+        x = a_op.a;
+        c0 = a_op.b;
+    }
+
+    if (c0.is_empty()) return e;
+    if (!c0.type().is_int()) return e;
+    if (!c1.type().is_int()) return e;
+
+    auto i_c0 = to_cpp<int64_t>(c0);
+    auto i_c1 = to_cpp<int64_t>(c1);
+
+    bool is_c0_neg = (i_c0 < 0);
+    bool sign = ((i_c0 < 0) != (i_c1 < 0));
+    i_c0 = std::abs(i_c0);
+    i_c1 = std::abs(i_c1);
+
+    bool has_mod = (i_c1 % i_c0 != 0);
+    if (has_mod && utils::one_of(op.op_kind, op_kind_t::_eq, op_kind_t::_ne))
+        return e;
+
+    auto new_op_kind = (is_c0_neg ? negate_cmp_op(op.op_kind) : op.op_kind);
+    int64_t div = i_c1 / i_c0;
+    if (has_mod) {
+        switch (new_op_kind) {
+            case op_kind_t::_ge:
+            case op_kind_t::_gt:
+                new_op_kind = op_kind_t::_ge;
+                div = (sign ? div : div + 1);
+                break;
+            case op_kind_t::_le:
+            case op_kind_t::_lt:
+                new_op_kind = op_kind_t::_le;
+                div = (sign ? div + 1 : div);
+                break;
+            default: ir_error_not_expected();
+        }
+    }
+
+    return binary_op_t::make(new_op_kind, x, (sign ? -1 : 1) * div);
+}
+
 expr_t const_fold_non_recursive(const expr_t &e) {
     auto *unary_op = e.as_ptr<unary_op_t>();
     if (unary_op) {
         auto &a = unary_op->a;
-        if (!is_const(a)) return e;
-        ir_assert(unary_op->op_kind == op_kind_t::_minus) << e;
-
-#define CASE(ir_type, cpp_type) \
-    if (e.type() == type_t::ir_type()) return to_expr(-to_cpp<cpp_type>(a))
-
-        CASE(f32, float);
-        CASE(s16, int16_t);
-        CASE(s32, int32_t);
-        CASE(s64, int64_t);
-
-#undef CASE
-
-        ir_error_not_expected() << "Cannot handle type: " << e;
-        return expr_t();
+        if (!is_const_or_shuffle_const(a)) return e;
+        return const_fold_unary(unary_op->op_kind, a);
     }
 
     auto *binary_op = e.as_ptr<binary_op_t>();
