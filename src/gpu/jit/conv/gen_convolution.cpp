@@ -36,7 +36,8 @@ public:
         auto *compute_engine
                 = utils::downcast<compute::compute_engine_t *>(engine);
 
-        if (!compute_engine->is_gen12hp()) return status::unimplemented;
+        if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+            return status::unimplemented;
         if (!compute_engine->mayiuse_ngen_kernels())
             return status::unimplemented;
         if (!pd->set_default_alg_kind(alg_kind::convolution_direct))
@@ -58,8 +59,24 @@ public:
         ir_trace() << "Configuration:" << std::endl;
         ir_trace() << cfg(primitive);
 
-        conv_kernel_t<ngen::HW::Gen12HP> ngen_kernel(cfg(primitive));
-        CHECK(primitive->create_kernel(engine, &kernel_, ngen_kernel));
+        using namespace compute;
+
+        auto compute_engine = utils::downcast<compute_engine_t *>(engine);
+        auto device_info = compute_engine->device_info();
+
+        std::unique_ptr<jit::jit_generator_base> jit_gen_convolution;
+        switch (device_info->gpu_arch()) {
+            case gpu_arch_t::gen12hp:
+                jit_gen_convolution.reset(
+                        new conv_kernel_t<gpu_gen12hp>(cfg(primitive)));
+                break;
+            case gpu_arch_t::gen12p7:
+                jit_gen_convolution.reset(
+                        new conv_kernel_t<gpu_gen12p7>(cfg(primitive)));
+                break;
+            default: return status::unimplemented;
+        }
+        CHECK(primitive->create_kernel(engine, &kernel_, *jit_gen_convolution));
 
         return status::success;
     }

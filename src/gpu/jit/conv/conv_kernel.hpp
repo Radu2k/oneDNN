@@ -27,6 +27,8 @@
 #include "gpu/jit/ngen/ngen_core.hpp"
 #include "gpu/jit/ngen/ngen_register_allocator.hpp"
 
+#include "gpu/jit/gemm/emulation.hpp"
+
 namespace dnnl {
 namespace impl {
 namespace gpu {
@@ -456,16 +458,16 @@ public:
             const ngen_operand_t &src0) {
         if (dst.is_reg_data()) {
             if (src0.is_reg_data()) {
-                mov(mod, dst.reg_data(), src0.reg_data());
+                emov(mod, dst.reg_data(), src0.reg_data());
             } else {
-                mov(mod, dst.reg_data(), src0.immediate());
+                emov(mod, dst.reg_data(), src0.immediate());
             }
         } else {
             // dst is a flag register.
             if (src0.is_reg_data()) {
-                mov(mod, dst.flag_register(), src0.reg_data());
+                emov(mod, dst.flag_register(), src0.reg_data());
             } else {
-                mov(mod, dst.flag_register(), src0.immediate());
+                emov(mod, dst.flag_register(), src0.immediate());
             }
         }
     }
@@ -473,25 +475,25 @@ public:
     void eadd(const ngen::InstructionModifier &mod, const ngen_operand_t &dst,
             const ngen_operand_t &src0, const ngen_operand_t &src1) {
         if (src1.is_reg_data()) {
-            add(mod, dst.reg_data(), src0.reg_data(), src1.reg_data());
+            eadd(mod, dst.reg_data(), src0.reg_data(), src1.reg_data());
         } else {
-            add(mod, dst.reg_data(), src0.reg_data(), src1.immediate());
+            eadd(mod, dst.reg_data(), src0.reg_data(), src1.immediate());
         }
     }
 
     void emul(const ngen::InstructionModifier &mod, const ngen_operand_t &dst,
             const ngen_operand_t &src0, const ngen_operand_t &src1) {
         if (src1.is_reg_data()) {
-            mul(mod, dst.reg_data(), src0.reg_data(), src1.reg_data());
+            emul(mod, dst.reg_data(), src0.reg_data(), src1.reg_data());
         } else {
             auto &src1_imm = src1.immediate();
             if (ngen_is_qw(dst.type()) || ngen_is_w(src1_imm.getType())) {
-                mul(mod, dst.reg_data(), src0.reg_data(), src1.immediate());
+                emul(mod, dst.reg_data(), src0.reg_data(), src1.immediate());
                 return;
             }
             auto tmp = ra_.alloc_sub<int64_t>();
-            mul(1, tmp.q(0), src0.reg_data(), src1_imm);
-            mov(1, dst.reg_data(), tmp.reinterpret(0, dst.type()));
+            emul(1, tmp.q(0), src0.reg_data(), src1_imm);
+            emov(1, dst.reg_data(), tmp.reinterpret(0, dst.type()));
             ra_.safeRelease(tmp);
         }
     }
@@ -584,11 +586,62 @@ public:
         ra_.safeRelease(_qot);
     }
 
+    friend struct dnnl::impl::gpu::jit::EmulationImplementation;
+    template <typename DT = void>
+    void emov(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::RegData src0) {
+        EmulationImplementation::emov<DT>(*this, mod, dst, src0, emu_strategy);
+    }
+    template <typename DT = void>
+    void emov(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::Immediate src0) {
+        EmulationImplementation::emov<DT>(*this, mod, dst, src0, emu_strategy);
+    }
+    template <typename DT = void>
+    void eadd(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, const ngen::RegData &src1) {
+        EmulationImplementation::eadd<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void eadd(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, ngen::Immediate src1) {
+        EmulationImplementation::eadd<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, const ngen::RegData &src1) {
+        EmulationImplementation::emul<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst,
+            const ngen::RegData &src0, ngen::Immediate src1) {
+        EmulationImplementation::emul<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void eshl(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::RegData src0, uint16_t src1) {
+        EmulationImplementation::eshl<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+    template <typename DT = void>
+    void eshr(const ngen::InstructionModifier &mod, ngen::RegData dst,
+            ngen::RegData src0, uint16_t src1) {
+        EmulationImplementation::eshr<DT>(
+                *this, mod, dst, src0, src1, emu_strategy, emu_state);
+    }
+
 private:
     const conv_config_t &cfg_;
     ngen::RegisterAllocator ra_;
     ngen::GRF signal_header_;
     std::vector<std::string> global_ptr_names_;
+
+    EmulationStrategy emu_strategy = EmulationStrategy(hw);
+    EmulationState emu_state;
 };
 
 // Evaluates expression by emitting instructions with nGEN.
@@ -1161,6 +1214,11 @@ conv_kernel_t<hw>::conv_kernel_t(const conv_config_t &cfg)
 
     for (auto &name : global_ptr_names_)
         ra_.claim(getArgument(name));
+
+    if (emu_strategy.emulate64) {
+        emu_state.temp[0] = ra_.alloc();
+        emu_state.temp[1] = ra_.alloc();
+    }
 
     // Enable IEEE f32 -> s32 rounding and f32/f16 denormals.
     or_(1, cr0, cr0, uint16_t(0x1480));
