@@ -361,18 +361,21 @@ public:
 
     void set_offset(const expr_t &offset) { offset_ = offset; }
 
-    bool is_strictly_equal(const layout_t &other) const {
+    bool is_strictly_equal(
+            const layout_t &other, bool compare_offset = true) const {
         if (!type_.is_equal(other.type_)) return false;
-        if (!offset_.is_equal(other.offset_)) return false;
+        if (compare_offset && !offset_.is_equal(other.offset_)) return false;
         if (!ir_utils::is_equal(blocks_, other.blocks_)) return false;
         return true;
     }
 
-    bool operator==(const layout_t &other) const {
-        return normalize().is_strictly_equal(other.normalize());
-    }
+    bool operator==(const layout_t &other) const { return is_equal(other); }
 
     bool operator!=(const layout_t &other) const { return !operator==(other); }
+
+    bool is_equal(const layout_t &other, bool compare_offset = true) const {
+        return normalize().is_strictly_equal(other.normalize(), compare_offset);
+    }
 
     template <typename T>
     T operator()(const std::vector<T> &args) const {
@@ -508,6 +511,12 @@ public:
 
     layout_t reinterpret(const type_t &new_type) const;
 
+    layout_t retype(const type_t &new_type) const {
+        auto ret = *this;
+        ret.type_ = new_type;
+        return ret;
+    }
+
     // Returns a packed layout where all blocks are contiguous, without gaps.
     layout_t make_dense() const {
         dim_t stride = 1;
@@ -534,6 +543,9 @@ public:
     //     Output blocks: [4, 2, 2, 2]
     layout_t split_into_multi_blocks(
             const std::vector<dim_t> &multi_blocks) const;
+
+    layout_t split_into_multi_blocks_with_hint(
+            std::vector<dim_t> &multi_blocks) const;
 
     layout_t add_outer_block(
             int dim_idx, dim_t block, dim_t stride = -1) const {
@@ -618,6 +630,10 @@ private:
             const std::string &format, int ndims_hint);
 
     void sanity_check() const;
+
+    layout_t split_into_multi_blocks_impl(
+            const std::vector<dim_t> &multi_blocks,
+            std::vector<dim_t> *out_multi_blocks) const;
 
     // Data type of the layout.
     type_t type_;
@@ -719,7 +735,7 @@ private:
 };
 
 // Used to describe semantics of a dimension in the GEMM context.
-enum class mnk_kind_t { m, n, k };
+enum class mnk_kind_t { undef, m, n, k };
 
 class mnk_tensor_t {
 public:
@@ -849,8 +865,8 @@ private:
 };
 
 inline std::ostream &operator<<(
-        std::ostream &out, const mask_vector_t &mask_tensor) {
-    out << mask_tensor.str();
+        std::ostream &out, const mask_vector_t &mask_vector) {
+    out << mask_vector.str();
     return out;
 }
 
@@ -943,6 +959,20 @@ public:
         }
     }
 
+    view_t(const layout_t &tlayout, const std::vector<expr_t> &vvars,
+            uint32_t bound_check_mask = 0)
+        : view_t(vvars, tlayout.ndims()) {
+        vdirect_start_.resize(nvdims(), 0);
+        for (int i = 0; i < tlayout.ndims(); i++) {
+            expr_t i_mask;
+            if ((bound_check_mask & (1 << i)) != 0)
+                i_mask = (placeholder_var() < tlayout.dim(i));
+            set_vdim(vvars_[i], tlayout.dim(i), 0);
+            set_tdim(i, vvars_[i], i_mask);
+        }
+        set_tlayout(tlayout);
+    }
+
     bool is_direct() const { return is_direct_; }
 
     const std::vector<expr_t> &vvars() const { return vvars_; }
@@ -955,6 +985,8 @@ public:
     }
 
     const std::vector<mnk_kind_t> &vmnk_kinds() const { return vmnk_kinds_; }
+
+    const layout_t tlayout() const { return tlayout_; }
 
     int nvdims() const { return int(vdims_.size()); }
 
@@ -992,7 +1024,7 @@ public:
     }
 
     void set_vdim(const expr_t &varg, dim_t vdim, const expr_t &vstart,
-            mnk_kind_t vmnk_kind) {
+            mnk_kind_t vmnk_kind = mnk_kind_t::undef) {
         ir_assert(!is_direct_);
         int vidx = vvar_index(varg);
         ir_assert(vstart_[vidx].is_empty());
@@ -1037,14 +1069,21 @@ public:
         return true;
     }
 
+    bool has_tmask(int tidx) const {
+        ir_assert(tidx >= 0 && tidx < ntdims());
+        return !tdims_[tidx].mask().is_empty();
+    }
+
     const type_t &type() const { return tlayout_.type(); }
 
-    expr_t offset() const {
-        auto targs = cvt_vargs_to_targs();
+    expr_t offset(const std::vector<expr_t> &vargs = {}) const {
+        auto targs = cvt_vargs_to_targs(vargs);
         return tlayout_(targs);
     }
 
-    expr_t offset_in_bytes() const { return offset() * type().size(); }
+    expr_t offset_in_bytes(const std::vector<expr_t> &vargs = {}) const {
+        return offset(vargs) * type().size();
+    }
 
     tensor_t vtensor(bool force_zero_start = false) const {
         if (force_zero_start) return tensor_t(vdims());
@@ -1071,6 +1110,18 @@ public:
     view_t create_sub_view(
             const tensor_t &sub_tensor, bool relative_vstart = true) const;
 
+    view_t retype(const type_t &new_type) const {
+        auto ret = *this;
+        ret.tlayout_ = tlayout_.retype(new_type);
+        return ret;
+    }
+
+    view_t make_dense() const {
+        auto ret = *this;
+        ret.tlayout_ = tlayout_.make_dense();
+        return ret;
+    }
+
     // FIXME: Offset of the returned layout is always 0.
     layout_t create_pseudo_vlayout() const {
         if (is_direct_) return create_vlayout(/*force_zero_offset=*/true);
@@ -1088,8 +1139,12 @@ public:
         return tlayout_.map(tensor_t(vdims_, vdirect_start_));
     }
 
-    bool has_same_vlayout(const view_t &other) const {
-        return create_vlayout() == other.create_vlayout();
+    dim_t vlayout_size() const { return create_vlayout().size(); }
+
+    bool has_same_vlayout(
+            const view_t &other, bool compare_offset = true) const {
+        return create_vlayout().is_equal(
+                other.create_vlayout(), compare_offset);
     }
 
     view_t split(const grid_info_t &grid) const;
@@ -1099,20 +1154,25 @@ public:
             std::vector<block_t> *outer_blocks = nullptr) const;
 
     // Tile is assumed to be dense.
-    tensor_t split_into_dense_tile(dim_t tile_elems, dim_t outer_block) const {
+    tensor_t split_into_dense_tile(
+            dim_t &tile_elems, dim_t &outer_block) const {
         auto vlayout = create_pseudo_vlayout();
-        vlayout = vlayout.split_into_multi_blocks({tile_elems, outer_block});
+        std::vector<dim_t> blocks = {tile_elems, outer_block};
+        vlayout = vlayout.split_into_multi_blocks_with_hint(blocks);
         if (vlayout.is_empty()) return tensor_t();
+        tile_elems = blocks[0];
+        outer_block = blocks[1];
         return split_into_dense_tile(vlayout, tile_elems, outer_block);
     }
 
-    // TODO: Combine with split_into_dense_tile()?
     // Returns a tensor corresponding to the biggest innermost sub-layout so that
-    // 1) It consists of consecutive blocks only (not the same as dense).
+    // 1) It consists of consecutive blocks only.
     // 2) It contains less or equal than max_tile_elems elements.
-    tensor_t split_into_max_innermost_tile(dim_t max_tile_elems) const {
+    // 3) It is dense if is_dense_tile is true.
+    tensor_t split_into_max_tile(
+            dim_t max_tile_elems, bool is_dense_tile) const {
         auto vlayout = create_pseudo_vlayout();
-        return split_into_max_innermost_tile(vlayout, max_tile_elems);
+        return split_into_max_tile(vlayout, max_tile_elems, is_dense_tile);
     }
 
     template <typename F>
@@ -1168,8 +1228,8 @@ private:
     tensor_t split_into_dense_tile(
             const layout_t &vlayout, dim_t tile_elems, dim_t outer_block) const;
 
-    tensor_t split_into_max_innermost_tile(
-            const layout_t &vlayout, dim_t max_tile_elems) const;
+    tensor_t split_into_max_tile(const layout_t &vlayout, dim_t max_tile_elems,
+            bool is_dense_tile) const;
 
     void create_mask_vector(mask_vector_t &mask_vec, const layout_t &_vlayout,
             int vidx, std::vector<dim_t> &vargs) const;

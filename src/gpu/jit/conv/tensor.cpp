@@ -271,27 +271,12 @@ layout_t layout_t::split_block(
 
 layout_t layout_t::split_into_multi_blocks(
         const std::vector<dim_t> &multi_blocks) const {
-    if (is_empty()) return *this;
+    return split_into_multi_blocks_impl(multi_blocks, nullptr);
+}
 
-    layout_t tmp(*this);
-    std::vector<dim_t> rem_elems = multi_blocks;
-    for (auto &eb : tmp.enumerated_blocks()) {
-        auto &b = eb.second;
-        for (dim_t &e : rem_elems) {
-            if (e == 1) continue;
-            if (b.block > e) {
-                // Try to split this block.
-                if (b.block % e != 0) return layout_t();
-                return tmp.split_block(eb, e, b.block / e)
-                        .split_into_multi_blocks(multi_blocks);
-            }
-            if (e % b.block != 0) return layout_t();
-            e /= b.block;
-        }
-    }
-    for (dim_t e : rem_elems)
-        if (e != 1) return layout_t();
-    return tmp;
+layout_t layout_t::split_into_multi_blocks_with_hint(
+        std::vector<dim_t> &multi_blocks) const {
+    return split_into_multi_blocks_impl(multi_blocks, &multi_blocks);
 }
 
 void layout_t::align_layouts(layout_t &a, layout_t &b) {
@@ -388,6 +373,44 @@ void layout_t::sanity_check() const {
             ir_trace() << "Warning: overlapping blocks.";
         stride = b.block * b.stride;
     }
+}
+
+layout_t layout_t::split_into_multi_blocks_impl(
+        const std::vector<dim_t> &multi_blocks,
+        std::vector<dim_t> *out_multi_blocks) const {
+    if (is_empty()) return *this;
+
+    bool allow_smaller_blocks = bool(out_multi_blocks);
+    layout_t tmp(*this);
+    std::vector<dim_t> rem_elems = multi_blocks;
+    std::vector<dim_t> cur_elems(rem_elems.size(), 1);
+    for (auto &eb : tmp.enumerated_blocks()) {
+        auto &b = eb.second;
+        for (int i = 0; i < int(rem_elems.size()); i++) {
+            auto &e = rem_elems[i];
+            if (e == 1) continue;
+            if (b.block > e) {
+                // Try to split this block.
+                int next_block = utils::max_div(b.block, e);
+                return tmp.split_block(eb, next_block, b.block / next_block)
+                        .split_into_multi_blocks_impl(
+                                multi_blocks, out_multi_blocks);
+            }
+            if (e % b.block != 0) {
+                if (!allow_smaller_blocks) return layout_t();
+            }
+            e /= b.block;
+            cur_elems[i] *= b.block;
+            break;
+        }
+    }
+    for (int i = 0; i < int(cur_elems.size()); i++) {
+        if (cur_elems[i] != multi_blocks[i]) {
+            if (!allow_smaller_blocks) return layout_t();
+        }
+        if (out_multi_blocks) (*out_multi_blocks)[i] = cur_elems[i];
+    }
+    return tmp;
 }
 
 expr_t grid_splitter_t::pop_block(int size) {
@@ -675,7 +698,7 @@ tensor_t view_t::split_into_dense_tile(
     stride_t dense_stride = 1;
     dim_t cur_tile_elems = 1;
     dim_t cur_outer_block = 1;
-    bool in_tile = true;
+    bool in_tile = (tile_elems != 1);
     std::vector<dim_t> tile_dims(nvdims(), 1);
     for (auto &b : vlayout.blocks()) {
         if (b.block == 1) continue;
@@ -690,6 +713,7 @@ tensor_t view_t::split_into_dense_tile(
         } else {
             if (outer_block == 1) break;
             cur_outer_block *= b.block;
+            tile_dims[b.dim_idx] *= b.block;
             ir_assert(cur_outer_block <= outer_block);
             if (cur_outer_block == outer_block) break;
         }
@@ -699,13 +723,20 @@ tensor_t view_t::split_into_dense_tile(
     return tensor_t(tile_dims);
 }
 
-tensor_t view_t::split_into_max_innermost_tile(
-        const layout_t &vlayout, dim_t max_tile_elems) const {
+tensor_t view_t::split_into_max_tile(const layout_t &vlayout,
+        dim_t max_tile_elems, bool is_dense_tile) const {
+    stride_t dense_stride = 1;
     std::vector<dim_t> tile_dims(nvdims(), 1);
     dim_t cur_elems = 1;
     for (auto &eb : vlayout.enumerated_blocks()) {
         auto &b = eb.second;
+        if (b.block == 1) continue;
         if (b.block * cur_elems <= max_tile_elems) {
+            if (is_dense_tile) {
+                if (b.stride.is_unknown()) return tensor_t();
+                if (dense_stride != b.stride) return tensor_t();
+                dense_stride = b.block * b.stride;
+            }
             cur_elems *= b.block;
             tile_dims[b.dim_idx] *= b.block;
             continue;
@@ -714,7 +745,7 @@ tensor_t view_t::split_into_max_innermost_tile(
         if (max_block == 1) break;
         auto tmp_layout
                 = vlayout.split_block(eb, max_block, b.block / max_block);
-        return split_into_max_innermost_tile(tmp_layout, max_tile_elems);
+        return split_into_max_tile(tmp_layout, max_tile_elems, is_dense_tile);
     }
     return tensor_t(tile_dims);
 }
