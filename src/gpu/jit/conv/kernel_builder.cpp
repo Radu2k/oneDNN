@@ -2430,24 +2430,8 @@ stmt_t inject_slm_buffering(
     return ret;
 }
 
-// Adds size one spatial dimensions according to input parameters. Spatial
-// dimensions are assumed to be the last dimensions.
-layout_t reshape_spatial(
-        const layout_t &layout, int old_sp_ndims, int new_sp_ndims) {
-    int old_ndims = layout.ndims();
-    int new_ndims = old_ndims - old_sp_ndims + new_sp_ndims;
-
-    dim_assignment_t to_3d(old_ndims, new_ndims);
-    for (int i = 0; i < old_ndims; i++) {
-        if (i < old_ndims - old_sp_ndims) {
-            // Non-spatial dimensions.
-            to_3d.assign(i, i);
-        } else {
-            // Spatial dimensions.
-            to_3d.assign(i, new_ndims - (old_ndims - i));
         }
     }
-    return to_3d.map(layout);
 }
 
 // Implements reorder between dense GRF buffers. Conversion between data types
@@ -3515,9 +3499,12 @@ void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
 
     // Reshape layouts to 3D spatial to unify code.
     int old_spatial_ndims = cfg_.ndims - 2;
-    auto src_layout = reshape_spatial(cfg_.src_layout, old_spatial_ndims, 3);
-    auto wei_layout = reshape_spatial(cfg_.wei_layout, old_spatial_ndims, 3);
-    auto dst_layout = reshape_spatial(cfg_.dst_layout, old_spatial_ndims, 3);
+    auto src_layout = normalize_spatial(
+            cfg_.src_layout, old_spatial_ndims, cfg_.reduced_to_1d);
+    auto wei_layout = normalize_spatial(
+            cfg_.wei_layout, old_spatial_ndims, cfg_.reduced_to_1d);
+    auto dst_layout = normalize_spatial(
+            cfg_.dst_layout, old_spatial_ndims, cfg_.reduced_to_1d);
 
     // Initialize thread group views.
     auto mb = var_t::make(type_t::s32(), "mb");

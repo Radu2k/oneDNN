@@ -838,7 +838,8 @@ layout_t dim_assignment_t::map(const layout_t &layout) const {
         new_b.dim_idx = new_idx;
         new_blocks.push_back(new_b);
     }
-    new_blocks = reshape_blocks(new_blocks, new_ndims());
+    new_blocks = layout_t::normalize_blocks(
+            new_ndims(), new_blocks, /*keep_size_1_blocks=*/true);
     auto ret
             = layout_t(layout.type(), new_ndims(), layout.offset(), new_blocks);
     ir_assert(layout.elems() == ret.elems())
@@ -846,45 +847,30 @@ layout_t dim_assignment_t::map(const layout_t &layout) const {
     return ret;
 }
 
-std::vector<block_t> dim_assignment_t::reshape_blocks(
-        const std::vector<block_t> &blocks, int new_ndims) {
-    auto new_blocks = blocks;
-    // Algorithm to insert dimension of size 1 with index I:
-    // 1. Find the outermost block B for dimension (I - 1)
-    // 2. Insert the new block of size 1 before block B
+layout_t normalize_spatial(
+        const layout_t &layout, int old_sp_ndims, bool reduced_to_1d) {
+    int old_ndims = layout.ndims();
+    int new_ndims = old_ndims - old_sp_ndims + 3;
 
-    // Start from 0 to ensure we always have (I - 1)-th dimension.
-    for (int dim_idx = 0; dim_idx < new_ndims; dim_idx++) {
-        bool found = false;
-        for (auto &b : new_blocks)
-            if (b.dim_idx == dim_idx) {
-                found = true;
-                break;
-            }
-        if (found) continue;
-
-        if (dim_idx == 0) {
-            dim_t max_stride = 0;
-            for (auto &b : new_blocks) {
-                max_stride = std::max(max_stride, dim_t(b.block * b.stride));
-            }
-            block_t new_b(dim_idx, 1, max_stride);
-            new_blocks.insert(new_blocks.end(), new_b);
-            continue;
-        }
-
-        for (int i = 0; i < int(new_blocks.size()); i++) {
-            auto &b = new_blocks[i];
-            if (layout_t::is_outermost({i, b}, new_blocks)
-                    && b.dim_idx == dim_idx - 1) {
-                // Insert new dimension before i (to make it more innermost).
-                block_t new_b(dim_idx, 1, b.stride);
-                new_blocks.insert(new_blocks.begin() + i, new_b);
-                break;
-            }
+    dim_assignment_t to_3d(old_ndims, new_ndims);
+    for (int i = 0; i < old_ndims; i++) {
+        if (i < old_ndims - old_sp_ndims) {
+            // Non-spatial dimensions.
+            to_3d.assign(i, i);
+        } else {
+            // Spatial dimensions.
+            int sp_idx = 3 - (old_ndims - i);
+            if (reduced_to_1d) sp_idx = 2;
+            to_3d.assign(i, new_ndims - (3 - sp_idx));
         }
     }
-    return new_blocks;
+    return to_3d.map(layout);
+}
+
+std::vector<dim_t> normalize_spatial(
+        const std::vector<dim_t> &dims, int old_sp_ndims, bool reduced_to_1d) {
+    layout_t dummy_layout(type_t::u8(), 0, dims);
+    return normalize_spatial(dummy_layout, old_sp_ndims, reduced_to_1d).dims();
 }
 
 } // namespace jit

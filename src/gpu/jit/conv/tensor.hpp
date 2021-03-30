@@ -476,33 +476,15 @@ public:
         return false;
     }
 
-    // Removes size one blocks and merges consecutive dense blocks representing
-    // the same dimension.
-    layout_t normalize() const {
-        auto blocks = blocks_;
-        // Remove blocks of size 1.
-        for (auto it = blocks.begin(); it != blocks.end();) {
-            if (it->block == 1) {
-                it = blocks.erase(it);
-            } else {
-                ++it;
-            }
-        }
-        // Merge same dimension blocks.
-        block_t prev_b;
-        prev_b.dim_idx = -1;
-        for (auto it = blocks.begin(); it != blocks.end();) {
-            if (it->dim_idx == prev_b.dim_idx
-                    && it->stride == (prev_b.stride * prev_b.block)) {
-                auto &b = *(it - 1);
-                b.block *= it->block;
-                prev_b = b;
-                it = blocks.erase(it);
-            } else {
-                prev_b = *it;
-                ++it;
-            }
-        }
+    // Returns a canonical representation of the layout:
+    // - Consecutive dense blocks are merged
+    // - Size one blocks are:
+    //   - Removed (if keep_size_1_blocks is false)
+    //   - Reordered according to the heuristic (if keep_size_1_blocks is true)
+    // Optionally removes size one blocks and merges consecutive dense blocks
+    // representing the same dimension.
+    layout_t normalize(bool keep_size_1_blocks = false) const {
+        auto blocks = normalize_blocks(ndims(), blocks_, keep_size_1_blocks);
         return layout_t(type(), ndims(), offset(), blocks);
     }
 
@@ -580,6 +562,55 @@ public:
 
     // Assume that layouts are normalized.
     static void align_layouts(layout_t &a, layout_t &b);
+
+    static std::vector<block_t> normalize_blocks(int ndims,
+            const std::vector<block_t> &blocks,
+            bool keep_size_1_blocks = false) {
+        auto new_blocks = blocks;
+
+        // Remove blocks of size 1.
+        for (auto it = new_blocks.begin(); it != new_blocks.end();) {
+            if (it->block == 1) {
+                it = new_blocks.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        // Merge same dimension blocks.
+        block_t prev_b;
+        prev_b.dim_idx = -1;
+        for (auto it = new_blocks.begin(); it != new_blocks.end();) {
+            if (it->dim_idx == prev_b.dim_idx
+                    && it->stride == (prev_b.stride * prev_b.block)) {
+                auto &b = *(it - 1);
+                b.block *= it->block;
+                prev_b = b;
+                it = new_blocks.erase(it);
+            } else {
+                prev_b = *it;
+                ++it;
+            }
+        }
+        // No need to keep size one blocks, return.
+        if (!keep_size_1_blocks) return new_blocks;
+
+        bool seen[max_ndims] = {false};
+        for (auto &b : new_blocks)
+            seen[b.dim_idx] = true;
+
+        stride_t stride = (new_blocks.empty()
+                        ? stride_t(1)
+                        : new_blocks.back().stride * new_blocks.back().block);
+
+        // Insert size one blocks according to the following heuristic:
+        // TODO: Add documentation.
+        for (int i = ndims - 1; i >= 0; i--) {
+            if (seen[i]) continue;
+            new_blocks.emplace_back(i, 1, stride);
+        }
+
+        return new_blocks;
+    }
 
 private:
     // Returns vector of <dimension index, block size> pairs.
@@ -1235,15 +1266,20 @@ public:
     layout_t map(const layout_t &layout) const;
 
 private:
-    static std::vector<block_t> reshape_blocks(
-            const std::vector<block_t> &blocks, int new_ndims);
-
     int old_ndims_ = 0;
     int new_ndims_ = 0;
 
     // assignments_[old_idx] = new_idx.
     std::vector<int> assignments_;
 };
+
+// Adds size one spatial dimensions according to input parameters. Spatial
+// dimensions are assumed to be the last dimensions.
+layout_t normalize_spatial(
+        const layout_t &layout, int old_sp_ndims, bool reduced_to_1d);
+
+std::vector<dim_t> normalize_spatial(
+        const std::vector<dim_t> &dims, int old_sp_ndims, bool reduced_to_1d);
 
 } // namespace jit
 } // namespace gpu

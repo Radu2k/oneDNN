@@ -108,6 +108,7 @@ public:
             iw = id * ih * iw;
             od = id = kd = 1;
             oh = ih = kh = 1;
+            reduced_to_1d = true;
         }
     }
 
@@ -170,6 +171,7 @@ public:
     int sd, sh, sw; // Strides.
     int pd, ph, pw; // Padding in the beginning.
     int dd, dh, dw; // Dilation.
+    bool reduced_to_1d; // Whether the problem spatial was reduced to 1D.
 };
 
 // Parameters for kernel generation.
