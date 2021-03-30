@@ -55,8 +55,6 @@ public:
     sycl_cuda_engine_t(const cl::sycl::device &dev,
             const cl::sycl::context &ctx, size_t index);
 
-    ~sycl_cuda_engine_t();
-
     status_t create_stream(stream_t **stream, unsigned flags) override;
     status_t create_stream(stream_t **stream, cl::sycl::queue &queue);
 
@@ -92,8 +90,8 @@ public:
 
 #ifdef DNNL_USE_RT_OBJECTS_IN_PRIMITIVE_CACHE
 protected:
-    ~sycl_cuda_engine_t() override = default;
 #endif
+    ~sycl_cuda_engine_t() override;
 
 private:
     // This functions sets the context type. Since cuda requires different
