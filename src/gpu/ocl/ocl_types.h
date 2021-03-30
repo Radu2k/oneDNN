@@ -484,6 +484,10 @@
 #define SRC_MMAD_DATA_T int
 #define SRC_MMAD_DATA4_T int4
 #define SRC_MMAD_DATA8_T int8
+#elif SRC_DT_F16 || SRC_DT_BF16
+#define SRC_MMAD_DATA_T uint
+#define SRC_MMAD_DATA4_T uint4
+#define SRC_MMAD_DATA8_T uint8
 #endif
 
 #if defined(SRC_DT_U8) || defined(SRC_DT_S8)
