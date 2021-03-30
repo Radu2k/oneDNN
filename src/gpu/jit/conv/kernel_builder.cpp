@@ -2472,8 +2472,49 @@ stmt_t inject_slm_buffering(
     return ret;
 }
 
+class store_splitter_t : public ir_mutator_t {
+public:
+    object_t _mutate(const store_t *obj) override {
+        int elems = obj->value.type().elems();
+        int elem_size = obj->value.type().scalar().size();
+        int stride = (obj->has_default_stride() ? 1 : obj->stride / elem_size);
+        int store_size = elem_size * stride * elems;
+        if (store_size <= 2 * reg_bytes) return ir_mutator_t::_mutate(obj);
+
+        int step = 2 * reg_bytes / (stride * elem_size);
+        stmt_t new_stmt;
+        for (int i = 0; i < elems; i += step) {
+            int cur_elems = std::min(step, elems - i);
+            ir_assert(math::is_pow2(cur_elems));
+            int off = i * stride * elem_size;
+            auto store = store_t::make(obj->buf, obj->off + off,
+                    split_expr(obj->value, i, i + cur_elems), obj->stride);
+            new_stmt = new_stmt.append(store);
         }
+        return std::move(new_stmt);
     }
+
+private:
+    static expr_t split_expr(const expr_t &e, int beg, int end) {
+        auto *shuffle = e.as_ptr<shuffle_t>();
+        if (shuffle) return shuffle_t::make(shuffle, beg, end);
+
+        auto *binary = e.as_ptr<binary_op_t>();
+        if (binary) {
+            auto a = split_expr(binary->a, beg, end);
+            auto b = split_expr(binary->b, beg, end);
+            return binary_op_t::make(binary->op_kind, a, b);
+        }
+        ir_error_not_expected();
+        return expr_t();
+    }
+};
+
+// Splits wide GRF stores otherwise unsupported in HW.
+stmt_t split_wide_stores(const stmt_t &s) {
+    auto ret = store_splitter_t().mutate(s);
+    trace_pass("split_wide_stores", ret);
+    return ret;
 }
 
 // Implements reorder between dense GRF buffers. Conversion between data types
@@ -3557,6 +3598,7 @@ void kernel_builder_t::build() {
     stmt_ = lift_buffer_offsets_in_send(stmt_);
     stmt_ = simplify(stmt_, init_cset);
     stmt_ = inject_send(stmt_, ir_ctx, init_cset);
+    stmt_ = split_wide_stores(stmt_);
     stmt_ = lift_alloc(stmt_);
     stmt_ = eliminate_common_subexprs(stmt_, ir_ctx);
     stmt_ = hoist_exprs(stmt_, ir_ctx);
