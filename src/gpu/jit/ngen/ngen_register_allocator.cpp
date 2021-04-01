@@ -224,6 +224,7 @@ void RegisterAllocator::setRegisterCount(int rcount)
 
 void RegisterAllocator::release(GRF reg)
 {
+    if (reg.isInvalid()) return;
     int r = reg.getBase();
 
     free_sub[r] = fullSubMask;
@@ -232,12 +233,14 @@ void RegisterAllocator::release(GRF reg)
 
 void RegisterAllocator::release(GRFRange range)
 {
+    if (range.isInvalid()) return;
     for (int i = 0; i < range.getLen(); i++)
         release(range[i]);
 }
 
 void RegisterAllocator::release(Subregister subreg)
 {
+    if (subreg.isInvalid()) return;
     int r = subreg.getBase();
     int dw = subreg.getDwords();
     int o = (subreg.getByteOffset()) >> 2;
@@ -249,6 +252,7 @@ void RegisterAllocator::release(Subregister subreg)
 
 void RegisterAllocator::release(FlagRegister flag)
 {
+    if (flag.isInvalid()) return;
     free_flag |= (1 << flag.index());
 }
 

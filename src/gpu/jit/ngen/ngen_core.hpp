@@ -1224,6 +1224,8 @@ public:
     }
 
     operator GRF() const { return (*this)[0]; }
+
+    void fixup(int execSize, DataType defaultType, bool isDest, int arity) {}
 };
 
 static inline GRFRange operator-(const GRF &reg1, const GRF &reg2)
@@ -1436,6 +1438,7 @@ enum class Opcode {
     bfi1_gen12 = 0x79,
     bfi2_gen12 = 0x7A,
     nop = 0x7E,
+    wrdep = 0x7F,   /* not a valid opcode; used internally by nGEN */
 };
 
 static inline bool isVariableLatency(HW hw, Opcode op)

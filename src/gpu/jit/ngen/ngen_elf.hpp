@@ -37,16 +37,21 @@ protected:
 
     void externalName(const std::string &name)                           { interface_.externalName(name); }
     const std::string &getExternalName() const                           { return interface_.getExternalName(); }
+    int getSIMD() const                                                  { return interface_.getSIMD(); }
 
+    void require32BitBuffers()                                           { interface_.require32BitBuffers(); }
     void requireBarrier()                                                { interface_.requireBarrier(); }
     void requireDPAS()                                                   { interface_.requireDPAS(); }
+    void requireGlobalAtomics()                                          { interface_.requireGlobalAtomics(); }
     void requireGRF(int grfs)                                            { interface_.requireGRF(grfs); }
     void requireLocalID(int dimensions)                                  { interface_.requireLocalID(dimensions); }
     void requireLocalSize()                                              { interface_.requireLocalSize(); }
     void requireNonuniformWGs()                                          { interface_.requireNonuniformWGs(); }
+    void requireNoPreemption()                                           { interface_.requireNoPreemption(); }
     void requireScratch(size_t bytes = 1)                                { interface_.requireScratch(bytes); }
     void requireSIMD(int simd_)                                          { interface_.requireSIMD(simd_); }
     void requireSLM(size_t bytes)                                        { interface_.requireSLM(bytes); }
+    void requireStatelessWrites(bool req = true)                         { interface_.requireStatelessWrites(req); }
     inline void requireType(DataType type)                               { interface_.requireType(type); }
     template <typename T> void requireType()                             { interface_.requireType<T>(); }
 
@@ -201,14 +206,20 @@ private:
 
 #define NGEN_FORWARD_ELF(hw) NGEN_FORWARD(hw) \
 template <typename... Targs> void externalName(Targs&&... args) { ngen::ELFCodeGenerator<hw>::externalName(std::forward<Targs>(args)...); } \
+const std::string &getExternalName() const { return ngen::ELFCodeGenerator<hw>::getExternalName(); } \
+int getSIMD() const { return ngen::ELFCodeGenerator<hw>::getSIMD(); } \
+template <typename... Targs> void require32BitBuffers(Targs&&... args) { ngen::ELFCodeGenerator<hw>::require32BitBuffers(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireBarrier(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireBarrier(std::forward<Targs>(args)...); } \
+template <typename... Targs> void requireGlobalAtomics(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireGlobalAtomics(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireGRF(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireGRF(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireLocalID(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireLocalID(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireLocalSize(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireLocalSize(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireNonuniformWGs(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireNonuniformWGs(std::forward<Targs>(args)...); } \
+template <typename... Targs> void requireNoPreemption(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireNoPreemption(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireScratch(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireScratch(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireSIMD(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireSIMD(std::forward<Targs>(args)...); } \
 template <typename... Targs> void requireSLM(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireSLM(std::forward<Targs>(args)...); } \
+template <typename... Targs> void requireStatelessWrites(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireStatelessWrites(std::forward<Targs>(args)...); } \
 void requireType(ngen::DataType type) { ngen::ELFCodeGenerator<hw>::requireType(type); } \
 template <typename DT = void> void requireType() { ngen::BinaryCodeGenerator<hw>::template requireType<DT>(); } \
 template <typename... Targs> void finalizeInterface(Targs&&... args) { ngen::ELFCodeGenerator<hw>::finalizeInterface(std::forward<Targs>(args)...); } \

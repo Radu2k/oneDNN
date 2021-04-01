@@ -125,7 +125,7 @@ public:
     void release(FlagRegister flag);
 
     template <typename RD>
-    void safeRelease(RD &reg) { if (!reg.isInvalid()) release(reg); reg.invalidate(); }
+    void safeRelease(RD &reg) { release(reg); reg.invalidate(); }
 
     // Claim specific registers.
     void claim(GRF reg);

@@ -157,13 +157,15 @@ struct AsmOperand {
         ExtendedReg ereg;
         Immediate imm;
         Label label;
+        GRFRange range;
     };
     enum class Type : uint8_t {
         none = 0,
         reg = 1,
         ereg = 2,
         imm = 3,
-        label = 4
+        label = 4,
+        range = 5
     } type;
 
     AsmOperand()                  : type{Type::none} {}
@@ -172,6 +174,7 @@ struct AsmOperand {
     AsmOperand(ExtendedReg ereg_) : ereg{ereg_}, type{Type::ereg} {}
     AsmOperand(Immediate imm_)    : imm{imm_}, type{Type::imm} {}
     AsmOperand(Label label_)      : label{label_}, type{Type::label} {}
+    AsmOperand(GRFRange range_)   : range{range_}, type{Type::range} {}
     AsmOperand(uint32_t imm_)     : imm{imm_}, type{Type::imm} {}
 
     void outputText(std::ostream &str, PrintDetail detail, LabelManager &man) const {
@@ -185,6 +188,7 @@ struct AsmOperand {
                 clone.outputText(str, detail, man);
                 break;
             }
+            case Type::range:   break;  /* not used for output */
         }
     }
 };
@@ -315,8 +319,9 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
     auto hw = region.hw;
 
     switch (operand.type) {
-        case AsmOperand::Type::reg:  rd = operand.reg; break;
-        case AsmOperand::Type::ereg: rd = operand.ereg.getBase(); break;
+        case AsmOperand::Type::reg:    rd = operand.reg; break;
+        case AsmOperand::Type::ereg:   rd = operand.ereg.getBase(); break;
+        case AsmOperand::Type::range:  region = DependencyRegion(hw, operand.range); return true;
         default: return false;
     }
 
@@ -1612,6 +1617,13 @@ public:
     Store store;
     Atomic atomic;
 
+    void wrdep(const GRFRange &r) {
+        opX(Opcode::wrdep, DataType::ud, InstructionModifier::createAutoSWSB(), null, r);
+    }
+    void wrdep(const GRF &r) {
+        wrdep(r-r);
+    }
+
     inline void mark(Label &label)          { streamStack.back()->mark(label, labelManager); }
 
 #include "ngen_pseudo.hpp"
@@ -1670,7 +1682,7 @@ void AsmCodeGenerator::getCode(std::ostream &out)
             out << ':' << std::endl;
         } else if (i.isComment()) {
             out << "// " << i.comment << std::endl;
-        } else {
+        } else if (i.op != Opcode::wrdep) {
             while ((nextSync != syncs.end()) && (nextSync->second->inum == i.inum))
                 outX(out, *(nextSync++)->second, lineNo++);
             outX(out, i, lineNo++);

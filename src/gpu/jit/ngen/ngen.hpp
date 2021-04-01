@@ -1200,6 +1200,20 @@ private:
         void bar(const InstructionModifier &mod = InstructionModifier()) {
             this->operator()(SyncFunction::bar, mod);
         }
+#if NGEN_GEN12P8
+        void bar(const InstructionModifier &mod, uint32_t src0) {
+            this->operator()(SyncFunction::bar, mod, src0);
+        }
+        void bar(const InstructionModifier &mod, const RegData &src0) {
+            this->operator()(SyncFunction::bar, mod, src0);
+        }
+        void bar(uint32_t src0) {
+            this->operator()(SyncFunction::bar, InstructionModifier(), src0);
+        }
+        void bar(const RegData &src0) {
+            this->operator()(SyncFunction::bar, InstructionModifier(), src0);
+        }
+#endif
         void host(const InstructionModifier &mod = InstructionModifier()) {
             this->operator()(SyncFunction::host, mod);
         }
@@ -1415,6 +1429,13 @@ public:
     Store store;
     Atomic_ atomic;
 
+    void wrdep(const GRFRange &r) {
+        opX(Opcode::wrdep, DataType::ud, InstructionModifier::createAutoSWSB(), null, r[0], r[r.getLen() - 1]);
+    }
+    void wrdep(const GRF &r) {
+        wrdep(r-r);
+    }
+
 #include "ngen_pseudo.hpp"
 };
 
@@ -1493,6 +1514,7 @@ template <typename... Targs> void sendsc(Targs&&... args) { ngen::BinaryCodeGene
 using ngen::BinaryCodeGenerator<hw>::sync; \
 template <typename... Targs> void wait(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::wait(std::forward<Targs>(args)...); } \
 template <typename... Targs> void while_(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::while_(std::forward<Targs>(args)...); } \
+template <typename... Targs> void wrdep(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::wrdep(std::forward<Targs>(args)...); } \
 template <typename DT = void, typename... Targs> void min_(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::template min_<DT>(std::forward<Targs>(args)...); } \
 template <typename DT = void, typename... Targs> void max_(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::template max_<DT>(std::forward<Targs>(args)...); } \
 template <typename DT = void, typename... Targs> void bfi(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::template bfi<DT>(std::forward<Targs>(args)...); } \
@@ -1778,11 +1800,15 @@ std::vector<uint8_t> BinaryCodeGenerator<hw>::getCode()
         auto *pdst = reinterpret_cast<Instruction12 *>(result.data());
         auto nextSync = syncs.begin();
 
-        for (uint32_t isrc = 0; isrc < program.size(); isrc++) {
+        for (uint32_t isrc = 0; isrc < program.size(); isrc++, psrc++) {
+            if (psrc->opcode() == Opcode::wrdep)
+                continue;
             while ((nextSync != syncs.end()) && (nextSync->second->inum == isrc))
                 *pdst++ = encodeSyncInsertion<hw>(*(nextSync++)->second);
-            *pdst++ = *psrc++;
+            *pdst++ = *psrc;
         }
+
+        result.resize(reinterpret_cast<uint8_t *>(pdst) - result.data());
     }
 
     return result;

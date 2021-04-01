@@ -826,6 +826,13 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
         case Opcode::nop_gen12:
         case Opcode::illegal:
             return false;
+        case Opcode::wrdep:
+            if (opNum != 0) return false;
+            BinaryOperand12 o0, o1;
+            o0.bits = binary.src0;
+            o1.bits = binary.src1;
+            region = DependencyRegion(hw, GRF(o0.direct.regNum)-GRF(o1.direct.regNum));
+            return true;
         case Opcode::dpas:
         case Opcode::dpasw: {
             unsigned sdepth = 1 << dpas.sdepth;
@@ -1017,12 +1024,12 @@ unsigned Instruction12::srcTypecode(int opNum) const
                 case 2: return ternary.src2Type | (ternary.execType << 3);
                 default: return 0;
             }
-        default: { // unary/binary
+        default: // unary/binary
             switch (opNum) {
                 case 0: return binary.src0Type;
                 case 1: return binary.src1Type;
+                default: return 0;
             }
-        }
     }
 
     return 0;

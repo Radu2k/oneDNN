@@ -74,11 +74,12 @@ public:
     void require32BitBuffers()                           { allow64BitBuffers = false; }
     void requireBarrier()                                { barrierCount = 1; }
     void requireDPAS()                                   { needDPAS = true; }
+    void requireGlobalAtomics()                          { needGlobalAtomics = true; }
     void requireGRF(int grfs)                            { needGRF = grfs; }
-    void requireNonuniformWGs()                          { needNonuniformWGs = true; }
-    void requireNoPreemption()                           { needNoPreemption = true; }
     void requireLocalID(int dimensions)                  { needLocalID = dimensions; }
     void requireLocalSize()                              { needLocalSize = true; }
+    void requireNonuniformWGs()                          { needNonuniformWGs = true; }
+    void requireNoPreemption()                           { needNoPreemption = true; }
     void requireScratch(size_t bytes = 1)                { scratchSize = bytes; }
     void requireSIMD(int simd_)                          { simd = simd_; }
     void requireSLM(size_t bytes)                        { slmSize = bytes; }
@@ -123,6 +124,7 @@ protected:
     bool allow64BitBuffers = 0;
     int barrierCount = 0;
     bool needDPAS = false;
+    bool needGlobalAtomics = false;
     int32_t needGRF = 128;
     int needLocalID = 0;
     bool needLocalSize = false;
@@ -279,6 +281,7 @@ void InterfaceHandler::generateDummyCL(std::ostream &stream) const
     if (needLocalSize)      stream << "    (void) ____[get_enqueued_local_size(0)];\n";
     if (barrierCount > 0)   stream << "    barrier(CLK_GLOBAL_MEM_FENCE);\n";
     if (needDPAS)           stream << dpasDummy;
+    if (needGlobalAtomics)  stream << "    atomic_inc(____);\n";
     if (scratchSize > 0)    stream << "    volatile char scratch[" << scratchSize << "] = {0};\n";
     if (slmSize > 0)        stream << "    volatile local char slm[" << slmSize << "]; slm[0]++;\n";
     if (needNoPreemption) {
@@ -445,6 +448,8 @@ std::string InterfaceHandler::generateZeInfo() const
         md << "      has_4gb_buffers : true\n";
     if (needDPAS)
         md << "      has_dpas : true\n";
+    if (needGlobalAtomics)
+        md << "      has_global_atomics : true\n";
     if (slmSize > 0)
         md << "      slm_size : " << slmSize << '\n';
     if (!needStatelessWrites)
