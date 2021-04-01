@@ -15,11 +15,10 @@
 *******************************************************************************/
 
 #include "gpu/gpu_impl_list.hpp"
-
 #include "gpu/jit/binary_format.hpp"
 #include "gpu/jit/conv/gen_convolution.hpp"
-#include "gpu/jit/gemm/gen12hp_systolic_gemm.hpp"
 #include "gpu/jit/gemm/gen_gemm.hpp"
+#include "gpu/jit/gemm/xe_hp_systolic_gemm.hpp"
 #include "gpu/ocl/convolution_inner_product.hpp"
 #include "gpu/ocl/gemm/gemm_with_post_ops.hpp"
 #include "gpu/ocl/gemm/gen9_gemm.hpp"
@@ -29,6 +28,7 @@
 #include "gpu/ocl/gemm_inner_product.hpp"
 #include "gpu/ocl/gemm_matmul.hpp"
 #include "gpu/ocl/gemm_post_ops_inner_product.hpp"
+#include "oneapi/dnnl/dnnl_config.h"
 #if DNNL_WITH_XE_HP
 #include "gpu/jit/gemm/xe_hp_systolic_gemm.hpp"
 #include "gpu/jit/xe_hp_convolution.hpp"

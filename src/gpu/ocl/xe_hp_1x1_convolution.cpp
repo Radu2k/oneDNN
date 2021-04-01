@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #include "gpu/ocl/xe_hp_1x1_convolution.hpp"
 
 #include "gpu/ocl/ocl_stream.hpp"
@@ -284,5 +283,3 @@ status_t xe_hp_1x1_convolution_fwd_t::execute_forward(
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
-
-#endif

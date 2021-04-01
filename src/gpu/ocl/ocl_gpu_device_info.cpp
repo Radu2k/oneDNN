@@ -63,12 +63,12 @@ status_t ocl_gpu_device_info_t::init_arch(engine_t *engine) {
         err = clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, param_size,
                 &extension_string[0], &param_size);
         OCL_CHECK(err);
-    }
-#endif
 #if DNNL_WITH_XE_HPG
-    if (extension_string.find(ext2cl_str(compute::device_ext_t::khr_fp64))
-            == std::string::npos)
-        gpu_arch_ = compute::gpu_arch_t::xe_hpg;
+        if (extension_string.find(ext2cl_str(compute::device_ext_t::khr_fp64))
+                == std::string::npos)
+            gpu_arch_ = compute::gpu_arch_t::xe_hpg;
+#endif
+    }
 #endif
     return status::success;
 }
@@ -176,6 +176,8 @@ std::string ocl_gpu_device_info_t::get_cl_ext_options() const {
                     device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate,
                     device_ext_t::intel_global_float_atomics,
+#endif
+#if DNNL_WITH_XE_HPG
                     device_ext_t::future_bf16_cvt,
 #endif
                     device_ext_t::intel_dot_accumulate))

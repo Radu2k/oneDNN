@@ -153,8 +153,7 @@ static inline constexpr int elementsPerGRF(HW hw, DataType dt) {
 
 static inline bool hasNativeAtomicAdd(
         HW hw, Type T, const MatrixAddressing &atype) {
-    if (T.isInteger())
-        return true;
+    if (T.isInteger()) return true;
 #if DNNL_WITH_XE_HP
     else if (T == Type::f32)
         return (atype.base.getModel() == ModelA64) && (hw >= HW::Xe_HP);
@@ -2637,9 +2636,9 @@ void gemm_kernel_generator_t<hw>::loadLoadStoreDescriptors(bool load,
     Subregister t1 = state.ra.alloc_sub<uint32_t>();
     Subregister t2 = state.ra.alloc_sub<uint32_t>();
 
-#if DNNL_WITH_XE_HPG
     if (astrategy.newDP) switch (astrategy.accessType) {
             case AccessType::ChannelScattered:
+#if DNNL_WITH_XE_HPG
             case AccessType::Scattered: {
                 bool channel = (astrategy.accessType
                         == AccessType::ChannelScattered);
@@ -2670,10 +2669,10 @@ void gemm_kernel_generator_t<hw>::loadLoadStoreDescriptors(bool load,
                 if (store) or_(1, a0.ud(load ? 2 : 0), t2.uw(0), descStore.all);
                 break;
             }
+#endif
             default: hw_unsupported();
         }
     else
-#endif
         switch (astrategy.accessType) {
             case AccessType::ChannelScattered: {
                 encodeLoadDescriptors(hw, descLoad, exdescLoad, block.simdSize,
@@ -2809,11 +2808,12 @@ void gemm_kernel_generator_t<hw>::loadMatrixBlock(const GRF &dest,
     // Get mask to apply, if any.
     maskMod |= getRegisterBlockMask(block, state);
 
-#if DNNL_WITH_XE_HPG
     if (astrategy.newDP)
         switch (implAccessType(astrategy.accessType, atype, block)) {
             case AccessType::Block:
             case AccessType::Scattered:
+
+#if DNNL_WITH_XE_HPG
             case AccessType::ChannelScattered: {
                 auto spec = getDataSpec12p7(
                         implAccessType(astrategy.accessType, atype, block),
@@ -2832,11 +2832,10 @@ void gemm_kernel_generator_t<hw>::loadMatrixBlock(const GRF &dest,
                 }
                 break;
             }
+#endif
             default: stub();
         }
-    else
-#endif
-            if (block.descAssigned)
+    else if (block.descAssigned)
         send(block.simdSize | maskMod, static_cast<SharedFunction>(block.sfid),
                 dest, addr, null, block.sfid, a0[0]);
     else
@@ -2921,11 +2920,11 @@ void gemm_kernel_generator_t<hw>::storeMatrixBlock(const GRF &src,
         send(block.simdSize | maskMod, static_cast<SharedFunction>(block.sfid),
                 null, addr, src, a0.ud(1), a0.ud(0));
 
-#if DNNL_WITH_XE_HPG
     else if (astrategy.newDP)
         switch (implAccessType(astrategy.accessType, atype, block)) {
             case AccessType::Block:
             case AccessType::Scattered:
+#if DNNL_WITH_XE_HPG
             case AccessType::ChannelScattered: {
                 auto spec = getDataSpec12p7(
                         implAccessType(astrategy.accessType, atype, block),
@@ -2933,10 +2932,10 @@ void gemm_kernel_generator_t<hw>::storeMatrixBlock(const GRF &src,
                 store(block.simdSize | maskMod, spec, atype.base, addr[0], src);
                 break;
             }
+#endif
             default: stub();
         }
     else
-#endif
         switch (implAccessType(astrategy.accessType, atype, block)) {
             case AccessType::ChannelScattered: {
                 static const ChannelMask cmasks[4] = {ChannelMask::r,

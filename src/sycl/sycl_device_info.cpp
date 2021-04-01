@@ -84,10 +84,9 @@ status_t sycl_device_info_t::init_arch(engine_t *engine) {
             && !device.has_extension(
                     ext2cl_str(gpu::compute::device_ext_t::khr_fp64)))
         gpu_arch_ = gpu::compute::gpu_arch_t::xe_hpg;
-    }
-#endif
-    return status::success;
 }
+#endif
+return status::success;
 
 status_t sycl_device_info_t::init_device_name(engine_t *engine) {
     auto &device

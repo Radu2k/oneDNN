@@ -140,10 +140,14 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     conf.ow_block = 1;
     conf.omb = 1;
     conf.ocb = 1;
-
+#if DNNL_WITH_XE_HP
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
-    const bool is_gen12hp
-            = compute_engine->is_gen12hp() || compute_engine->is_gen12p7();
+    const bool is_xe_hp = compute_engine->is_xe_hp()
+#if DNNL_WITH_XE_HPG
+            || compute_engine->is_xe_hpg()
+#endif
+            ;
+#endif
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();
 
@@ -163,8 +167,7 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
         conf.ver = ver_1stconv;
     } else if ((is_16oc && is_16ic) || is_dw_16g) {
         if (conf.mb % 32 == 0 && conf.is_depthwise
-                && utils::one_of(src_mdw.data_type(), bf16, f16)
-                && is_gen12hp) {
+                && utils::one_of(src_mdw.data_type(), bf16, f16) && is_xe_hp) {
             conf.ver = ver_32mb16c;
         } else if (conf.mb % 16 == 0) {
             conf.ver = ver_16mb16c;
@@ -176,7 +179,6 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     }
 
     const bool is_fp16 = src_mdw.data_type() == data_type::f16;
-#endif
 
     switch (conf.ver) {
         case ver_nhwc: {
@@ -544,8 +546,11 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
 #if DNNL_WITH_XE_HP
-    const bool is_xe_hp
-            = compute_engine->is_xe_hp() || compute_engine->is_xe_hpg();
+    const bool is_xe_hp = compute_engine->is_xe_hp()
+#if DNNL_WITH_XE_HPG
+            || compute_engine->is_xe_hpg()
+#endif
+            ;
 #endif
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();
@@ -878,8 +883,11 @@ status_t gen9_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
 
 #if DNNL_WITH_XE_HP
-    const bool is_xe_hp
-            = compute_engine->is_xe_hp() || compute_engine->is_xe_hpg();
+    const bool is_xe_hp = compute_engine->is_xe_hp()
+#if DNNL_WITH_XE_HPG
+            || compute_engine->is_xe_hpg()
+#endif
+            ;
 #endif
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();

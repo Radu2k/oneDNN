@@ -117,14 +117,13 @@ struct gen_gemm_t : public gpu_gemm_t {
 
             if (!ok) return status::unimplemented;
 
-
             ok &= utils::one_of(arch_, arch_t::gen9, arch_t::xe_lp
 
 #if DNNL_WITH_XE_HP
                     ,
                     arch_t::xe_hp
 #endif
-#if DNNL_WITH_XE_HP
+#if DNNL_WITH_XE_HPG
                     ,
                     arch_t::xe_hpg
 #endif
@@ -169,7 +168,7 @@ struct gen_gemm_t : public gpu_gemm_t {
             auto b_t_sz = types::data_type_size(b_t);
 
             bool is_f16 = utils::everyone_is(f16, a_t, b_t, c_t);
-            bool is_gen12hp_plus = arch_ >= arch_t::gen12hp;
+            bool is_xe_hp_plus = arch_ >= arch_t::xe_hp;
 
             // Rename memory descriptors following column major format.
             auto &a_desc = desc_.b_desc;
@@ -206,7 +205,7 @@ struct gen_gemm_t : public gpu_gemm_t {
             auto dotrans = batch ? acb : ba;
             auto notrans = batch ? abc : ab;
 
-            if (is_f16 && is_gen12hp_plus && use_tn) {
+            if (is_f16 && is_xe_hp_plus && use_tn) {
                 if (a_any && b_any) {
                     CHECK(memory_desc_init_by_tag(a_desc, dotrans));
                     CHECK(memory_desc_init_by_tag(b_desc, notrans));

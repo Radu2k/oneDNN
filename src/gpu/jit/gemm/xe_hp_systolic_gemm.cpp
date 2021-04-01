@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #include "gpu/jit/gemm/xe_hp_systolic_gemm.hpp"
 
 #include "common/c_types_map.hpp"
@@ -115,7 +114,11 @@ status_t xe_hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     if (dt_int_ok) attr_skip_mask |= smask_t::zero_points_runtime;
 
     ok = true && limits_ok && (dt_float_ok || dt_int_ok)
+#if DNNL_WITH_XE_HPG
             && utils::one_of(arch, arch_t::xe_hp, arch_t::xe_hpg)
+#else
+            && arch == arch_t::xe_hp
+#endif
             && compute_engine->mayiuse(compute::device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate)
             && attr()->has_default_values(attr_skip_mask)
@@ -711,5 +714,4 @@ status_t xe_hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
-#endif
 // vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

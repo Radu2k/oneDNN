@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #include "gpu/jit/xe_hp_conv_bwd_wei_kernel.hpp"
 
 #include "gpu/jit/jit_generator.hpp"
@@ -1627,4 +1626,3 @@ status_t xe_hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
-#endif

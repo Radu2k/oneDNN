@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #ifndef GPU_JIT_XE_HP_SYSTOLIC_GEMM_KERNEL_HPP
 #define GPU_JIT_XE_HP_SYSTOLIC_GEMM_KERNEL_HPP
 
@@ -54,7 +53,11 @@ public:
         bool early_c_bias = false;
         bool c_packed = false;
         bool batch = false;
+#if DNNL_WITH_XE_HPG
         bool emulate64 = (hw == ngen::HW::Xe_HPG);
+#else
+        bool emulate64 = false;
+#endif
 
         int tile_m = 32;
         int tile_n = 48;
@@ -353,4 +356,3 @@ public:
 } // namespace dnnl
 
 #endif // GPU_JIT_XE_HP_SYSTOLIC_GEMM_KERNEL_HPP
-#endif // DNNL_WITH_XE_HP

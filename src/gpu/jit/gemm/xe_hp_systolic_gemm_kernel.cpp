@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #include <assert.h>
 
 #include "gpu/jit/gemm/xe_hp_systolic_gemm_kernel.hpp"
@@ -35,7 +34,11 @@ template <HW hw>
 void xe_hp_systolic_gemm_kernel_t<hw>::barrier_prep(
         const InstructionModifier &swsb, const GRF &header) {
     and_<uint32_t>(1 | swsb, header[2], r0_save[2],
+#if DNNL_WITH_XE_HPG
             uint32_t((hw >= HW::Xe_HPG) ? 0xFFFF0000 : 0x7F000000));
+#else
+            uint32_t(0x7F000000));
+#endif
 }
 
 template <HW hw>
@@ -1547,7 +1550,9 @@ xe_hp_systolic_gemm_kernel_t<hw>::xe_hp_systolic_gemm_kernel_t(config_t cfg_)
     mul_constant(1, global_n0, global_id_y, 4 * cfg.tile_n);
 
     // Adjust barrier ID field on DG2.
+#if DNNL_WITH_XE_HPG
     if (hw == HW::Xe_HPG) mov<uint8_t>(1, r0[10], r0[11]);
+#endif
 
     // Find our position within the threadgroup. Fixed threadgroup size: 4x4.
     mul_constant(1, local_m0, local_id_x, cfg.tile_m / 8);
@@ -1698,10 +1703,11 @@ xe_hp_systolic_gemm_kernel_t<hw>::xe_hp_systolic_gemm_kernel_t(config_t cfg_)
 }
 
 template class xe_hp_systolic_gemm_kernel_t<HW::Xe_HP>;
+#if DNNL_WITH_XE_HPG
 template class xe_hp_systolic_gemm_kernel_t<HW::Xe_HPG>;
+#endif
 
 } // namespace jit
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
-#endif

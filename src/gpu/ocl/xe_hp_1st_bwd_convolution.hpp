@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #ifndef GPU_OCL_XE_HP_1ST_BWD_CONVOLUTION_HPP
 #define GPU_OCL_XE_HP_1ST_BWD_CONVOLUTION_HPP
 
@@ -57,7 +56,7 @@ struct xe_hp_1st_convolution_bwd_weights_t : public gpu_primitive_t {
             assert(engine->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
-            if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
                 return status::unimplemented;
             bool ok = set_default_alg_kind(alg_kind::convolution_direct)
                     && this->desc()->prop_kind == backward_weights
@@ -150,6 +149,5 @@ private:
 } // namespace impl
 } // namespace dnnl
 
-#endif
 #endif
 // vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

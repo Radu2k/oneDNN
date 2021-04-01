@@ -74,7 +74,7 @@ ngen::AddressBase get_address_base(char c) {
 bool gen_gemm_kernel_t::matching_hw(ngen::HW hw, ngen::HW hw_ref) {
     using ngen::HW;
     if (hw == hw_ref) return true;
-#if DNNL_WITH_XE_HPG
+#if DNNL_WITH_XE_HPG && DNNL_WITH_XE_HP
     if (hw == HW::Xe_HPG && hw_ref == HW::Xe_HP) return true;
 #endif
     return false;

@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #ifndef GPU_JIT_XE_HP_CONV_DATA_KERNEL_HPP
 #define GPU_JIT_XE_HP_CONV_DATA_KERNEL_HPP
 
@@ -38,5 +37,4 @@ status_t xe_hp_conv_data_create_kernel(const conv_conf_t &conf,
 } // namespace impl
 } // namespace dnnl
 
-#endif
 #endif

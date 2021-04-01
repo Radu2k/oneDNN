@@ -37,7 +37,7 @@ public:
         auto *compute_engine
                 = utils::downcast<compute::compute_engine_t *>(engine);
 
-        if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+        if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
             return status::unimplemented;
         if (!compute_engine->mayiuse_ngen_kernels())
             return status::unimplemented;
@@ -67,12 +67,16 @@ public:
 
         std::unique_ptr<jit::jit_generator_base> jit_gen_convolution;
         switch (device_info->gpu_arch()) {
-            case gpu_arch_t::gen12hp:
-                jit_gen_convolution.reset(new conv_kernel_t<gpu_gen12hp>(
+            case gpu_arch_t::xe_hp:
+                jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hp>(
                         cfg(primitive), primitive->pd(), kernel_arg_info_));
                 break;
-            case gpu_arch_t::gen12p7:
-                jit_gen_convolution.reset(new conv_kernel_t<gpu_gen12p7>(
+            case gpu_arch_t::xe_hpg:
+                jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hpg>(
+                        cfg(primitive), primitive->pd(), kernel_arg_info_));
+                break;
+            case gpu_arch_t::xe_hpc:
+                jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hpc>(
                         cfg(primitive), primitive->pd(), kernel_arg_info_));
                 break;
             default: return status::unimplemented;

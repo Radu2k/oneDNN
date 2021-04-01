@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #ifndef GPU_OCL_XE_HP_BF16_CONVOLUTION_HPP
 #define GPU_OCL_XE_HP_BF16_CONVOLUTION_HPP
 
@@ -44,8 +43,12 @@ struct xe_hp_bf16_convolution_bwd_weights_t : public gpu_primitive_t {
             using namespace data_type;
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
+#if DNNL_WITH_XE_HPG
             if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
                 return status::unimplemented;
+#else
+            if (!compute_engine->is_xe_hp()) return status::unimplemented;
+#endif
 
             bool ok = desc()->prop_kind == backward_weights
                     && desc()->alg_kind == alg_kind::convolution_direct
@@ -124,5 +127,4 @@ private:
 } // namespace impl
 } // namespace dnnl
 
-#endif
 #endif

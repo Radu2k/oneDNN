@@ -4122,7 +4122,7 @@ private:
                 << "Requested register layouts for " << tag << " do not match.";
     }
 
-    // SLM has 65 dword-granularity banks (Gen12HP):
+    // SLM has 65 dword-granularity banks (Xe_HP):
     //      banks:   [bank 0] [bank 1] [bank 2] ... [bank 0]
     // byte offsets: | 0      | 4      | 8      ... | 4 * 65
     // SLM reads don't have conflicts. During SLM writes each fused EU writes

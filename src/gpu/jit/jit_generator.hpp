@@ -19,6 +19,7 @@
 
 #include "common/float16.hpp"
 #include "gpu/jit/jit_generator_base.hpp"
+#include "oneapi/dnnl/dnnl_config.h"
 
 namespace ngen {
 using half = dnnl::impl::float16_t;

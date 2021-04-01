@@ -86,10 +86,12 @@ struct xe_lp_x8s8x_convolution_fwd_t : public gpu_primitive_t {
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
 
 #if DNNL_WITH_XE_HP
-            is_xe_hp
-                    = compute_engine->is_xe_hp() || compute_engine->is_xe_hpg();
+            is_xe_hp = compute_engine->is_xe_hp()
+#if DNNL_WITH_XE_HPG
+                    || compute_engine->is_xe_hpg()
 #endif
-
+                    ;
+#endif
             return ok ? status::success : status::unimplemented;
         }
 

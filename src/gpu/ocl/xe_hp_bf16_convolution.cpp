@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #include "gpu/ocl/xe_hp_bf16_convolution.hpp"
 
 #include "common/c_types_map.hpp"
@@ -374,4 +373,3 @@ status_t xe_hp_bf16_convolution_bwd_weights_t::execute_backward_weights(
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
-#endif

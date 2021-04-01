@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #ifndef GPU_OCL_XE_HP_CONVOLUTION_HPP
 #define GPU_OCL_XE_HP_CONVOLUTION_HPP
 
@@ -45,8 +44,12 @@ struct xe_hp_convolution_fwd_t : public gpu_primitive_t {
             assert(engine->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
+#if DNNL_WITH_XE_HPG
             if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
                 return status::unimplemented;
+#else
+            if (!compute_engine->is_xe_hp()) return status::unimplemented;
+#endif
 
             const auto attr_skip_mask
                     = primitive_attr_t::skip_mask_t::oscale_runtime
@@ -175,8 +178,12 @@ struct xe_hp_convolution_bwd_data_t : public gpu_primitive_t {
             assert(engine->kind() == engine_kind::gpu);
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
+#if DNNL_WITH_XE_HPG
             if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
                 return status::unimplemented;
+#else
+            if (!compute_engine->is_xe_hp()) return status::unimplemented;
+#endif
 
             const auto attr_skip_mask = primitive_attr_t::skip_mask_t::oscale
                     | primitive_attr_t::skip_mask_t::post_ops;
@@ -244,5 +251,4 @@ private:
 } // namespace impl
 } // namespace dnnl
 
-#endif
 #endif

@@ -50,6 +50,8 @@ uint64_t get_future_extensions(compute::gpu_arch_t gpu_arch) {
                     intel_subgroup_split_matrix_multiply_accumulate;
             extensions
                     |= (uint64_t)device_ext_t::intel_variable_eu_thread_count;
+#endif
+#if DNNL_WITH_XE_HPG
             extensions |= (uint64_t)device_ext_t::future_bf16_cvt;
 #endif
         case gpu_arch_t::xe_lp:

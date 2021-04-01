@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #ifndef GPU_JIT_XE_HP_SYSTOLIC_GEMM_HPP
 #define GPU_JIT_XE_HP_SYSTOLIC_GEMM_HPP
 
@@ -200,6 +199,5 @@ private:
 } // namespace impl
 } // namespace dnnl
 
-#endif
 #endif
 // vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

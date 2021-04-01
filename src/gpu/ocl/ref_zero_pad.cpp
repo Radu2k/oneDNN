@@ -35,13 +35,11 @@ status_t ref_zero_pad_t::execute_ref(const exec_ctx_t &ctx) const {
     const auto &pdims = mdw.padded_dims();
     const blocking_desc_t blocking_desc = mdw.blocking_desc();
     const ptrdiff_t nelems = (ptrdiff_t)mdw.nelems(true);
-#if DNNL_WITH_XE_HP
     const compute::compute_engine_t *engine
             = utils::downcast<compute::compute_engine_t *>(
                     ctx.stream()->engine());
     const compute::device_info_t *device = engine->device_info();
     const unsigned int hw_threads = device->hw_threads();
-#endif
 
     // Setup Initial parameters used in opencl kernel computation
     dims_t blk_size;
@@ -83,12 +81,18 @@ status_t ref_zero_pad_t::execute_ref(const exec_ctx_t &ctx) const {
         // Balance work unit size with parallelism
         cl_ulong step_block = 1;
 #if DNNL_WITH_XE_HP
-        if (!engine->is_xe_hp() && !engine->is_xe_hpg()) {
+        if (!engine->is_xe_hp()
+#if DNNL_WITH_XE_HPG
+                && !engine->is_xe_hpg()
+#endif
+        ) {
+#endif
             while (step_nelems / nelems_block * step_block < 4 * 1024
                     && step_count % (step_block * 2) == 0
                     && npsteps / step_block > 2 * hw_threads) {
                 step_block *= 2;
             }
+#if (DNNL_WITH_XE_HP)
         }
 #endif
         dim_t tail_start = dims[i] % blk_size[i];

@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#if DNNL_WITH_XE_HP
 #ifndef GPU_JIT_XE_HP_CONVOLUTION_HPP
 #define GPU_JIT_XE_HP_CONVOLUTION_HPP
 
@@ -24,6 +23,7 @@
 #include "gpu/gpu_primitive.hpp"
 #include "gpu/jit/jit_eltwise_injector.hpp"
 #include "gpu/primitive_conf.hpp"
+#include "oneapi/dnnl/dnnl_config.h"
 
 namespace dnnl {
 namespace impl {
@@ -42,9 +42,12 @@ struct xe_hp_convolution_fwd_t : public gpu_primitive_t {
 
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
-
+#if DNNL_WITH_XE_HPG
             if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
                 return status::unimplemented;
+#else
+            if (!compute_engine->is_xe_hp()) return status::unimplemented;
+#endif
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;
 
@@ -171,8 +174,12 @@ struct xe_hp_convolution_bwd_data_t : public gpu_primitive_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
 
+#if DNNL_WITH_XE_HPG
             if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
                 return status::unimplemented;
+#else
+            if (!compute_engine->is_xe_hp()) return status::unimplemented;
+#endif
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;
 
@@ -296,5 +303,4 @@ private:
 } // namespace impl
 } // namespace dnnl
 
-#endif
 #endif
