@@ -1174,6 +1174,12 @@ protected:
     void cmp0(const ngen::InstructionModifier &mod, ngen::RegData src0);
     void syncall();
 
+    void wrdepRanges(const std::vector<GRFMultirange> &rrs) {
+        for (auto &rr : rrs)
+            for (auto &r : rr.ranges)
+                wrdep(r);
+    }
+
     void addScaled(const ngen::InstructionModifier &mod,
             const ngen::RegData &dst, int src0, const ngen::RegData &src1,
             int numerator, int denominator, CommonState &state,

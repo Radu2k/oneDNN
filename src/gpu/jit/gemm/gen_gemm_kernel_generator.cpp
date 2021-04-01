@@ -7915,6 +7915,13 @@ bool gemm_kernel_generator_t<hw>::gemmKLoop(int ka_repack_in, int kb_repack_in,
                     switch (strategy.slmBuffers) {
                         case 1:
                         case 2: {
+                            if (hw >= HW::Gen12p7) {
+                                // Ensure all prior SLM reads have completed.
+                                if (strategy.slmA && A_copies > 1)
+                                    wrdepRanges(state.A_regs);
+                                if (strategy.slmB && B_copies > 1)
+                                    wrdepRanges(state.B_regs);
+                            }
                             auto temp = state.ra.alloc();
                             barrier(temp, r0_info);
                             doSLMStores();
