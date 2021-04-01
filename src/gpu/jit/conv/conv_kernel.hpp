@@ -891,6 +891,7 @@ public:
 
     void _visit(const ptr_t *obj) override {
         auto base_op = eval(obj->base);
+
         if (is_zero(obj->off)) {
             bind(obj, base_op);
             return;
@@ -901,7 +902,10 @@ public:
         int off = to_cpp<int>(obj->off);
         int base = base_op.reg_data().getBase();
         auto grf = ngen::GRF(base + off / reg_bytes).retype(ngen::DataType::ub);
-        bind(obj, grf[off % reg_bytes]);
+        if (off % reg_bytes == 0)
+            bind(obj, grf);
+        else
+            bind(obj, grf[off % reg_bytes]);
     }
 
     void _visit(const shuffle_t *obj) override {
@@ -1163,6 +1167,9 @@ public:
         if (func.is<dpas_t>()) {
             auto arg_ops = eval(obj->args, scope);
             dpas(func.as<dpas_t>(), arg_ops, obj->attr);
+        } else if (func.is<mad_t>()) {
+            auto arg_ops = eval(obj->args, scope);
+            mad(func.as<mad_t>(), arg_ops, obj->attr);
         } else if (func.is<send_t>()) {
             auto &send_func = func.as<send_t>();
             auto args = obj->args;
@@ -1303,6 +1310,45 @@ private:
             host_->dpas(mod, dpas_func.sdepth, dpas_func.rcount, dst, src0,
                     src1, src2);
         }
+    }
+
+    void mad(const mad_t &mad_func, const std::vector<ngen_operand_t> &args,
+            const func_call_attr_t &attr) {
+        auto dst = mad_t::arg_dst(args).reg_data();
+        auto src1 = mad_t::arg_src1(args).reg_data();
+        auto src2 = mad_t::arg_src2(args).reg_data();
+
+        ngen::RegData src0;
+        auto &src0_op = mad_t::arg_src0(args);
+        if (src0_op.is_reg_data()) {
+            src0 = ngen_reg_data(src0_op.reg_data(), 0,
+                    to_ngen(mad_func.dst_type), mad_func.dst_simd_size);
+        } else {
+            ir_assert(src0_op.is_immediate());
+            ir_assert(to_cpp<int32_t>(src0_op.immediate()) == 0);
+            src0 = host_->null;
+            src0.setType(to_ngen(mad_func.dst_type));
+        }
+
+        dst = ngen_reg_data(
+                dst, 0, to_ngen(mad_func.dst_type), mad_func.dst_simd_size);
+        src1 = ngen_reg_data(
+                src1, 0, to_ngen(mad_func.src1_type), mad_func.src1_simd_size);
+        src2 = ngen_reg_data(
+                src2, 0, to_ngen(mad_func.src2_type), mad_func.src2_simd_size);
+
+        ngen::InstructionModifier mod = simd_size_;
+        if (!attr.is_empty())
+            mod = mod | to_ngen(attr.as<instruction_modifier_attr_t>().mod);
+
+        // Force scalar register parameter to be scalar since when the registers
+        // offset = 0 the register is interpreted as a vector by default
+        if (mad_func.src1_simd_size == 1)
+            src1.setRegion(0, mad_func.src1_simd_size, 0);
+        if (mad_func.src2_simd_size == 1)
+            src2.setRegion(0, mad_func.src2_simd_size, 0);
+
+        host_->mad(mod, dst, src0, src1, src2);
     }
 
     void send(ngen_register_scope_t &scope, const send_t &send_func,

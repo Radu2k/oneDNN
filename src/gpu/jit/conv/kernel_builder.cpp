@@ -2176,7 +2176,7 @@ public:
         auto ret = substitute(root_, step_.compute_loop(), body, 1);
         ret = alloc_updater.update(ret);
 
-        // Remove zero-out statement for C (handled by sub_dpas_src0_with_zero).
+        // Remove zero-out statement for C (handled by sub_fma_acc_with_zero).
         ret = substitute(ret, step_.c_zero_out(), stmt_t(), 1);
 
         return ret;
@@ -2242,7 +2242,7 @@ private:
 
         if (it.is_first_mul()) {
             for (auto &m : mul) {
-                m = sub_dpas_src0_with_zero(m);
+                m = sub_fma_acc_with_zero(m);
             }
         }
 
@@ -2345,23 +2345,37 @@ private:
         return ret;
     }
 
-    stmt_t sub_dpas_src0_with_zero(const stmt_t &stmt) const {
+    stmt_t sub_fma_acc_with_zero(const stmt_t &stmt) const {
         auto stmt_vec = flatten_statements(stmt);
 
+        object_eq_set_t<expr_t> seen_dst;
         stmt_t ret = stmt;
         for (auto &s : stmt_vec) {
-            if (!is_func_call<dpas_t>(s)) continue;
+            if (is_func_call<dpas_t>(s)) {
+                auto &call = s.as<func_call_t>();
 
-            auto &call = s.as<func_call_t>();
+                auto &dst = dpas_t::arg_dst(s);
+                auto src0 = expr_t(0); // Will be translated to null register.
+                auto &src1 = dpas_t::arg_src1(s);
+                auto &src2 = dpas_t::arg_src2(s);
 
-            auto &dst = dpas_t::arg_dst(s);
-            auto src0 = expr_t(0); // Will be translated to null register.
-            auto &src1 = dpas_t::arg_src1(s);
-            auto &src2 = dpas_t::arg_src2(s);
+                auto new_call = func_call_t::make(
+                        call.func, {dst, src0, src1, src2}, call.attr);
+                ret = substitute(ret, s, new_call, 1);
+            } else if (is_func_call<mad_t>(s)) {
+                auto &call = s.as<func_call_t>();
 
-            auto new_call = func_call_t::make(
-                    call.func, {dst, src0, src1, src2}, call.attr);
-            ret = substitute(ret, s, new_call, 1);
+                auto &dst = mad_t::arg_dst(s);
+                auto src0 = expr_t(0); // Will be translated to null register.
+                auto &src1 = mad_t::arg_src1(s);
+                auto &src2 = mad_t::arg_src2(s);
+
+                if (!seen_dst.insert(dst).second) continue;
+
+                auto new_call = func_call_t::make(
+                        call.func, {dst, src0, src1, src2}, call.attr);
+                ret = substitute(ret, s, new_call, 1);
+            }
         }
         return ret;
     }
@@ -3459,15 +3473,25 @@ class multiply_builder_t {
 public:
     multiply_builder_t() = default;
 
-    multiply_builder_t(const layout_t &a_layout, const layout_t &b_layout,
-            const expr_t &a_buf, const expr_t &b_buf, const expr_t &c_buf)
+    multiply_builder_t(fma_kind_t kind, const layout_t &a_layout,
+            const layout_t &b_layout, const expr_t &a_buf, const expr_t &b_buf,
+            const expr_t &c_buf)
         : a_layout_(a_layout)
         , b_layout_(b_layout)
         , a_buf_(a_buf)
         , b_buf_(b_buf)
         , c_buf_(c_buf) {
 
-        if (try_build_dpas()) return;
+        switch (kind) {
+            case fma_kind_t::dpasw:
+            case fma_kind_t::dpas:
+                if (try_build_dpas()) return;
+                break;
+            case fma_kind_t::mad:
+                if (try_build_mad()) return;
+                break;
+            default: break;
+        }
 
         ir_error_not_expected();
     }
@@ -3556,6 +3580,55 @@ private:
     static layout_t compute_dpas_c_layout(int m_blk, int n_blk,
             const layout_t &blk_layout, const multiply_desc_t &desc) {
         auto c_layout = blk_layout;
+        c_layout = c_layout.add_outer_block(1, desc.n() / n_blk);
+        c_layout = c_layout.add_outer_block(0, desc.m() / m_blk);
+        return c_layout;
+    }
+
+    bool try_build_mad() {
+        multiply_desc_t desc(a_layout_, b_layout_, true);
+        if (!mad_t::matches_types(desc.a_type(), desc.b_type(), desc.c_type()))
+            return false;
+
+        int simd_size = mad_t::get_simd_size(
+                desc.a_type(), desc.b_type(), desc.c_type());
+        auto _mad = mad_t::make(desc.c_type(), simd_size, desc.a_type(), 1,
+                desc.b_type(), simd_size);
+        if (_mad.as<mad_t>().matches(desc)) {
+            build_mad(_mad.as<mad_t>(), desc);
+            return true;
+        }
+        return false;
+    }
+
+    void build_mad(const mad_t &mad, const multiply_desc_t &desc) {
+        int m_blk = 1;
+        int n_blk = mad.get_simd_size();
+        int k_blk = 1;
+
+        c_layout_ = compute_mad_c_layout(desc);
+
+        for (int i_k = 0; i_k < desc.k(); i_k += k_blk) {
+            for (int i_m = 0; i_m < desc.m(); i_m += m_blk) {
+                for (int i_n = 0; i_n < desc.n(); i_n += n_blk) {
+                    std::vector<int> a_args = {i_m, i_k};
+                    std::vector<int> b_args = {i_k, i_n};
+                    std::vector<int> c_args = {i_m, i_n};
+                    auto a = a_buf_[desc.a_layout()(a_args)
+                            * desc.a_type().size()];
+                    auto b = b_buf_[desc.b_layout()(b_args)
+                            * desc.b_type().size()];
+                    auto c = c_buf_[c_layout_(c_args) * desc.c_type().size()];
+                    stmt_ = stmt_seq_t::make(stmt_, mad(c, c, a, b));
+                }
+            }
+        }
+    }
+
+    static layout_t compute_mad_c_layout(const multiply_desc_t &desc) {
+        auto c_layout = desc.a_layout();
+        int n_blk = c_layout.dim(1);
+        int m_blk = c_layout.dim(0);
         c_layout = c_layout.add_outer_block(1, desc.n() / n_blk);
         c_layout = c_layout.add_outer_block(0, desc.m() / m_blk);
         return c_layout;
@@ -3721,8 +3794,8 @@ public:
                         b_read.reg_view(), {mnk_kind_t::k, mnk_kind_t::n});
 
                 // Multiply C_i_j += A_i x B_j in GEMM notation.
-                multiply_builder_t mul_builder(
-                        a_layout, b_layout, a_buf, b_buf, c_buf[c_buf_off]);
+                multiply_builder_t mul_builder(cfg_.fma_kind, a_layout,
+                        b_layout, a_buf, b_buf, c_buf[c_buf_off]);
                 ir_trace() << "Multiply (" << i << ", " << j << "):\n"
                            << mul_builder.str() << std::endl;
                 load_mul_stmt_ = load_mul_stmt_.append(stmt_group_t::make(
@@ -3786,7 +3859,7 @@ public:
         c_store_stmt_ = c_m2g.stmt();
 
         // Replace DPAS by DPASW when applicable.
-        if (cfg_.use_dpasw) {
+        if (cfg_.fma_kind == fma_kind_t::dpasw) {
             alloc_updater_t alloc_updater;
             inject_dpasw(load_mul_stmt_, c_store_stmt_, alloc_updater,
                     tg_grid_.idx(0));

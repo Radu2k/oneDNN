@@ -27,6 +27,27 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
+// Possible backend instruction sets
+enum class fma_kind_t {
+    mad,
+    dpas,
+    dpasw,
+    unknown,
+};
+
+namespace fma_kind {
+
+std::string to_string(fma_kind_t val);
+fma_kind_t from_string(std::string enum_string);
+
+fma_kind_t get_supported_kind(
+        const type_t &a, const type_t &b, const type_t &c);
+
+int get_simd_size(
+        fma_kind_t kind, const type_t &a, const type_t &b, const type_t &c);
+
+} // namespace fma_kind
+
 class multiply_desc_t {
 public:
     multiply_desc_t() = default;
@@ -126,6 +147,10 @@ public:
 
     static bool matches_types(
             const type_t &a, const type_t &b, const type_t &c);
+    static int get_simd_size(
+            const type_t &a, const type_t &b, const type_t &c) {
+        return simd_size;
+    }
 
     static const int simd_size = 8;
 
@@ -147,6 +172,95 @@ private:
         , dst_type(dst_type)
         , src1_type(src1_type)
         , src2_type(src2_type) {}
+};
+
+// Function representing MAD instruction.
+class mad_t : public func_impl_t {
+public:
+    IR_DECL_DERIVED_TYPE_ID(mad_t, func_impl_t)
+
+    static func_t make(const type_t &dst_type, int dst_simd_size,
+            const type_t &src1_type, int src1_simd_size, const type_t src2_type,
+            int src2_simd_size) {
+        return func_t(new mad_t(dst_type, dst_simd_size, src1_type,
+                src1_simd_size, src2_type, src2_simd_size));
+    }
+
+    bool is_equal(const object_impl_t *obj) const override {
+        if (!obj->is<self_type>()) return false;
+        auto &other = obj->as<self_type>();
+
+        return (dst_type == other.dst_type) && (src1_type == other.src1_type)
+                && (src2_type == other.src2_type)
+                && (dst_simd_size == other.dst_simd_size)
+                && (src1_simd_size == other.src1_simd_size)
+                && (src2_simd_size == other.src2_simd_size);
+    }
+
+    size_t get_hash() const override {
+        return ir_utils::get_hash(dst_type, src1_type, src2_type, dst_simd_size,
+                src2_simd_size, src1_simd_size);
+    }
+
+    std::string str() const override {
+        std::ostringstream oss;
+        oss << "mad";
+        return oss.str();
+    }
+
+    IR_DEFINE_ARG_GET(dst, 0)
+    IR_DEFINE_ARG_GET(src0, 1)
+    IR_DEFINE_ARG_GET(src1, 2)
+    IR_DEFINE_ARG_GET(src2, 3)
+
+    stmt_t operator()(const expr_t &dst, const expr_t &src0, const expr_t &src1,
+            const expr_t &src2) const {
+        return call({dst, src0, src1, src2});
+    }
+
+    int dst_size() { return dst_simd_size * dst_type.size(); }
+    int src0_size() { return dst_size(); }
+    int src1_size() { return src1_simd_size * src1_type.size(); }
+    int src2_size() { return src2_simd_size * src2_type.size(); }
+
+    layout_t a_layout() const;
+    layout_t b_layout() const;
+    layout_t c_layout() const;
+
+    bool matches(const multiply_desc_t &desc) const;
+
+    static bool matches_types(
+            const type_t &a, const type_t &b, const type_t &c);
+
+    static const int reg_size = 32;
+    static int get_simd_size(
+            const type_t &a, const type_t &b, const type_t &c) {
+        return reg_size / c.size();
+    }
+    int get_simd_size() const { return dst_simd_size; }
+
+    type_t dst_type;
+    type_t src1_type;
+    type_t src2_type;
+
+    int dst_simd_size;
+    int src1_simd_size;
+    int src2_simd_size;
+
+private:
+    mad_t(const type_t &dst_type, int dst_simd_size, const type_t &src1_type,
+            int src1_simd_size, const type_t &src2_type, int src2_simd_size)
+        : dst_type(dst_type)
+        , src1_type(src1_type)
+        , src2_type(src2_type)
+        , dst_simd_size(dst_simd_size)
+        , src1_simd_size(src1_simd_size)
+        , src2_simd_size(src2_simd_size) {
+        ir_assert(math::is_pow2(dst_simd_size));
+        ir_assert(dst_simd_size <= reg_size / dst_type.size());
+        ir_assert(utils::one_of(src1_simd_size, 1, dst_simd_size));
+        ir_assert(utils::one_of(src2_simd_size, 1, dst_simd_size));
+    }
 };
 
 } // namespace jit

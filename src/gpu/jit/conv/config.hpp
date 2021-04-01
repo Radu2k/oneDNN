@@ -26,6 +26,7 @@
 #include "common/memory_desc_wrapper.hpp"
 #include "common/type_helpers.hpp"
 #include "gpu/compute/compute.hpp"
+#include "gpu/jit/conv/fma_support.hpp"
 #include "gpu/jit/conv/tensor.hpp"
 #include "gpu/jit/conv/utils.hpp"
 #include "gpu/jit/jit_eltwise_injector.hpp"
@@ -190,8 +191,9 @@ public:
         if (!is_fwd) return status::unimplemented;
         if (with_groups) return status::unimplemented;
         if (!post_ops_ok(conv_pd)) return status::unimplemented;
-        if (utils::one_of(data_type::f32, src_data_type, wei_data_type))
-            return status::unimplemented;
+        fma_kind = fma_kind::get_supported_kind(
+                src_data_type, wei_data_type, dst_data_type);
+        if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
 
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
@@ -211,7 +213,8 @@ public:
         ow_thr_blk = getenv_int("ow_thr_blk", ow_thr_blk);
 #endif
 
-        simd_size = 8;
+        simd_size = fma_kind::get_simd_size(
+                fma_kind, src_data_type, wei_data_type, dst_data_type);
         regs = 256;
         tg_grid_dim[0] = std::min(4, utils::div_up(oc, oc_thr_blk));
         tg_grid_dim[1] = std::min(4, utils::div_up(ow, ow_thr_blk));
@@ -257,9 +260,9 @@ public:
 
         use_a_slm = true;
         use_b_slm = true;
-        use_dpasw = true;
         pad_slm = true;
-        assign_sbids = true;
+        assign_sbids
+                = utils::one_of(fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw);
         slm_bufs = (tg_grid_dim[0] * tg_grid_dim[1] <= 8 ? 2 : 3);
         gmem_bufs = 2;
         reduce_grf_usage = true;
@@ -267,9 +270,10 @@ public:
         b_sub_tiles = 1;
 
 #ifdef GEN_CONV_DEBUG
+        fma_kind = fma_kind::from_string(
+                getenv_str("fma_kind", fma_kind::to_string(fma_kind)));
         use_a_slm = getenv_bool("use_a_slm", use_a_slm);
         use_b_slm = getenv_bool("use_b_slm", use_b_slm);
-        use_dpasw = getenv_bool("use_dpasw", use_dpasw);
         pad_slm = getenv_bool("pad_slm", pad_slm);
         assign_sbids = getenv_bool("assign_sbids", assign_sbids);
         slm_bufs = getenv_int("slm_bufs", slm_bufs);
@@ -282,7 +286,11 @@ public:
         std::string src_tag;
         std::string wei_tag;
         std::string dst_tag;
-        if (is_s32_accumulator()) {
+        if (fma_kind == fma_kind_t::mad) {
+            src_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
+            wei_tag = "BAx16b16a";
+            dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
+        } else if (is_s32_accumulator()) {
             src_tag = (mb_thr_blk == 1 ? "aBx32b" : "ABx32a32b");
             wei_tag = "ABx4a8b8a4b";
             dst_tag = (mb_thr_blk == 1 ? "aBx32b" : "ABx32a32b");
@@ -397,9 +405,9 @@ public:
         oss << "  OW TG block:                " << ow_tg_blk << std::endl;
         oss << "  OC TG block:                " << oc_tg_blk << std::endl;
         oss << "  Thread group:               " << make_seq_print_helper(tg_grid_dim, " x ") << std::endl;
+        oss << "  FMA kind:                   " << fma_kind::to_string(fma_kind) << std::endl;
         oss << "  Use SLM for A:              " << to_string(use_a_slm) << std::endl;
         oss << "  Use SLM for B:              " << to_string(use_b_slm) << std::endl;
-        oss << "  Use DPASW:                  " << to_string(use_dpasw) << std::endl;
         oss << "  Pad SLM:                    " << to_string(pad_slm) << std::endl;
         oss << "  Assign SBIDs:               " << to_string(assign_sbids) << std::endl;
         oss << "  SLM buffers:                " << slm_bufs << std::endl;
@@ -435,9 +443,10 @@ public:
     int n_tg_blk;
     int k_tg_blk;
 
+    fma_kind_t fma_kind; // Which instruction backend to use.
+
     bool use_a_slm; // Whether to use SLM for A.
     bool use_b_slm; // Whether to use SLM for B.
-    bool use_dpasw; // Whether to use DPASW.
     bool pad_slm; // Whether to pad SLM to avoid write conflicts.
     bool assign_sbids; // Whether to manually assign SBID tokens.
     int slm_bufs; // Number of SLM buffers to use.
@@ -490,7 +499,8 @@ private:
             use_a_slm = false;
             use_b_slm = false;
         }
-        if (tg_grid_dim[0] % 2 != 0) use_dpasw = false;
+        if (tg_grid_dim[0] % 2 != 0 && fma_kind == fma_kind_t::dpasw)
+            fma_kind = fma_kind_t::dpas;
     }
 
     void try_reduce_grf_usage() {
@@ -558,7 +568,7 @@ private:
         int b_headers = utils::div_up(
                 b_bytes, use_b_slm ? slm_msg_bytes : gmem_msg_bytes);
 
-        if (use_dpasw) {
+        if (fma_kind == fma_kind_t::dpasw) {
             // Pessimistically reduce the smallest buffer by 2x.
             if (a_regs < b_regs) {
                 a_regs /= 2;

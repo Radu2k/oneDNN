@@ -281,6 +281,7 @@ std::string object_impl_t::str() const {
 
 object_t substitute(const object_t &root, const object_t &from,
         const object_t &to, int max_substitutions) {
+    if (to.is_same(from)) return root;
     substitute_mutator_t sm(from, to);
     auto ret = sm.mutate(root);
     ir_assert(sm.substitutions() <= max_substitutions)
