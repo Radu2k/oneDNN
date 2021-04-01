@@ -51,13 +51,4 @@ observe consistent CPU features both during generation and execution.
 * @ref dnnl::get_effective_cpu_isa function returns the currently used CPU ISA
 which is the highest available CPU ISA by default.
 
-
-The `dnnl::get_effective_cpu_isa()` function returns the currently used CPU ISA
-which is the highest available CPU ISA by default. This behavior can be
-overridden via the `DNNL_MAX_CPU_ISA` environment variable or by
-`dnnl::set_max_cpu_isa()` function.
-
-This feature can be enabled or disabled at build time. See @ref
-dev_guide_build_options for more information.
-
 Function settings take precedence over environment variables.

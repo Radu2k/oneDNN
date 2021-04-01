@@ -264,8 +264,6 @@ struct ref_deconvolution_bwd_data_t : public gpu_primitive_t {
                     diff_dst_md_ = *conv_pd_->src_md();
                 init_scratchpad();
 
-                init_scratchpad();
-
                 return status::success;
             }
 
