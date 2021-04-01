@@ -26,9 +26,9 @@
 
 #include "tests/test_thread.hpp"
 
+#include "compare.hpp"
 #include "dnnl_common.hpp"
 #include "dnnl_memory.hpp"
-#include "norm.hpp"
 
 #include "bnorm/bnorm.hpp"
 #include "lnorm/lnorm.hpp"
@@ -271,116 +271,6 @@ static int prepare_bwd(const prb_t *prb, dnn_mem_t &src, dnn_mem_t &d_dst,
     return OK;
 }
 
-static int compare(const prb_t *prb, data_kind_t kind, const dnn_mem_t &fp_mem,
-        const dnn_mem_t &dt_mem, res_t *res, const dnn_mem_t *ss = nullptr) {
-    const char *skind = data_kind2str(kind);
-    const int f32_mant_digits = 24;
-    const float eps_coeff = (1 << (f32_mant_digits - digits_dt(prb->dt)));
-    const float eps = eps_coeff
-            * (prb->dir & FLAG_FWD ? (kind == DATA ? 5e-7 : 0)
-                                   : (kind == DATA || kind == SS ? 2e-7 : 0));
-    const int64_t N = kind == SS ? 1 : prb->n;
-    const int64_t C = kind == DATA ? prb->c : (kind == SS ? 2 * prb->c : 1);
-
-    const auto nelems = N * C;
-    if (nelems == 0) return res->state = PASSED, OK;
-
-    res->total += nelems;
-
-    diff_norm_t diff_norm;
-    for (int64_t n = 0; n < N; n++) {
-        for (int64_t c = 0; c < C; c++) {
-            int64_t i = n * C + c;
-            const float dt = dt_mem.get_elem(i);
-            const float fp0 = fp_mem.get_elem(i);
-            const float fp = kind == DATA
-                    ? round_to_nearest_representable(prb->dt, fp0)
-                    : fp0;
-            diff_norm.update(fp, dt);
-
-            const float diff = fabsf(fp - dt);
-            const float rel_diff = diff / (fabsf(fp) > FLT_MIN ? fabsf(fp) : 1);
-            bool ok = (fabsf(fp) > 1e-5 ? rel_diff : diff) <= eps;
-
-            /* When the error is larger than eps, It could be
-         * due to catastrophic cancellation in final result
-         * which is computed as `Y = a * X + b`.
-         * When `a * X`  is close to `b` and `sign(a * X) = - sign(b)`.
-         * Then large error in `a * X` could result in a final
-         * result (which has a cancellation i.e. `|Y| = |a*X - (-b)|`)
-         * which has no meaningful digits left in mantissa.*/
-            if (!ok && (prb->dir & FLAG_FWD) && kind == DATA && ss) {
-                const float beta = ((float *)*ss)[prb->c + c];
-                /* Using an empirically derived threshold,
-             * check if cancellation error
-             * in `|Y| = |a*X - (-b)|` is huge.*/
-                bool maybe_cancellation_error
-                        = (fabsf(fp - beta)
-                                  / (fabsf(fp) > FLT_MIN ? fabsf(fp) : 1))
-                        > 1.0f;
-                if (maybe_cancellation_error) {
-                    /* Check for error in `a * X` */
-                    float diff_aX = fabsf((fp - beta) - (dt - beta));
-                    float rel_diff_aX = diff_aX
-                            / (fabsf(fp - beta) > FLT_MIN ? fabsf(fp - beta)
-                                                          : 1);
-                    ok = rel_diff_aX <= eps;
-                }
-            }
-
-            res->errors += !ok;
-
-            bool dump = false || (!ok && (res->errors < 10 || verbose >= 10))
-                    || (verbose >= 50 && i < 30);
-            if (dump) {
-                std::stringstream ss;
-                if (kind == SS) {
-                    ss << i / prb->c << "," << i % prb->c;
-                } else {
-                    int64_t size = kind == DATA ? N * C : N;
-                    size_t ndims = kind == DATA ? prb->ndims : prb->ndims - 1;
-                    const char *separator = "";
-                    for (size_t j = 0; j < ndims; j++) {
-                        size /= prb->dims[j];
-                        ss << separator << (i / size) % prb->dims[j];
-                        separator = ",";
-                    }
-                }
-                std::string ind_str = ss.str();
-                BENCHDNN_PRINT(0,
-                        "[%4ld][%s%s][%s] fp:%8g dt:%8g diff:%8g rdiff:%8g\n",
-                        (long)i, prb->dir & FLAG_BWD ? "D_" : "", skind,
-                        ind_str.c_str(), fp, dt, diff, rel_diff);
-            }
-        }
-    }
-
-    diff_norm.done();
-
-    if (res->errors || verbose >= 5) {
-        const int vl = res->errors ? 0 : 2;
-        BENCHDNN_PRINT(vl,
-                "@@@ [%s%s] diff: l0(``%g``) "
-                "l1:(%g,%g,%g,``%g``) "
-                "l2:(%g,%g,%g,``%g``) "
-                "l8:(%g,%g,%g,``%g``)\n",
-                prb->dir & FLAG_BWD ? "D_" : "", skind,
-                diff_norm.rel_diff(norm_t::L0), diff_norm.a_[norm_t::L1],
-                diff_norm.b_[norm_t::L1], diff_norm.diff_[norm_t::L1],
-                diff_norm.rel_diff(norm_t::L1), diff_norm.a_[norm_t::L2],
-                diff_norm.b_[norm_t::L2], diff_norm.diff_[norm_t::L2],
-                diff_norm.rel_diff(norm_t::L2), diff_norm.a_[norm_t::L8],
-                diff_norm.b_[norm_t::L8], diff_norm.diff_[norm_t::L8],
-                diff_norm.rel_diff(norm_t::L8));
-    }
-
-    if (res->errors) res->state = FAILED;
-
-    if (res->state == UNTESTED) res->state = PASSED; /* optimism */
-
-    return res->state == FAILED ? FAIL : OK;
-}
-
 static int init_pd(dnnl_engine_t engine, const prb_t *prb,
         dnnl_primitive_desc_t &lpd, res_t *res, dir_t dir,
         const_dnnl_primitive_desc_t hint) {
@@ -559,14 +449,28 @@ int doit(const prb_t *prb, res_t *res) {
 
         if (bench_mode & CORR) {
             compute_ref_fwd(prb, src_fp, mean_fp, var_fp, ss_fp, dst_fp);
+
+            compare::compare_t cmp_data;
+            const int digits_f32 = 24;
+            const float eps = (1 << (digits_f32 - digits_dt(prb->dt))) * 5e-7;
+            cmp_data.set_threshold(eps);
+            cmp_data.set_data_kind(DATA);
+            // TODO: improve bf16 filling
+            if (prb->dt == dnnl_bf16) cmp_data.set_zero_trust_percent(100.f);
+            SAFE(cmp_data.compare(dst_fp, dst_dt, prb->attr, res), WARN);
+
             if (!(prb->flags & GLOB_STATS) && !(prb->dir & FLAG_INF)) {
-                dnn_mem_t mean(mean_dt, fp, stat_tag, test_engine);
-                dnn_mem_t var(var_dt, fp, stat_tag, test_engine);
-                SAFE(compare(prb, MEAN, mean_fp, mean, res), WARN);
-                SAFE(compare(prb, VAR, var_fp, var, res), WARN);
+                compare::compare_t cmp_mean;
+                cmp_mean.set_data_kind(MEAN);
+                if (prb->dt == dnnl_bf16)
+                    cmp_mean.set_zero_trust_percent(100.f);
+                SAFE(cmp_mean.compare(mean_fp, mean_dt, prb->attr, res), WARN);
+
+                compare::compare_t cmp_var;
+                cmp_var.set_data_kind(VAR);
+                if (prb->dt == dnnl_bf16) cmp_var.set_zero_trust_percent(100.f);
+                SAFE(cmp_var.compare(var_fp, var_dt, prb->attr, res), WARN);
             }
-            dnn_mem_t dst(dst_dt, fp, tag, test_engine);
-            SAFE(compare(prb, DATA, dst_fp, dst, res, &ss_fp), WARN);
         }
     } else {
         const auto &d_data_md = q(DNNL_ARG_DIFF_DST);
@@ -604,11 +508,21 @@ int doit(const prb_t *prb, res_t *res) {
         if (bench_mode & CORR) {
             compute_ref_bwd(prb, src_fp, mean_fp, var_fp, d_dst_fp, ss_fp,
                     d_src_fp, d_ss_fp);
+
+            compare::compare_t cmp_data;
+            const int digits_f32 = 24;
+            const float eps = (1 << (digits_f32 - digits_dt(prb->dt))) * 2e-7;
+            cmp_data.set_threshold(eps);
+            cmp_data.set_data_kind(DATA);
+            cmp_data.set_zero_trust_percent(100.f); // TODO: Consider enabling
+            SAFE(cmp_data.compare(d_src_fp, d_src_dt, prb->attr, res), WARN);
+
             if ((prb->flags & USE_SCALESHIFT) && (prb->dir & FLAG_WEI)) {
-                SAFE(compare(prb, SS, d_ss_fp, d_ss_dt, res), WARN);
+                compare::compare_t cmp_ss;
+                cmp_ss.set_threshold(eps);
+                cmp_ss.set_data_kind(SS);
+                SAFE(cmp_ss.compare(d_ss_fp, d_ss_dt, prb->attr, res), WARN);
             }
-            dnn_mem_t d_src(d_src_dt, fp, tag, test_engine);
-            SAFE(compare(prb, DATA, d_src_fp, d_src, res), WARN);
         }
     }
 

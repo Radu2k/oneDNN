@@ -49,15 +49,28 @@ private:
     using reg32_t = const Xbyak::Reg32;
     using opmask_t = const Xbyak::Opmask;
     using zmm = const Xbyak::Zmm;
+    using ymm = const Xbyak::Ymm;
+    using xmm = const Xbyak::Xmm;
 
-    enum { typesize = sizeof(int8_t), k_step = 64 };
+    enum {
+        typesize = sizeof(int8_t),
+        num_comp_acc = 8,
+        k_loop_unroll = 16,
+        k_step = 64
+    };
     dim_t src_stride = 0, tr_src_stride = 0;
+    bool do_compute_compensation = false;
 
     opmask_t kTail_load = k7;
     opmask_t kTail_store = k6;
+    opmask_t kTail_comp = k5;
 
     reg64_t reg_src = rax;
     reg64_t reg_tr_src = rbx;
+    reg64_t reg_K_start = abi_not_param1;
+
+    reg64_t reg_zp_comp_buf_ptr = rdx;
+    reg64_t reg_zp_comp_res_ptr = rsi;
 
     reg64_t reg_M_blk = r9;
     reg64_t reg_K_blk = r10;
@@ -66,111 +79,280 @@ private:
     reg64_t reg_aux_tr_src = r13;
     reg64_t regq_tmp = r14;
     reg64_t imm_addr64 = r15;
+    reg64_t reg_zp_ab_comp_ptr = imm_addr64;
+    reg64_t reg_zp_b_neg_val_ptr = reg_K_blk;
 
-    zmm zmm_comp_add = zmm30;
-    zmm zmm_zero = zmm31;
+    zmm zmm_comp_mul = zmm30;
+    zmm zmm_comp_add = zmm31;
 
     // Allows to shift A data by 128 for s8s8 problem for AVX512 in copy
     // routine, not in compute kernel. It's disabled for now, as it
     // requires setting some hint to brgemm kerenel to avoid double shifting
     const bool allow_input_shift_for_s8s8 = false;
 
+    Xbyak::Zmm get_zmm_comp_acc(int i) {
+        assert(i >= 0 && i < num_comp_acc);
+        return Xbyak::Zmm(i);
+    }
+
+    Xbyak::Zmm get_zmm_copy(int i) {
+        assert(i >= 0 && i < k_loop_unroll);
+        return Xbyak::Zmm(29 - i);
+    }
+    void reduce_compensation_across_accumulators(int num_accumulators);
     void copy_row(int ncolumns);
+    void copy_K_loop(bool is_K_tail, bool is_first_K_iter, bool is_last_K_iter);
+    void copy_M_loop(bool is_K_tail, bool is_first_K_iter, bool is_last_K_iter);
     void generate() override;
 };
 
+void jit_brgemm_matmul_copy_A_int8_t::reduce_compensation_across_accumulators(
+        int num_accumulators) {
+    int num = num_accumulators;
+    while (num > 1) {
+        for (int i = 0; i < num / 2; i++) {
+            const auto zmm_acc0 = get_zmm_comp_acc(i);
+            const auto zmm_acc1 = get_zmm_comp_acc(div_up(num, 2) + i);
+            vpaddd(zmm_acc0, zmm_acc0, zmm_acc1);
+        }
+        num = div_up(num, 2);
+    }
+}
+
+void jit_brgemm_matmul_copy_A_int8_t::copy_K_loop(
+        bool is_K_tail, bool is_first_K_iter, bool is_last_K_iter) {
+    MAYBE_UNUSED(is_K_tail);
+    MAYBE_UNUSED(is_first_K_iter);
+    MAYBE_UNUSED(is_last_K_iter);
+
+    const int K_blk = is_K_tail ? conf_->K % conf_->K_blk
+                                : nstl::min(conf_->K, conf_->K_blk);
+    const int k_tail = K_blk % k_step;
+    const int num_k_iters = K_blk / k_step;
+    const int num_acc = utils::saturate(1, (int)num_comp_acc, num_k_iters);
+
+    if (do_compute_compensation) {
+        for (int i = 0; i < num_acc; i++) {
+            const auto zmm_acc = get_zmm_comp_acc(i);
+            vpxord(zmm_acc, zmm_acc, zmm_acc);
+        }
+    }
+
+    auto maybe_compute_compensation = [=](int k_idx, zmm zmm_copy) {
+        if (do_compute_compensation) {
+            const auto zmm_comp_acc = get_zmm_comp_acc(k_idx % num_acc);
+            if (conf_->src_dt == data_type::s8)
+                vpdpbusd(zmm_comp_acc, zmm_comp_mul, zmm_copy);
+            else
+                vpdpbusd(zmm_comp_acc, zmm_copy, zmm_comp_mul);
+        }
+    };
+
+    for (int kb = 0; kb < div_up(num_k_iters, k_loop_unroll); kb++) {
+        int k_start = 0;
+        int k_end = nstl::min(
+                (int)k_loop_unroll, num_k_iters - kb * k_loop_unroll);
+        for (int k = k_start; k < k_end; k++) {
+            const int k_idx = kb * k_loop_unroll + k;
+            const size_t offset = (size_t)k_idx * k_step;
+            vmovdqu8(get_zmm_copy(k), EVEX_compress_addr(reg_src, offset));
+
+            maybe_compute_compensation(k_idx, get_zmm_copy(k));
+        }
+        if (allow_input_shift_for_s8s8 && conf_->s8s8_compensation_required) {
+            for (int k = k_start; k < k_end; k++)
+                vpaddb(get_zmm_copy(k), get_zmm_copy(k), zmm_comp_add);
+        }
+
+        for (int k = k_start; k < k_end; k++) {
+            const size_t offset = ((size_t)kb * k_loop_unroll + k) * k_step;
+            vmovdqu8(EVEX_compress_addr(reg_tr_src, offset), get_zmm_copy(k));
+        }
+    }
+
+    if (k_tail > 0) {
+        const auto kmovq = [=](Opmask k, size_t q) {
+            mov(regq_tmp, q);
+            jit_generator::kmovq(k, regq_tmp);
+        };
+        const size_t k_gran = conf_->isa == avx512_core_bf16_amx_int8 ? 4 : 1;
+        const size_t tail_mask_load = size_t(((size_t)1 << k_tail) - 1);
+        kmovq(kTail_load, tail_mask_load);
+        const size_t k_tail_st = rnd_up(k_tail, k_gran);
+        const size_t tail_mask_store = k_tail_st == k_step
+                ? 0xffffffffffffffff
+                : size_t(((size_t)1 << k_tail_st) - 1);
+        kmovq(kTail_store, tail_mask_store);
+
+        auto zmm_tail = get_zmm_copy(0) | kTail_load | T_z;
+        vmovdqu8(zmm_tail, EVEX_compress_addr(reg_src, num_k_iters * k_step));
+
+        maybe_compute_compensation(0, get_zmm_copy(0));
+
+        if (allow_input_shift_for_s8s8 && conf_->s8s8_compensation_required)
+            vpaddb(get_zmm_copy(0), get_zmm_copy(0), zmm_comp_add);
+
+        vmovdqu8(EVEX_compress_addr(reg_tr_src, num_k_iters * k_step),
+                get_zmm_copy(0) | kTail_store);
+    }
+
+    if (do_compute_compensation) {
+        reduce_compensation_across_accumulators(num_acc);
+
+        const auto addr_buf = zword[reg_zp_comp_buf_ptr];
+        if (!is_first_K_iter)
+            vpaddd(get_zmm_comp_acc(0), get_zmm_comp_acc(0), addr_buf);
+        if (!is_last_K_iter) {
+            vmovups(addr_buf, get_zmm_comp_acc(0));
+            return;
+        }
+
+        // is_last_K_iter == true: we need to reduce values within acc
+        // register, add mixed ab_compensation component if any, multiply
+        // it by negative zp_b_value and finally store the reslt
+
+        // step 1: reduce values within acc register
+        const auto ymm_red0 = ymm(get_zmm_comp_acc(0).getIdx());
+        const auto ymm_red1 = ymm(get_zmm_comp_acc(1).getIdx());
+        vextracti64x4(ymm_red1, get_zmm_comp_acc(0), 1);
+        vphaddd(ymm_red0, ymm_red0, ymm_red1);
+        vpxord(ymm_red1, ymm_red1, ymm_red1);
+        vphaddd(ymm_red0, ymm_red0, ymm_red1);
+        vphaddd(ymm_red0, ymm_red0, ymm_red1);
+        const auto xmm_red1 = xmm(ymm_red1.getIdx());
+        vextractf128(xmm_red1, ymm_red0, 1);
+        vpaddd(ymm_red0, ymm_red0, ymm_red1);
+
+        // step 2: add -K * zp_a_val as mixed ab_compensation component
+        if (conf_->src_zp_type != brgemm_broadcast_t::none) {
+            assert(conf_->src_zp_type != brgemm_broadcast_t::per_tensor);
+            reg64_t reg_zp_ab_comp_ptr = imm_addr64;
+            mov(reg_zp_ab_comp_ptr, ptr[param1 + GET_OFF(zp_ab_comp_ptr)]);
+
+            const auto addr_ab_comp = zword_b[reg_zp_ab_comp_ptr];
+            const auto zmm_res = get_zmm_comp_acc(0) | kTail_comp;
+            vpaddd(zmm_res, get_zmm_comp_acc(0), addr_ab_comp);
+        }
+
+        // step 3: multiply by zp_b_val
+        mov(reg_zp_b_neg_val_ptr, ptr[param1 + GET_OFF(zp_b_neg_value_ptr)]);
+        const auto zmm_zp_b_neg_val = get_zmm_comp_acc(1);
+        vbroadcastss(zmm_zp_b_neg_val, ptr[reg_zp_b_neg_val_ptr]);
+        vpmulld(get_zmm_comp_acc(0), get_zmm_comp_acc(0), zmm_zp_b_neg_val);
+
+        // step 4: store the final result value
+        vmovups(ptr[reg_zp_comp_res_ptr], get_zmm_comp_acc(0) | kTail_comp);
+    }
+}
+
+void jit_brgemm_matmul_copy_A_int8_t::copy_M_loop(
+        bool is_K_tail, bool is_first_K_iter, bool is_last_K_iter) {
+
+    if (do_compute_compensation) {
+        mov(imm_addr64, 1);
+        vpbroadcastb(zmm_comp_mul, imm_addr64.cvt8());
+        if (!(is_first_K_iter && is_last_K_iter))
+            mov(reg_zp_comp_buf_ptr,
+                    ptr[param1 + GET_OFF(zp_b_compensation_buffer_ptr)]);
+
+        if (is_last_K_iter) {
+            mov(reg_zp_comp_res_ptr,
+                    ptr[param1 + GET_OFF(zp_a_compensation_result_ptr)]);
+            const auto kmovw = [=](Opmask k, size_t q) {
+                mov(regq_tmp, q);
+                jit_generator::kmovw(k, imm_addr64.cvt32());
+            };
+            kmovw(kTail_comp, 1);
+        }
+    }
+
+    Label loop_M;
+    L(loop_M);
+
+    copy_K_loop(is_K_tail, is_first_K_iter, is_last_K_iter);
+
+    add(reg_src, src_stride);
+    add(reg_tr_src, tr_src_stride);
+    if (do_compute_compensation) {
+        // shift comp pointers
+        if (!(is_first_K_iter && is_last_K_iter))
+            add(reg_zp_comp_buf_ptr, sizeof(int32_t) * 16);
+        if (is_last_K_iter) add(reg_zp_comp_res_ptr, sizeof(int32_t));
+    }
+
+    dec(reg_M_blk);
+    jnz(loop_M, T_NEAR);
+}
+
 void jit_brgemm_matmul_copy_A_int8_t::generate() {
     preamble();
-    vpxord(zmm_zero, zmm_zero, zmm_zero);
     src_stride = conf_->K * typesize;
     const dim_t LDA = conf_->use_buffer_a_tail_only ? (dim_t)conf_->wei_k_blk
                                                     : conf_->LDA;
     tr_src_stride = LDA * typesize;
+    do_compute_compensation = conf_->has_zero_point_b;
 
     mov(reg_src, ptr[param1 + GET_OFF(src)]);
     mov(reg_tr_src, ptr[param1 + GET_OFF(tr_src)]);
     mov(reg_K_blk, ptr[param1 + GET_OFF(current_K_blk)]);
     mov(reg_M_blk, ptr[param1 + GET_OFF(current_M_blk)]);
 
-    if (allow_input_shift_for_s8s8 && conf_->signed_input) {
+    if (allow_input_shift_for_s8s8 && conf_->s8s8_compensation_required) {
         mov(imm_addr64, 128);
         vpbroadcastb(zmm_comp_add, imm_addr64.cvt8());
     }
 
-    auto copy_K_loop = [=](bool is_K_tail) {
-        const int k_unroll = 16;
-        const int K_blk = is_K_tail ? conf_->K % conf_->K_blk
-                                    : nstl::min(conf_->K, conf_->K_blk);
-        const int k_tail = K_blk % k_step;
-        const int num_k_iters = K_blk / k_step;
-        for (int kb = 0; kb < div_up(num_k_iters, k_unroll); kb++) {
-            int k_start = kb * k_unroll;
-            int k_end = nstl::min(k_start + k_unroll, num_k_iters);
-            for (int k = k_start; k < k_end; k++) {
-                vmovdqu8(zmm(k), EVEX_compress_addr(reg_src, k * k_step));
-            }
-            if (allow_input_shift_for_s8s8 && conf_->signed_input) {
-                for (int k = k_start; k < k_end; k++)
-                    vpaddb(zmm(k), zmm(k), zmm_comp_add);
-            }
+    auto copy_body = [=](bool is_first_K_iter, bool is_last_K_iter) {
+        Label copy_body_done;
+        // might be different from conf_->K_tail
+        const dim_t K_blk_tail
+                = conf_->K_tail > 0 ? conf_->K % conf_->K_blk : 0;
+        if (K_blk_tail > 0) {
+            Label not_K_tail;
+            cmp(reg_K_blk, K_blk_tail);
+            jne(not_K_tail, T_NEAR);
+            copy_M_loop(true, is_first_K_iter, is_last_K_iter);
+            jmp(copy_body_done, T_NEAR);
 
-            for (int k = k_start; k < k_end; k++) {
-                vmovdqu8(EVEX_compress_addr(reg_tr_src, k * k_step), zmm(k));
-            }
-        }
-        if (k_tail > 0) {
-            auto kmovq = [=](Opmask k, size_t q) {
-                mov(regq_tmp, q);
-                jit_generator::kmovq(k, regq_tmp);
-            };
-            const size_t k_gran
-                    = conf_->isa == avx512_core_bf16_amx_int8 ? 4 : 1;
-            const size_t tail_mask_load = size_t(((size_t)1 << k_tail) - 1);
-            kmovq(kTail_load, tail_mask_load);
-            size_t k_tail_st = rnd_up(k_tail, k_gran);
-            const size_t tail_mask_store = k_tail_st == k_step
-                    ? 0xffffffffffffffff
-                    : size_t(((size_t)1 << k_tail_st) - 1);
-            kmovq(kTail_store, tail_mask_store);
+            L(not_K_tail);
         }
 
-        if (k_tail > 0) {
-            auto zmm_tail = zmm(0) | kTail_load | T_z;
-            vmovdqu8(zmm_tail,
-                    EVEX_compress_addr(reg_src, num_k_iters * k_step));
-            if (allow_input_shift_for_s8s8 && conf_->signed_input)
-                vpaddb(zmm(0), zmm(0), zmm_comp_add);
-
-            vmovdqu8(EVEX_compress_addr(reg_tr_src, num_k_iters * k_step),
-                    zmm(0) | kTail_store);
-        }
-    };
-    auto copy_M_loop = [=](bool is_K_tail) {
-        Label loop_M;
-        L(loop_M);
-
-        copy_K_loop(is_K_tail);
-
-        add(reg_src, src_stride);
-        add(reg_tr_src, tr_src_stride);
-        dec(reg_M_blk);
-        jnz(loop_M, T_NEAR);
+        copy_M_loop(false, is_first_K_iter, is_last_K_iter);
+        L(copy_body_done);
     };
 
     Label done;
-    // might be different from conf_->K_tail
-    const dim_t K_blk_tail = conf_->K_tail > 0 ? conf_->K % conf_->K_blk : 0;
-    if (K_blk_tail > 0) {
-        Label not_K_tail;
-        cmp(reg_K_blk, K_blk_tail);
-        jne(not_K_tail, T_NEAR);
-        copy_M_loop(true);
+    if (do_compute_compensation) {
+        assert(conf_->wei_zp_type == brgemm_broadcast_t::per_tensor);
+
+        mov(reg_K_start, ptr[param1 + GET_OFF(current_K_start)]);
+        const auto last_K_threshold
+                = rnd_up(conf_->K, conf_->K_blk) - conf_->K_blk;
+        Label not_first, not_first_not_last;
+        cmp(reg_K_start, 0);
+        jne(not_first, T_NEAR);
+        {
+            // first K iteration
+            Label first_not_last;
+            cmp(reg_K_start, last_K_threshold);
+            jl(first_not_last, T_NEAR);
+            copy_body(true, true);
+            jmp(done, T_NEAR);
+
+            L(first_not_last);
+            copy_body(true, false);
+            jmp(done, T_NEAR);
+        }
+
+        L(not_first);
+        cmp(reg_K_start, last_K_threshold);
+        jl(not_first_not_last, T_NEAR);
+
+        copy_body(false, true);
         jmp(done, T_NEAR);
-
-        L(not_K_tail);
+        L(not_first_not_last);
     }
-
-    copy_M_loop(false);
+    copy_body(false, false);
     L(done);
 
     postamble();
@@ -196,12 +378,15 @@ private:
     enum { typesize = sizeof(int8_t), k_blk_step = 4, n_blk_step = 64 };
     dim_t src_stride = 0, tr_src_stride = 0;
     bool is_amx = false;
+    bool do_compute_compensation = false;
 
     opmask_t kTail = k7;
 
     reg64_t reg_src = rax;
     reg64_t reg_tr_src = rbx;
     reg64_t reg_comp_ptr = rdx;
+    reg64_t reg_zp_comp_ptr = r11;
+    reg64_t reg_zp_a_neg_val_ptr = r12;
 
     reg64_t reg_K_iters = r8;
     reg64_t reg_N_blk = r9;
@@ -217,6 +402,8 @@ private:
     zmm zmm_zero = zmm31;
 
     Xbyak::Zmm get_comp_acc(int i) { return Xbyak::Zmm(25 - i); }
+    Xbyak::Zmm get_zmm_zp_comp_res(int i) { return get_comp_acc(i); }
+    Xbyak::Zmm get_zmm_oscale_comp_res(int i) { return Xbyak::Zmm(i); }
     void copy_4x64_vnni_avx512_core(int nrows, int ncolumns);
     void copy_4x64_vnni_amx(int nrows, int ncolumns);
     void copy_4x64_vnni(int nrows, int ncolumns);
@@ -241,7 +428,7 @@ void jit_brgemm_matmul_copy_B_int8_t::copy_4x64_vnni_amx(
     if (ncolumns < n_blk_step) kmovq(kTail, tail_mask);
 
     const int blk_sz = 6;
-    const int max_unroll = (conf_->signed_input ? 21 : 25) / blk_sz;
+    const int max_unroll = (do_compute_compensation ? 21 : 25) / blk_sz;
     auto get_zmm = [=](int blk, int idx) {
         assert(idx >= 0 && idx < blk_sz && blk >= 0);
         auto reg_idx = blk_sz * blk + idx;
@@ -285,12 +472,16 @@ void jit_brgemm_matmul_copy_B_int8_t::copy_4x64_vnni_amx(
         vpermi2b(get_zmm(k, 1), get_zmm(k, 4), get_zmm(k, 0));
         dim_t tr_src_off_base = (kb * max_unroll + k) * tr_src_stride;
         vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base), get_zmm(k, 1));
+        if (do_compute_compensation)
+            vpdpbusd(get_comp_acc(0), zmm_comp_mul, get_zmm(k, 1));
 
         if (ncolumns > 16) {
             vmovups(get_zmm(k, 3), vreg_idx_hi_128);
             vpermi2b(get_zmm(k, 3), get_zmm(k, 4), get_zmm(k, 0));
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 64),
                     get_zmm(k, 3));
+            if (do_compute_compensation)
+                vpdpbusd(get_comp_acc(1), zmm_comp_mul, get_zmm(k, 3));
         } else if (conf_->wei_n_blk > 16) {
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 64),
                     zmm_zero);
@@ -301,6 +492,8 @@ void jit_brgemm_matmul_copy_B_int8_t::copy_4x64_vnni_amx(
             vpermi2b(get_zmm(k, 4), get_zmm(k, 5), get_zmm(k, 2));
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 128),
                     get_zmm(k, 4));
+            if (do_compute_compensation)
+                vpdpbusd(get_comp_acc(2), zmm_comp_mul, get_zmm(k, 4));
         } else if (conf_->wei_n_blk > 32) {
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 128),
                     zmm_zero);
@@ -311,6 +504,8 @@ void jit_brgemm_matmul_copy_B_int8_t::copy_4x64_vnni_amx(
             vpermi2b(get_zmm(k, 0), get_zmm(k, 5), get_zmm(k, 2));
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 192),
                     get_zmm(k, 0));
+            if (do_compute_compensation)
+                vpdpbusd(get_comp_acc(3), zmm_comp_mul, get_zmm(k, 0));
         } else if (conf_->wei_n_blk > 48) {
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 192),
                     zmm_zero);
@@ -329,7 +524,7 @@ void jit_brgemm_matmul_copy_B_int8_t::copy_4x64_vnni_avx512_core(
     if (ncolumns < n_blk_step) kmovq(kTail, tail_mask);
 
     const int blk_sz = 6;
-    const int max_unroll = (conf_->signed_input ? 21 : 25) / blk_sz;
+    const int max_unroll = (do_compute_compensation ? 21 : 25) / blk_sz;
     auto get_zmm = [=](int blk, int idx) {
         assert(idx >= 0 && idx < blk_sz && blk >= 0);
         auto reg_idx = blk_sz * blk + idx;
@@ -382,7 +577,7 @@ void jit_brgemm_matmul_copy_B_int8_t::copy_4x64_vnni_avx512_core(
         vpermi2q(get_zmm(k, 3), get_zmm(k, 0), get_zmm(k, 2));
         dim_t tr_src_off_base = (kb * max_unroll + k) * tr_src_stride;
         vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base), get_zmm(k, 3));
-        if (conf_->signed_input)
+        if (do_compute_compensation)
             vpdpbusd(get_comp_acc(0), zmm_comp_mul, get_zmm(k, 3));
 
         if (ncolumns > 16) {
@@ -390,7 +585,7 @@ void jit_brgemm_matmul_copy_B_int8_t::copy_4x64_vnni_avx512_core(
             vpermi2q(get_zmm(k, 5), get_zmm(k, 0), get_zmm(k, 2));
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 64),
                     get_zmm(k, 5));
-            if (conf_->signed_input)
+            if (do_compute_compensation)
                 vpdpbusd(get_comp_acc(1), zmm_comp_mul, get_zmm(k, 5));
         } else if (conf_->wei_n_blk > 16) {
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 64),
@@ -402,7 +597,7 @@ void jit_brgemm_matmul_copy_B_int8_t::copy_4x64_vnni_avx512_core(
             vpermi2q(get_zmm(k, 0), get_zmm(k, 1), get_zmm(k, 4));
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 128),
                     get_zmm(k, 0));
-            if (conf_->signed_input)
+            if (do_compute_compensation)
                 vpdpbusd(get_comp_acc(2), zmm_comp_mul, get_zmm(k, 0));
         } else if (conf_->wei_n_blk > 32) {
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 128),
@@ -414,7 +609,7 @@ void jit_brgemm_matmul_copy_B_int8_t::copy_4x64_vnni_avx512_core(
             vpermi2q(get_zmm(k, 2), get_zmm(k, 1), get_zmm(k, 4));
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 192),
                     get_zmm(k, 2));
-            if (conf_->signed_input)
+            if (do_compute_compensation)
                 vpdpbusd(get_comp_acc(3), zmm_comp_mul, get_zmm(k, 2));
         } else if (conf_->wei_n_blk > 48) {
             vmovups(EVEX_compress_addr(reg_tr_src, tr_src_off_base + 192),
@@ -429,6 +624,8 @@ void jit_brgemm_matmul_copy_B_int8_t::generate() {
     src_stride = conf_->N * typesize;
     tr_src_stride = conf_->LDB * k_blk_step * typesize;
     is_amx = conf_->isa == avx512_core_bf16_amx_int8;
+    do_compute_compensation
+            = conf_->s8s8_compensation_required || conf_->has_zero_point_a;
 
     mov(reg_src, ptr[param1 + GET_OFF(src)]);
     mov(reg_tr_src, ptr[param1 + GET_OFF(tr_src)]);
@@ -482,9 +679,7 @@ void jit_brgemm_matmul_copy_B_int8_t::generate() {
     vmovdqa64(vreg_idx_hi_128,
             is_amx ? (const void *)idx_hi_8 : (const void *)idx_hi_128);
 
-    if (conf_->signed_input) {
-        mov(reg_comp_ptr, ptr[param1 + GET_OFF(compensation_ptr)]);
-        mov(reg_K_start, ptr[param1 + GET_OFF(current_K_start)]);
+    if (do_compute_compensation) {
         int n_iters = div_up(conf_->wei_n_blk, 16);
         for (int i = 0; i < n_iters; i++)
             vpxord(get_comp_acc(i), get_comp_acc(i), get_comp_acc(i));
@@ -548,37 +743,89 @@ void jit_brgemm_matmul_copy_B_int8_t::generate() {
     compute_K_loop(false);
     L(done);
 
-    if (conf_->signed_input) {
+    if (do_compute_compensation) {
+        const bool req_s8s8_comp = conf_->s8s8_compensation_required;
+        const bool req_zp_comp = conf_->has_zero_point_a;
+        assert(IMPLICATION(req_zp_comp,
+                conf_->src_zp_type == brgemm_broadcast_t::per_tensor));
+
         Label skip_acc, store;
-        mov(reg_comp_ptr, ptr[param1 + GET_OFF(compensation_ptr)]);
+        if (req_s8s8_comp)
+            mov(reg_comp_ptr, ptr[param1 + GET_OFF(compensation_ptr)]);
+        if (req_zp_comp)
+            mov(reg_zp_comp_ptr, ptr[param1 + GET_OFF(zp_a_compensation_ptr)]);
+
         mov(reg_K_start, ptr[param1 + GET_OFF(current_K_start)]);
         cmp(reg_K_start, 0);
         je(skip_acc, T_NEAR);
         int n_iters = div_up(conf_->wei_n_blk, 16);
-        for (int i = 0; i < n_iters; i++)
-            vpaddd(get_comp_acc(i), get_comp_acc(i),
-                    EVEX_compress_addr(reg_comp_ptr, i * 64));
+        if (req_s8s8_comp) {
+            for (int i = 0; i < n_iters; i++) {
+                const auto zmm_acc = get_comp_acc(i);
+                const auto zmm_res = get_zmm_oscale_comp_res(i);
+                const auto addr = EVEX_compress_addr(reg_comp_ptr, i * 64);
+                vpaddd(zmm_res, zmm_acc, addr);
+            }
+        }
+
+        if (req_zp_comp) {
+            for (int i = 0; i < n_iters; i++) {
+                const auto zmm_acc = get_comp_acc(i);
+                const auto zmm_res = get_zmm_zp_comp_res(i);
+                const auto addr = EVEX_compress_addr(reg_zp_comp_ptr, i * 64);
+                vpaddd(zmm_res, zmm_acc, addr);
+            }
+        }
+
         L(skip_acc);
         cmp(reg_K_start, rnd_up(conf_->K, conf_->K_blk) - conf_->K_blk);
         jl(store, T_NEAR);
 
-        mov(imm_addr64, 0xffffffff);
-        vpbroadcastd(zmm_comp_mul, imm_addr64.cvt32());
-        mov(imm_addr64, 0x1);
-        auto zmm_one = zmm_zero;
-        vpbroadcastd(zmm_one, imm_addr64.cvt32());
+        if (req_s8s8_comp) {
+            mov(imm_addr64, 0xffffffff);
+            const auto zmm_all_bits_1 = zmm_comp_mul;
+            vpbroadcastd(zmm_all_bits_1, imm_addr64.cvt32());
+            mov(imm_addr64, 0x1);
+            const auto zmm_one_s32 = zmm_zero;
+            vpbroadcastd(zmm_one_s32, imm_addr64.cvt32());
 
-        for (int i = 0; i < n_iters; i++) {
-            // multiply by 128
-            vpslld(get_comp_acc(i), get_comp_acc(i), 7);
-            // change sign
-            vpandnq(get_comp_acc(i), get_comp_acc(i), zmm_comp_mul);
-            vpaddd(get_comp_acc(i), get_comp_acc(i), zmm_one);
+            for (int i = 0; i < n_iters; i++) {
+                const auto zmm_res = get_zmm_oscale_comp_res(i);
+                // multiply by 128
+                vpslld(zmm_res, zmm_res, 7);
+                // change sign
+                vpandnq(zmm_res, zmm_res, zmm_all_bits_1);
+                vpaddd(zmm_res, zmm_res, zmm_one_s32);
+            }
+        }
+
+        if (req_zp_comp) {
+            mov(reg_zp_a_neg_val_ptr,
+                    ptr[param1 + GET_OFF(zp_a_neg_value_ptr)]);
+            const auto zmm_zp_a_neg_val = vreg_idx_hi_128;
+            vbroadcastss(zmm_zp_a_neg_val, ptr[reg_zp_a_neg_val_ptr]);
+
+            for (int i = 0; i < n_iters; i++) {
+                const auto zmm_res = get_zmm_zp_comp_res(i);
+                vpmulld(zmm_res, zmm_res, zmm_zp_a_neg_val);
+            }
         }
 
         L(store);
-        for (int i = 0; i < n_iters; i++)
-            vmovups(EVEX_compress_addr(reg_comp_ptr, i * 64), get_comp_acc(i));
+        if (req_s8s8_comp) {
+            for (int i = 0; i < n_iters; i++) {
+                const auto zmm_res = get_zmm_oscale_comp_res(i);
+                const auto addr = EVEX_compress_addr(reg_comp_ptr, i * 64);
+                vmovups(addr, zmm_res);
+            }
+        }
+        if (req_zp_comp) {
+            for (int i = 0; i < n_iters; i++) {
+                const auto zmm_res = get_zmm_zp_comp_res(i);
+                const auto addr = EVEX_compress_addr(reg_zp_comp_ptr, i * 64);
+                vmovups(addr, zmm_res);
+            }
+        }
     }
 
     postamble();
@@ -608,6 +855,7 @@ private:
         k_blk_step = 64
     };
     dim_t src_stride = 0, tr_src_stride = 0;
+    bool do_compute_compensation = false;
 
     opmask_t k3333 = k1;
     opmask_t k5555 = k2;
@@ -625,11 +873,22 @@ private:
     reg64_t reg_N_iters = r9;
     reg64_t reg_src = r10;
     reg64_t reg_tr_src = r11;
+    reg64_t reg_zp_comp_ptr = r12;
+    reg64_t reg_zp_a_neg_val_ptr = r13;
+    reg64_t reg_K_start = r14;
 
-    reg64_t regq_tmp = r14;
-    reg32_t regw_tmp = r14d;
+    reg64_t regq_tmp = r15;
+    reg32_t regw_tmp = r15d;
+
+    zmm zmm_zp_a_neg_val = zmm29;
+    zmm zmm_comp_acc = zmm30;
+    zmm zmm_comp_mul = zmm31;
 
     void copy_16x64_vnni(int nrows, int ncolumns);
+    void compute_K_loop(bool is_N_tail, int curr_K_tail, bool is_first_K_iter,
+            bool is_last_K_iter);
+    void compute_N_loop(
+            int curr_K_tail, bool is_first_K_iter, bool is_last_K_iter);
 
     void generate() override;
 };
@@ -646,7 +905,8 @@ void jit_brgemm_matmul_copy_B_transposed_int8_t::copy_16x64_vnni(
     };
 
     auto tmp_zmm = [=](int i) {
-        assert(i >= 0 && i < 16);
+        // If compensation compute is required - last 4 zmms are reserved for it
+        assert(i >= 0 && i < 16 - do_compute_compensation * 4);
         return Zmm(16 + i);
     };
 
@@ -676,11 +936,14 @@ void jit_brgemm_matmul_copy_B_transposed_int8_t::copy_16x64_vnni(
 
     auto transpose16x8 = [=](int base_idx) {
         assert(base_idx == 0 || base_idx == 8);
+        // If compensation compute is required - use tmp(0) ... tmp(7)
+        // to not spoil reserved registers' values
+        const int tmp_corr_idx = do_compute_compensation * base_idx;
 
         // swap 1
         for (int i = 0; i < 4; i++) {
-            int src_idx0 = base_idx + i * 2;
-            int src_idx1 = src_idx0 + 1;
+            const int src_idx0 = base_idx + i * 2;
+            const int src_idx1 = src_idx0 + 1;
 
             int next_src_idx0 = src_idx0 + 2;
             int next_src_idx1 = src_idx1 + 2;
@@ -688,17 +951,13 @@ void jit_brgemm_matmul_copy_B_transposed_int8_t::copy_16x64_vnni(
 
             if (base_idx == 0 && i == 0) {
                 load(src_idx0);
-                if (src_idx1 < nrows)
-                    load(src_idx1);
-                else
-                    vpxord(src_zmm(src_idx1), src_zmm(src_idx1),
-                            src_zmm(src_idx1));
+                load(src_idx1);
             }
 
-            auto tmp0 = tmp_zmm(src_idx0);
-            auto tmp1 = tmp_zmm(src_idx1);
-            auto src0 = src_zmm(src_idx0);
-            auto src1 = src_zmm(src_idx1);
+            const auto tmp0 = tmp_zmm(src_idx0 - tmp_corr_idx);
+            const auto tmp1 = tmp_zmm(src_idx1 - tmp_corr_idx);
+            const auto src0 = src_zmm(src_idx0);
+            const auto src1 = src_zmm(src_idx1);
 
             if (next_src_idx0 < nrows && load_next) load(next_src_idx0);
             valignd(tmp0, src0, src0, 0x1);
@@ -711,14 +970,14 @@ void jit_brgemm_matmul_copy_B_transposed_int8_t::copy_16x64_vnni(
         }
         // swap 2
         for (int i = 0; i < 4; i++) {
-            int select_half = (i < 2) ? 0 : 2;
-            int src_idx0 = base_idx + i + select_half + 0;
-            int src_idx2 = src_idx0 + 2;
+            const int select_half = (i < 2) ? 0 : 2;
+            const int src_idx0 = base_idx + i + select_half + 0;
+            const int src_idx2 = src_idx0 + 2;
 
-            auto tmp0 = tmp_zmm(src_idx0);
-            auto tmp1 = tmp_zmm(src_idx2);
-            auto src0 = src_zmm(src_idx0);
-            auto src2 = src_zmm(src_idx2);
+            const auto tmp0 = tmp_zmm(src_idx0 - tmp_corr_idx);
+            const auto tmp1 = tmp_zmm(src_idx2 - tmp_corr_idx);
+            const auto src0 = src_zmm(src_idx0);
+            const auto src2 = src_zmm(src_idx2);
 
             valignd(tmp0, src0, src0, 0x2);
             valignd(tmp1, src2, src2, 0xe);
@@ -728,12 +987,12 @@ void jit_brgemm_matmul_copy_B_transposed_int8_t::copy_16x64_vnni(
 
         // swap 4
         for (int i = 0; i < 4; i++) {
-            int src_idx0 = base_idx + i;
-            int src_idx4 = src_idx0 + 4;
+            const int src_idx0 = base_idx + i;
+            const int src_idx4 = src_idx0 + 4;
 
-            auto tmp0 = tmp_zmm(src_idx0);
-            auto src0 = src_zmm(src_idx0);
-            auto src4 = src_zmm(src_idx4);
+            const auto tmp0 = tmp_zmm(src_idx0 - tmp_corr_idx);
+            const auto src0 = src_zmm(src_idx0);
+            const auto src4 = src_zmm(src_idx4);
 
             vmovaps(tmp0, src0);
             vshuff32x4(src0 | kF0F0, src4, src4, 0xb1);
@@ -744,18 +1003,25 @@ void jit_brgemm_matmul_copy_B_transposed_int8_t::copy_16x64_vnni(
     auto fixup16x16 = [=]() {
         // swap 8
         for (int i = 0; i < 8; i++) {
-            auto tmp = tmp_zmm(i);
-            auto src0 = src_zmm(i);
-            auto src8 = src_zmm(8 + i);
+            const auto tmp = tmp_zmm(i);
+            const auto src0 = src_zmm(i);
+            const auto src8 = src_zmm(8 + i);
             vshuff64x2(tmp, src0, src8, 0x44);
+            if (do_compute_compensation)
+                vpdpbusd(zmm_comp_acc, zmm_comp_mul, tmp);
             store(tmp, i);
         }
 
         for (int i = 0; i < 8; i++) {
-            auto tmp = tmp_zmm(8 + i);
-            auto src0 = src_zmm(i);
-            auto src8 = src_zmm(8 + i);
+            // If compensation compute is required - last 4 zmms are reserved
+            const auto tmp = IMPLICATION(do_compute_compensation, i < 4)
+                    ? tmp_zmm(8 + i)
+                    : src_zmm((i - 4) / 2 + (i % 2) * 8);
+            const auto src0 = src_zmm(i);
+            const auto src8 = src_zmm(8 + i);
             vshuff64x2(tmp, src0, src8, 0xee);
+            if (do_compute_compensation)
+                vpdpbusd(zmm_comp_acc, zmm_comp_mul, tmp);
             store(tmp, 8 + i);
         }
     };
@@ -765,14 +1031,88 @@ void jit_brgemm_matmul_copy_B_transposed_int8_t::copy_16x64_vnni(
     fixup16x16();
 }
 
+void jit_brgemm_matmul_copy_B_transposed_int8_t::compute_K_loop(bool is_N_tail,
+        int curr_K_tail, bool is_first_K_iter, bool is_last_K_iter) {
+    MAYBE_UNUSED(is_first_K_iter);
+    MAYBE_UNUSED(is_last_K_iter);
+    const int N_chunk_tail = conf_->N % n_blk_step;
+    int nrows = is_N_tail ? N_chunk_tail : n_blk_step;
+    if (do_compute_compensation)
+        vpxord(zmm_comp_acc, zmm_comp_acc, zmm_comp_acc);
+
+    Label K_loop, K_loop_tail_or_done;
+    mov(reg_K_iters, ptr[param1 + GET_OFF(current_K_iters)]);
+
+    mov(reg_src, reg_src_base);
+    mov(reg_tr_src, reg_tr_src_base);
+    if (curr_K_tail > 0) {
+        cmp(reg_K_iters, k_blk_step);
+        jl(K_loop_tail_or_done, T_NEAR);
+    }
+
+    L(K_loop);
+    copy_16x64_vnni(nrows, k_blk_step);
+    add(reg_src, k_blk_step);
+    add(reg_tr_src, k_blk_step / vnni_granularity * tr_src_stride);
+
+    sub(reg_K_iters, k_blk_step);
+    cmp(reg_K_iters, k_blk_step);
+    jge(K_loop, T_NEAR);
+
+    L(K_loop_tail_or_done);
+
+    if (curr_K_tail > 0) copy_16x64_vnni(nrows, curr_K_tail);
+
+    if (do_compute_compensation) {
+        const auto addr = zword[reg_zp_comp_ptr];
+        if (!is_first_K_iter) vpaddd(zmm_comp_acc, zmm_comp_acc, addr);
+        if (is_last_K_iter)
+            vpmulld(zmm_comp_acc, zmm_comp_acc, zmm_zp_a_neg_val);
+
+        vmovups(addr, zmm_comp_acc);
+    }
+}
+
+void jit_brgemm_matmul_copy_B_transposed_int8_t::compute_N_loop(
+        int curr_K_tail, bool is_first_K_iter, bool is_last_K_iter) {
+    const int N_chunk_tail = conf_->N % n_blk_step;
+
+    Label N_loop, N_loop_tail_or_done;
+    if (N_chunk_tail > 0) {
+        cmp(reg_N_iters, n_blk_step);
+        jl(N_loop_tail_or_done, T_NEAR);
+    }
+
+    L(N_loop);
+    compute_K_loop(false, curr_K_tail, is_first_K_iter, is_last_K_iter);
+    add(reg_src_base, n_blk_step * src_stride);
+    add(reg_tr_src_base, n_blk_step * vnni_granularity);
+    if (do_compute_compensation) add(reg_zp_comp_ptr, 64);
+
+    sub(reg_N_iters, n_blk_step);
+    cmp(reg_N_iters, n_blk_step);
+    jge(N_loop, T_NEAR);
+
+    L(N_loop_tail_or_done);
+    if (N_chunk_tail > 0) {
+        Label N_loop_done;
+        cmp(reg_N_iters, 0);
+        jle(N_loop_done, T_NEAR);
+
+        compute_K_loop(true, curr_K_tail, is_first_K_iter, is_last_K_iter);
+        L(N_loop_done);
+    }
+}
+
 void jit_brgemm_matmul_copy_B_transposed_int8_t::generate() {
     // TODO: support compensation calculation
-    if (conf_->signed_input) return;
+    if (conf_->s8s8_compensation_required) return;
 
     preamble();
 
     src_stride = conf_->K * typesize;
     tr_src_stride = conf_->LDB * vnni_granularity * typesize;
+    do_compute_compensation = conf_->has_zero_point_a;
 
     mov(reg_src_base, ptr[param1 + GET_OFF(src)]);
     mov(reg_tr_src_base, ptr[param1 + GET_OFF(tr_src)]);
@@ -791,80 +1131,73 @@ void jit_brgemm_matmul_copy_B_transposed_int8_t::generate() {
     kmovw(k0F0F, 0x0f0f); // 0000111100001111
     kmovw(kF0F0, 0xf0f0); // 1111000011110000
 
-    const dim_t N_chunk_elems = conf_->N_blk * conf_->N_chunk_size;
+    const dim_t N_chunk_elems = conf_->N_chunk_elems;
     assert(N_chunk_elems % n_blk_step == 0 || N_chunk_elems == conf_->N);
     UNUSED(N_chunk_elems);
-    const int N_chunk_tail = conf_->N % n_blk_step;
 
-    auto compute_K_loop = [=](bool is_N_tail, int curr_K_tail) {
-        int nrows = is_N_tail ? N_chunk_tail : n_blk_step;
+    const auto K_blk_tail = nstl::min(conf_->K, conf_->K_blk) % k_blk_step;
+    const auto K_tail_tail = (conf_->K % conf_->K_blk) % k_blk_step;
 
-        Label K_loop, K_loop_tail_or_done;
-        mov(reg_K_iters, ptr[param1 + GET_OFF(current_K_iters)]);
-
-        mov(reg_src, reg_src_base);
-        mov(reg_tr_src, reg_tr_src_base);
-        if (curr_K_tail > 0) {
-            cmp(reg_K_iters, k_blk_step);
-            jl(K_loop_tail_or_done, T_NEAR);
+    auto compute_body = [=](bool is_first_K_iter, bool is_last_K_iter) {
+        if (do_compute_compensation && is_last_K_iter) {
+            mov(reg_zp_a_neg_val_ptr,
+                    ptr[param1 + GET_OFF(zp_a_neg_value_ptr)]);
+            vbroadcastss(zmm_zp_a_neg_val, ptr[reg_zp_a_neg_val_ptr]);
         }
 
-        L(K_loop);
-        copy_16x64_vnni(nrows, k_blk_step);
-        add(reg_src, k_blk_step);
-        add(reg_tr_src, k_blk_step / vnni_granularity * tr_src_stride);
+        Label compute_body_done;
+        if (conf_->K_tail > 0 && K_blk_tail != K_tail_tail) {
+            Label not_K_tail;
+            cmp(reg_K_iters, conf_->K_blk);
+            je(not_K_tail, T_NEAR);
+            compute_N_loop(K_tail_tail, is_first_K_iter, is_last_K_iter);
+            jmp(compute_body_done, T_NEAR);
 
-        sub(reg_K_iters, k_blk_step);
-        cmp(reg_K_iters, k_blk_step);
-        jge(K_loop, T_NEAR);
+            L(not_K_tail);
+        }
 
-        L(K_loop_tail_or_done);
-
-        if (curr_K_tail > 0) copy_16x64_vnni(nrows, curr_K_tail);
+        compute_N_loop(K_blk_tail, is_first_K_iter, is_last_K_iter);
+        L(compute_body_done);
     };
-
-    auto compute_N_loop = [=](int curr_K_tail) {
-        Label N_loop, N_loop_tail_or_done;
-        if (N_chunk_tail > 0) {
-            cmp(reg_N_iters, n_blk_step);
-            jl(N_loop_tail_or_done, T_NEAR);
-        }
-
-        L(N_loop);
-        compute_K_loop(false, curr_K_tail);
-        add(reg_src_base, n_blk_step * src_stride);
-        add(reg_tr_src_base, n_blk_step * vnni_granularity);
-
-        sub(reg_N_iters, n_blk_step);
-        cmp(reg_N_iters, n_blk_step);
-        jge(N_loop, T_NEAR);
-
-        L(N_loop_tail_or_done);
-        if (N_chunk_tail > 0) {
-            Label N_loop_done;
-            cmp(reg_N_iters, 0);
-            jle(N_loop_done, T_NEAR);
-
-            compute_K_loop(true, curr_K_tail);
-            L(N_loop_done);
-        }
-    };
-
-    auto K_blk_tail = nstl::min(conf_->K, conf_->K_blk) % k_blk_step;
-    auto K_tail_tail = (conf_->K % conf_->K_blk) % k_blk_step;
 
     Label done;
-    if (conf_->K_tail > 0 && K_blk_tail != K_tail_tail) {
-        Label not_K_tail;
-        cmp(reg_K_iters, conf_->K_blk);
-        je(not_K_tail, T_NEAR);
-        compute_N_loop(K_tail_tail);
-        jmp(done, T_NEAR);
+    if (do_compute_compensation) {
+        assert(conf_->src_zp_type == brgemm_broadcast_t::per_tensor);
 
-        L(not_K_tail);
+        mov(reg_K_start, ptr[param1 + GET_OFF(current_K_start)]);
+        mov(reg_zp_comp_ptr, ptr[param1 + GET_OFF(zp_a_compensation_ptr)]);
+
+        mov(regq_tmp, 1);
+        vpbroadcastb(zmm_comp_mul, regq_tmp.cvt8());
+
+        const auto last_K_threshold
+                = rnd_up(conf_->K, conf_->K_blk) - conf_->K_blk;
+        Label not_first, not_first_not_last;
+        cmp(reg_K_start, 0);
+        jne(not_first, T_NEAR);
+        {
+            // first K iteration
+            Label first_not_last;
+            cmp(reg_K_start, last_K_threshold);
+            jl(first_not_last, T_NEAR);
+            compute_body(true, true);
+            jmp(done, T_NEAR);
+
+            L(first_not_last);
+            compute_body(true, false);
+            jmp(done, T_NEAR);
+        }
+
+        L(not_first);
+        cmp(reg_K_start, last_K_threshold);
+        jl(not_first_not_last, T_NEAR);
+
+        compute_body(false, true);
+        jmp(done, T_NEAR);
+        L(not_first_not_last);
     }
 
-    compute_N_loop(K_blk_tail);
+    compute_body(false, false);
     L(done);
 
     postamble();

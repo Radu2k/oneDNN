@@ -243,7 +243,6 @@ status_t jit_uni_dw_conv_fwd_kernel<isa, kernel_dt>::init_conf(
             jcp.post_ops, &dst_d, sum_at_pos_0_only, sum_requires_scale_one});
     if (!post_ops_ok_) return status::unimplemented;
 
-    const bool is_f32 = src_d.data_type() == data_type::f32;
     const bool ok_to_pad_channels = true && !is_data_layout_nxc
             && jcp.oc == jcp.ngroups && jcp.ic == jcp.ngroups
             && one_of(isa, avx512_common, avx512_core, avx2);
@@ -254,8 +253,7 @@ status_t jit_uni_dw_conv_fwd_kernel<isa, kernel_dt>::init_conf(
     }
 
     const bool args_ok = true && jcp.oc == jcp.ngroups && jcp.ic == jcp.ngroups
-            && IMPLICATION(
-                    !(is_data_layout_nxc && is_f32), jcp.ngroups % simd_w == 0)
+            && IMPLICATION(!is_data_layout_nxc, jcp.ngroups % simd_w == 0)
             && jcp.wei_tag == wei_tag && data_tag != format_tag::undef
             && jcp.ic <= src_d.padded_dims()[1]
             && jcp.oc <= dst_d.padded_dims()[1]
@@ -501,9 +499,6 @@ status_t jit_uni_dw_conv_bwd_weights_kernel<isa, kernel_dt>::init_conf(
     jcp.dilate_h = cd.dilates[0];
     jcp.dilate_w = cd.dilates[1];
 
-    jcp.ihp = jcp.ih + jcp.t_pad + jcp.b_pad;
-    jcp.iwp = jcp.iw + jcp.l_pad + jcp.r_pad;
-
     jcp.with_bias = cd.diff_bias_desc.format_kind != format_kind::undef;
 
     const int ext_kw = calculate_extended_filter_size(jcp.kw, jcp.dilate_w);
@@ -514,6 +509,9 @@ status_t jit_uni_dw_conv_bwd_weights_kernel<isa, kernel_dt>::init_conf(
     jcp.b_pad = nstl::max(0,
             calculate_end_padding(
                     jcp.t_pad, jcp.oh, jcp.ih, jcp.stride_h, ext_kh));
+
+    jcp.ihp = jcp.ih + jcp.t_pad + jcp.b_pad;
+    jcp.iwp = jcp.iw + jcp.l_pad + jcp.r_pad;
 
     auto dat_tag = one_of(isa, avx512_common, avx512_core) ? nChw16c : nChw8c;
     auto wei_tag = one_of(isa, avx512_common, avx512_core) ? Goihw16g : Goihw8g;

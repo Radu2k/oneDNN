@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2020 Intel Corporation
+* Copyright 2016-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@
 #include "oneapi/dnnl/dnnl.h"
 
 #include "c_types_map.hpp"
-#include "dnnl_thread.hpp"
 #include "memory_tracking.hpp"
 #include "nstl.hpp"
 #include "primitive_attr.hpp"
@@ -33,11 +32,12 @@
 namespace dnnl {
 namespace impl {
 
+struct impl_list_item_t;
 struct primitive_t;
 // Primitive descriptor implementation
 struct primitive_desc_t : public c_compatible {
     primitive_desc_t(const primitive_attr_t *attr, primitive_kind_t kind)
-        : attr_(*attr), kind_(kind) {
+        : attr_(*attr), kind_(kind), pd_iterator_offset_(0) {
         is_initialized_ = is_initialized_ && attr_.is_initialized();
     }
 
@@ -122,11 +122,6 @@ struct primitive_desc_t : public c_compatible {
                 &scratchpad_md_, size ? 1 : 0, dims, data_type::u8, dnnl_x);
     }
 
-    virtual std::type_index impl_id() const {
-        assert(!"primitive_desc_t doesn't have impl_id");
-        return typeid(primitive_desc_t);
-    }
-
     /** returns the scratchpad size for the given scratchpad mode. */
     dim_t scratchpad_size(scratchpad_mode_t mode) const {
         if (mode != attr_.scratchpad_mode_) return 0;
@@ -192,6 +187,35 @@ struct primitive_desc_t : public c_compatible {
         return n_inputs;
     }
 
+    // The `hint_mds(bool is_hint)` returns a vector of memory descriptors
+    // that might affect the equality of primitive descriptors for backward pass.
+    //
+    // This function is used for creating a key to fetch primitive or primitive
+    // descriptor from cache.
+    //
+    // 1. When creating a primitive descriptor for backward pass there may be
+    //    a forward primitive descriptor hint that can be used to obtain the
+    //    memory descriptors. In this case the `is_hint` argument must be `true`.
+    // 2. When creating a primitive this function is called for a primitive
+    //    descriptor that can be either forward or backward. In this case
+    //    the `is_hint` argument must be `false`.
+    //       - For forward it will return an empty vector.
+    //       - For backward it will return a vector of memory descriptors if
+    //         the implementation depends on a forward primitive descriptor.
+    //
+    // The current cases are:
+    // - pooling
+    // - shuffle
+    //
+    // Later the list of primitives can be extended. For instance, currently
+    // there is no convolution on the list because nthrs + op_desc
+    // (even with format=`any`) + attributes fully define a particular
+    // implementation.
+    virtual std::vector<memory_desc_t> hint_mds(bool is_hint) const {
+        UNUSED(is_hint);
+        return {};
+    }
+
     virtual status_t create_primitive(
             std::pair<std::shared_ptr<primitive_t>, bool> &primitive,
             engine_t *engine) const = 0;
@@ -208,6 +232,33 @@ struct primitive_desc_t : public c_compatible {
     }
 
     virtual const char *name() const = 0;
+
+    int pd_iterator_offset() const { return pd_iterator_offset_; }
+
+protected:
+    primitive_attr_t attr_;
+    primitive_kind_t kind_;
+    int pd_iterator_offset_;
+
+    memory_desc_t scratchpad_md_;
+
+    mutable pd_info_t info_;
+
+    memory_tracking::registry_t scratchpad_registry_;
+
+protected:
+    void init_pd_iterator_offset(int offset) { pd_iterator_offset_ = offset; }
+
+    /** compares ws between fwd_pd and this (make sense to use for bwd_pd)
+     * Expectation: this already set workspace, and this workspace should
+     *              exactly match the one from fwd_pd */
+    bool compare_ws(const primitive_desc_t *fwd_pd) const {
+        if (!workspace_md()) return true; // the impl lives fine w/o workspace
+        return fwd_pd && fwd_pd->workspace_md()
+                && *fwd_pd->workspace_md() == *workspace_md();
+    }
+
+    primitive_desc_t &operator=(const primitive_desc_t &other) = delete;
 
     /* static magic */
 
@@ -245,27 +296,7 @@ struct primitive_desc_t : public c_compatible {
         return success;
     }
 
-protected:
-    primitive_attr_t attr_;
-    primitive_kind_t kind_;
-
-    memory_desc_t scratchpad_md_;
-
-    mutable pd_info_t info_;
-
-    memory_tracking::registry_t scratchpad_registry_;
-
-protected:
-    /** compares ws between fwd_pd and this (make sense to use for bwd_pd)
-     * Expectation: this already set workspace, and this workspace should
-     *              exactly match the one from fwd_pd */
-    bool compare_ws(const primitive_desc_t *fwd_pd) const {
-        if (!workspace_md()) return true; // the impl lives fine w/o workspace
-        return fwd_pd && fwd_pd->workspace_md()
-                && *fwd_pd->workspace_md() == *workspace_md();
-    }
-
-    primitive_desc_t &operator=(const primitive_desc_t &other) = delete;
+    friend struct dnnl::impl::impl_list_item_t;
 };
 
 } // namespace impl
@@ -279,11 +310,6 @@ protected:
 // to which it belongs
 // 2. engine_t - a dnnl engine
 struct dnnl_primitive_desc : public dnnl::impl::c_compatible {
-    // This ctor is used to create a standalone pd
-    dnnl_primitive_desc(
-            dnnl::impl::primitive_desc_t *pd, dnnl::impl::engine_t *engine);
-
-    // This ctor is used to create pd inside primitive_iface_t
     dnnl_primitive_desc(const std::shared_ptr<dnnl::impl::primitive_desc_t> &pd,
             dnnl::impl::engine_t *engine);
 
@@ -323,7 +349,10 @@ protected:
                 primitive, this, engine, use_global_scratchpad); \
     } \
     const char *name() const override { return impl_name; } \
-    std::type_index impl_id() const override { return typeid(pd_t); }
+    template <typename pd_t> \
+    friend status_t primitive_desc_t::create(primitive_desc_t **pd, \
+            const op_desc_t *adesc, const primitive_attr_t *attr, \
+            engine_t *engine, const primitive_desc_t *hint_fwd);
 
 #define DECLARE_COMMON_PD_T_USE_GLOBAL_SCRATCHPAD(impl_name, impl_type) \
     DECLARE_COMMON_PD_t(impl_name, impl_type, true)

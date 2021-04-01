@@ -14,6 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <algorithm>
+
 #include "gpu/ocl/simple_reorder.hpp"
 
 #include "common/utils.hpp"
@@ -166,6 +168,11 @@ reorder_kernel_t select_kernel(const reorder_conf_t &conf,
             = !conf.has_padding && !conf.scale_quant && !type_s8_u8;
     if (!conf.scale_quant) {
         if (matches_one_NxN_layout(src_mdw, dst_mdw, 16)) {
+            // W/A for compiler bug: avoid using intel_sub_group_shuffle with
+            // SIMD16 on gen12lp
+            if (dev_info->gpu_arch() == compute::gpu_arch_t::gen12lp) {
+                return reorder_kernel_t::transpose8x8;
+            }
             return reorder_kernel_t::transpose16x16;
         }
         if (matches_one_NxN_layout(src_mdw, dst_mdw, 8)) {
@@ -265,6 +272,9 @@ void simple_reorder_t::pd_t::alt_defines(
     auto sstr = src_mdw.blocking_desc().strides;
     auto dstr = dst_mdw.blocking_desc().strides;
     kernel_ctx.define_int("ALT_OFFSETS", 1);
+    if (conf.dispatch.nd_range().global_range()[0] != (size_t)sdim[0]) {
+        kernel_ctx.define_int("LIMIT_MAX_D0", sdim[last]);
+    }
     kernel_ctx.define_int("S0", sstr[last]);
     kernel_ctx.define_int("S1", sstr[last - 1]);
     kernel_ctx.define_int("S2", ndims > 2 ? sstr[last - 2] : 1);
@@ -283,11 +293,14 @@ void simple_reorder_t::pd_t::alt_gen() {
 
     size_t last = src_mdw.ndims() - 1;
     size_t gws3 = src_mdw.ndims() > 2 ? sdim[last - 2] : 1;
-    const size_t gws[3] = {(size_t)sdim[last], (size_t)sdim[last - 1], gws3};
+    size_t gws[3] = {(size_t)sdim[last], (size_t)sdim[last - 1], gws3};
     size_t work_group_size = 32;
     if (sdim[last] <= 16) { work_group_size = 16; }
     if (sdim[last] <= 8) { work_group_size = 8; }
     const size_t lws[3] = {work_group_size, 1, 1};
+    // Don't use nonuniform work groups, round up number work items if needed.
+    size_t mod = gws[0] % lws[0];
+    if (mod != 0) { gws[0] += lws[0] - mod; }
     conf.dispatch.generate_override(gws, lws);
 }
 
