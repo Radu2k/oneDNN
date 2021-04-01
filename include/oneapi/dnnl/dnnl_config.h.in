@@ -103,4 +103,16 @@
 // When defined, SYCL CUDA backend is used.
 #cmakedefine DNNL_SYCL_CUDA
 
+// By default enable arch specific code. 
+#ifndef DNNL_WITH_XE_HP 
+#define DNNL_WITH_XE_HP 1
 #endif
+#ifndef DNNL_WITH_XE_HPC
+#define DNNL_WITH_XE_HPC 1
+#endif
+#ifndef DNNL_WITH_XE_HPG
+#define DNNL_WITH_XE_HPG 1
+#endif
+
+#endif
+
