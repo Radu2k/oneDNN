@@ -102,8 +102,9 @@ struct gen12hp_convolution_fwd_t : public gpu_primitive_t {
             return false;
         }
 
-        bool post_ops_ok(const primitive_attr_t *attr) const override {
-            if (!gpu_convolution_fwd_pd_t::post_ops_ok(attr)) return false;
+        bool post_ops_ok(const primitive_attr_t *attr) const {
+            if (!post_ops_with_binary_ok(attr, invariant_dst_md()->data_type))
+                return false;
 
             auto &po = attr->post_ops_;
             int bin_cnt = 0;
