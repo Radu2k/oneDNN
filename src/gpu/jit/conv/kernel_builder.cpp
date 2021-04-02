@@ -1781,6 +1781,22 @@ public:
 
         ir_assert(g2r_load_.size() == mul_.size());
         ir_assert(s2r_load_.size() == mul_.size());
+
+        for (auto &_let : inner_let_stmts_) {
+            auto &var = _let.as<let_t>().var;
+            bool in_g2s_load = count_object(g2s_load_, var);
+            bool in_g2s_store = count_object(g2s_store_, var);
+            bool in_g2r_load = count_object(g2r_load_, var);
+            bool in_s2r_load = count_object(s2r_load_, var);
+            bool in_mul = count_object(mul_, var);
+            ir_assert(!in_mul && !in_s2r_load && !in_g2s_store)
+                    << "Unexpected let usage.";
+            if (in_g2s_load) g2s_lets_.insert(_let);
+            if (in_g2r_load) mul_lets_.insert(_let);
+            MAYBE_UNUSED(in_g2s_store);
+            MAYBE_UNUSED(in_s2r_load);
+            MAYBE_UNUSED(in_mul);
+        }
     }
 
     // See ir_core.hpp for the description.
@@ -1795,6 +1811,10 @@ public:
         return inner_let_stmts_;
     }
 
+    bool is_g2s_let(const stmt_t &s) const { return g2s_lets_.count(s) > 0; }
+
+    bool is_mul_let(const stmt_t &s) const { return mul_lets_.count(s) > 0; }
+
 private:
     stmt_t compute_loop_;
     stmt_t g2s_load_;
@@ -1805,6 +1825,14 @@ private:
     stmt_t c_zero_out_;
 
     std::vector<stmt_t> inner_let_stmts_;
+
+    // Let statements can be used from two different contexts:
+    // - In GMEM to SLM loads (with SLM buffering)
+    // - In GMEM to GRF loads (no SLM buffering)
+    // Due to loop unrolling such lets depend on different values for loop
+    // variables hence we need to differentiate between them.
+    object_set_t<stmt_t> g2s_lets_;
+    object_set_t<stmt_t> mul_lets_;
 };
 
 // Helper class to work with loop nest of the compute loop.
@@ -2163,9 +2191,18 @@ private:
                 s = const_fold(
                         substitute(s, v, expr_t(it.g2s_loop_it.var_value(v))));
             }
-            for (auto &s : lets) {
-                s = const_fold(
-                        substitute(s, v, expr_t(it.g2s_loop_it.var_value(v))));
+            for (int i = 0; i < int(lets.size()); i++) {
+                auto &let = lets[i];
+                auto &orig_let = step_.inner_let_stmts()[i];
+                expr_t var_value;
+                if (step_.is_g2s_let(orig_let)) {
+                    var_value = it.g2s_loop_it.var_value(v);
+                } else if (step_.is_mul_let(orig_let)) {
+                    var_value = it.mul_loop_it.var_value(v);
+                } else {
+                    ir_error_not_expected() << orig_let;
+                }
+                let = const_fold(substitute(let, v, var_value));
             }
         });
 

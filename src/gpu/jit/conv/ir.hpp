@@ -665,8 +665,19 @@ object_set_t<object_t> find_unique_objects(const object_t &root) {
     return finder.found_unique;
 }
 
-// returns number of occurrences of `obj` in `root` (based on identity equality).
+// Returns number of occurrences of `obj` in `root` (based on identity
+// comparison).
 int count_object(const object_t &root, const object_t &obj);
+
+// Returns number of occurrences of `obj` in vector of root objects (based on
+// identity comparison).
+template <typename T>
+int count_object(const std::vector<T> &roots, const object_t &obj) {
+    int ret = 0;
+    for (auto &root : roots)
+        ret += count_object(root, obj);
+    return ret;
+}
 
 // Checks if `root` contains `obj`.
 bool contains_object(const object_t &root, const object_t &obj);
