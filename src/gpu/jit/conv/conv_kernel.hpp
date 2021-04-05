@@ -280,6 +280,23 @@ public:
         return ngen_reg_data(reg_data(), 0, to_ngen(new_type), 1);
     }
 
+    // Creates an operand with the requested register region based on the
+    // existing region. off - offset in elements of the region data type.
+    ngen_operand_t sub_reg_data(int off, int exec_size) const {
+        ir_assert(is_reg_data());
+        auto rd = reg_data();
+        int new_base = rd.getBase();
+        int new_off = rd.getByteOffset() + off * rd.getBytes() * rd.getHS();
+        new_base += (new_off / reg_bytes);
+        new_off = (new_off % reg_bytes);
+
+        rd.setBase(new_base);
+        rd.setOffset(new_off / rd.getBytes());
+        rd.setRegion(0, exec_size, rd.getHS());
+        rd.fixup(exec_size, ngen::DataType::invalid, false, 1);
+        return ngen_operand_t(rd, exec_size);
+    }
+
 private:
     template <ngen_operand_kind_t kind>
     static void destroy(void *ptr) {
@@ -358,15 +375,21 @@ public:
         return ret;
     }
 
-    ngen::RegData alloc_reg_data(
-            const type_t &type, ngen::Bundle bundle = ngen::Bundle()) {
+    ngen::RegData alloc_reg_data(const type_t &type, int stride_bytes = -1,
+            ngen::Bundle bundle = ngen::Bundle()) {
         if (type.is_scalar()) return alloc_sub(to_ngen(type), bundle);
 
-        int regs = utils::div_up(type.size(), reg_bytes);
+        if (stride_bytes == -1) stride_bytes = type.scalar().size();
+
+        ir_assert(stride_bytes > 0);
+        ir_assert(stride_bytes % type.scalar().size() == 0);
+
+        int regs = utils::div_up(type.elems() * stride_bytes, reg_bytes);
         auto sub = alloc_range(regs, bundle)[0].retype(
                 to_ngen(type.scalar()))[0];
-        if (type.is_scalar()) return sub;
-        return sub(1);
+        auto ret = sub(stride_bytes / type.scalar().size());
+        ret.fixup(type.elems(), ngen::DataType::invalid, false, 1);
+        return ret;
     }
 
     ngen::FlagRegister alloc_flag() {
@@ -795,8 +818,12 @@ public:
                 break;
             }
             default: {
-                auto src0_op = eval(obj->a);
-                auto src1_op = eval(obj->b);
+                // Some cases require pre-allocated register regions with
+                // special strides for a/b.
+                auto a_out_op = maybe_alloc_strided_op(obj->type, obj->a);
+                auto b_out_op = maybe_alloc_strided_op(obj->type, obj->b);
+                auto src0_op = eval(obj->a, a_out_op);
+                auto src1_op = eval(obj->b, b_out_op);
                 ebinary(obj, mod, dst_op, src0_op, src1_op);
                 break;
             }
@@ -884,7 +911,6 @@ public:
             return;
         }
 
-        auto scalar_type = obj->type.scalar();
         int elems = obj->elems();
         auto dst_op = alloc_op(obj);
 
@@ -921,12 +947,11 @@ public:
         }
 
         for (auto &chunk : chunks) {
-            int off = scalar_type.size() * std::get<0>(chunk);
+            int off = std::get<0>(chunk);
             int exec_size = std::get<1>(chunk);
             int idx = std::get<2>(chunk);
-            auto rd = ngen_reg_data(
-                    dst_op.reg_data(), off, to_ngen(scalar_type), exec_size);
-            eval(obj->vec[idx], ngen_operand_t(rd, exec_size));
+            auto chunk_op = dst_op.sub_reg_data(off, exec_size);
+            eval(obj->vec[idx], chunk_op);
         }
         expr_binding_.mark_as_evaluated(obj);
     }
@@ -955,6 +980,25 @@ private:
         }
         expr_binding_.bind_unevaluated(e, op);
         return op;
+    }
+
+    // Pre-allocates a strided register region for expression `e` if needed.
+    ngen_operand_t maybe_alloc_strided_op(
+            const type_t &res_type, const expr_t &e) {
+        // Need q-strided region for `e` if res_type is q/uq and `e` is of a
+        // sub-q data type and not a scalar.
+        if (e.type().is_scalar()) return ngen_operand_t();
+        if (!utils::one_of(res_type.scalar(), type_t::s64(), type_t::u64()))
+            return ngen_operand_t();
+        if (utils::one_of(e.type().scalar(), type_t::s64(), type_t::u64()))
+            return ngen_operand_t();
+
+        auto *shuffle = e.as_ptr<shuffle_t>();
+        if (shuffle && shuffle->is_broadcast()) return ngen_operand_t();
+
+        return ngen_operand_t(
+                scope_.alloc_reg_data(e.type(), res_type.scalar().size()),
+                e.type().elems());
     }
 
     void bind(const expr_t &e, const ngen_operand_t &op) {
