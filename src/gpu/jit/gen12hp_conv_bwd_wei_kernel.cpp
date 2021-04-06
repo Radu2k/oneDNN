@@ -28,14 +28,17 @@ namespace jit {
 
 using namespace ngen;
 
-class gen12hp_conv_bwd_wei_init_kernel_t : public jit_generator<HW::Gen12HP> {
+template <gpu_gen_t hw>
+class gen12hp_conv_bwd_wei_init_kernel_t : public jit_generator<hw> {
 public:
+    NGEN_FORWARD_OPENCL(hw);
+
     const conv_conf_t conf;
     RegisterAllocator ra;
 
 public:
     gen12hp_conv_bwd_wei_init_kernel_t(const conv_conf_t &conf)
-        : conf(conf), ra(HW::Gen12HP) {
+        : conf(conf), ra(hw) {
         newArgument("wei", ExternalArgumentType::GlobalPtr);
         newArgument("bia", ExternalArgumentType::GlobalPtr);
         requireGRF(128);
@@ -147,14 +150,17 @@ public:
     }
 };
 
-class gen12hp_conv_bwd_wei_cvt_kernel_t : public jit_generator<HW::Gen12HP> {
+template <gpu_gen_t hw>
+class gen12hp_conv_bwd_wei_cvt_kernel_t : public jit_generator<hw> {
 public:
+    NGEN_FORWARD_OPENCL(hw);
+
     const conv_conf_t conf;
     RegisterAllocator ra;
 
 public:
     gen12hp_conv_bwd_wei_cvt_kernel_t(const conv_conf_t &conf)
-        : conf(conf), ra(HW::Gen12HP) {
+        : conf(conf), ra(hw) {
         newArgument("wei_bf16", ExternalArgumentType::GlobalPtr);
         newArgument("bia_bf16", ExternalArgumentType::GlobalPtr);
         newArgument("wei_f32", ExternalArgumentType::GlobalPtr);
@@ -320,8 +326,11 @@ public:
     }
 };
 
-class gen12hp_conv_bwd_wei_conv_kernel_t : public jit_generator<HW::Gen12HP> {
+template <gpu_gen_t hw>
+class gen12hp_conv_bwd_wei_conv_kernel_t : public jit_generator<hw> {
 public:
+    NGEN_FORWARD_OPENCL(hw);
+
     const conv_conf_t conf;
     RegisterAllocator ra;
 
@@ -383,7 +392,7 @@ public:
 
 public:
     gen12hp_conv_bwd_wei_conv_kernel_t(const conv_conf_t &conf)
-        : conf(conf), ra(HW::Gen12HP) {
+        : conf(conf), ra(hw) {
 
         proto();
         allocate_registers();
@@ -520,7 +529,7 @@ public:
         init_gmem_offsets_tg_32n16c();
 
         // main loop
-        auto flag_loop = f1_1;
+        auto flag_loop = f1[1];
 
         mov(4, reg_counters.d(0), 0);
 
@@ -1350,7 +1359,7 @@ public:
     }
 
     void multiply_32i32o(bool is_last = false) {
-        auto f_reset = f0_1;
+        auto f_reset = f0[1];
 
         auto src_hdrs = GRFRange(tmp_regs.getBase() + 0, 4);
         auto dst_hdrs = GRFRange(tmp_regs.getBase() + 4, 4);
@@ -1415,8 +1424,8 @@ public:
 
     void store_slm() {
         Label end_src_reorder, end_dst_reorder;
-        auto f_select = f1_0;
-        auto f_reset = f0_1;
+        auto f_select = f1[0];
+        auto f_reset = f0[1];
 
         mov(1, f_select.uw(), src_select.uw());
 
@@ -1568,20 +1577,31 @@ status_t gen12hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
         std::vector<compute::kernel_t> &kernels, gpu_primitive_t *primitive,
         engine_t *engine) {
 
+    using namespace compute;
+
     std::unique_ptr<jit::jit_generator_base> jit_gen_wei_init;
     std::unique_ptr<jit::jit_generator_base> jit_gen_wei_cvt;
     std::unique_ptr<jit::jit_generator_base> jit_gen_convolution;
 
-    auto compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
+    auto compute_engine = utils::downcast<compute_engine_t *>(engine);
     auto device_info = compute_engine->device_info();
 
     switch (device_info->gpu_arch()) {
-        case compute::gpu_arch_t::gen12hp:
+        case gpu_arch_t::gen12hp:
             jit_gen_wei_init.reset(
-                    new gen12hp_conv_bwd_wei_init_kernel_t(conf));
-            jit_gen_wei_cvt.reset(new gen12hp_conv_bwd_wei_cvt_kernel_t(conf));
+                    new gen12hp_conv_bwd_wei_init_kernel_t<gpu_gen12hp>(conf));
+            jit_gen_wei_cvt.reset(
+                    new gen12hp_conv_bwd_wei_cvt_kernel_t<gpu_gen12hp>(conf));
             jit_gen_convolution.reset(
-                    new gen12hp_conv_bwd_wei_conv_kernel_t(conf));
+                    new gen12hp_conv_bwd_wei_conv_kernel_t<gpu_gen12hp>(conf));
+            break;
+        case gpu_arch_t::gen12p7:
+            jit_gen_wei_init.reset(
+                    new gen12hp_conv_bwd_wei_init_kernel_t<gpu_gen12p7>(conf));
+            jit_gen_wei_cvt.reset(
+                    new gen12hp_conv_bwd_wei_cvt_kernel_t<gpu_gen12p7>(conf));
+            jit_gen_convolution.reset(
+                    new gen12hp_conv_bwd_wei_conv_kernel_t<gpu_gen12p7>(conf));
             break;
         default: return status::runtime_error;
     }

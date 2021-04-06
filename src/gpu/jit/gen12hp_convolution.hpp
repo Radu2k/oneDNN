@@ -245,7 +245,8 @@ struct gen12hp_convolution_bwd_weights_t : public gpu_primitive_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
 
-            if (!compute_engine->is_gen12hp()) return status::unimplemented;
+            if (!compute_engine->is_gen12hp() && !compute_engine->is_gen12p7())
+                return status::unimplemented;
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;
 
