@@ -92,8 +92,8 @@ struct gen12hp_1st_convolution_bwd_weights_t : public gpu_primitive_t {
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
         conv_conf_t conf;
-        std::unique_ptr<primitive_desc_t> rpd_wei_;
-        std::unique_ptr<primitive_desc_t> rpd_bia_;
+        std::shared_ptr<primitive_desc_t> rpd_wei_;
+        std::shared_ptr<primitive_desc_t> rpd_bia_;
 
     private:
         status_t init_scratchpad();
