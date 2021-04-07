@@ -35,6 +35,9 @@ compute::gpu_arch_t detect_gpu_arch(cl_device_id device, cl_context context) {
 #if DNNL_WITH_XE_HPG
         case HW::Xe_HPG: return compute::gpu_arch_t::xe_hpg; break;
 #endif
+#if DNNL_WITH_XE_HPC
+        case HW::Xe_HPC: return compute::gpu_arch_t::xe_hpc; break;
+#endif
         default: return compute::gpu_arch_t::unknown; break;
     }
 }
@@ -47,6 +50,14 @@ compute::gpu_arch_t detect_gpu_arch_by_device_name(const std::string &name) {
 #if DNNL_WITH_XE_HP
     if (name.find("Xe_HP") != std::string::npos)
         return compute::gpu_arch_t::xe_hp;
+#endif
+#if DNNL_WITH_XE_HPG
+    if (name.find("Xe_HPG") != std::string::npos)
+        return compute::gpu_arch_t::xe_hpg;
+#endif
+#if DNNL_WITH_XE_HPC
+    if (name.find("Xe_HPC") != std::string::npos)
+        return compute::gpu_arch_t::xe_hpc;
 #endif
     return compute::gpu_arch_t::unknown;
 }

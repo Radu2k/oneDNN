@@ -302,7 +302,7 @@ inline GeneralizedPipe getPipe(HW hw, const Instruction &insn, bool checkOOO = t
     // Exception: if there are any long operands, it's a long pipe instruction.
     if (hw >= HW::Xe_HP) {
         auto dt = insn.dstTypecode();
-#if NGEN_XE_HPC && !NGEN_PVC_A
+#if NGEN_XE_HPC && !NGEN_XE_HPC_A
         unsigned lmask = (hw == HW::Xe_HPC) ? 0b1011 : 0b0011;
 #else
         unsigned lmask = 3;

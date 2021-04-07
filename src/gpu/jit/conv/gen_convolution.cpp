@@ -75,10 +75,6 @@ public:
                 jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hpg>(
                         cfg(primitive), primitive->pd(), kernel_arg_info_));
                 break;
-            case gpu_arch_t::xe_hpc:
-                jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hpc>(
-                        cfg(primitive), primitive->pd(), kernel_arg_info_));
-                break;
             default: return status::unimplemented;
         }
         CHECK(primitive->create_kernel(engine, &kernel_, *jit_gen_convolution));

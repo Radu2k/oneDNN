@@ -25,6 +25,7 @@
 #include "common/utils.hpp"
 #include "common/z_magic.hpp"
 #include "cpu/platform.hpp"
+#include "oneapi/dnnl/dnnl_config.h"
 
 namespace dnnl {
 namespace impl {
@@ -40,6 +41,9 @@ enum class gpu_arch_t {
 #endif
 #if DNNL_WITH_XE_HPG
     xe_hpg,
+#endif
+#if DNNL_WITH_XE_HPC
+    xe_hpc,
 #endif
 };
 

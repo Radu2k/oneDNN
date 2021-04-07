@@ -116,6 +116,11 @@ public:
         return device_info_->gpu_arch() == gpu_arch_t::xe_hpg;
     }
 #endif
+#if DNNL_WITH_XE_HPC
+    bool is_xe_hpc() const {
+        return device_info_->gpu_arch() == gpu_arch_t::xe_hpc;
+    }
+#endif
     bool mayiuse_ngen_kernels() {
         return device_info_->mayiuse_ngen_kernels(this);
     }

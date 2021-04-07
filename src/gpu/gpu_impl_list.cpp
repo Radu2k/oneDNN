@@ -37,6 +37,11 @@
 #include "gpu/ocl/xe_hp_bf16_convolution.hpp"
 #include "gpu/ocl/xe_hp_convolution.hpp"
 #endif
+#if DNNL_WITH_XE_HPC
+#include "gpu/ocl/xe_hpc_1x1_convolution.hpp"
+#include "gpu/ocl/xe_hpc_bf16_convolution.hpp"
+#include "gpu/ocl/xe_hpc_convolution.hpp"
+#endif
 #include "gpu/ocl/gen9_batch_normalization.hpp"
 #include "gpu/ocl/gen9_binary.hpp"
 #include "gpu/ocl/gen9_convolution.hpp"
@@ -111,6 +116,7 @@ const impl_list_item_t gpu_impl_list[] = {
         INSTANCE(ocl::xe_lp_x8s8x_convolution_fwd_t),
         INSTANCE(ocl::xe_lp_x8s8x_convolution_bwd_data_t),
         INSTANCE(ocl::gen9_wino_convolution_fwd_t),
+        // Convolution
         INSTANCE(ocl::gen9_convolution_fwd_t),
         INSTANCE(ocl::gen9_convolution_bwd_data_t),
         INSTANCE(ocl::gen9_convolution_bwd_weights_t),
