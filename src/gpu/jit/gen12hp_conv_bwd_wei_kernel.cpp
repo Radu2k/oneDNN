@@ -1040,7 +1040,7 @@ public:
         auto s_stride_z = r_stride.w(4);
         auto s_stride_a = r_stride.w(6);
 
-        auto r_dilate = tmp[9];
+        auto r_dilate = tmp[10];
         auto s_dilate_x = r_dilate.w(0);
         auto s_dilate_y = r_dilate.w(1);
         auto s_dilate_z = r_dilate.w(2);
