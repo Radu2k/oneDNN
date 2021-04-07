@@ -16,6 +16,7 @@
 
 #include "primitive_cache.hpp"
 #include "c_types_map.hpp"
+#include "primitive.hpp"
 #include "primitive_desc.hpp"
 #include "rw_mutex.hpp"
 #include "z_magic.hpp"
@@ -47,6 +48,17 @@ status_t get_primitive_cache_size(int *size) {
     *size = primitive_cache().get_size();
 #endif
     return dnnl::impl::status::success;
+}
+
+bool is_pd_in_cache(const primitive_desc_iface_t *pd_iface) {
+    const auto *pd = pd_iface->impl().get();
+    const auto *engine = pd_iface->engine();
+    primitive_hashing::key_t key(pd, engine);
+    return bool(primitive_cache().get_pd(key));
+}
+
+bool is_primitive_in_cache(const primitive_iface_t *p_iface) {
+    return is_pd_in_cache(p_iface->pd());
 }
 
 status_t lru_primitive_cache_t::set_capacity(int capacity) {
@@ -138,6 +150,16 @@ lru_primitive_cache_t::value_t lru_primitive_cache_t::get(const key_t &key) {
     it->second.timestamp_.store(timestamp);
     // Return the entry
     return it->second.value_;
+}
+
+std::shared_ptr<primitive_desc_t> lru_primitive_cache_t::get_pd(
+        const key_t &key) {
+    lock_read();
+    auto e = get(key);
+    unlock_read();
+
+    if (e.valid()) return e.get().primitive->pd();
+    return nullptr;
 }
 
 void lru_primitive_cache_t::remove_if_invalidated(const key_t &key) {

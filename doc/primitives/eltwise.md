@@ -49,7 +49,6 @@ The following operations are supported:
 
 \f$ (1)\ ds = dd \cdot 0.5 (1 + \tanh[\sqrt{\frac{2}{\pi}} (s + 0.044715 s^3)]) \cdot (1 + \sqrt{\frac{2}{\pi}} (s + 0.134145 s^3) \cdot (1 -  \tanh[\sqrt{\frac{2}{\pi}} (s + 0.044715 s^3)]) ) \f$
 
-
 \f$ (2)\ \text{Operation is supported only for } \alpha \geq 0. \f$
 
 \f$ (3)\ \text{where, } \omega = e^{3s} + 4 \cdot e^{2s} + e^{s} \cdot (4 \cdot s + 6) + 4 \cdot (s + 1) \text{ and } \delta = e^{2s} + 2 \cdot e^{s} + 2. \f$

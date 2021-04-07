@@ -32,43 +32,30 @@ status_t gemm_with_post_ops_t::pd_t::init(engine_t *engine) {
     if (attr()->post_ops_.len() == 0) return status::unimplemented;
 
     auto attributes_with_po = attr()->clone();
-    attributes_with_po->set_scratchpad_mode(scratchpad_mode::user);
 
     auto attributes_without_po = attr()->clone();
     attributes_without_po->post_ops_.entry_.clear();
-    attributes_without_po->set_scratchpad_mode(scratchpad_mode::user);
 
-    const auto gemm_desc = desc();
+    const auto impl_list = engine->get_implementation_list(op_desc());
 
-    const auto impl_list
-            = engine->get_implementation_list((op_desc_t *)gemm_desc);
+    int current_impl_idx
+            = impl_list_item_t::find<ocl::gemm_with_post_ops_t::pd_t>(
+                    impl_list);
 
-    dnnl::impl::primitive_desc_t *gemm_candidate_pd = nullptr;
+    dnnl_primitive_desc_iterator it_gemm_with_po(engine, op_desc(),
+            attributes_with_po, nullptr,
+            current_impl_idx /* skip implementation */);
+    if (!it_gemm_with_po.is_initialized()) return status::invalid_arguments;
+    gemm_pd_ = *(++it_gemm_with_po);
+    // exit if gemm kernel support post ops
+    if (gemm_pd_) return status::unimplemented;
 
-    status_t pd_create_res = status_t::dnnl_unimplemented;
-    unsigned list_idx = 0;
-    do {
-        if (impl_list[list_idx]
-                != &primitive_desc_t::create<ocl::gemm_with_post_ops_t::pd_t>) {
-            pd_create_res = impl_list[list_idx](&gemm_candidate_pd,
-                    (op_desc_t *)gemm_desc, attributes_with_po, engine,
-                    nullptr);
-
-            // exit if gemm kernel support post ops
-            if (pd_create_res == status_t::dnnl_success) {
-                delete gemm_candidate_pd;
-                return status::unimplemented;
-            }
-
-            pd_create_res = impl_list[list_idx](&gemm_candidate_pd,
-                    (op_desc_t *)gemm_desc, attributes_without_po, engine,
-                    nullptr);
-        }
-    } while (pd_create_res != status_t::dnnl_success
-            && impl_list[++list_idx] != nullptr);
-
-    CHECK(pd_create_res);
-    gemm_pd_.reset(gemm_candidate_pd);
+    dnnl_primitive_desc_iterator it_gemm_without_po(engine, op_desc(),
+            attributes_without_po, nullptr,
+            current_impl_idx /* skip implementation */);
+    if (!it_gemm_without_po.is_initialized()) return status::invalid_arguments;
+    gemm_pd_ = *(++it_gemm_without_po);
+    if (!gemm_pd_) return status::unimplemented;
 
     desc_.c_desc = *gemm_pd_->dst_md();
 
@@ -81,8 +68,7 @@ status_t gemm_with_post_ops_t::pd_t::init(engine_t *engine) {
     dnnl_primitive_desc_iterator it(
             engine, (op_desc_t *)&po_worker_desc, attributes_with_po, nullptr);
     if (!it.is_initialized()) return status::invalid_arguments;
-    ++it;
-    post_op_worker_pd_.reset(it.fetch_once());
+    post_op_worker_pd_ = *(++it);
     if (post_op_worker_pd_) {
         use_scratchpad_with_post_op_worker
                 = attributes_with_po->post_ops_.find(primitive_kind_t::dnnl_sum)

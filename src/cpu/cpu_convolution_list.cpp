@@ -58,20 +58,18 @@ using namespace dnnl::impl::cpu::x64;
 #include "cpu/aarch64/jit_sve_512_1x1_convolution.hpp"
 #include "cpu/aarch64/jit_sve_512_convolution.hpp"
 #include "cpu/aarch64/jit_sve_512_x8s8s32x_convolution.hpp"
-#if DNNL_AARCH64_USE_ACL
+#include "cpu/aarch64/jit_uni_dw_convolution.hpp"
+#if DNNL_AARCH64 && DNNL_AARCH64_USE_ACL
 #include "cpu/aarch64/acl_gemm_convolution.hpp"
 #include "cpu/aarch64/acl_indirect_gemm_convolution.hpp"
 #include "cpu/aarch64/acl_winograd_convolution.hpp"
 #endif
-#include "cpu/aarch64/jit_uni_dw_convolution.hpp"
 using namespace dnnl::impl::cpu::aarch64;
 #endif
 
 namespace dnnl {
 namespace impl {
 namespace cpu {
-
-using pd_create_f = engine_t::primitive_desc_create_f;
 
 namespace {
 using namespace dnnl::impl::data_type;
@@ -96,7 +94,7 @@ private:
 };
 
 // clang-format off
-const std::map<conv_impl_key_t, std::vector<pd_create_f>> impl_list_map {
+const std::map<conv_impl_key_t, std::vector<impl_list_item_t>> impl_list_map {
     // FWD fp
     {{forward, f32, f32, f32}, {
         CPU_INSTANCE_X64(ip_convolution_fwd_t)
@@ -408,8 +406,9 @@ const std::map<conv_impl_key_t, std::vector<pd_create_f>> impl_list_map {
 // clang-format on
 } // namespace
 
-const pd_create_f *get_convolution_impl_list(const convolution_desc_t *desc) {
-    static const pd_create_f empty_list[] = {nullptr};
+const impl_list_item_t *get_convolution_impl_list(
+        const convolution_desc_t *desc) {
+    static const impl_list_item_t empty_list[] = {nullptr};
 
     prop_kind_t prop_kind = utils::one_of(desc->prop_kind, forward_training,
                                     forward_inference)

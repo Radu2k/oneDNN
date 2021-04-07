@@ -50,6 +50,8 @@ struct primitive_cache_t : public c_compatible {
 
     virtual int get_size() const = 0;
 
+    virtual std::shared_ptr<primitive_desc_t> get_pd(const key_t &key) = 0;
+
 protected:
     static utils::rw_mutex_t &rw_mutex() {
         static utils::rw_mutex_t mutex;
@@ -77,6 +79,8 @@ struct lru_primitive_cache_t : public primitive_cache_t {
 
     int get_size() const override;
 
+    std::shared_ptr<primitive_desc_t> get_pd(const key_t &key) override;
+
 private:
     void evict(size_t n);
     void add(const key_t &key, const value_t &value);
@@ -98,7 +102,10 @@ private:
 
 primitive_cache_t &primitive_cache();
 
+// Undocumented API for testing.
 status_t DNNL_API get_primitive_cache_size(int *size);
+bool DNNL_API is_primitive_in_cache(const primitive_iface_t *p_iface);
+bool DNNL_API is_pd_in_cache(const primitive_desc_iface_t *pd_iface);
 
 } // namespace impl
 } // namespace dnnl

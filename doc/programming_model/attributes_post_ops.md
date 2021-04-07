@@ -151,13 +151,6 @@ result, the computation will be:
 **CPU**
     - No support for different destination and sum data type.
 
-
-@warning
-    This post-op (as well as all the others) disregards the original layout of
-    the destination; that is, the layout of the original destination is
-    expected to be the same as the layout of the output destination.
-
-
 @anchor dev_guide_attributes_post_ops_depthwise
 ### Depthwise Post-op
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2016-2020 Intel Corporation
+* Copyright 2016-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -31,13 +31,6 @@ struct pooling_fwd_pd_t;
 
 struct pooling_pd_t : public primitive_desc_t {
     static constexpr auto base_pkind = primitive_kind::pooling_v2;
-
-    pooling_pd_t(const pooling_v2_desc_t *adesc, const primitive_attr_t *attr,
-            const pooling_fwd_pd_t *hint_fwd_pd)
-        : primitive_desc_t(attr, base_pkind)
-        , desc_(cast_pool_v1_to_v2(*adesc))
-        , hint_fwd_pd_(hint_fwd_pd)
-        , ws_md_() {}
 
     const pooling_v2_desc_t *desc() const { return &desc_; }
     const op_desc_t *op_desc() const override {
@@ -146,6 +139,13 @@ protected:
 
     memory_desc_t ws_md_;
 
+    pooling_pd_t(const pooling_v2_desc_t *adesc, const primitive_attr_t *attr,
+            const pooling_fwd_pd_t *hint_fwd_pd)
+        : primitive_desc_t(attr, base_pkind)
+        , desc_(cast_pool_v1_to_v2(*adesc))
+        , hint_fwd_pd_(hint_fwd_pd)
+        , ws_md_() {}
+
     void init_default_ws(data_type_t dt = data_type::undef) {
         ws_md_ = is_fwd() ? *dst_md() : *diff_dst_md();
         ws_md_.data_type = (dt != data_type::undef) ? dt : indices_data_type();
@@ -204,12 +204,6 @@ struct pooling_fwd_pd_t : public pooling_pd_t {
     typedef pooling_fwd_pd_t base_class;
     typedef pooling_fwd_pd_t hint_class;
 
-    pooling_fwd_pd_t(const pooling_v2_desc_t *adesc,
-            const primitive_attr_t *attr, const pooling_fwd_pd_t *hint_fwd_pd)
-        : pooling_pd_t(adesc, attr, hint_fwd_pd)
-        , src_md_(desc_.src_desc)
-        , dst_md_(desc_.dst_desc) {}
-
     arg_usage_t arg_usage(int arg) const override {
         if (arg == DNNL_ARG_SRC) return arg_usage_t::input;
 
@@ -245,9 +239,20 @@ struct pooling_fwd_pd_t : public pooling_pd_t {
         return 1 + (!types::is_zero_md(workspace_md()));
     }
 
+    std::vector<memory_desc_t> hint_mds(bool is_hint) const override {
+        if (!is_hint) return {};
+        return {*dst_md(0)};
+    }
+
 protected:
     memory_desc_t src_md_;
     memory_desc_t dst_md_;
+
+    pooling_fwd_pd_t(const pooling_v2_desc_t *adesc,
+            const primitive_attr_t *attr, const pooling_fwd_pd_t *hint_fwd_pd)
+        : pooling_pd_t(adesc, attr, hint_fwd_pd)
+        , src_md_(desc_.src_desc)
+        , dst_md_(desc_.dst_desc) {}
 
     virtual status_t set_default_params() {
         if (dst_md()->format_kind != format_kind::any) return status::success;
@@ -263,12 +268,6 @@ protected:
 struct pooling_bwd_pd_t : public pooling_pd_t {
     typedef pooling_bwd_pd_t base_class;
     typedef pooling_fwd_pd_t hint_class;
-
-    pooling_bwd_pd_t(const pooling_v2_desc_t *adesc,
-            const primitive_attr_t *attr, const pooling_fwd_pd_t *hint_fwd_pd)
-        : pooling_pd_t(adesc, attr, hint_fwd_pd)
-        , diff_src_md_(desc_.diff_src_desc)
-        , diff_dst_md_(desc_.diff_dst_desc) {}
 
     arg_usage_t arg_usage(int arg) const override {
         if (arg == DNNL_ARG_DIFF_DST) return arg_usage_t::input;
@@ -305,16 +304,32 @@ struct pooling_bwd_pd_t : public pooling_pd_t {
     }
     int n_outputs() const override { return 1; }
 
+    std::vector<memory_desc_t> hint_mds(bool is_hint) const override {
+        assert(!is_hint);
+        MAYBE_UNUSED(is_hint);
+        return hint_mds_;
+    }
+
 protected:
     memory_desc_t diff_src_md_;
     memory_desc_t diff_dst_md_;
+
+    pooling_bwd_pd_t(const pooling_v2_desc_t *adesc,
+            const primitive_attr_t *attr, const pooling_fwd_pd_t *hint_fwd_pd)
+        : pooling_pd_t(adesc, attr, hint_fwd_pd)
+        , diff_src_md_(desc_.diff_src_desc)
+        , diff_dst_md_(desc_.diff_dst_desc) {
+        if (hint_fwd_pd_)
+            hint_mds_ = hint_fwd_pd_->hint_mds(true /* is_hint */);
+    }
 
     virtual status_t set_default_params() {
         if (diff_dst_md()->format_kind == format_kind::any) {
             status_t status = status::success;
             if (hint_fwd_pd_)
                 status = memory_desc_init_by_md_and_dt(diff_dst_md_,
-                        *hint_fwd_pd_->dst_md(0), diff_dst_md_.data_type);
+                        hint_mds(false /* is_hint */)[0],
+                        diff_dst_md_.data_type);
             else
                 status = memory_desc_init_by_strides(diff_dst_md_, nullptr);
             if (status != status::success) return status;
@@ -329,6 +344,9 @@ protected:
         return memory_desc_init_by_blocking_desc(
                 diff_src_md_, diff_dst_md_.format_desc.blocking);
     }
+
+private:
+    std::vector<memory_desc_t> hint_mds_;
 };
 
 } // namespace impl

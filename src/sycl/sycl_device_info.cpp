@@ -44,38 +44,35 @@ status_t sycl_device_info_t::init_arch(engine_t *engine) {
 
     // try to detect gpu by device name first
     gpu_arch_ = gpu::ocl::detect_gpu_arch_by_device_name(name());
+    if (gpu_arch_ != gpu::compute::gpu_arch_t::unknown) return status::success;
 
     // if failed, use slower method
-    if (gpu_arch_ == gpu::compute::gpu_arch_t::unknown) {
-        backend_t be = get_sycl_backend(device);
-        if (be == backend_t::opencl) {
-            cl_int err = CL_SUCCESS;
+    backend_t be = get_sycl_backend(device);
+    if (be == backend_t::opencl) {
+        cl_int err = CL_SUCCESS;
 
-            auto ocl_dev_wrapper = gpu::ocl::make_ocl_wrapper(device.get());
+        auto ocl_dev_wrapper = gpu::ocl::make_ocl_wrapper(device.get());
 
-            auto ocl_dev = ocl_dev_wrapper.get();
-            auto ocl_ctx_wrapper = gpu::ocl::make_ocl_wrapper(clCreateContext(
-                    nullptr, 1, &ocl_dev, nullptr, nullptr, &err));
-            OCL_CHECK(err);
+        auto ocl_dev = ocl_dev_wrapper.get();
+        auto ocl_ctx_wrapper = gpu::ocl::make_ocl_wrapper(
+                clCreateContext(nullptr, 1, &ocl_dev, nullptr, nullptr, &err));
+        OCL_CHECK(err);
 
-            gpu_arch_ = gpu::ocl::detect_gpu_arch(
-                    ocl_dev_wrapper, ocl_ctx_wrapper);
-        } else if (be == backend_t::level0) {
-            // TODO: add support for L0 binary ngen check
-            // XXX: query from ocl_engine for now
-            gpu::ocl::ocl_engine_factory_t f(engine_kind::gpu);
+        gpu_arch_ = gpu::ocl::detect_gpu_arch(ocl_dev_wrapper, ocl_ctx_wrapper);
+    } else if (be == backend_t::level0) {
+        // TODO: add support for L0 binary ngen check
+        // XXX: query from ocl_engine for now
+        gpu::ocl::ocl_engine_factory_t f(engine_kind::gpu);
 
-            engine_t *engine;
-            CHECK(f.engine_create(&engine, 0));
+        engine_t *engine;
+        CHECK(f.engine_create(&engine, 0));
 
-            std::unique_ptr<gpu::compute::compute_engine_t> compute_engine(
-                    utils::downcast<gpu::compute::compute_engine_t *>(engine));
-
-            auto *dev_info = compute_engine->device_info();
-            gpu_arch_ = dev_info->gpu_arch();
-        } else {
-            assert(!"not_expected");
-        }
+        std::unique_ptr<gpu::compute::compute_engine_t, engine_deleter_t>
+                compute_engine(
+                        utils::downcast<gpu::compute::compute_engine_t *>(
+                                engine));
+    } else {
+        assert(!"not_expected");
     }
 
     // XXX: temporary WA for different Gen12HP devices
