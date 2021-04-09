@@ -1788,21 +1788,37 @@ public:
         ir_assert(g2r_load_.size() == mul_.size());
         ir_assert(s2r_load_.size() == mul_.size());
 
+        // Assign g2s/g2r tags to let statements.
         for (auto &_let : inner_let_stmts_) {
             auto &var = _let.as<let_t>().var;
-            bool in_g2s_load = count_object(g2s_load_, var);
-            bool in_g2s_store = count_object(g2s_store_, var);
-            bool in_g2r_load = count_object(g2r_load_, var);
-            bool in_s2r_load = count_object(s2r_load_, var);
-            bool in_mul = count_object(mul_, var);
-            ir_assert(!in_mul && !in_s2r_load && !in_g2s_store)
-                    << "Unexpected let usage.";
-            if (in_g2s_load) g2s_lets_.insert(_let);
-            if (in_g2r_load) mul_lets_.insert(_let);
-            MAYBE_UNUSED(in_g2s_store);
-            MAYBE_UNUSED(in_s2r_load);
-            MAYBE_UNUSED(in_mul);
+            bool is_g2s = count_object(g2s_load_, var) > 0;
+            bool is_g2r = count_object(g2r_load_, var) > 0;
+            if (is_g2s) g2s_lets_.insert(_let);
+            if (is_g2r) g2r_lets_.insert(_let);
         }
+
+        // Propagate g2s/g2r tags up based on dependencies between let
+        // statements.
+        object_set_t<stmt_t> seen;
+        std::function<void(const stmt_t &)> propagate;
+        propagate = [&](const stmt_t &_let) {
+            if (seen.count(_let) > 0) return;
+            auto &let = _let.as<let_t>();
+            for (auto &_child : inner_let_stmts_) {
+                auto &child = _child.as<let_t>();
+                if (_child.is_same(_let)) continue;
+                if (contains_object(child.value, let.var)) {
+                    // Visit child let statements first.
+                    propagate(_child);
+                    // Propagate child g2s/g2r values to this let statement.
+                    if (is_g2s_let(_child)) g2s_lets_.insert(_let);
+                    if (is_g2r_let(_child)) g2r_lets_.insert(_let);
+                }
+            }
+            seen.insert(_let);
+        };
+        for (auto &_let : inner_let_stmts_)
+            propagate(_let);
     }
 
     // See ir_core.hpp for the description.
@@ -1818,8 +1834,7 @@ public:
     }
 
     bool is_g2s_let(const stmt_t &s) const { return g2s_lets_.count(s) > 0; }
-
-    bool is_mul_let(const stmt_t &s) const { return mul_lets_.count(s) > 0; }
+    bool is_g2r_let(const stmt_t &s) const { return g2r_lets_.count(s) > 0; }
 
 private:
     stmt_t compute_loop_;
@@ -1838,7 +1853,7 @@ private:
     // Due to loop unrolling such lets depend on different values for loop
     // variables hence we need to differentiate between them.
     object_set_t<stmt_t> g2s_lets_;
-    object_set_t<stmt_t> mul_lets_;
+    object_set_t<stmt_t> g2r_lets_;
 };
 
 // Helper class to work with loop nest of the compute loop.
@@ -2201,12 +2216,17 @@ private:
                 auto &let = lets[i];
                 auto &orig_let = step_.inner_let_stmts()[i];
                 expr_t var_value;
-                if (step_.is_g2s_let(orig_let)) {
+                bool is_g2s_let = step_.is_g2s_let(orig_let);
+                bool is_g2r_let = step_.is_g2r_let(orig_let);
+                if (is_g2s_let && !is_g2r_let) {
                     var_value = it.g2s_loop_it.var_value(v);
-                } else if (step_.is_mul_let(orig_let)) {
+                } else if (is_g2r_let && !is_g2s_let) {
                     var_value = it.mul_loop_it.var_value(v);
                 } else {
-                    ir_error_not_expected() << orig_let;
+                    ir_assert(count_object(let.as<let_t>().value, v) == 0)
+                            << "Unexpected reference to variable " << v
+                            << " from " << let;
+                    continue;
                 }
                 let = const_fold(substitute(let, v, var_value));
             }
