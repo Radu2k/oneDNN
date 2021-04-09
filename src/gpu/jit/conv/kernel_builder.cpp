@@ -3424,11 +3424,11 @@ private:
 
         // Generate alloc statements for stage buffers.
         object_set_t<expr_t> seen;
-        for (int i = 1; i < nstages; i++) {
+        for (int i = 0; i < nstages; i++) {
             auto &s = stages[i];
             auto &buf = s.buf_base();
             auto ret = seen.insert(buf);
-            if (!ret.second) continue;
+            if (i == 0 || !ret.second) continue;
             tile_stmt = alloc_t::make(
                     buf, s.buf_size(), alloc_kind_t::grf, {}, tile_stmt);
         }
