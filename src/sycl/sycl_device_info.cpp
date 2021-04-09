@@ -71,6 +71,9 @@ status_t sycl_device_info_t::init_arch(engine_t *engine) {
                 compute_engine(
                         utils::downcast<gpu::compute::compute_engine_t *>(
                                 engine));
+
+        auto *dev_info = compute_engine->device_info();
+        gpu_arch_ = dev_info->gpu_arch();
     } else {
         assert(!"not_expected");
     }
