@@ -752,12 +752,15 @@ tensor_t view_t::split_into_max_tile(const layout_t &vlayout,
 void view_t::create_mask_vector(mask_vector_t &mask_vec,
         const layout_t &_vlayout, int vidx, std::vector<dim_t> &vargs) const {
     if (vidx == _vlayout.ndims()) {
+        std::vector<expr_t> vvalues = vstart_;
+        for (int i = 0; i < nvdims(); i++)
+            vvalues[i] += vargs[i];
         auto targs = cvt_vargs_to_targs<dim_t, expr_t>(vargs);
         expr_t mask = bool_imm_t::make(true);
         for (int i = 0; i < ntdims(); i++) {
             auto &tdim = tdims_[i];
             if (tdim.mask().is_empty()) continue;
-            mask &= tdim.mask(targs[i]);
+            mask &= tdim.mask(targs[i], vvars_, vvalues);
         }
         mask_vec.set_mask(_vlayout(vargs), mask);
         return;

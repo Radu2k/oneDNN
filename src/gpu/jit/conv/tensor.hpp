@@ -886,8 +886,15 @@ public:
 
     const expr_t &mask() const { return mask_; }
 
-    expr_t mask(const expr_t &tvalue) const {
-        return substitute(mask_, placeholder_var(), tvalue);
+    expr_t mask(const expr_t &tvalue, const std::vector<expr_t> &vvars,
+            const std::vector<expr_t> &vvalues) const {
+        auto ret = substitute(mask_, placeholder_var(), tvalue);
+        for (int i = 0; i < int(vvars.size()); i++) {
+            if (contains_object(ret, vvars[i])) {
+                ret = substitute(ret, vvars[i], vvalues[i]);
+            }
+        }
+        return ret;
     }
 
     int vidx(int arg_idx) const {
@@ -1186,6 +1193,7 @@ public:
     view_t substitute(const expr_t &from, const expr_t &to) const;
 
     mask_vector_t create_mask_vector() const {
+        ir_assert(!is_direct_) << "Direct views don't use masks.";
         auto _vlayout = create_dense_vlayout();
         mask_vector_t mask_vec(type(), _vlayout.elems());
         std::vector<dim_t> vargs(nvdims());
