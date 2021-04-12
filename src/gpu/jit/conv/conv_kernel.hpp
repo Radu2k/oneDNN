@@ -25,6 +25,7 @@
 #include "gpu/jit/conv/message_support.hpp"
 #include "gpu/jit/conv/ngen_proxy.hpp"
 #include "gpu/jit/conv/post_op_support.hpp"
+#include "gpu/jit/conv/reorder_support.hpp"
 #include "gpu/jit/jit_eltwise_injector.hpp"
 #include "gpu/jit/jit_generator.hpp"
 #include "gpu/jit/ngen/ngen_core.hpp"
@@ -161,6 +162,13 @@ ngen::RegData ngen_reg_data(const ngen::RegData &base, int off_bytes,
     return grf[new_grf_off / type_size](vstride, width, hstride);
 }
 
+ngen::Subregister ngen_subregister(const ngen::RegData &base, int off_bytes,
+        ngen::DataType type = ngen::DataType::invalid) {
+    if (type == ngen::DataType::invalid) type = base.getType();
+    auto rd = ngen_reg_data(base, off_bytes, type, 1, 0);
+    return ngen::Subregister(rd, rd.getOffset(), rd.getType());
+}
+
 ngen::Immediate ngen_negate(const ngen::Immediate &imm) {
     switch (imm.getType()) {
         case ngen::DataType::w: return ngen::Immediate(-to_cpp<int16_t>(imm));
@@ -181,6 +189,10 @@ bool ngen_is_dw(ngen::DataType type) {
 
 bool ngen_is_w(ngen::DataType type) {
     return utils::one_of(type, ngen::DataType::w, ngen::DataType::uw);
+}
+
+bool ngen_is_b(ngen::DataType type) {
+    return utils::one_of(type, ngen::DataType::b, ngen::DataType::ub);
 }
 
 bool ngen_is_xf(ngen::DataType type) {
@@ -1142,6 +1154,839 @@ private:
     const send_t &send_;
 };
 
+// Reinterprets layouts to wider data type (up to 4 bytes).
+// Example: 16a16b (s8 type) -> 16a4b (s32 type)
+static bool try_reinterpret_to_wider_type(layout_t &src, layout_t &dst,
+        const tensor_t &tile = {}, bool do_update = true,
+        int *new_size_out = nullptr) {
+    if (src.blocks().empty() || dst.blocks().empty()) return false;
+    if (src.type() != dst.type()) return false;
+
+    auto &s0 = src.blocks()[0];
+    auto &d0 = dst.blocks()[0];
+    if (s0.dim_idx != d0.dim_idx) return false;
+
+    int old_size = src.type().size();
+    int s0_old_size = int(s0.block) * old_size;
+    int d0_old_size = int(d0.block) * old_size;
+
+    int new_size = math::gcd(s0_old_size, d0_old_size);
+    new_size = math::gcd(new_size, 4); // Try types up to 4 bytes.
+    if (new_size <= old_size) return false;
+
+    auto tile_ok = [&](const layout_t &l) {
+        if (tile.is_empty()) return true;
+        int factor = new_size / old_size;
+        if (tile(l.blocks()[0].dim_idx) % factor != 0) return false;
+        return true;
+    };
+
+    auto strides_ok = [&](const layout_t &l) {
+        for (int i = 1; i < int(l.blocks().size()); i++) {
+            auto &b = l.blocks()[i];
+            if (b.block * old_size % new_size != 0) return false;
+        }
+        return true;
+    };
+
+    while (new_size > old_size) {
+        bool ok = true;
+        ok &= (tile_ok(src) && tile_ok(dst));
+        ok &= (strides_ok(src) && strides_ok(dst));
+        if (ok) {
+            if (do_update) {
+                src = src.reinterpret(type_t::s(new_size * 8));
+                dst = dst.reinterpret(type_t::s(new_size * 8));
+            }
+            if (new_size_out) *new_size_out = new_size;
+            return true;
+        }
+        new_size /= 2;
+    }
+    return false;
+}
+
+// Implementation of GRF reorder between 2D dense layouts.
+// Requirements for A -> B reorder:
+// - A and B must have the same data type
+// - Layouts must be 2D and dense
+// Reorder may require several steps, in this case a temporary buffer T is
+// allocated. For example: A -> T -> B or A -> B -> T -> B
+class reorder_2d_impl_t {
+public:
+    reorder_2d_impl_t(const layout_t &src_layout, const layout_t &dst_layout)
+        : src_(src_layout), dst_(dst_layout) {
+        ir_assert(src_.type() == dst_.type());
+        tile_ = find_2d_tile(src_, dst_);
+    }
+
+    const tensor_t &tile() const { return tile_; }
+
+    template <typename GeneratorT>
+    void emit(GeneratorT *host, ngen_register_scope_t &scope,
+            const grf_permutator_t &grf_perm, const ngen::RegData &src_rd,
+            const ngen::RegData &dst_rd) {
+        int a_idx, b_idx;
+        int tile_a, tile_b;
+        tile_to_2d_dims(tile_, a_idx, b_idx, tile_a, tile_b);
+
+        // Convert src/dst to 2D layouts.
+        dim_assignment_t to_ab(src_.ndims(), 2);
+        to_ab.assign(a_idx, 0);
+        to_ab.assign(b_idx, 1);
+        auto src_ab = to_ab.map(src_).normalize();
+        auto dst_ab = to_ab.map(dst_).normalize();
+
+        // Find minimal cost reorder path between layouts.
+        auto path = find_min_cost_path(src_ab, dst_ab, tile_a, tile_b);
+
+        // Allocate a temporary GRF buffer if needed.
+        ngen::GRFRange tmp;
+        if (path.size() > 1) {
+            tmp = scope.alloc_range(utils::div_up(dst_ab.size(), reg_bytes));
+        }
+
+        // Iterate through found reorders.
+        auto *prev_layout = &src_ab;
+        auto prev_rd = src_rd;
+        int path_len = int(path.size());
+        auto &orig_type = src_ab.type();
+        for (int i = 0; i < path_len; i++) {
+            auto &step = path[i];
+            auto &tile = step.tile;
+            auto &type = step.type;
+            auto *next_layout = &step.layout;
+
+            // x -> y reorder.
+            auto x = prev_layout->map(tile).normalize().reinterpret(type);
+            auto y = next_layout->map(tile).normalize().reinterpret(type);
+            x = x.normalize();
+            y = y.normalize();
+
+            bool use_dst = ((path_len - i) % 2 == 1);
+            auto next_rd = (use_dst ? dst_rd : tmp[0].retype(to_ngen(type)));
+            auto &x_blocks = x.blocks();
+            auto &y_blocks = y.blocks();
+            ir_assert(x_blocks.size() <= 1);
+            ir_assert(y_blocks.size() <= 1);
+            int x_stride = (x_blocks.empty() ? 1 : int(x_blocks[0].stride));
+            int y_stride = (y_blocks.empty() ? 1 : int(y_blocks[0].stride));
+            int width = int(tile.elems()) * orig_type.size() / type.size();
+            next_layout->for_each_tile(
+                    tile, [&](const std::vector<dim_t> &start) {
+                        int prev_off = int(prev_layout->offset_in_bytes(start));
+                        int next_off = int(next_layout->offset_in_bytes(start));
+                        auto x_sub = ngen_subregister(
+                                prev_rd, prev_off, to_ngen(type));
+                        auto y_sub = ngen_subregister(
+                                next_rd, next_off, to_ngen(type));
+                        emit_1d_tile(host, scope, grf_perm, width, x_sub,
+                                x_stride, y_sub, y_stride);
+                    });
+            prev_layout = next_layout;
+            prev_rd = next_rd;
+        }
+    }
+
+private:
+    // Helper class to incrementally increase a sub-layout of the given layout.
+    // One step - adding the minimal factor of the next remaining block. Used
+    // to find the minimal tile between two layouts that is innermost for both
+    // layouts.
+    struct layout_iterator_t {
+        layout_iterator_t(const layout_t &l) : l(l), block_idx(-1), block(1) {}
+
+        bool has_next() const {
+            dim_t b = block;
+            int b_idx = block_idx;
+            while (b == 1) {
+                b_idx++;
+                if (b_idx >= int(l.blocks().size())) return false;
+                b = int(l.blocks()[b_idx].block);
+            }
+            return true;
+        }
+
+        layout_iterator_t &operator++() {
+            ir_assert(has_next());
+            while (block == 1) {
+                block_idx++;
+                block = int(l.blocks()[block_idx].block);
+            }
+            // Find smallest factor.
+            for (int factor = 2; factor <= int(block); factor++) {
+                if (block % factor == 0) {
+                    block /= factor;
+                    return *this;
+                }
+            }
+
+            ir_error_not_expected();
+            return *this;
+        }
+
+        tensor_t tile() const {
+            std::vector<dim_t> dims(l.ndims(), 1);
+            for (int i = 0; i <= block_idx; i++) {
+                auto &b = l.blocks()[i];
+                int b_block = b.block;
+                if (i == block_idx) b_block /= block;
+                dims[b.dim_idx] *= b_block;
+            }
+            return tensor_t(dims);
+        }
+
+        const layout_t &l;
+
+        int block_idx;
+        dim_t block;
+    };
+
+    // Represents 2D reorder corresponding to (a x b) tile.
+    struct edge_t {
+        edge_t() = default;
+        edge_t(int idx, int a, int b) : idx(idx), a(a), b(b) {}
+
+        tensor_t tile() const { return tensor_t({a, b}); }
+
+        std::string str() const {
+            std::ostringstream oss;
+            oss << "edge(idx = " << idx << ", a = " << a << ", b = " << b
+                << ")";
+            return oss.str();
+        }
+
+        int idx; // Identifier of the edge.
+        int a, b; // Specify tile (a x b).
+    };
+
+    // Represents GRF layout between edges-reorders.
+    struct vertex_t {
+        vertex_t(int idx, const layout_t &layout) : idx(idx), layout(layout) {}
+
+        std::string str() const {
+            std::ostringstream oss;
+            oss << "vertex(idx = " << idx << ", layout = " << layout << ")";
+            return oss.str();
+        }
+
+        void set_edges(const std::vector<edge_t> &edges) {
+            adj_edge_type_masks.resize(edges.size());
+            int type_size = layout.type().size();
+            for (int i = 0; i < int(edges.size()); i++) {
+                auto &e = edges[i];
+                auto tile = e.tile();
+                int max_type_size;
+                bool ok = try_reinterpret_to_wider_type(
+                        layout, layout, tile, false, &max_type_size);
+                if (!ok) max_type_size = type_size;
+                int from = math::ilog2q(type_size);
+                int to = math::ilog2q(max_type_size);
+                for (int j = from; j <= to; j++) {
+                    type_t type = type_t::u(8 << j);
+                    if (can_reorder(tile, type))
+                        adj_edge_type_masks[i] |= (1 << j);
+                }
+            }
+        }
+
+        void add_neighbor(const vertex_t *v) { adj_vertices.push_back(v); }
+
+        bool is_neighbor(const vertex_t &v) const {
+            for (auto *n : adj_vertices)
+                if (n == &v) return true;
+            return false;
+        }
+
+        // Check the following limitations:
+        // - Assume at most one block (maybe with non-dense stride)
+        // - Horizontal stride must be <= 4 for GRF region
+        // - GRF region can't span more than 2 registers
+        bool can_reorder(const tensor_t &tile, const type_t &type) const {
+            auto ab_layout = layout.map(tile).reinterpret(type).normalize();
+            int nblocks = int(ab_layout.blocks().size());
+            if (nblocks == 0) return true;
+            if (nblocks > 1) return false;
+            auto &last = ab_layout.blocks().back();
+            int max_stride = int(last.stride * last.block);
+            if (last.stride > 4) return false;
+            int max_stride_bytes = max_stride * type.size();
+            if (max_stride_bytes > 2 * reg_bytes) return false;
+            return true;
+        }
+
+        // Finds the minimal cost of reordering from this vertex to vertex v.
+        int cost(const vertex_t &v, const std::vector<edge_t> &edges,
+                edge_t &min_edge, type_t &min_type) const {
+            int min_cost = std::numeric_limits<int>::max();
+            for (int i = 0; i < int(edges.size()); i++) {
+                type_t i_min_type;
+                int new_cost = cost(edges[i], v, i_min_type);
+                if (new_cost < min_cost) {
+                    min_cost = new_cost;
+                    min_edge = edges[i];
+                    min_type = i_min_type;
+                }
+            }
+            return min_cost;
+        }
+
+        // Finds the minimal cost of reordering from this vertex to vertex `v`
+        // through edge `e`. If the reorder is possible, `type` contains the
+        // reorder type with the minimal cost.
+        int cost(const edge_t &e, const vertex_t &v, type_t &type) const {
+            uint32_t mask = (adj_edge_type_masks[e.idx]
+                    & v.adj_edge_type_masks[e.idx]);
+            if (mask == 0) return std::numeric_limits<int>::max();
+            int cur_size = layout.type().size();
+            int cur_cost = layout.elems() / (e.a * e.b);
+            int min_log_bytes = math::ilog2q(cur_size);
+            int max_log_bytes = 3;
+            int min_cost = std::numeric_limits<int>::max();
+            for (int i = min_log_bytes; i <= max_log_bytes; i++) {
+                if ((mask & (1 << i)) == 0) continue;
+                int factor = (1 << i) / cur_size;
+                ir_assert(cur_cost % factor == 0);
+                int new_cost = cur_cost / factor;
+                if (new_cost >= min_cost) continue;
+                min_cost = new_cost;
+                type = type_t::u(8 << i);
+            }
+            return min_cost;
+        }
+
+        int idx; // Identifier of the vertex.
+        layout_t layout; // Layout of the vertex.
+        // Specifies a bitmask for every edge: if adj_edge_type_masks[E_idx]
+        // has b-th bit set then this vertex can be reordered through E edge
+        // using the data type with size 2^b bytes.
+        std::vector<uint32_t> adj_edge_type_masks;
+        std::vector<const vertex_t *> adj_vertices; // Adjacent vertices.
+    };
+
+    // Represents a reorder step.
+    struct reorder_step_t {
+        reorder_step_t() = default;
+        reorder_step_t(const layout_t &layout, const tensor_t &tile,
+                const type_t &type)
+            : layout(layout), tile(tile), type(type) {}
+
+        layout_t layout; // Destination layout.
+        tensor_t tile; // Tile corresponding to one instruction.
+        type_t type; // Registers should be reinterpreted to `type` for reorder.
+    };
+
+    // Returns the biggest common 2D tile that is innermost for both layouts.
+    static tensor_t find_2d_tile(const layout_t &a, const layout_t &b) {
+        std::vector<dim_t> tile_dims(a.ndims(), 1);
+        if (a.blocks().empty() || b.blocks().empty())
+            return tensor_t(tile_dims);
+
+        auto non_one_ndims = [](const tensor_t &t) {
+            int ret = 0;
+            for (dim_t d : t.dims())
+                ret += (d != 1 ? 1 : 0);
+            return ret;
+        };
+
+        layout_iterator_t a_it(a);
+        layout_iterator_t b_it(b);
+
+        tensor_t max_tile;
+        for (;;) {
+            auto a_tile = a_it.tile();
+            auto b_tile = b_it.tile();
+            if (non_one_ndims(a_tile) > 2 || non_one_ndims(b_tile) > 2) break;
+            dim_t a_elems = a_tile.elems();
+            dim_t b_elems = b_tile.elems();
+            if (a_tile.is_equal(b_tile)) {
+                max_tile = a_tile;
+                if (!a_it.has_next() || !b_it.has_next()) break;
+                ++a_it;
+                ++b_it;
+            } else if (a_elems <= b_elems) {
+                if (!a_it.has_next()) break;
+                ++a_it;
+            } else {
+                if (!b_it.has_next()) break;
+                ++b_it;
+            }
+        }
+        return max_tile;
+    }
+
+    // Extracts dimension sizes and their indices from a multidimensional
+    // tensor.
+    static void tile_to_2d_dims(
+            const tensor_t &tile, int &a_idx, int &b_idx, int &a, int &b) {
+        a_idx = -1;
+        b_idx = -1;
+        for (int i = 0; i < tile.ndims(); i++) {
+            if (tile.dims()[i] == 1) continue;
+            if (a_idx == -1) {
+                a_idx = i;
+                continue;
+            }
+            if (b_idx == -1) {
+                b_idx = i;
+                continue;
+            }
+            ir_error_not_expected();
+        }
+
+        for (int i = 0; i < tile.ndims(); i++) {
+            if (utils::one_of(i, a_idx, b_idx)) continue;
+            if (a_idx == -1) {
+                a_idx = i;
+                continue;
+            }
+            if (b_idx == -1) {
+                b_idx = i;
+                continue;
+            }
+        }
+
+        if (a_idx > b_idx) std::swap(a_idx, b_idx);
+
+        a = tile.dims()[a_idx];
+        b = tile.dims()[b_idx];
+    }
+
+    // Finds the optimal sequence of reorders between src and dst layouts.
+    static std::vector<reorder_step_t> find_min_cost_path(
+            const layout_t &src, const layout_t &dst, int tile_a, int tile_b) {
+        // Create all possible edges - 2D reorders.
+        std::vector<edge_t> edges;
+        for (int a = 1; a <= tile_a; a *= 2) {
+            for (int b = 1; b <= tile_b; b *= 2) {
+                int idx = int(edges.size());
+                edges.emplace_back(idx, a, b);
+            }
+        }
+
+        int nedges = int(edges.size());
+
+        // Create all possible layouts for tile_a x tile_b tensor.
+        std::vector<vertex_t> vertices;
+        std::vector<std::vector<std::pair<int, uint32_t>>> edge_vertices(
+                nedges);
+        auto all_layouts = generate_all_layouts(src.type(), tile_a, tile_b);
+        for (auto &l : all_layouts) {
+            // Skip if too many blocks.
+            if (l.blocks().size() > 4) continue;
+            int v_idx = int(vertices.size());
+            vertices.emplace_back(v_idx, l);
+            auto &v = vertices.back();
+            // Pass all known reorders, the vertex/layout will filter out
+            // incompatible reorders.
+            v.set_edges(edges);
+            // Store all vertices adjacent to a specific edge.
+            for (int i = 0; i < nedges; i++) {
+                uint32_t mask = v.adj_edge_type_masks[i];
+                if (mask != 0) edge_vertices[i].emplace_back(v_idx, mask);
+            }
+        }
+
+        // Find neighbors between all vertices.
+        int nvertices = int(vertices.size());
+        for (int i = 0; i < nvertices; i++) {
+            auto &v = vertices[i];
+            for (int j = 0; j < nedges; j++) {
+                uint32_t mask = v.adj_edge_type_masks[j];
+                if (mask != 0) {
+                    for (auto &idx_mask : edge_vertices[j]) {
+                        int v_idx = idx_mask.first;
+                        if (v_idx == i) continue;
+                        uint32_t common_mask = (mask
+                                & vertices[v_idx].adj_edge_type_masks[j]);
+                        if (common_mask != 0) v.add_neighbor(&vertices[v_idx]);
+                    }
+                }
+            }
+        }
+
+        // Identify source and destination vertices.
+        int src_idx = -1;
+        int dst_idx = -1;
+        for (int i = 0; i < nvertices; i++) {
+            auto &v = vertices[i];
+            if (src_idx == -1
+                    && v.layout.is_strictly_equal(
+                            src, /*compare_offset=*/false))
+                src_idx = i;
+            if (dst_idx == -1
+                    && v.layout.is_strictly_equal(
+                            dst, /*compare_offset=*/false))
+                dst_idx = i;
+        }
+
+        ir_assert(src_idx != -1);
+        ir_assert(dst_idx != -1);
+
+        // Layouts are the same, just copy.
+        if (src_idx == dst_idx) {
+            auto &v = vertices[src_idx];
+            edge_t min_edge;
+            type_t min_type;
+            v.cost(v, edges, min_edge, min_type);
+            reorder_step_t step(v.layout, min_edge.tile(), min_type);
+            return {step};
+        }
+
+        // Dijkstra's algorithm, find the minimal cost path between src and
+        // dst. Use the number of instructions to estimate the cost.
+        int inf_cost = std::numeric_limits<int>::max();
+        std::vector<int> cost(nvertices, inf_cost);
+        std::vector<int> prev(nvertices);
+        std::vector<reorder_step_t> reorder_steps(nvertices);
+        std::vector<bool> seen(nvertices, false);
+        cost[src_idx] = 0;
+        for (int i = 0; i < nvertices; i++) {
+            int min_idx = -1;
+            int min_cost = inf_cost;
+            for (int j = 0; j < nvertices; j++) {
+                if (seen[j]) continue;
+                if (cost[j] < min_cost) {
+                    min_idx = j;
+                    min_cost = cost[j];
+                }
+            }
+            seen[min_idx] = true;
+            auto &v_min = vertices[min_idx];
+            for (auto *v : v_min.adj_vertices) {
+                edge_t min_edge;
+                type_t min_type;
+                int new_cost = cost[min_idx]
+                        + v_min.cost(*v, edges, min_edge, min_type);
+                if (new_cost < cost[v->idx]) {
+                    cost[v->idx] = new_cost;
+                    prev[v->idx] = min_idx;
+                    reorder_steps[v->idx] = reorder_step_t(
+                            v->layout, min_edge.tile(), min_type);
+                }
+            }
+        }
+
+        // Sanity check, ensure the reorder sequence is not too long.
+        int max_cost = 256;
+        ir_assert(cost[dst_idx] <= max_cost);
+        MAYBE_UNUSED(max_cost);
+
+        // Restore the shortest reorder path.
+        std::vector<reorder_step_t> ret;
+        int idx = dst_idx;
+        while (idx != src_idx) {
+            ret.push_back(reorder_steps[idx]);
+            idx = prev[idx];
+        }
+        std::reverse(ret.begin(), ret.end());
+        return ret;
+    }
+
+    // Returns all possible layouts for (a x b) tensor.
+    static std::vector<layout_t> generate_all_layouts(
+            const type_t &type, int a, int b) {
+        std::vector<layout_t> ret;
+        std::vector<block_t> blocks;
+        generate_all_layouts_impl(ret, blocks, type, a, b, 1);
+        return ret;
+    }
+
+    static void generate_all_layouts_impl(std::vector<layout_t> &layouts,
+            std::vector<block_t> &blocks, const type_t &type, int a, int b,
+            int stride) {
+        if (a == 1 && b == 1) {
+            layouts.emplace_back(type, 2, 0, blocks);
+            return;
+        }
+        bool iterate_a = true;
+        bool iterate_b = true;
+
+        // Avoid repeating indices to keep only unique layouts.
+        if (!blocks.empty()) {
+            auto &last = blocks.back();
+            iterate_a &= (last.dim_idx != 0);
+            iterate_b &= (last.dim_idx != 1);
+        }
+
+        if (iterate_a) {
+            for (int a_blk = 2; a_blk <= a; a_blk++) {
+                if (a % a_blk != 0) continue;
+                blocks.emplace_back(0, a_blk, stride);
+                generate_all_layouts_impl(
+                        layouts, blocks, type, a / a_blk, b, stride * a_blk);
+                blocks.pop_back();
+            }
+        }
+        if (iterate_b) {
+            for (int b_blk = 2; b_blk <= b; b_blk++) {
+                if (b % b_blk != 0) continue;
+                blocks.emplace_back(1, b_blk, stride);
+                generate_all_layouts_impl(
+                        layouts, blocks, type, a, b / b_blk, stride * b_blk);
+                blocks.pop_back();
+            }
+        }
+    }
+
+    layout_t src_;
+    layout_t dst_;
+
+    tensor_t tile_;
+};
+
+ngen::Subregister get_subregister(const grf_permutator_t &grf_perm,
+        const ngen::Subregister &base_sub, int off, int width, int stride_bytes,
+        ngen::DataType type = ngen::DataType::invalid) {
+    if (type == ngen::DataType::invalid) type = base_sub.getType();
+    int off_bytes = off * stride_bytes;
+    auto rd = ngen_reg_data(base_sub, off_bytes, type, 1, 0);
+    auto ret = ngen::Subregister(rd, rd.getOffset(), rd.getType());
+    if (grf_perm.is_empty()) return ret;
+
+    // Ensure no GRF boundary crossing.
+    int off0 = ret.getByteOffset();
+    int off1 = off0 + stride_bytes * (width - 1);
+
+    int base0 = ret.getBase();
+    int base1 = base0 + off1 / reg_bytes;
+
+    int new_base = grf_perm.map(base0);
+
+    for (int i = 1; i <= base1 - base0; i++) {
+        ir_assert(grf_perm.map(base0 + i) == new_base + i)
+                << "Unexpected mapping.";
+    }
+
+    ret.setBase(new_base);
+    return ret;
+}
+
+// Performs 1D reorder, possibly with strides and type conversion.
+template <typename GeneratorT>
+void emit_1d_tile(GeneratorT *host, ngen_register_scope_t &scope,
+        const grf_permutator_t &grf_perm, int width,
+        const ngen::Subregister &src, int src_stride,
+        const ngen::Subregister &dst, int dst_stride) {
+    ngen::DataType src_type = src.getType();
+    ngen::DataType dst_type = dst.getType();
+    int src_stride_bytes = src_stride * ngen::getBytes(src_type);
+    int dst_stride_bytes = dst_stride * ngen::getBytes(dst_type);
+    bool dst_b = ngen_is_b(dst_type);
+    bool dst_bf = (dst_type == ngen::DataType::bf);
+    bool dst_d = ngen_is_dw(dst_type) || (dst_type == ngen::DataType::f);
+    bool dst_f = (dst_type == ngen::DataType::f);
+    bool dst_hf = (dst_type == ngen::DataType::hf);
+    bool src_b = ngen_is_b(src_type);
+    bool src_bf = (src_type == ngen::DataType::bf);
+    bool src_d = ngen_is_dw(src_type) || (src_type == ngen::DataType::f);
+    bool src_f = (src_type == ngen::DataType::f);
+    bool f_to_xf = (src_f && (dst_bf || dst_hf));
+
+    auto get_step = [&]() {
+        int step = (width < 16 ? 8 : 16);
+
+        // f32 -> bf16 or f32 -> f16: SIMD16 does not support mixed mode move.
+        if (f_to_xf) step = std::min(step, 8);
+
+        // Max supported stride is 4.
+        if (src_stride > 4 || dst_stride > 4) step = 1;
+
+        return step;
+    };
+
+    // bf16 -> f32:
+    // - bf16 must be packed: use left shift instead.
+    if (src_bf && dst_f) {
+        int step = get_step();
+        for (int i = 0; i < width; i += step) {
+            int esize = std::min(step, width - i);
+            ir_assert(math::is_pow2(esize));
+            auto s = get_subregister(grf_perm, src, i, esize, src_stride_bytes,
+                    ngen::DataType::uw);
+            auto d = get_subregister(grf_perm, dst, i, esize, dst_stride_bytes,
+                    ngen::DataType::ud);
+            host->eshl(
+                    esize, d(dst_stride), s(src_stride), ngen::Immediate(16));
+        }
+        return;
+    }
+
+    // f32/s32 -> s8/u8 and s8/u8 -> f32/s32
+    // - Use saturation
+    // - s8/u8 must be DW-strided: use temporary
+    if ((src_d && dst_b) || (src_b && dst_d)) {
+        if (dst_d) ir_assert(dst_stride_bytes == 4);
+        if (src_d) ir_assert(src_stride_bytes == 4);
+        if (dst_b) ir_assert(utils::one_of(dst_stride_bytes, 1, 4));
+        if (src_b) ir_assert(utils::one_of(src_stride_bytes, 1, 4));
+        int step = get_step();
+        auto tmp = scope.alloc_range(
+                utils::div_up(int(step * sizeof(uint32_t)), reg_bytes));
+        for (int i = 0; i < width; i += step) {
+            int esize = std::min(step, width - i);
+            ir_assert(math::is_pow2(esize));
+
+            auto s = get_subregister(grf_perm, src, i, esize, src_stride_bytes);
+            auto d = get_subregister(grf_perm, dst, i, esize, dst_stride_bytes);
+            if (src_d) {
+                // d -> b.
+                if (dst_stride_bytes == 1) {
+                    auto t = tmp[0].retype(dst_type)[0](4);
+                    host->emov(esize | host->sat, t, s(1));
+                    host->emov(esize, d(1), t);
+                } else {
+                    host->emov(esize | host->sat, dst(4), src(1));
+                }
+            } else {
+                // b -> d.
+                if (esize == 1) {
+                    // Direct x8 -> x32 scalar cast is not always
+                    // supported. Use intermediate cast to s16.
+                    auto t = tmp[0].uw();
+                    host->emov(esize, t, s);
+                    host->emov(esize, d, t);
+                } else if (src_stride_bytes == 1) {
+                    auto t = tmp[0].retype(src_type)[0](4);
+                    host->emov(esize, t, s(1));
+                    host->emov(esize, d(1), t);
+                } else {
+                    host->emov(esize | host->sat, dst(1), src(4));
+                }
+            }
+        }
+        return;
+    }
+
+    // Perform regular move.
+    int step = get_step();
+    for (int i = 0; i < width; i += step) {
+        int esize = std::min(step, width - i);
+        ir_assert(math::is_pow2(esize));
+        ir_assert(!f_to_xf || utils::one_of(i % 16, 0, 8))
+                << "Not always supported in HW.";
+        auto s = get_subregister(grf_perm, src, i, esize, src_stride_bytes);
+        auto d = get_subregister(grf_perm, dst, i, esize, dst_stride_bytes);
+        host->emov(esize, d(dst_stride), s(src_stride));
+    }
+}
+
+class reorder_impl_t {
+public:
+    reorder_impl_t(const reorder_t &reorder) {
+        src_layout_ = reorder.src_layout.normalize();
+        dst_layout_ = reorder.dst_layout.normalize();
+        try_reinterpret_to_wider_type(src_layout_, dst_layout_);
+
+        // Pure bf moves are not supported.
+        if (utils::everyone_is(
+                    type_t::bf16(), src_layout_.type(), dst_layout_.type())) {
+            src_layout_ = src_layout_.retype(type_t::u16());
+            dst_layout_ = dst_layout_.retype(type_t::u16());
+        }
+
+        if (reorder.grf_perm) grf_perm_ = *reorder.grf_perm;
+        with_permutation_ = !grf_perm_.is_empty();
+    }
+
+    template <typename GeneratorT>
+    void emit(GeneratorT *host, ngen_register_scope_t &scope,
+            const ngen::RegData &_src, const ngen::RegData &_dst) {
+        if (with_permutation_) {
+            ir_assert(_src.getOffset() == 0)
+                    << "Must be aligned to GRF boundary.";
+            ir_assert(_dst.getOffset() == 0)
+                    << "Must be aligned to GRF boundary.";
+            grf_perm_.set_grf_base(_src.getBase());
+        }
+
+        auto &src_type = src_layout_.type();
+        auto &dst_type = dst_layout_.type();
+        auto src = ngen_reg_data(_src, 0, to_ngen(src_type), 1);
+        auto dst = ngen_reg_data(_dst, 0, to_ngen(dst_type), 1);
+
+        if (try_emit_2d(host, scope, src, dst)) return;
+        emit_1d(host, scope, src, dst);
+    }
+
+private:
+    template <typename GeneratorT>
+    void emit_1d(GeneratorT *host, ngen_register_scope_t &scope,
+            const ngen::RegData &src_rd, const ngen::RegData &dst_rd) {
+        int src_stride;
+        int dst_stride;
+        auto tile = find_max_tile_with_fixed_stride(
+                src_layout_, dst_layout_, src_stride, dst_stride);
+
+        int tile_elems = int(tile.elems());
+        auto &src_type = src_layout_.type();
+        auto &dst_type = dst_layout_.type();
+        dst_layout_.for_each_tile(tile, [&](const std::vector<dim_t> &start) {
+            int src_off = int(src_layout_(start) * src_type.size());
+            int dst_off = int(dst_layout_(start) * dst_type.size());
+            auto sub_src = ngen_subregister(src_rd, src_off);
+            auto sub_dst = ngen_subregister(dst_rd, dst_off);
+
+            emit_1d_tile(host, scope, grf_perm_, tile_elems, sub_src,
+                    src_stride, sub_dst, dst_stride);
+        });
+    }
+
+    template <typename GeneratorT>
+    bool try_emit_2d(GeneratorT *host, ngen_register_scope_t &scope,
+            const ngen::RegData &src_rd, const ngen::RegData &dst_rd) {
+        if (src_layout_.type() != dst_layout_.type()) return false;
+        if (!src_layout_.is_dense()) return false;
+        if (!dst_layout_.is_dense()) return false;
+
+        reorder_2d_impl_t r(src_layout_, dst_layout_);
+        int tile_elems = int(r.tile().elems());
+        if (tile_elems < 16 || tile_elems > 512) return false;
+
+        r.emit(host, scope, grf_perm_, src_rd, dst_rd);
+        return true;
+    }
+
+    static tensor_t find_max_tile_with_fixed_stride(const layout_t &src,
+            const layout_t &dst, int &src_stride, int &dst_stride) {
+        // 1. Split layouts to have aligned blocks.
+        auto a = src;
+        auto b = dst;
+        layout_t::align_layouts(a, b);
+
+        // 2. Find the max innermost tile.
+        auto a_blocks = a.blocks();
+        auto b_blocks = b.blocks();
+
+        std::vector<dim_t> tile_dims(a.ndims(), 1);
+        src_stride = (a_blocks.empty() ? 1 : int(a_blocks[0].stride));
+        dst_stride = (b_blocks.empty() ? 1 : int(b_blocks[0].stride));
+        int src_cur_stride = src_stride;
+        int dst_cur_stride = dst_stride;
+
+        int min_blocks = int(std::min(a_blocks.size(), b_blocks.size()));
+        for (int i = 0; i < min_blocks; i++) {
+            auto &ab = a_blocks[i];
+            auto &bb = b_blocks[i];
+            if (ab.dim_idx != bb.dim_idx || ab.block != bb.block) break;
+
+            // Strides are supported for the innermost block only.
+            if (src_cur_stride != int(ab.stride)) break;
+            if (dst_cur_stride != int(bb.stride)) break;
+
+            src_cur_stride = int(ab.block * ab.stride);
+            dst_cur_stride = int(bb.block * bb.stride);
+            tile_dims[ab.dim_idx] *= ab.block;
+        }
+        return tensor_t(tile_dims);
+    }
+
+    layout_t src_layout_;
+    layout_t dst_layout_;
+    grf_permutator_t grf_perm_;
+    bool with_permutation_ = false;
+};
+
 // Lowers IR to nGEN.
 template <ngen::HW hw>
 class ir_to_ngen_t : public ir_visitor_t {
@@ -1191,6 +2036,10 @@ public:
         } else if (func.is<mad_t>()) {
             auto arg_ops = eval(obj->args, scope);
             mad(func.as<mad_t>(), arg_ops, obj->attr);
+        } else if (func.is<reorder_t>()) {
+            auto arg_ops = eval(obj->args, scope);
+            ir_assert(obj->attr.is_empty()) << "Unexpected attribute.";
+            reorder(scope, func.as<reorder_t>(), arg_ops);
         } else if (func.is<send_t>()) {
             auto &send_func = func.as<send_t>();
             auto args = obj->args;
@@ -1389,6 +2238,15 @@ private:
             src2.setRegion(0, mad_func.src2_simd_size, 0);
 
         host_->mad(mod, dst, src0, src1, src2);
+    }
+
+    void reorder(ngen_register_scope_t &scope, const reorder_t &reorder_func,
+            const std::vector<ngen_operand_t> &args) {
+        auto &src_op = reorder_t::arg_src_buf(args);
+        auto &dst_op = reorder_t::arg_dst_buf(args);
+
+        reorder_impl_t reorder_impl(reorder_func);
+        reorder_impl.emit(host_, scope, src_op.reg_data(), dst_op.reg_data());
     }
 
     void send(ngen_register_scope_t &scope, const send_t &send_func,

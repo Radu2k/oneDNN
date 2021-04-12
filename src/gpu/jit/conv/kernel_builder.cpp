@@ -17,6 +17,7 @@
 #include "gpu/jit/conv/kernel_builder.hpp"
 
 #include <algorithm>
+#include <array>
 #include <iostream>
 #include <memory>
 #include <utility>
@@ -28,6 +29,7 @@
 #include "gpu/jit/conv/ir.hpp"
 #include "gpu/jit/conv/message_support.hpp"
 #include "gpu/jit/conv/post_op_support.hpp"
+#include "gpu/jit/conv/reorder_support.hpp"
 #include "gpu/jit/conv/tensor.hpp"
 
 namespace dnnl {
@@ -35,47 +37,23 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
-// Helper class to permute registers. Used to restore registers after applying
-// DPAS -> DPASW transformation.
-class grf_permutator_t : public ir_mutator_t {
+class permutation_injector_t : public ir_mutator_t {
 public:
-    void set_permute(const expr_t &old_grf, const expr_t &new_grf) {
-        auto &old_base = old_grf.as<ptr_t>().base;
-        auto &new_base = new_grf.as<ptr_t>().base;
-        ir_assert(old_base.is_same(new_base));
-        MAYBE_UNUSED(new_base);
+    permutation_injector_t(const grf_permutator_t &grf_perm)
+        : grf_perm_(new grf_permutator_t(grf_perm)) {}
 
-        if (grf_buf_base_.is_empty()) grf_buf_base_ = old_base;
-        ir_assert(old_base.is_same(grf_buf_base_));
+    object_t _mutate(const func_call_t *obj) override {
+        if (!is_func_call<reorder_t>(obj)) return ir_mutator_t::_mutate(obj);
 
-        int old_off = to_cpp<int>(old_grf.as<ptr_t>().off);
-        int new_off = to_cpp<int>(new_grf.as<ptr_t>().off);
+        auto &func = obj->func.as<reorder_t>();
+        auto new_func
+                = reorder_t::make(func.src_layout, func.dst_layout, grf_perm_);
 
-        auto ret = permutation_.insert({old_off, new_off});
-        ir_assert(ret.second);
-        MAYBE_UNUSED(ret);
-    }
-
-    object_t _mutate(const load_t *obj) override {
-        if (!obj->buf.is_same(grf_buf_base_) || !obj->has_default_stride())
-            return ir_mutator_t::_mutate(obj);
-
-        // Ensure no cross-register accesses.
-        ir_assert(obj->type.size() <= reg_bytes);
-
-        int load_off = to_cpp<int>(obj->off);
-        if (permutation_.count(load_off) == 0)
-            return ir_mutator_t::_mutate(obj);
-
-        int new_off = permutation_[load_off];
-        ir_assert(new_off % obj->type.size() == 0);
-
-        return load_t::make(obj->type, obj->buf, new_off);
+        return new_func.call(obj->args);
     }
 
 private:
-    expr_t grf_buf_base_;
-    std::unordered_map<int, int> permutation_;
+    std::shared_ptr<grf_permutator_t> grf_perm_;
 };
 
 class dpasw_injector_t {
@@ -139,7 +117,7 @@ public:
         }
 
         // Apply permutation to C store.
-        c_store_stmt_ = grf_perm.mutate(c_store_stmt_);
+        c_store_stmt_ = apply_permutation_to_reorder(c_store_stmt_, grf_perm);
 
         int new_src2_size = src2_off;
         alloc_updater_.resize(src2_base, new_src2_size);
@@ -423,6 +401,11 @@ private:
                 create_half_send(a_send.send()).call(new_send_args));
 
         return true;
+    }
+
+    static stmt_t apply_permutation_to_reorder(
+            const stmt_t &stmt, const grf_permutator_t &grf_perm) {
+        return permutation_injector_t(grf_perm).mutate(stmt);
     }
 
     stmt_t load_mul_stmt_;
@@ -2748,234 +2731,17 @@ stmt_t split_wide_stores(const stmt_t &s) {
     return ret;
 }
 
-// Implements reorder between dense GRF buffers. Conversion between data types
-// is supported.
-class linear_reorder_builder_t {
-public:
-    linear_reorder_builder_t(ir_context_t &ir_ctx, int elems,
-            const type_t &src_type, const expr_t &src_buf, int src_stride,
-            const type_t &dst_type, const expr_t &dst_buf, int dst_stride)
-        : ir_ctx_(ir_ctx)
-        , elems_(elems)
-        , src_type_(src_type)
-        , src_buf_(src_buf)
-        , src_stride_bytes_(src_stride * src_type.size())
-        , dst_type_(dst_type)
-        , dst_buf_(dst_buf)
-        , dst_stride_bytes_(dst_stride * dst_type.size()) {
-        ir_assert(src_type_.is_scalar()) << "Vector types are unsupported.";
-        ir_assert(dst_type_.is_scalar()) << "Vector types are unsupported.";
-        build();
-    }
-
-    const stmt_t &stmt() const { return stmt_; }
-
-private:
-    void build() {
-        // bf16 -> f32:
-        // - bf16 must be packed: use left shift instead.
-        if (src_type_ == type_t::bf16() && dst_type_ == type_t::f32()) {
-            int step = (elems_ < 16 ? 8 : 16);
-            for (int i = 0; i < elems_; i += step) {
-                int cur_elems = std::min(step, elems_ - i);
-                ir_assert(math::is_pow2(cur_elems));
-                auto src_vec_type = type_t::u16(cur_elems);
-                auto dst_vec_type = type_t::u32(cur_elems);
-                int src_off = i * src_stride_bytes_;
-                int dst_off = i * dst_stride_bytes_;
-                auto load = load_t::make(
-                        src_vec_type, src_buf_, src_off, src_stride_bytes_);
-                auto shifted = binary_op_t::make(op_kind_t::_shl, load,
-                        shuffle_t::make_broadcast(16, cur_elems));
-                auto store = store_t::make(dst_buf_, dst_off,
-                        cast(shifted, dst_vec_type), dst_stride_bytes_);
-                stmt_ = stmt_.append(store);
-            }
-            return;
-        }
-
-        bool is_src_dw = (src_type_.size() == 4);
-        bool is_src_b = (src_type_.size() == 1);
-        bool is_dst_dw = (dst_type_.size() == 4);
-        bool is_dst_b = (dst_type_.size() == 1);
-
-        // f32/s32 -> s8/u8 and s8/u8 -> f32/s32
-        // - Use saturation
-        // - s8/u8 must be DW-strided: use temporary
-        if ((is_src_dw && is_dst_b) || (is_src_b && is_dst_dw)) {
-            if (is_dst_dw) ir_assert(dst_stride_bytes_ == 4);
-            if (is_src_dw) ir_assert(src_stride_bytes_ == 4);
-            if (is_dst_b) ir_assert(utils::one_of(dst_stride_bytes_, 1, 4));
-            if (is_src_b) ir_assert(utils::one_of(src_stride_bytes_, 1, 4));
-            int step = (elems_ < 16 ? 8 : 16);
-            auto tmp_buf = ir_ctx_.create_tmp_var(type_t::byte_ptr());
-            int tmp_size = 4 * step;
-            for (int i = 0; i < elems_; i += step) {
-                int cur_elems = std::min(step, elems_ - i);
-                ir_assert(math::is_pow2(cur_elems));
-                auto src_vec_type = src_type_.with_elems(cur_elems);
-                auto dst_vec_type = dst_type_.with_elems(cur_elems);
-                int src_off = i * src_stride_bytes_;
-                int dst_off = i * dst_stride_bytes_;
-
-                expr_t L0, L1; // Loads.
-                expr_t C; // Cast.
-                stmt_t S0, S1; // Stores.
-
-                L0 = load_t::make(
-                        src_vec_type, src_buf_, src_off, src_stride_bytes_);
-                if (is_src_dw) {
-                    C = cast(L0, dst_vec_type, /*saturate=*/true);
-                    if (dst_stride_bytes_ == 1) {
-                        S0 = store_t::make(tmp_buf, 0, C, 4);
-                        L1 = load_t::make(dst_vec_type, tmp_buf, 0, 4);
-                        S1 = store_t::make(
-                                dst_buf_, dst_off, L1, dst_stride_bytes_);
-                    } else {
-                        S0 = store_t::make(
-                                dst_buf_, dst_off, C, dst_stride_bytes_);
-                    }
-                } else {
-                    if (elems_ == 1) {
-                        // Direct x8 -> x32 scalar cast is not always
-                        // supported. Use intermediate cast to s16.
-                        C = cast(L0, type_t::s16());
-                        S0 = store_t::make(tmp_buf, 0, C);
-                        L1 = load_t::make(type_t::s16(), tmp_buf, 0);
-                        S1 = store_t::make(dst_buf_, dst_off,
-                                cast(L1, dst_type_), dst_stride_bytes_);
-                    } else if (src_stride_bytes_ == 1) {
-                        S0 = store_t::make(tmp_buf, 0, L0, 4);
-                        L1 = load_t::make(src_vec_type, tmp_buf, 0, 4);
-                        C = cast(L1, dst_vec_type);
-                        S1 = store_t::make(
-                                dst_buf_, dst_off, C, dst_stride_bytes_);
-                    } else {
-                        C = cast(L0, dst_vec_type);
-                        S0 = store_t::make(
-                                dst_buf_, dst_off, C, dst_stride_bytes_);
-                    }
-                }
-                stmt_ = stmt_.append(S0.append(S1));
-            }
-            stmt_ = alloc_t::make(
-                    tmp_buf, tmp_size, alloc_kind_t::grf, {}, stmt_);
-            return;
-        }
-
-        // Perform regular move.
-        int step = (elems_ < 16 ? 8 : 16);
-
-        // f32 -> bf16 or f32 -> f16: SIMD16 does not support mixed mode move.
-        if (src_type_ == type_t::f32()
-                && utils::one_of(dst_type_, type_t::bf16(), type_t::f16())) {
-            step = std::min(step, 8);
-        }
-        for (int i = 0; i < elems_; i += step) {
-            int cur_elems = std::min(step, elems_ - i);
-            ir_assert(math::is_pow2(cur_elems));
-            ir_assert(utils::one_of(i % 16, 0, 8))
-                    << "Not always supported in HW.";
-            auto src_vec_type = src_type_.with_elems(cur_elems);
-            auto dst_vec_type = dst_type_.with_elems(cur_elems);
-            int src_off = i * src_stride_bytes_;
-            int dst_off = i * dst_stride_bytes_;
-            auto load = load_t::make(
-                    src_vec_type, src_buf_, src_off, src_stride_bytes_);
-            auto store = store_t::make(dst_buf_, dst_off,
-                    cast(load, dst_vec_type), dst_stride_bytes_);
-            stmt_ = stmt_.append(store);
-        }
-    }
-
-    ir_context_t &ir_ctx_;
-
-    int elems_;
-    type_t src_type_;
-    expr_t src_buf_;
-    int src_stride_bytes_;
-    type_t dst_type_;
-    expr_t dst_buf_;
-    int dst_stride_bytes_;
-
-    stmt_t stmt_;
-};
-
-// Implements reorder between GRF buffers in given layouts. Conversion between
-// data types is supported.
-class reorder_builder_t {
-public:
-    reorder_builder_t(ir_context_t &ir_ctx, const view_t &src,
-            const view_t &dst, const expr_t &src_buf, const expr_t &dst_buf)
-        : ir_ctx_(ir_ctx)
-        , src_(src.create_vlayout())
-        , dst_(dst.create_vlayout())
-        , src_buf_(src_buf)
-        , dst_buf_(dst_buf) {
-        ir_assert(src_.ndims() == dst_.ndims()) << "Layouts are incompatible.";
-        ir_assert(src_.elems() == dst_.elems()) << "Layouts are incompatible.";
-        build();
-    }
-
-    const stmt_t &stmt() const { return stmt_; }
-
-private:
-    void build() {
-        // 1. Split layouts to have aligned blocks.
-        auto a = src_;
-        auto b = dst_;
-        layout_t::align_layouts(a, b);
-
-        // 2. Find the biggest innermost dense tensor (tile).
-        auto a_blocks = a.blocks();
-        auto b_blocks = b.blocks();
-
-        std::vector<dim_t> tile_dims(a.ndims(), 1);
-        stride_t src_stride
-                = (a_blocks.empty() ? stride_t(1) : a_blocks[0].stride);
-        stride_t dst_stride
-                = (b_blocks.empty() ? stride_t(1) : b_blocks[0].stride);
-        stride_t src_cur_stride = src_stride;
-        stride_t dst_cur_stride = dst_stride;
-        for (size_t i = 0; i < std::min(a_blocks.size(), b_blocks.size());
-                i++) {
-            auto &ab = a_blocks[i];
-            auto &bb = b_blocks[i];
-            if (ab.dim_idx != bb.dim_idx || ab.block != bb.block) break;
-            if (src_cur_stride != ab.stride) break;
-            src_cur_stride = ab.block * ab.stride;
-            if (dst_cur_stride != bb.stride) break;
-            dst_cur_stride = bb.block * bb.stride;
-            tile_dims[ab.dim_idx] *= ab.block;
-        }
-
-        // 3. Generate copy/convert statements for every tile.
-        tensor_t tile(tile_dims);
-        dim_t tile_elems = tile.elems();
-        src_.for_each_tile(tile, [&](const std::vector<dim_t> &start) {
-            dim_t src_off = src_(start);
-            dim_t dst_off = dst_(start);
-            ir_assert(src_off % tile_elems == 0);
-            ir_assert(dst_off % tile_elems == 0);
-            auto src_sub_buf = src_buf_[src_off * src_.type().size()];
-            auto dst_sub_buf = dst_buf_[dst_off * dst_.type().size()];
-            linear_reorder_builder_t b(ir_ctx_, tile_elems, src_.type(),
-                    src_sub_buf, int(src_stride), dst_.type(), dst_sub_buf,
-                    int(dst_stride));
-            stmt_ = stmt_.append(b.stmt());
-        });
-    }
-
-    ir_context_t &ir_ctx_;
-
-    layout_t src_;
-    layout_t dst_;
-
-    expr_t src_buf_;
-    expr_t dst_buf_;
-
-    stmt_t stmt_;
-};
+stmt_t create_reorder_stmt(const view_t &src, const view_t &dst,
+        const expr_t &src_buf, const expr_t &dst_buf) {
+    auto src_layout = src.create_vlayout();
+    auto dst_layout = dst.create_vlayout();
+    ir_assert(src_layout.ndims() == dst_layout.ndims())
+            << "Layouts are incompatible.";
+    ir_assert(src_layout.elems() == dst_layout.elems())
+            << "Layouts are incompatible.";
+    auto func = reorder_t::make(src_layout, dst_layout);
+    return func.call({dst_buf, src_buf});
+}
 
 // Generates loads or stores to move data between memory (global or SLM) and
 // GRF. Memory layout is a parameter. GRF layout is deduced automatically,
@@ -3181,14 +2947,14 @@ public:
         rhs_f32_reg_buf_size_ = int(f32_view.vlayout_size());
 
         // Reorder to f32.
-        reorder_builder_t reorder(ir_ctx_, pre_load_rhs_reg_view_, f32_view,
+        auto ret = create_reorder_stmt(pre_load_rhs_reg_view_, f32_view,
                 rhs_orig_reg_buf_, rhs_f32_reg_buf_);
 
         // Now rhs is converted to f32.
         pre_load_rhs_reg_view_ = f32_view;
         rhs_reg_buf_ = rhs_f32_reg_buf_;
 
-        return reorder.stmt();
+        return ret;
     }
 
     // Loads rhs data for one tile.
@@ -3215,9 +2981,8 @@ public:
                         = rhs_reg_view_.make_dense().retype(type_t::f32());
                 rhs_f32_reg_buf_size_ = std::max(
                         rhs_f32_reg_buf_size_, int(f32_view.vlayout_size()));
-                reorder_builder_t reorder(ir_ctx_, rhs_reg_view_, f32_view,
-                        rhs_orig_reg_buf_, rhs_f32_reg_buf_);
-                stmt = stmt.append(reorder.stmt());
+                stmt = stmt.append(create_reorder_stmt(rhs_reg_view_, f32_view,
+                        rhs_orig_reg_buf_, rhs_f32_reg_buf_));
 
                 // Now rhs is converted to f32.
                 rhs_reg_view_ = f32_view;
@@ -3494,11 +3259,9 @@ private:
         void set_next(ir_context_t &ir_ctx, stage_t *next) {
             if (!next) return;
             if (!view.has_same_vlayout(next->view, /*compare_offset=*/false)) {
-                // Generate reorder between stages.
-                reorder_builder_t reorder(
-                        ir_ctx, view, next->view, buf, next->buf);
                 ir_assert(stmt.is_empty());
-                stmt = reorder.stmt();
+                // Generate reorder between stages.
+                stmt = create_reorder_stmt(view, next->view, buf, next->buf);
             } else {
                 // Reuse the same GRF buffer for the next stage.
                 int this_off = to_cpp<int>(view.offset_in_bytes());

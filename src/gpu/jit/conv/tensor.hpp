@@ -140,6 +140,8 @@ public:
 
     bool operator!=(const stride_t &other) const { return !operator==(other); }
 
+    size_t get_hash() const { return ir_utils::get_hash(kind_, stride_); }
+
     operator dim_t() const {
         ir_assert(kind_ == stride_kind_t::fixed);
         return stride_;
@@ -221,6 +223,10 @@ struct block_t {
     bool is_equal(const block_t &other) const {
         return (dim_idx == other.dim_idx) && (block == other.block)
                 && (stride == other.stride);
+    }
+
+    size_t get_hash() const {
+        return ir_utils::get_hash(dim_idx, block, stride);
     }
 
     std::string str() const {
@@ -364,6 +370,10 @@ public:
 
     bool is_equal(const layout_t &other, bool compare_offset = true) const {
         return normalize().is_strictly_equal(other.normalize(), compare_offset);
+    }
+
+    size_t get_hash() const {
+        return ir_utils::get_hash(type_, ndims_, offset_, blocks_);
     }
 
     template <typename T>
