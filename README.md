@@ -337,8 +337,9 @@ contributors are expected to adhere to the
 
 # License
 
-oneDNN is licensed under [Apache License Version 2.0](LICENSE). Refer to the
-"[LICENSE](LICENSE)" file for the full license text and copyright notice.
+This software is licensed under Intel End User License Agreement
+for Developer Tools. Refer to the "[license.rtf](license.rtf)" file for
+the full license text.
 
 This distribution includes third party software governed by separate license
 terms.
@@ -353,6 +354,7 @@ Apache License Version 2.0:
 * [Font Roboto](https://fonts.google.com/specimen/Roboto)
 * [MathJax](https://github.com/mathjax/MathJax)
 * [Xbyak_aarch64](https://github.com/fujitsu/xbyak_aarch64)
+* [oneDNN](https://github.com/oneapi-src/oneDNN)
 
 Boost Software License, Version 1.0:
 * [Boost C++ Libraries](https://www.boost.org/)
