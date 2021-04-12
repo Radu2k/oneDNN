@@ -43,5 +43,11 @@
 --sdt=f32:f32
 --stag=aBcd16b
 --dtag=aBcd16b
-1x8x64x64
+1x8x64x64 1x8x640x1024 1x24x640x1024
+
+--sdt=bf16:bf16
+--ddt=bf16
+--stag=AB48a16b:AB48a16b
+--dtag=AB48a16b
+512x1024
 
