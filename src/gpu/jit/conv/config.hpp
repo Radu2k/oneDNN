@@ -195,6 +195,10 @@ public:
                 src_data_type, wei_data_type, dst_data_type);
         if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
 
+        // Disable using mad instruction backend until performance parity is
+        // reached with OpenCL kernels.
+        if (fma_kind == fma_kind_t::mad) return status::unimplemented;
+
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
         // Current implementation performs full unrolling across the filter,
