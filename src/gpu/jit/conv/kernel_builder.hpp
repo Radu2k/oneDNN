@@ -49,6 +49,11 @@ private:
     void init_fwd(constraint_set_t &init_cset, std::vector<stmt_t> &init_stmts,
             std::vector<stmt_t> &reduction_loops, view_t &src_tg_view,
             view_t &wei_tg_view, view_t &dst_tg_view, view_t &dst_view);
+    void init_bwd_data(constraint_set_t &init_cset,
+            std::vector<stmt_t> &init_stmts,
+            std::vector<stmt_t> &reduction_loops, view_t &src_tg_view,
+            view_t &wei_tg_view, view_t &dst_tg_view,
+            view_t &dst_view);
 
     const conv_config_t &cfg_;
     const convolution_pd_t *pd_;

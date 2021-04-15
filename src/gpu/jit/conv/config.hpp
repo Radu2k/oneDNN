@@ -46,12 +46,20 @@ public:
         (void)desc;
 
         is_fwd = conv_pd->is_fwd();
+        is_bwd_d = conv_pd->is_bwd_d();
         with_bias = conv_pd->with_bias();
         with_groups = conv_pd->with_groups();
 
-        orig_src_md = *conv_pd->arg_md(DNNL_ARG_SRC);
-        orig_wei_md = *conv_pd->arg_md(DNNL_ARG_WEIGHTS);
-        orig_dst_md = *conv_pd->arg_md(DNNL_ARG_DST);
+        if (is_fwd) {
+            orig_src_md = *conv_pd->arg_md(DNNL_ARG_SRC);
+            orig_wei_md = *conv_pd->arg_md(DNNL_ARG_WEIGHTS);
+            orig_dst_md = *conv_pd->arg_md(DNNL_ARG_DST);
+        } else if (is_bwd_d) {
+            orig_src_md = *conv_pd->arg_md(DNNL_ARG_DIFF_SRC);
+            orig_wei_md = *conv_pd->arg_md(DNNL_ARG_WEIGHTS);
+            orig_dst_md = *conv_pd->arg_md(DNNL_ARG_DIFF_DST);
+        } else
+            ir_error_not_expected(); // not implemented yet
 
         src_data_type = orig_src_md.data_type;
         wei_data_type = orig_wei_md.data_type;
@@ -160,6 +168,7 @@ public:
     data_type_t dst_data_type;
 
     bool is_fwd;
+    bool is_bwd_d;
     bool with_bias;
     bool with_groups;
 
@@ -188,9 +197,10 @@ public:
         CHECK(init_acc_data_type());
 
         // Cases below are not supported yet.
-        if (!is_fwd) return status::unimplemented;
+        if (!is_fwd && !is_bwd_d) return status::unimplemented;
         if (with_groups) return status::unimplemented;
         if (!post_ops_ok(conv_pd)) return status::unimplemented;
+
         fma_kind = fma_kind::get_supported_kind(
                 src_data_type, wei_data_type, acc_data_type);
         if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
@@ -198,6 +208,11 @@ public:
         // Disable using mad instruction backend until performance parity is
         // reached with OpenCL kernels.
         if (fma_kind == fma_kind_t::mad) return status::unimplemented;
+
+        if (is_fwd && utils::one_of(data_type::f32, src_data_type, wei_data_type))
+                return status::unimplemented;
+        if (is_bwd_d && utils::one_of(data_type::f32, dst_data_type, wei_data_type))
+                return status::unimplemented;
 
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
@@ -210,18 +225,29 @@ public:
         int oc_thr_blk = 32;
         int ow_thr_blk = (mb < 16 ? 16 : 1);
         if (ow < ow_thr_blk) ow_thr_blk = 8;
+        int ic_thr_blk = 32; // For BWD
+        int iw_thr_blk = (mb < 16 ? 16 : 1);
+        if (iw < iw_thr_blk) iw_thr_blk = 8;
 
 #ifdef GEN_CONV_DEBUG
         mb_thr_blk = getenv_int("mb_thr_blk", mb_thr_blk);
         oc_thr_blk = getenv_int("oc_thr_blk", oc_thr_blk);
+        ic_thr_blk = getenv_int("ic_thr_blk", ic_thr_blk);
         ow_thr_blk = getenv_int("ow_thr_blk", ow_thr_blk);
+        iw_thr_blk = getenv_int("iw_thr_blk", iw_thr_blk);
 #endif
 
         simd_size = fma_kind::get_simd_size(
                 fma_kind, src_data_type, wei_data_type, dst_data_type);
         regs = 256;
-        tg_grid_dim[0] = std::min(4, utils::div_up(oc, oc_thr_blk));
-        tg_grid_dim[1] = std::min(4, utils::div_up(ow, ow_thr_blk));
+
+        if (is_fwd) {
+            tg_grid_dim[0] = std::min(4, utils::div_up(oc, oc_thr_blk));
+            tg_grid_dim[1] = std::min(4, utils::div_up(ow, ow_thr_blk));
+        } else {
+            tg_grid_dim[0] = std::min(4, utils::div_up(ic, ic_thr_blk));
+            tg_grid_dim[1] = std::min(4, utils::div_up(iw, iw_thr_blk));
+        }
         tg_grid_dim[2] = 1;
 
         // Round down to a power of 2.
@@ -236,30 +262,50 @@ public:
 
         mb_tg_blk = mb_thr_blk;
         oc_tg_blk = tg_grid_dim[0] * oc_thr_blk;
+        ic_tg_blk = tg_grid_dim[0] * ic_thr_blk;
         ow_tg_blk = tg_grid_dim[1] * ow_thr_blk;
+        iw_tg_blk = tg_grid_dim[1] * iw_thr_blk;
         ic_blk = (is_s32_accumulator() ? 32 : 16);
+        oc_blk = (is_s32_accumulator() ? 32 : 16);
 
 #ifdef GEN_CONV_DEBUG
         mb_tg_blk = getenv_int("mb_tg_blk", mb_tg_blk);
         oc_tg_blk = getenv_int("oc_tg_blk", oc_tg_blk);
+        ic_tg_blk = getenv_int("ic_tg_blk", ic_tg_blk);
         ow_tg_blk = getenv_int("ow_tg_blk", ow_tg_blk);
+        iw_tg_blk = getenv_int("iw_tg_blk", iw_tg_blk);
 #endif
 
-        m_tg_blk = mb_tg_blk * ow_tg_blk;
-        n_tg_blk = oc_tg_blk;
-        k_tg_blk = ic_blk;
+        if (is_fwd) {
+            m_tg_blk = mb_tg_blk * ow_tg_blk;
+            n_tg_blk = oc_tg_blk;
+            k_tg_blk = ic_blk;
+        } else {
+            m_tg_blk = mb_tg_blk * iw_tg_blk;
+            n_tg_blk = ic_tg_blk;
+            k_tg_blk = oc_blk;
+        }
 
         int mb_tg_padded = utils::rnd_up(mb, mb_tg_blk);
         int oc_tg_padded = utils::rnd_up(oc, oc_tg_blk);
+        int ic_tg_padded = utils::rnd_up(ic, ic_tg_blk);
         int ow_tg_padded = utils::rnd_up(ow, ow_tg_blk);
+        int iw_tg_padded = utils::rnd_up(iw, iw_tg_blk);
 
         int mb_tg_dim = mb_tg_padded / mb_tg_blk;
         int oc_tg_dim = oc_tg_padded / oc_tg_blk;
+        int ic_tg_dim = ic_tg_padded / ic_tg_blk;
 
         ow_tg_dim = ow_tg_padded / ow_tg_blk;
+        iw_tg_dim = iw_tg_padded / iw_tg_blk;
 
-        kernel_grid_dim[0] = oc_tg_dim;
-        kernel_grid_dim[1] = od * oh * ow_tg_dim;
+        if (is_fwd) {
+            kernel_grid_dim[0] = oc_tg_dim;
+            kernel_grid_dim[1] = od * oh * ow_tg_dim;
+        } else {
+            kernel_grid_dim[0] = ic_tg_dim;
+            kernel_grid_dim[1] = id * ih * iw_tg_dim;
+        }
         kernel_grid_dim[2] = mb_tg_dim;
 
         use_a_slm = true;
@@ -300,7 +346,7 @@ public:
             dst_tag = (mb_thr_blk == 1 ? "aBx32b" : "ABx32a32b");
         } else {
             src_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
-            wei_tag = "ABx4a8b8a2b";
+            wei_tag = (is_fwd ? "ABx4a8b8a2b" : "BAx4b8a8b2a");
             dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
         }
 
@@ -345,7 +391,8 @@ public:
             return status::unimplemented;
 
         // Blocked large batch performance is slightly behind.
-        if (!is_src_nhwc && mb >= 16) return status::unimplemented;
+        if (is_fwd && !is_src_nhwc && mb >= 16) return status::unimplemented;
+        // TODO: check perf for BWD_D
 
         return status::success;
     }
@@ -435,12 +482,16 @@ public:
     std::array<int, 3> kernel_grid_dim;
 
     int ow_tg_dim;
+    int iw_tg_dim;
 
     // Block sizes per thread group (convolution notation).
     int mb_tg_blk;
     int oc_tg_blk;
     int ow_tg_blk;
     int ic_blk;
+    int ic_tg_blk;
+    int iw_tg_blk;
+    int oc_blk;
 
     // Block sizes per thread group (GEMM notation).
     int m_tg_blk;
@@ -479,8 +530,13 @@ private:
             acc_data_type = data_type::s32;
             return status::success;
         }
-        if (utils::everyone_is(data_type::f16, sdt, wdt)
-                || utils::everyone_is(data_type::bf16, sdt, wdt)) {
+        if (is_fwd && (utils::everyone_is(data_type::f16, sdt, wdt)
+                || utils::everyone_is(data_type::bf16, sdt, wdt))) {
+            acc_data_type = data_type::f32;
+            return status::success;
+        }
+        if (is_bwd_d && (utils::everyone_is(data_type::f16, ddt, wdt)
+                || utils::everyone_is(data_type::bf16, ddt, wdt))) {
             acc_data_type = data_type::f32;
             return status::success;
         }

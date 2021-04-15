@@ -62,6 +62,32 @@ private:
     std::shared_ptr<gen_convolution_t> impl_;
 };
 
+class gen_convolution_bwd_data_t : public gpu_primitive_t {
+public:
+    friend gen_convolution_t;
+
+    struct pd_t : public gpu_convolution_bwd_data_pd_t {
+        friend gen_convolution_t;
+
+        using gpu_convolution_bwd_data_pd_t::gpu_convolution_bwd_data_pd_t;
+
+        DECLARE_COMMON_PD_T("jit:ir", gen_convolution_bwd_data_t);
+
+        status_t init(engine_t *engine);
+
+        std::shared_ptr<conv_config_t> cfg;
+    };
+
+    using gpu_primitive_t::gpu_primitive_t;
+
+    status_t init(engine_t *engine) override;
+    status_t execute(const exec_ctx_t &ctx) const override;
+
+private:
+    const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
+    std::shared_ptr<gen_convolution_t> impl_;
+};
+
 } // namespace jit
 } // namespace gpu
 } // namespace impl

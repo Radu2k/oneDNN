@@ -87,6 +87,7 @@ const impl_list_item_t gpu_impl_list[] = {
 
         // Convolution
         INSTANCE(jit::gen_convolution_fwd_t),
+        INSTANCE(jit::gen_convolution_bwd_data_t),
         INSTANCE(jit::gen12hp_convolution_fwd_t),
         INSTANCE(jit::gen12hp_convolution_bwd_data_t),
         INSTANCE(jit::gen12hp_convolution_bwd_weights_t),

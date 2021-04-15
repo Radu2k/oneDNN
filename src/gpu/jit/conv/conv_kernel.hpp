@@ -752,14 +752,23 @@ public:
 
 private:
     void init_kernel_arg_info(kernel_arg_info_t &kernel_arg_info) {
-        // TODO: Update for backward.
-        ir_assert(cfg_.is_fwd);
-        kernel_arg_info.register_user_arg(
-                make_buffer("src"), DNNL_ARG_SRC, /*is_input=*/true);
-        kernel_arg_info.register_user_arg(
-                make_buffer("wei"), DNNL_ARG_WEIGHTS, /*is_input=*/true);
-        kernel_arg_info.register_user_arg(
-                make_buffer("dst"), DNNL_ARG_DST, /*is_input=*/false);
+        ir_assert(cfg_.is_fwd || cfg_.is_bwd_d);
+        if (cfg_.is_fwd) {
+            kernel_arg_info.register_user_arg(
+                    make_buffer("src"), DNNL_ARG_SRC, /*is_input=*/true);
+            kernel_arg_info.register_user_arg(
+                    make_buffer("wei"), DNNL_ARG_WEIGHTS, /*is_input=*/true);
+            kernel_arg_info.register_user_arg(
+                    make_buffer("dst"), DNNL_ARG_DST, /*is_input=*/false);
+        } else if (cfg_.is_bwd_d) {
+            kernel_arg_info.register_user_arg(
+                    make_buffer("dst"), DNNL_ARG_DIFF_DST, /*is_input=*/true);
+            kernel_arg_info.register_user_arg(
+                    make_buffer("wei"), DNNL_ARG_WEIGHTS, /*is_input=*/true);
+            kernel_arg_info.register_user_arg(
+                    make_buffer("src"), DNNL_ARG_DIFF_SRC, /*is_input=*/false);
+        } else
+            ir_error_not_expected();
     }
 
     const conv_config_t &cfg_;

@@ -4114,16 +4114,28 @@ void kernel_builder_t::build() {
     view_t cp_tg_view;
     view_t cp_view;
 
-    init_fwd(init_cset, init_stmts, reduction_loops, ap_tg_view, bp_tg_view,
-            cp_tg_view, cp_view);
+    if (cfg_.is_fwd)
+        init_fwd(init_cset, init_stmts, reduction_loops, ap_tg_view, bp_tg_view,
+                cp_tg_view, cp_view);
+    else if (cfg_.is_bwd_d)
+        init_bwd_data(init_cset, init_stmts, reduction_loops, ap_tg_view,
+                bp_tg_view, cp_tg_view, cp_view);
+    else
+        ir_error_not_expected(); // not implemented yet
 
     post_op_context_t post_op_ctx(pd_, cfg_, cp_view, kernel_arg_info_);
     compute_builder_t cb(cfg_, ir_ctx, init_cset);
 
     cb.set_thread_group(tg_grid_);
-    cb.set_ap_buf(src_buf);
+    if (cfg_.is_fwd) {
+        cb.set_ap_buf(src_buf);
+        cb.set_cp_buf(dst_buf);
+    } else if (cfg_.is_bwd_d) {
+        cb.set_ap_buf(dst_buf);
+        cb.set_cp_buf(src_buf);
+    } else
+        ir_error_not_expected();
     cb.set_bp_buf(wei_buf);
-    cb.set_cp_buf(dst_buf);
     cb.set_ap_tg_view(ap_tg_view);
     cb.set_bp_tg_view(bp_tg_view);
     cb.set_cp_tg_view(cp_tg_view);
@@ -4187,6 +4199,20 @@ void kernel_builder_t::build() {
     stmt_ = stmt_group_t::make(stmt_label_t::kernel(), stmt_);
 
     ir_trace() << "Kernel body:\n" << stmt_ << std::endl;
+}
+
+namespace {
+bool need_src_check(bool is_fwd, int o, int i, int k, int p, int s, int d) {
+       if (is_fwd) {
+            int i_min = -p;
+            int i_max = (o - 1) * s - p + (k - 1) * (1 + d);
+            return (i_min < 0) || (i_max >= i);
+        }
+        // Backward.
+        int os_min = p - (k - 1) * (1 + d);
+        int os_max = (o - 1) + p;
+        return (os_min < 0) || (os_max >= i * s);
+}
 }
 
 void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
@@ -4256,25 +4282,13 @@ void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
     expr_t src_mb_mask, dst_mb_mask;
     expr_t wei_oc_mask, dst_oc_mask;
 
-    auto need_src_check = [&](int o, int i, int k, int p, int s, int d) {
-        if (cfg_.is_fwd) {
-            int i_min = -p;
-            int i_max = (o - 1) * s - p + (k - 1) * (1 + d);
-            return (i_min < 0) || (i_max >= i);
-        }
-        // Backward.
-        int os_min = p - (k - 1) * (1 + d);
-        int os_max = (o - 1) + p;
-        return (os_min < 0) || (os_max >= i * s);
-    };
-
     bool check_ow = (cfg_.ow % cfg_.ow_tg_blk != 0);
     bool check_iw = check_ow
-            || need_src_check(
+            || need_src_check(cfg_.is_fwd,
                     cfg_.ow, cfg_.iw, cfg_.kw, cfg_.pw, cfg_.sw, cfg_.dw);
-    bool check_ih = need_src_check(
+    bool check_ih = need_src_check(cfg_.is_fwd,
             cfg_.oh, cfg_.ih, cfg_.kh, cfg_.ph, cfg_.sh, cfg_.dh);
-    bool check_id = need_src_check(
+    bool check_id = need_src_check(cfg_.is_fwd,
             cfg_.od, cfg_.id, cfg_.kd, cfg_.pd, cfg_.sd, cfg_.dd);
 
     int wei_oc = int(cfg_.wei_layout.dim(cfg_.with_groups ? 1 : 0));
@@ -4357,6 +4371,176 @@ void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
     std::vector<expr_t> dst_tg_start
             = {mb_tg_idx, oc_tg_idx, od_tg_idx, oh_tg_idx, ow_tg_idx};
     dst_tg_view = dst_view.create_sub_view(tensor_t(dst_tg_dims, dst_tg_start));
+}
+
+void kernel_builder_t::init_bwd_data(constraint_set_t &init_cset,
+        std::vector<stmt_t> &init_stmts, std::vector<stmt_t> &reduction_loops,
+        view_t &diff_dst_tg_view, view_t &wei_tg_view, view_t &diff_src_tg_view,
+        view_t &diff_src_view) {
+
+    // Reduction variables.
+    auto oc_blk_idx = var_t::make(type_t::s32(), "oc_blk_idx");
+    auto oc_idx = oc_blk_idx * cfg_.oc_blk;
+
+    auto kd_idx = var_t::make(type_t::s32(), "kd_idx");
+    auto kh_idx = var_t::make(type_t::s32(), "kh_idx");
+    auto kw_idx = var_t::make(type_t::s32(), "kw_idx");
+
+    // Loops are ordered from innermost to outermost.
+    reduction_loops.emplace_back(for_t::make(kw_idx, 0, cfg_.kw));
+    reduction_loops.emplace_back(for_t::make(kh_idx, 0, cfg_.kh));
+    reduction_loops.emplace_back(for_t::make(kd_idx, 0, cfg_.kd));
+    reduction_loops.emplace_back(
+            for_t::make(oc_blk_idx, 0, utils::div_up(cfg_.oc, cfg_.oc_blk)));
+
+    // Variables.
+    auto mb_tg_blk_idx = var_t::make(type_t::s32(), "mb_tg_blk_idx");
+    auto oc_tg_blk_idx = var_t::make(type_t::s32(), "oc_tg_blk_idx");
+    auto ic_tg_blk_idx = var_t::make(type_t::s32(), "ic_tg_blk_idx");
+    auto idhw_tg_blk_idx = var_t::make(type_t::s32(), "idhw_tg_blk_idx");
+
+    auto id_tg_idx = var_t::make(type_t::s32(), "id_tg_idx");
+    auto ih_tg_idx = var_t::make(type_t::s32(), "ih_tg_idx");
+    auto iw_tg_idx = var_t::make(type_t::s32(), "iw_tg_idx");
+
+    init_stmts.push_back(let_t::make(ic_tg_blk_idx, kernel_grid_.idx(0)));
+    init_stmts.push_back(let_t::make(idhw_tg_blk_idx, kernel_grid_.idx(1)));
+    init_stmts.push_back(let_t::make(mb_tg_blk_idx, kernel_grid_.idx(2)));
+
+    auto mb_tg_idx = mb_tg_blk_idx * cfg_.mb_tg_blk;
+    auto ic_tg_idx = ic_tg_blk_idx * cfg_.ic_tg_blk;
+    init_cset.add_constraint(ic_tg_idx % cfg_.ic_tg_blk == 0);
+    init_stmts.push_back(let_t::make(
+            id_tg_idx, (idhw_tg_blk_idx / cfg_.iw_tg_dim) / cfg_.ih));
+    init_stmts.push_back(let_t::make(
+            ih_tg_idx, (idhw_tg_blk_idx / cfg_.iw_tg_dim) % cfg_.ih));
+    init_stmts.push_back(let_t::make(
+            iw_tg_idx, (idhw_tg_blk_idx % cfg_.iw_tg_dim) * cfg_.iw_tg_blk));
+
+    // Reshape layouts to 3D spatial to unify code.
+    int old_spatial_ndims = cfg_.ndims - 2;
+    auto src_layout = normalize_spatial(
+            cfg_.src_layout, old_spatial_ndims, cfg_.reduced_to_1d);
+    auto wei_layout = normalize_spatial(
+            cfg_.wei_layout, old_spatial_ndims, cfg_.reduced_to_1d);
+    auto dst_layout = normalize_spatial(
+            cfg_.dst_layout, old_spatial_ndims, cfg_.reduced_to_1d);
+
+    // Initialize thread group views.
+    auto mb = var_t::make(type_t::s32(), "mb");
+    auto ic = var_t::make(type_t::s32(), "ic");
+    auto oc = var_t::make(type_t::s32(), "oc");
+    auto id = var_t::make(type_t::s32(), "id");
+    auto ih = var_t::make(type_t::s32(), "ih");
+    auto iw = var_t::make(type_t::s32(), "iw");
+    auto kd = var_t::make(type_t::s32(), "kd");
+    auto kh = var_t::make(type_t::s32(), "kh");
+    auto kw = var_t::make(type_t::s32(), "kw");
+
+    // Initialize masks.
+    expr_t id_mask, ih_mask, iw_mask;
+    expr_t od_mask(true), oh_mask(true), ow_mask(true);
+    expr_t src_mb_mask, dst_mb_mask;
+    expr_t wei_oc_mask, dst_oc_mask;
+    expr_t wei_ic_mask, src_ic_mask;
+
+    bool check_iw = (cfg_.iw % cfg_.iw_tg_blk != 0);
+    bool check_ow = check_iw
+            || need_src_check(cfg_.is_fwd,
+                    cfg_.ow, cfg_.iw, cfg_.kw, cfg_.pw, cfg_.sw, cfg_.dw);
+    bool check_oh = need_src_check(cfg_.is_fwd,
+            cfg_.oh, cfg_.ih, cfg_.kh, cfg_.ph, cfg_.sh, cfg_.dh);
+    bool check_od = need_src_check(cfg_.is_fwd,
+            cfg_.od, cfg_.id, cfg_.kd, cfg_.pd, cfg_.sd, cfg_.dd);
+
+    int wei_ic = int(cfg_.wei_layout.dim(cfg_.with_groups ? 2 : 1));
+    int src_ic = int(cfg_.src_layout.dim(1));
+
+    int wei_ic_inner_blk
+            = int(cfg_.wei_layout.inner_block(cfg_.with_groups ? 2 : 1));
+
+    int src_ic_inner_blk = int(cfg_.src_layout.inner_block(1));
+
+    bool check_wei_ic = (wei_ic % cfg_.ic_tg_blk != 0);
+    bool check_src_ic = (src_ic % cfg_.ic_tg_blk != 0);
+
+    int src_mb = int(cfg_.src_layout.dim(0));
+    int dst_mb = int(cfg_.src_layout.dim(0));
+
+    bool check_src_mb = (src_mb % cfg_.mb_tg_blk != 0);
+    bool check_dst_mb = (dst_mb % cfg_.mb_tg_blk != 0);
+
+    auto &x = view_t::placeholder_var();
+    if (check_od) od_mask = (x >= 0) & (x < cfg_.od);
+    if (check_oh) oh_mask = (x >= 0) & (x < cfg_.oh);
+    if (check_ow) ow_mask = (x >= 0) & (x < cfg_.ow);
+    if (check_iw) iw_mask = (x >= 0) & (x < cfg_.iw);
+    if (check_wei_ic)
+        wei_ic_mask = (x / wei_ic_inner_blk < wei_ic / wei_ic_inner_blk);
+    if (check_src_ic)
+        src_ic_mask = (x / src_ic_inner_blk < src_ic / src_ic_inner_blk);
+    if (check_src_mb) src_mb_mask = (x < src_mb);
+    if (check_dst_mb) dst_mb_mask = (x < dst_mb);
+
+    // Source.
+    diff_dst_tg_view = view_t({mb, oc, id, ih, iw, kd, kh, kw}, 5);
+    diff_dst_tg_view.set_vdim(mb, cfg_.mb_tg_blk, mb_tg_idx, mnk_kind_t::m);
+    diff_dst_tg_view.set_vdim(oc, cfg_.oc_blk, oc_idx, mnk_kind_t::k);
+    diff_dst_tg_view.set_vdim(id, 1, id_tg_idx, mnk_kind_t::m);
+    diff_dst_tg_view.set_vdim(ih, 1, ih_tg_idx, mnk_kind_t::m);
+    diff_dst_tg_view.set_vdim(iw, cfg_.iw_tg_blk, iw_tg_idx, mnk_kind_t::m);
+    diff_dst_tg_view.set_vdim(kd, 1, kd_idx, mnk_kind_t::k);
+    diff_dst_tg_view.set_vdim(kh, 1, kh_idx, mnk_kind_t::k);
+    diff_dst_tg_view.set_vdim(kw, 1, kw_idx, mnk_kind_t::k);
+    diff_dst_tg_view.set_tdim(0, mb, src_mb_mask); // mb
+    diff_dst_tg_view.set_tdim(1, oc); // ic
+
+    auto od = id - kd * (1 + cfg_.dd) + cfg_.pd;
+    diff_dst_tg_view.set_tdim(
+            2, od / cfg_.sd, od_mask & (od % cfg_.sd == 0)); // od
+    auto oh = ih - kh * (1 + cfg_.dh) + cfg_.ph;
+    diff_dst_tg_view.set_tdim(
+            3, oh / cfg_.sh, oh_mask & (oh % cfg_.sh == 0)); // oh
+    auto ow = iw - kw * (1 + cfg_.dw) + cfg_.pw;
+    diff_dst_tg_view.set_tdim(
+            4, ow / cfg_.sw, ow_mask & (ow % cfg_.sw == 0)); // ow
+
+    diff_dst_tg_view.set_tlayout(dst_layout);
+
+    // Weights.
+    wei_tg_view = view_t({oc, ic, kd, kh, kw}, 5); // +
+    wei_tg_view.set_vdim(ic, cfg_.ic_tg_blk, ic_tg_idx, mnk_kind_t::n);
+    wei_tg_view.set_vdim(oc, cfg_.oc_blk, oc_idx, mnk_kind_t::k);
+    wei_tg_view.set_vdim(kd, 1, kd_idx, mnk_kind_t::k);
+    wei_tg_view.set_vdim(kh, 1, kh_idx, mnk_kind_t::k);
+    wei_tg_view.set_vdim(kw, 1, kw_idx, mnk_kind_t::k);
+    wei_tg_view.set_tdim(0, oc); // oc
+    wei_tg_view.set_tdim(1, ic, wei_ic_mask); // ic
+    wei_tg_view.set_tdim(2, kd); // kd
+    wei_tg_view.set_tdim(3, kh); // kh
+    wei_tg_view.set_tdim(4, kw); // kw
+    wei_tg_view.set_tlayout(wei_layout);
+
+    // Destination.
+    diff_src_view = view_t({mb, ic, id, ih, iw}, 5);
+    diff_src_view.set_vdim(mb, cfg_.mb, 0, mnk_kind_t::m);
+    diff_src_view.set_vdim(ic, cfg_.ic, 0, mnk_kind_t::n);
+    diff_src_view.set_vdim(id, cfg_.id, 0, mnk_kind_t::m);
+    diff_src_view.set_vdim(ih, cfg_.ih, 0, mnk_kind_t::m);
+    diff_src_view.set_vdim(iw, cfg_.iw, 0, mnk_kind_t::m);
+    diff_src_view.set_tdim(0, mb, dst_mb_mask); // mb
+    diff_src_view.set_tdim(1, ic, src_ic_mask); // oc
+    diff_src_view.set_tdim(2, id, id_mask); // od
+    diff_src_view.set_tdim(3, ih, ih_mask); // oh
+    diff_src_view.set_tdim(4, iw, iw_mask); // ow
+    diff_src_view.set_tlayout(src_layout);
+
+    std::vector<dim_t> diff_src_tg_dims
+            = {cfg_.mb_tg_blk, cfg_.ic_tg_blk, 1, 1, cfg_.iw_tg_blk};
+    std::vector<expr_t> diff_src_tg_start
+            = {mb_tg_idx, ic_tg_idx, id_tg_idx, ih_tg_idx, iw_tg_idx};
+    diff_src_tg_view = diff_src_view.create_sub_view(
+            tensor_t(diff_src_tg_dims, diff_src_tg_start));
 }
 
 } // namespace jit

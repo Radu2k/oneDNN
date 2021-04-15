@@ -115,6 +115,7 @@ private:
 
 status_t gen_convolution_fwd_t::pd_t::init(engine_t *engine) {
     format_tag_t src_tag, dst_tag, wei_tag;
+    if (!is_fwd()) return status::unimplemented;
     CHECK(gen_convolution_t::init_pd(this, engine, src_tag, wei_tag, dst_tag));
     bool ok = set_default_formats_common(src_tag, wei_tag, dst_tag);
     return ok ? status::success : status::unimplemented;
@@ -134,6 +135,23 @@ status_t gen_convolution_fwd_t::init_res_storage(
     int key = impl_->find_output_scales_resource_key();
     if (key == -1) return status::success;
     return init_output_scales_res_storage(engine, r, key);
+}
+
+status_t gen_convolution_bwd_data_t::pd_t::init(engine_t *engine) {
+    format_tag_t src_tag, dst_tag, wei_tag;
+    if (!is_bwd_d()) return status::unimplemented;
+    CHECK(gen_convolution_t::init_pd(this, engine, src_tag, wei_tag, dst_tag));
+    bool ok = set_default_formats_common(src_tag, wei_tag, dst_tag);
+    return ok ? status::success : status::unimplemented;
+}
+
+status_t gen_convolution_bwd_data_t::init(engine_t *engine) {
+    impl_.reset(new gen_convolution_t());
+    return impl_->init(this, engine);
+}
+
+status_t gen_convolution_bwd_data_t::execute(const exec_ctx_t &ctx) const {
+    return impl_->execute(this, ctx);
 }
 
 } // namespace jit

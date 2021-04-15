@@ -154,6 +154,9 @@ format_tag_t layout_t::to_format_tag() const {
     CASE(ABcde4a8b8a2b);
     CASE(ABcde4a8b8a4b);
     CASE(BAcd16b16a);
+    CASE(BAc4b8a8b2a);
+    CASE(BAcd4b8a8b2a);
+    CASE(BAcde4b8a8b2a);
     CASE(aBc16b);
     CASE(aBc32b);
     CASE(aBcd16b);
