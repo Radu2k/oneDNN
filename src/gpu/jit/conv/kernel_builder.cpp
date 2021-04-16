@@ -4202,18 +4202,19 @@ void kernel_builder_t::build() {
 }
 
 namespace {
-bool need_src_check(bool is_fwd, int o, int i, int k, int p, int s, int d) {
-       if (is_fwd) {
-            int i_min = -p;
-            int i_max = (o - 1) * s - p + (k - 1) * (1 + d);
-            return (i_min < 0) || (i_max >= i);
-        }
-        // Backward.
-        int os_min = p - (k - 1) * (1 + d);
-        int os_max = (o - 1) + p;
-        return (os_min < 0) || (os_max >= i * s);
+bool need_src_or_dst_check(
+        bool is_fwd, int o, int i, int k, int p, int s, int d) {
+    if (is_fwd) {
+        int i_min = -p;
+        int i_max = (o - 1) * s - p + (k - 1) * (1 + d);
+        return (i_min < 0) || (i_max >= i);
+    }
+    // Backward.
+    int os_min = p - (k - 1) * (1 + d);
+    int os_max = (o - 1) + p;
+    return (os_min < 0) || (os_max >= i * s);
 }
-}
+} // namespace
 
 void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
         std::vector<stmt_t> &init_stmts, std::vector<stmt_t> &reduction_loops,
@@ -4284,12 +4285,12 @@ void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
 
     bool check_ow = (cfg_.ow % cfg_.ow_tg_blk != 0);
     bool check_iw = check_ow
-            || need_src_check(cfg_.is_fwd,
-                    cfg_.ow, cfg_.iw, cfg_.kw, cfg_.pw, cfg_.sw, cfg_.dw);
-    bool check_ih = need_src_check(cfg_.is_fwd,
-            cfg_.oh, cfg_.ih, cfg_.kh, cfg_.ph, cfg_.sh, cfg_.dh);
-    bool check_id = need_src_check(cfg_.is_fwd,
-            cfg_.od, cfg_.id, cfg_.kd, cfg_.pd, cfg_.sd, cfg_.dd);
+            || need_src_or_dst_check(cfg_.is_fwd, cfg_.ow, cfg_.iw, cfg_.kw,
+                    cfg_.pw, cfg_.sw, cfg_.dw);
+    bool check_ih = need_src_or_dst_check(
+            cfg_.is_fwd, cfg_.oh, cfg_.ih, cfg_.kh, cfg_.ph, cfg_.sh, cfg_.dh);
+    bool check_id = need_src_or_dst_check(
+            cfg_.is_fwd, cfg_.od, cfg_.id, cfg_.kd, cfg_.pd, cfg_.sd, cfg_.dd);
 
     int wei_oc = int(cfg_.wei_layout.dim(cfg_.with_groups ? 1 : 0));
     int dst_oc = int(cfg_.dst_layout.dim(1));
@@ -4446,12 +4447,12 @@ void kernel_builder_t::init_bwd_data(constraint_set_t &init_cset,
 
     bool check_iw = (cfg_.iw % cfg_.iw_tg_blk != 0);
     bool check_ow = check_iw
-            || need_src_check(cfg_.is_fwd,
-                    cfg_.ow, cfg_.iw, cfg_.kw, cfg_.pw, cfg_.sw, cfg_.dw);
-    bool check_oh = need_src_check(cfg_.is_fwd,
-            cfg_.oh, cfg_.ih, cfg_.kh, cfg_.ph, cfg_.sh, cfg_.dh);
-    bool check_od = need_src_check(cfg_.is_fwd,
-            cfg_.od, cfg_.id, cfg_.kd, cfg_.pd, cfg_.sd, cfg_.dd);
+            || need_src_or_dst_check(cfg_.is_fwd, cfg_.ow, cfg_.iw, cfg_.kw,
+                    cfg_.pw, cfg_.sw, cfg_.dw);
+    bool check_oh = need_src_or_dst_check(
+            cfg_.is_fwd, cfg_.oh, cfg_.ih, cfg_.kh, cfg_.ph, cfg_.sh, cfg_.dh);
+    bool check_od = need_src_or_dst_check(
+            cfg_.is_fwd, cfg_.od, cfg_.id, cfg_.kd, cfg_.pd, cfg_.sd, cfg_.dd);
 
     int wei_ic = int(cfg_.wei_layout.dim(cfg_.with_groups ? 2 : 1));
     int src_ic = int(cfg_.src_layout.dim(1));

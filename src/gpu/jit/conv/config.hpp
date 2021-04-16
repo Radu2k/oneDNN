@@ -196,10 +196,22 @@ public:
         CHECK(conv_problem_t::init(conv_pd));
         CHECK(init_acc_data_type());
 
-        // Cases below are not supported yet.
-        if (!is_fwd && !is_bwd_d) return status::unimplemented;
-        if (with_groups) return status::unimplemented;
         if (!post_ops_ok(conv_pd)) return status::unimplemented;
+
+        // Groups are not supported yet.
+        if (with_groups) return status::unimplemented;
+
+        if (is_fwd)
+            CHECK(init_fwd(conv_pd, engine));
+        else if (is_bwd_d)
+            CHECK(init_bwd_d(conv_pd, engine));
+        else
+            ir_error_not_expected(); // not implemented yet
+        return status::success;
+    }
+
+    status_t init_fwd(convolution_pd_t *conv_pd, engine_t *engine) {
+        using namespace ir_utils;
 
         fma_kind = fma_kind::get_supported_kind(
                 src_data_type, wei_data_type, acc_data_type);
@@ -209,11 +221,9 @@ public:
         // reached with OpenCL kernels.
         if (fma_kind == fma_kind_t::mad) return status::unimplemented;
 
-        if (is_fwd && utils::one_of(data_type::f32, src_data_type, wei_data_type))
-                return status::unimplemented;
-        if (is_bwd_d && utils::one_of(data_type::f32, dst_data_type, wei_data_type))
-                return status::unimplemented;
-
+        // Cases below are not supported yet.
+        if (utils::one_of(data_type::f32, src_data_type, wei_data_type))
+            return status::unimplemented;
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
         // Current implementation performs full unrolling across the filter,
@@ -225,29 +235,19 @@ public:
         int oc_thr_blk = 32;
         int ow_thr_blk = (mb < 16 ? 16 : 1);
         if (ow < ow_thr_blk) ow_thr_blk = 8;
-        int ic_thr_blk = 32; // For BWD
-        int iw_thr_blk = (mb < 16 ? 16 : 1);
-        if (iw < iw_thr_blk) iw_thr_blk = 8;
 
 #ifdef GEN_CONV_DEBUG
         mb_thr_blk = getenv_int("mb_thr_blk", mb_thr_blk);
         oc_thr_blk = getenv_int("oc_thr_blk", oc_thr_blk);
-        ic_thr_blk = getenv_int("ic_thr_blk", ic_thr_blk);
         ow_thr_blk = getenv_int("ow_thr_blk", ow_thr_blk);
-        iw_thr_blk = getenv_int("iw_thr_blk", iw_thr_blk);
 #endif
 
         simd_size = fma_kind::get_simd_size(
-                fma_kind, src_data_type, wei_data_type, dst_data_type);
+                fma_kind, src_data_type, wei_data_type, acc_data_type);
         regs = 256;
 
-        if (is_fwd) {
-            tg_grid_dim[0] = std::min(4, utils::div_up(oc, oc_thr_blk));
-            tg_grid_dim[1] = std::min(4, utils::div_up(ow, ow_thr_blk));
-        } else {
-            tg_grid_dim[0] = std::min(4, utils::div_up(ic, ic_thr_blk));
-            tg_grid_dim[1] = std::min(4, utils::div_up(iw, iw_thr_blk));
-        }
+        tg_grid_dim[0] = std::min(4, utils::div_up(oc, oc_thr_blk));
+        tg_grid_dim[1] = std::min(4, utils::div_up(ow, ow_thr_blk));
         tg_grid_dim[2] = 1;
 
         // Round down to a power of 2.
@@ -262,76 +262,35 @@ public:
 
         mb_tg_blk = mb_thr_blk;
         oc_tg_blk = tg_grid_dim[0] * oc_thr_blk;
-        ic_tg_blk = tg_grid_dim[0] * ic_thr_blk;
         ow_tg_blk = tg_grid_dim[1] * ow_thr_blk;
-        iw_tg_blk = tg_grid_dim[1] * iw_thr_blk;
         ic_blk = (is_s32_accumulator() ? 32 : 16);
-        oc_blk = (is_s32_accumulator() ? 32 : 16);
 
 #ifdef GEN_CONV_DEBUG
         mb_tg_blk = getenv_int("mb_tg_blk", mb_tg_blk);
         oc_tg_blk = getenv_int("oc_tg_blk", oc_tg_blk);
-        ic_tg_blk = getenv_int("ic_tg_blk", ic_tg_blk);
         ow_tg_blk = getenv_int("ow_tg_blk", ow_tg_blk);
-        iw_tg_blk = getenv_int("iw_tg_blk", iw_tg_blk);
 #endif
 
-        if (is_fwd) {
-            m_tg_blk = mb_tg_blk * ow_tg_blk;
-            n_tg_blk = oc_tg_blk;
-            k_tg_blk = ic_blk;
-        } else {
-            m_tg_blk = mb_tg_blk * iw_tg_blk;
-            n_tg_blk = ic_tg_blk;
-            k_tg_blk = oc_blk;
-        }
+        m_tg_blk = mb_tg_blk * ow_tg_blk;
+        n_tg_blk = oc_tg_blk;
+        k_tg_blk = ic_blk;
 
         int mb_tg_padded = utils::rnd_up(mb, mb_tg_blk);
         int oc_tg_padded = utils::rnd_up(oc, oc_tg_blk);
-        int ic_tg_padded = utils::rnd_up(ic, ic_tg_blk);
         int ow_tg_padded = utils::rnd_up(ow, ow_tg_blk);
-        int iw_tg_padded = utils::rnd_up(iw, iw_tg_blk);
 
         int mb_tg_dim = mb_tg_padded / mb_tg_blk;
         int oc_tg_dim = oc_tg_padded / oc_tg_blk;
-        int ic_tg_dim = ic_tg_padded / ic_tg_blk;
 
         ow_tg_dim = ow_tg_padded / ow_tg_blk;
-        iw_tg_dim = iw_tg_padded / iw_tg_blk;
 
-        if (is_fwd) {
-            kernel_grid_dim[0] = oc_tg_dim;
-            kernel_grid_dim[1] = od * oh * ow_tg_dim;
-        } else {
-            kernel_grid_dim[0] = ic_tg_dim;
-            kernel_grid_dim[1] = id * ih * iw_tg_dim;
-        }
+        kernel_grid_dim[0] = oc_tg_dim;
+        kernel_grid_dim[1] = od * oh * ow_tg_dim;
         kernel_grid_dim[2] = mb_tg_dim;
 
-        use_a_slm = true;
-        use_b_slm = true;
-        pad_slm = true;
-        assign_sbids
-                = utils::one_of(fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw);
-        slm_bufs = (tg_grid_dim[0] * tg_grid_dim[1] <= 8 ? 2 : 3);
-        gmem_bufs = 2;
-        reduce_grf_usage = true;
-        a_sub_tiles = 1;
-        b_sub_tiles = 1;
-
-#ifdef GEN_CONV_DEBUG
-        fma_kind = fma_kind::from_string(
-                getenv_str("fma_kind", fma_kind::to_string(fma_kind)));
-        use_a_slm = getenv_bool("use_a_slm", use_a_slm);
-        use_b_slm = getenv_bool("use_b_slm", use_b_slm);
-        pad_slm = getenv_bool("pad_slm", pad_slm);
-        assign_sbids = getenv_bool("assign_sbids", assign_sbids);
-        slm_bufs = getenv_int("slm_bufs", slm_bufs);
-        gmem_bufs = getenv_int("gmem_bufs", gmem_bufs);
-        reduce_grf_usage = getenv_bool("reduce_grf_usage", reduce_grf_usage);
-        a_sub_tiles = getenv_int("a_sub_tiles", a_sub_tiles);
-        b_sub_tiles = getenv_int("b_sub_tiles", b_sub_tiles);
-#endif
+        init_common_config();
+        fixup_inference_consistency();
+        try_reduce_grf_usage();
 
         std::string src_tag;
         std::string wei_tag;
@@ -346,7 +305,7 @@ public:
             dst_tag = (mb_thr_blk == 1 ? "aBx32b" : "ABx32a32b");
         } else {
             src_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
-            wei_tag = (is_fwd ? "ABx4a8b8a2b" : "BAx4b8a8b2a");
+            wei_tag = "ABx4a8b8a2b";
             dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
         }
 
@@ -355,9 +314,6 @@ public:
         wei_tag = getenv_str("wtag", wei_tag);
         dst_tag = getenv_str("dtag", dst_tag);
 #endif
-
-        fixup_inference_consistency();
-        try_reduce_grf_usage();
 
         auto &src_md = *conv_pd->invariant_src_md();
         auto &wei_md = *conv_pd->invariant_wei_md();
@@ -391,10 +347,172 @@ public:
             return status::unimplemented;
 
         // Blocked large batch performance is slightly behind.
-        if (is_fwd && !is_src_nhwc && mb >= 16) return status::unimplemented;
-        // TODO: check perf for BWD_D
+        if (!is_src_nhwc && mb >= 16) return status::unimplemented;
 
         return status::success;
+    }
+    status_t init_bwd_d(convolution_pd_t *conv_pd, engine_t *engine) {
+        using namespace ir_utils;
+
+        fma_kind = fma_kind::get_supported_kind(
+                dst_data_type, wei_data_type, acc_data_type);
+        if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
+
+        // Disable using mad instruction backend until performance parity is
+        // reached with OpenCL kernels.
+        if (fma_kind == fma_kind_t::mad) return status::unimplemented;
+
+        // Cases below are not supported yet.
+        if (utils::one_of(data_type::f32, dst_data_type, wei_data_type))
+            return status::unimplemented;
+        // First convolution is not supported.
+        if (ic < 16) return status::unimplemented;
+        // Current implementation performs full unrolling across the filter,
+        // limit the filter size to avoid code bloat.
+        if (kd * kh * kw >= 25) return status::unimplemented;
+
+        // Set dispatch and kernel parameters.
+        int mb_thr_blk = (mb < 16 ? 1 : 32);
+        int ic_thr_blk = 32;
+        int iw_thr_blk = (mb < 16 ? 16 : 1);
+        if (iw < iw_thr_blk) iw_thr_blk = 8;
+
+#ifdef GEN_CONV_DEBUG
+        mb_thr_blk = getenv_int("mb_thr_blk", mb_thr_blk);
+        ic_thr_blk = getenv_int("ic_thr_blk", ic_thr_blk);
+        iw_thr_blk = getenv_int("iw_thr_blk", iw_thr_blk);
+#endif
+
+        simd_size = fma_kind::get_simd_size(
+                fma_kind, dst_data_type, wei_data_type, acc_data_type);
+        regs = 256;
+
+        tg_grid_dim[0] = std::min(4, utils::div_up(ic, ic_thr_blk));
+        tg_grid_dim[1] = std::min(4, utils::div_up(iw, iw_thr_blk));
+        tg_grid_dim[2] = 1;
+
+        // Round down to a power of 2.
+        tg_grid_dim[0] = (1 << math::ilog2q(tg_grid_dim[0]));
+        tg_grid_dim[1] = (1 << math::ilog2q(tg_grid_dim[1]));
+        tg_grid_dim[2] = (1 << math::ilog2q(tg_grid_dim[2]));
+
+#ifdef GEN_CONV_DEBUG
+        tg_grid_dim[0] = getenv_int("tg0", tg_grid_dim[0]);
+        tg_grid_dim[1] = getenv_int("tg1", tg_grid_dim[1]);
+#endif
+
+        mb_tg_blk = mb_thr_blk;
+        ic_tg_blk = tg_grid_dim[0] * ic_thr_blk;
+        iw_tg_blk = tg_grid_dim[1] * iw_thr_blk;
+        oc_blk = (is_s32_accumulator() ? 32 : 16);
+
+#ifdef GEN_CONV_DEBUG
+        mb_tg_blk = getenv_int("mb_tg_blk", mb_tg_blk);
+        ic_tg_blk = getenv_int("ic_tg_blk", ic_tg_blk);
+        iw_tg_blk = getenv_int("iw_tg_blk", iw_tg_blk);
+#endif
+
+        m_tg_blk = mb_tg_blk * iw_tg_blk;
+        n_tg_blk = ic_tg_blk;
+        k_tg_blk = oc_blk;
+
+        int mb_tg_padded = utils::rnd_up(mb, mb_tg_blk);
+        int ic_tg_padded = utils::rnd_up(ic, ic_tg_blk);
+        int iw_tg_padded = utils::rnd_up(iw, iw_tg_blk);
+
+        int mb_tg_dim = mb_tg_padded / mb_tg_blk;
+        int ic_tg_dim = ic_tg_padded / ic_tg_blk;
+
+        iw_tg_dim = iw_tg_padded / iw_tg_blk;
+
+        kernel_grid_dim[0] = ic_tg_dim;
+        kernel_grid_dim[1] = id * ih * iw_tg_dim;
+        kernel_grid_dim[2] = mb_tg_dim;
+
+        init_common_config();
+        fixup_inference_consistency();
+        try_reduce_grf_usage();
+
+        std::string src_tag;
+        std::string wei_tag;
+        std::string dst_tag;
+        if (!is_s32_accumulator()) {
+            src_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
+            wei_tag = "BAx4b8a8b2a";
+            dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
+        } else
+            ir_error_not_expected(); // not implemented yet
+
+#ifdef GEN_CONV_DEBUG
+        src_tag = getenv_str("stag", src_tag);
+        wei_tag = getenv_str("wtag", wei_tag);
+        dst_tag = getenv_str("dtag", dst_tag);
+#endif
+
+        auto &src_md = *conv_pd->invariant_src_md();
+        auto &wei_md = *conv_pd->invariant_wei_md();
+        auto &dst_md = *conv_pd->invariant_dst_md();
+
+        // Select layouts.
+        src_layout = init_layout(src_md, src_tag);
+        wei_layout = init_layout(wei_md, wei_tag);
+        dst_layout = init_layout(dst_md, dst_tag);
+
+        // Validate layouts.
+        bool is_src_nhwc = (orig_src_mdw().is_plain()
+                && src_layout == layout_t(src_md, "axb"));
+        bool is_dst_nhwc = (orig_dst_mdw().is_plain()
+                && dst_layout == layout_t(dst_md, "axb"));
+        if (is_src_nhwc != is_dst_nhwc) return status::unimplemented;
+
+        if (!is_src_nhwc && src_layout != layout_t(src_md, src_tag))
+            return status::unimplemented;
+        if (!is_dst_nhwc && dst_layout != layout_t(dst_md, dst_tag))
+            return status::unimplemented;
+
+        if (wei_layout != layout_t(wei_md, wei_tag))
+            return status::unimplemented;
+
+        // HWord loads require 32 byte alignment. For NHWC layout it means
+        // input/output channels must be multiples of 32 bytes.
+        size_t ic_bytes = ic * types::data_type_size(src_data_type);
+        size_t oc_bytes = oc * types::data_type_size(dst_data_type);
+        if (is_dst_nhwc && (ic_bytes % 32 != 0 || oc_bytes % 32 != 0))
+            return status::unimplemented;
+
+        // Blocked large batch performance is slightly behind.
+        if (!is_src_nhwc && mb >= 16) return status::unimplemented;
+
+        return status::success;
+    }
+
+    void init_common_config() {
+        using namespace ir_utils;
+
+        use_a_slm = true;
+        use_b_slm = true;
+        pad_slm = true;
+        assign_sbids
+                = utils::one_of(fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw);
+        slm_bufs = (tg_grid_dim[0] * tg_grid_dim[1] <= 8 ? 2 : 3);
+        gmem_bufs = 2;
+        reduce_grf_usage = true;
+        a_sub_tiles = 1;
+        b_sub_tiles = 1;
+
+#ifdef GEN_CONV_DEBUG
+        fma_kind = fma_kind::from_string(
+                getenv_str("fma_kind", fma_kind::to_string(fma_kind)));
+        use_a_slm = getenv_bool("use_a_slm", use_a_slm);
+        use_b_slm = getenv_bool("use_b_slm", use_b_slm);
+        pad_slm = getenv_bool("pad_slm", pad_slm);
+        assign_sbids = getenv_bool("assign_sbids", assign_sbids);
+        slm_bufs = getenv_int("slm_bufs", slm_bufs);
+        gmem_bufs = getenv_int("gmem_bufs", gmem_bufs);
+        reduce_grf_usage = getenv_bool("reduce_grf_usage", reduce_grf_usage);
+        a_sub_tiles = getenv_int("a_sub_tiles", a_sub_tiles);
+        b_sub_tiles = getenv_int("b_sub_tiles", b_sub_tiles);
+#endif
     }
 
     bool post_ops_ok(const convolution_pd_t *pd) const {
@@ -530,13 +648,15 @@ private:
             acc_data_type = data_type::s32;
             return status::success;
         }
-        if (is_fwd && (utils::everyone_is(data_type::f16, sdt, wdt)
-                || utils::everyone_is(data_type::bf16, sdt, wdt))) {
+        if (is_fwd
+                && (utils::everyone_is(data_type::f16, sdt, wdt)
+                        || utils::everyone_is(data_type::bf16, sdt, wdt))) {
             acc_data_type = data_type::f32;
             return status::success;
         }
-        if (is_bwd_d && (utils::everyone_is(data_type::f16, ddt, wdt)
-                || utils::everyone_is(data_type::bf16, ddt, wdt))) {
+        if (is_bwd_d
+                && (utils::everyone_is(data_type::f16, ddt, wdt)
+                        || utils::everyone_is(data_type::bf16, ddt, wdt))) {
             acc_data_type = data_type::f32;
             return status::success;
         }
