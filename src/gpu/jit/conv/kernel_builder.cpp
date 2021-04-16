@@ -1189,6 +1189,7 @@ private:
 
     bool is_invariant(const expr_t &e, const expr_t &var) const {
         if (contains_object(e, var)) return false;
+        if (!find_objects<load_t>(e).empty()) return false;
 
         // Check value if this is a let variable.
         auto it = let_vars_.find(e);
@@ -1598,9 +1599,11 @@ private:
 //             ...
 //         }
 //     }
-stmt_t update_loops_for_slm_buffering(const stmt_t &s) {
-    auto ret = slm_buffering_loop_updater_t().mutate(s);
-    trace_pass("update_loops_for_slm_buffering", ret);
+stmt_t upate_loops_for_unrolled_slm_buffering(
+        const stmt_t &s, const conv_config_t &cfg) {
+    auto ret = s;
+    if (cfg.do_loop_unroll) ret = slm_buffering_loop_updater_t().mutate(s);
+    trace_pass("upate_loops_for_unrolled_slm_buffering", ret);
     return ret;
 }
 
@@ -2102,9 +2105,202 @@ private:
     int cur_time_ = 0;
 };
 
-class slm_buffering_injector_t {
+class simple_slm_buffering_injector_t {
 public:
-    slm_buffering_injector_t(
+    simple_slm_buffering_injector_t(
+            const stmt_t &root, const conv_config_t &cfg, ir_context_t &ir_ctx)
+        : cfg_(cfg)
+        , ir_ctx_(ir_ctx)
+        , root_(root)
+        , alloc_mgr_(root_)
+        , step_(root)
+        , loop_nest_(root) {
+        // SLM size without buffering.
+        slm_size_ = alloc_mgr_.total_size(alloc_kind_t::slm);
+    }
+
+    stmt_t inject() {
+        ir_assert(cfg_.gmem_bufs == 1)
+                << "Only single GRF buffering is supported for GMEM loads.";
+
+        if (utils::one_of(cfg_.slm_bufs, 0, 1)) return root_;
+
+        ir_assert(cfg_.use_a_slm == cfg_.use_b_slm)
+                << "Mixed SLM/GMEM loads are not supported.";
+
+        auto loop = step_.compute_loop();
+
+        // SLM indices are allocated as follows:
+        // slm_idx[0] -> slm_buf_store
+        // slm_idx[1] -> slm_buf_compute
+        // slm_idx[2] -> slm_counter
+        auto slm_idx_buf
+                = ir_ctx_.create_tmp_var(type_t::byte_ptr(), "slm_idx");
+        int slm_idx_size = type_t::s32().size();
+
+        auto slm_idx_load = [&](int off, int elems) {
+            return load_t::make(
+                    type_t::s32(elems), slm_idx_buf, slm_idx_size * off);
+        };
+
+        // Initialize slm_idx.
+        int off = 0;
+        auto store0 = store_t::make(slm_idx_buf, off, 0);
+        off += slm_idx_size;
+
+        auto store1 = store_t::make(slm_idx_buf, off, 1);
+        off += slm_idx_size;
+
+        auto store2 = store_t::make(
+                slm_idx_buf, off, int_imm_t::make(0, type_t::s32()));
+
+        auto slm_idx_init = store0.append(store1).append(store2);
+
+        auto slm_idx_load2 = slm_idx_load(0, 2);
+        auto slm_idx_load4 = slm_idx_load(0, 4);
+        auto slm_idx_store = store_t::make(slm_idx_buf, 0,
+                slm_idx_load4 + shuffle_t::make_broadcast(1, 4));
+
+        // Update slm_idx.
+        auto mask = (slm_idx_load2
+                == shuffle_t::make_broadcast(cfg_.slm_bufs, 2));
+        auto slm_idx_store_fix = store_t::make(slm_idx_buf, 0,
+                shuffle_t::make_broadcast(int_imm_t::make(0, type_t::s32()), 2),
+                store_t::default_stride, mask);
+
+        auto slm_idx_update = slm_idx_store.append(slm_idx_store_fix);
+
+        loop = slm_idx_init.append(loop);
+
+        auto &g2s_store_orig = step_.g2s_store();
+        auto &s2r_load = step_.s2r_load();
+        auto &mul = step_.mul();
+
+        auto g2s_store = g2s_store_orig;
+
+        stmt_t s2r_mul;
+        for (auto &s : s2r_load) {
+            s2r_mul = s2r_mul.append(s);
+            loop = substitute(loop, s, stmt_t(), 1);
+        }
+        for (auto &s : mul) {
+            s2r_mul = s2r_mul.append(s);
+            loop = substitute(loop, s, stmt_t(), 1);
+        }
+
+        loop = remove_synchronization(loop);
+
+        s2r_mul = sub_slm_bufs(s2r_mul, slm_idx_load(1, 1));
+        g2s_store = sub_slm_bufs(g2s_store, slm_idx_load(0, 1));
+
+        auto s2r_mul_body = s2r_mul;
+        auto s2r_mul_tail = s2r_mul;
+        auto slm_counter = slm_idx_load(2, 1);
+        auto cond = shuffle_t::make_broadcast(
+                slm_counter >= cfg_.slm_bufs - 1, cfg_.simd_size);
+        s2r_mul_body = if_t::make(cond, s2r_mul_body);
+
+        g2s_store = g2s_store.append(slm_idx_update);
+
+        if (cfg_.slm_bufs == 2) {
+            g2s_store = g2s_store.append(funcs::barrier());
+        } else {
+            s2r_mul_body = funcs::barrier_wait().append(s2r_mul_body);
+            s2r_mul_body = s2r_mul_body.append(funcs::slm_fence());
+            s2r_mul_body = s2r_mul_body.append(funcs::signal());
+        }
+
+        loop = substitute(
+                loop, g2s_store_orig, s2r_mul_body.append(g2s_store), 1);
+
+        if (cfg_.slm_bufs == 3) {
+            // Emit initial signal, to match wait-signal pairs in the loop.
+            loop = funcs::signal().append(loop);
+        }
+
+        // Complete the remaining iterations.
+        int rem_iters = cfg_.slm_bufs - 1;
+        int mul_start = std::max(0, rem_iters - loop_nest_.size());
+        for (int i = 0; i < rem_iters; i++) {
+            if (cfg_.slm_bufs == 3) loop = loop.append(funcs::barrier_wait());
+            if (i >= mul_start) loop = loop.append(s2r_mul_tail);
+            loop = loop.append(slm_idx_update);
+            if (cfg_.slm_bufs == 3 && i + 1 < rem_iters)
+                loop = loop.append(funcs::signal());
+        }
+
+        loop = alloc_t::make(
+                slm_idx_buf, reg_bytes, alloc_kind_t::grf, {}, loop);
+
+        alloc_updater_t alloc_updater;
+
+        auto slm_buffers = alloc_mgr_.find_buffers(alloc_kind_t::slm);
+        ir_assert(slm_buffers.size() == 1);
+        auto &slm_buf = slm_buffers[0];
+        alloc_updater.resize(slm_buf, slm_size_ * cfg_.slm_bufs);
+
+        auto ret = substitute(root_, step_.compute_loop(), loop, 1);
+        ret = alloc_updater.update(ret);
+        return ret;
+    }
+
+    static stmt_t remove_synchronization(const stmt_t &s) {
+        auto ret = s;
+        for (auto &_c : find_objects<func_call_t>(s)) {
+            auto &c = _c.as<func_call_t>();
+            if (c.func.is_equal(funcs::signal_func())
+                    || c.func.is_equal(funcs::slm_fence_func())
+                    || c.func.is_equal(funcs::barrier_func())) {
+                ret = substitute(ret, _c, stmt_t(), 1);
+            }
+        }
+        return ret;
+    }
+
+    stmt_t sub_slm_bufs(const stmt_t &stmt, const expr_t &slm_idx) const {
+        auto stmt_vec = flatten_statements(stmt);
+
+        stmt_t ret = stmt;
+        for (auto &s : stmt_vec) {
+            if (!is_func_call<send_t>(s)) continue;
+
+            auto &send = s.as<func_call_t>().func.as<send_t>();
+
+            // This is not send to SLM, skip.
+            if (send.address_model != ngen_proxy::AddressModel::ModelSLM)
+                continue;
+
+            auto new_args = s.as<func_call_t>().args;
+            send_t::arg_mem_off(new_args) += slm_size_ * slm_idx;
+            auto new_send = send.call(new_args);
+            ret = substitute(ret, s, new_send, 1);
+        }
+
+        return ret;
+    }
+
+    const conv_config_t &cfg_;
+    ir_context_t &ir_ctx_;
+
+    stmt_t root_;
+    alloc_manager_t alloc_mgr_;
+    compute_step_t step_;
+    compute_loop_nest_t loop_nest_;
+
+    int slm_size_;
+};
+
+// Injects SLM buffering without unrolling based on the config.
+stmt_t inject_simple_slm_buffering(
+        const stmt_t &s, const conv_config_t &cfg, ir_context_t &ir_ctx) {
+    auto ret = simple_slm_buffering_injector_t(s, cfg, ir_ctx).inject();
+    trace_pass("inject_simple_slm_buffering", ret);
+    return ret;
+}
+
+class unrolled_slm_buffering_injector_t {
+public:
+    unrolled_slm_buffering_injector_t(
             const stmt_t &root, const conv_config_t &cfg, ir_context_t &ir_ctx)
         : cfg_(cfg)
         , ir_ctx_(ir_ctx)
@@ -2499,11 +2695,11 @@ private:
     std::vector<buffer_info_t> g2s_reg_bufs_;
 };
 
-// Injects SLM buffering based on the config.
-stmt_t inject_slm_buffering(
+// Injects SLM buffering with unrolling based on the config.
+stmt_t inject_unrolled_slm_buffering(
         const stmt_t &s, const conv_config_t &cfg, ir_context_t &ir_ctx) {
-    auto ret = slm_buffering_injector_t(s, cfg, ir_ctx).inject();
-    trace_pass("inject_slm_buffering", ret);
+    auto ret = unrolled_slm_buffering_injector_t(s, cfg, ir_ctx).inject();
+    trace_pass("inject_unrolled_slm_buffering", ret);
     return ret;
 }
 
@@ -4183,6 +4379,9 @@ void kernel_builder_t::build() {
 
     stmt_ = inject_external_var_let(stmt_);
     stmt_ = merge_slm_buffers(stmt_);
+    if (!cfg_.do_loop_unroll) {
+        stmt_ = inject_simple_slm_buffering(stmt_, cfg_, ir_ctx);
+    }
     stmt_ = lift_buffer_offsets_in_send(stmt_);
     stmt_ = simplify(stmt_, init_cset);
     stmt_ = inject_send(stmt_, ir_ctx, init_cset);
@@ -4190,10 +4389,12 @@ void kernel_builder_t::build() {
     stmt_ = lift_alloc(stmt_);
     stmt_ = eliminate_common_subexprs(stmt_, ir_ctx);
     stmt_ = hoist_exprs(stmt_, ir_ctx);
-    stmt_ = loop_strength_reduce(stmt_);
+    if (cfg_.do_loop_unroll) stmt_ = loop_strength_reduce(stmt_);
     stmt_ = optimize_let(stmt_);
-    stmt_ = update_loops_for_slm_buffering(stmt_);
-    stmt_ = inject_slm_buffering(stmt_, cfg_, ir_ctx);
+    if (cfg_.do_loop_unroll) {
+        stmt_ = upate_loops_for_unrolled_slm_buffering(stmt_, cfg_);
+        stmt_ = inject_unrolled_slm_buffering(stmt_, cfg_, ir_ctx);
+    }
     stmt_ = simplify(stmt_, init_cset);
     stmt_ = optimize_let(stmt_);
     stmt_ = stmt_group_t::make(stmt_label_t::kernel(), stmt_);

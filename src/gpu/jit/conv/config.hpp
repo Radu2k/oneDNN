@@ -226,9 +226,6 @@ public:
             return status::unimplemented;
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
-        // Current implementation performs full unrolling across the filter,
-        // limit the filter size to avoid code bloat.
-        if (kd * kh * kw >= 25) return status::unimplemented;
 
         // Set dispatch and kernel parameters.
         int mb_thr_blk = (mb < 16 ? 1 : 32);
@@ -289,6 +286,11 @@ public:
         kernel_grid_dim[2] = mb_tg_dim;
 
         init_common_config();
+
+        // Do not perform full unrolling when there are too many inner
+        // iterations.
+        if (kd * kh * kw > 9) do_loop_unroll = false;
+
         fixup_inference_consistency();
         try_reduce_grf_usage();
 
@@ -367,9 +369,6 @@ public:
             return status::unimplemented;
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
-        // Current implementation performs full unrolling across the filter,
-        // limit the filter size to avoid code bloat.
-        if (kd * kh * kw >= 25) return status::unimplemented;
 
         // Set dispatch and kernel parameters.
         int mb_thr_blk = (mb < 16 ? 1 : 32);
@@ -430,6 +429,11 @@ public:
         kernel_grid_dim[2] = mb_tg_dim;
 
         init_common_config();
+
+        // Do not perform full unrolling when there are too many inner
+        // iterations.
+        if (kd * kh * kw > 9) do_loop_unroll = false;
+
         fixup_inference_consistency();
         try_reduce_grf_usage();
 
@@ -496,6 +500,7 @@ public:
                 = utils::one_of(fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw);
         slm_bufs = (tg_grid_dim[0] * tg_grid_dim[1] <= 8 ? 2 : 3);
         gmem_bufs = 2;
+        do_loop_unroll = true;
         reduce_grf_usage = true;
         a_sub_tiles = 1;
         b_sub_tiles = 1;
@@ -509,6 +514,7 @@ public:
         assign_sbids = getenv_bool("assign_sbids", assign_sbids);
         slm_bufs = getenv_int("slm_bufs", slm_bufs);
         gmem_bufs = getenv_int("gmem_bufs", gmem_bufs);
+        do_loop_unroll = getenv_bool("do_loop_unroll", do_loop_unroll);
         reduce_grf_usage = getenv_bool("reduce_grf_usage", reduce_grf_usage);
         a_sub_tiles = getenv_int("a_sub_tiles", a_sub_tiles);
         b_sub_tiles = getenv_int("b_sub_tiles", b_sub_tiles);
@@ -624,6 +630,7 @@ public:
     bool assign_sbids; // Whether to manually assign SBID tokens.
     int slm_bufs; // Number of SLM buffers to use.
     int gmem_bufs; // Number of GRF buffers to use for GMEM -> SLM copy.
+    bool do_loop_unroll; // Whether to fully unroll inner loops.
     bool reduce_grf_usage; // Whether to try to reduce GRF usage based on heuristics.
 
     // Sub-tiles to split into for the inner A x B multiplication:
@@ -681,6 +688,12 @@ private:
         }
         if (tg_grid_dim[0] % 2 != 0 && fma_kind == fma_kind_t::dpasw)
             fma_kind = fma_kind_t::dpas;
+        if (!do_loop_unroll) {
+            gmem_bufs = 1;
+            // Double/triple SLM buffering is not supported when only one
+            // matrix is SLM-buffered.
+            if (use_a_slm != use_b_slm) slm_bufs = std::min(1, slm_bufs);
+        }
     }
 
     void try_reduce_grf_usage() {

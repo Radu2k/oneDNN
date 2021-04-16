@@ -147,7 +147,6 @@ ngen::RegData ngen_reg_data(const ngen::RegData &base, int off_bytes,
     auto grf = ngen::GRF(base.getBase() + new_off / reg_bytes).retype(type);
 
     ir_assert(new_grf_off % type_size == 0);
-    MAYBE_UNUSED(new_grf_off);
 
     if (width == 1) {
         hstride = 0;
@@ -159,7 +158,7 @@ ngen::RegData ngen_reg_data(const ngen::RegData &base, int off_bytes,
         width = std::min(width, 16);
     }
     int vstride = width * hstride;
-    return grf[new_off / type_size](vstride, width, hstride);
+    return grf[new_grf_off / type_size](vstride, width, hstride);
 }
 
 ngen::Immediate ngen_negate(const ngen::Immediate &imm) {
@@ -918,15 +917,20 @@ public:
     }
 
     void _visit(const shuffle_t *obj) override {
-        if (obj->is_broadcast() && !obj->type.is_bool()) {
-            auto scalar_op = eval(obj->vec[0]);
-            bind(obj, scalar_op);
+        int elems = obj->elems();
+        if (obj->is_broadcast()) {
+            if (obj->type.is_bool()) {
+                auto dst_op = alloc_op(obj);
+                eval(obj->vec[0], dst_op);
+                expr_binding_.mark_as_evaluated(obj);
+            } else {
+                auto scalar_op = eval(obj->vec[0]);
+                bind(obj, scalar_op);
+            }
             return;
         }
 
-        int elems = obj->elems();
         auto dst_op = alloc_op(obj);
-
         if (obj->type.is_bool()) {
             auto e_shuffle = expr_t(obj);
             ir_assert(dst_op.is_flag_register()) << e_shuffle;
@@ -1205,6 +1209,25 @@ public:
         } else {
             ir_error_not_expected() << object_t(obj);
         }
+    }
+
+    void _visit(const if_t *obj) override {
+        bool has_else = !obj->else_body.is_empty();
+        auto scope = register_scope();
+        auto cond_op = eval(obj->cond, scope);
+
+        ngen::Label l_else;
+        ngen::Label l_endif;
+        host_->if_(simd_size_ | cond_op.flag_register(),
+                has_else ? l_else : l_endif, l_endif);
+        visit(obj->body);
+        if (has_else) {
+            host_->else_(simd_size_, l_endif, l_endif);
+            host_->mark(l_else);
+            visit(obj->else_body);
+        }
+        host_->mark(l_endif);
+        host_->endif(simd_size_);
     }
 
     void _visit(const let_t *obj) override {

@@ -1536,8 +1536,8 @@ class if_t : public stmt_impl_t {
 public:
     IR_DECL_STMT_TYPE_ID(if_t)
 
-    static stmt_t make(
-            const expr_t &cond, const stmt_t &body, const stmt_t &else_body) {
+    static stmt_t make(const expr_t &cond, const stmt_t &body,
+            const stmt_t &else_body = stmt_t()) {
         return stmt_t(new if_t(cond, body, else_body));
     }
 
