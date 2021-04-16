@@ -17,6 +17,7 @@
 #ifndef CPU_X64_JIT_PRIMITIVE_CONF_HPP
 #define CPU_X64_JIT_PRIMITIVE_CONF_HPP
 
+#include <queue>
 #include <stdint.h>
 
 #include "common/primitive_attr.hpp"
@@ -707,6 +708,7 @@ struct jit_pool_call_s {
 struct jit_resampling_conf_t {
     unsigned ndims = 0;
 
+    unsigned c = 0;
     unsigned id = 0, ih = 0, iw = 0;
     unsigned od = 0, oh = 0, ow = 0;
 
@@ -714,9 +716,6 @@ struct jit_resampling_conf_t {
     unsigned stride_h = 0;
     unsigned stride_w = 0;
     unsigned inner_stride = 0;
-
-    unsigned tail = 0;
-    unsigned simd_w = 0;
 
     // The linear algorithm is an approximation of the point
     // value based on the limit values. For one dimension,
@@ -727,14 +726,25 @@ struct jit_resampling_conf_t {
     unsigned number_of_corners = 0;
 
     bool is_data_size_bigger_than_L3 = false;
-    data_type_t data_type = data_type::undef;
-    size_t dt_size = 0;
+    bool is_saturation_needed = false;
+    data_type_t src_data_type = data_type::undef;
+    data_type_t dst_data_type = data_type::undef;
+    size_t src_dt_size = 0;
+    size_t dst_dt_size = 0;
+    size_t output_data_size = 0;
     size_t el_size_of_indices = 0;
 
     jit_memory_tag_kind_t tag_kind = jit_memory_tag_kind_t::undef;
     alg_kind_t alg = alg_kind::undef;
 
     cpu_isa_t isa = isa_any;
+
+    post_ops_t post_ops = post_ops_t();
+    bool with_postops = false;
+    bool with_eltwise = false;
+    bool with_binary = false;
+    bool with_sum = false;
+    std::queue<float> sum_scales;
 };
 
 struct jit_resampling_call_s {
@@ -744,6 +754,9 @@ struct jit_resampling_call_s {
     const void *dst = nullptr;
     const void *indices = nullptr;
     const void *weights = nullptr;
+    const void *post_ops_binary_rhs_arg_vec = nullptr;
+
+    size_t c_offset = 0;
 
     size_t src_offset_top = 0;
     size_t src_offset_bottom = 0;
@@ -797,6 +810,7 @@ struct jit_brgemm_conv_conf_t {
     bool with_binary;
 
     bool is_fused_conv;
+    bool is_os_blocking;
     int nb_ic, ic_block;
     int nb_oc, oc_block;
     int nb_iw, iw_block;
@@ -866,6 +880,45 @@ struct jit_shuffle_call_s {
 
     dim_t cb_loop_size
             = 0; // number of loop iterations over corresponding C batches
+};
+
+enum class binary_op_t : unsigned { none, c_blocked, n_spatial_c, n_c_spatial };
+
+enum class binary_bcast_t : unsigned {
+    none, // tensor operation
+    scalar,
+    per_c,
+    per_w
+};
+
+struct jit_binary_conf_t {
+    binary_op_t op_type = binary_op_t::none;
+    binary_bcast_t bcast_type = binary_bcast_t::none;
+    bool do_scale_src0 = false;
+    bool do_scale_src1 = false;
+    bool do_sum = false;
+    bool with_eltwise = false;
+    bool with_postops = false;
+    float sum_scale = 0.f;
+    bool use_stride_src1 = false;
+    bool broadcast_src1_value = false;
+    bool use_stride_rhs_postops = false;
+    bool postops_per_oc_broadcast_exists = false;
+    bool is_i8 = false;
+    bool is_bf16 = false;
+
+    data_type_t src0_type = data_type::undef;
+    data_type_t src1_type = data_type::undef;
+    data_type_t dst_type = data_type::undef;
+};
+
+struct jit_binary_call_s {
+    // keep all sizes at 8 bytes -- jit code expects this
+    const void *src0, *src1, *dst;
+    const float *scales_src0, *scales_src1;
+    size_t spat_offt_count;
+    const void *post_ops_binary_rhs_arg_vec;
+    size_t oc_l_off;
 };
 
 } // namespace x64

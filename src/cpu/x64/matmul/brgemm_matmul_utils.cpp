@@ -41,11 +41,23 @@ bool post_ops_ok(brgemm_matmul_conf_t &bgmmc, const primitive_attr_t &attr,
 
     const auto &post_ops = attr.post_ops_;
 
-    return injector::post_ops_ok(post_ops_ok_args_t(avx512_common,
-            {sum, eltwise, binary}, post_ops, &dst_d,
-            false /*sum_at_pos_0_only*/, false /*sum_requires_scale_one*/,
-            {broadcasting_strategy_t::per_oc,
-                    broadcasting_strategy_t::scalar}));
+    const bool is_binary_po_channel_bcast
+            = binary_injector_utils::bcast_strategy_present(
+                    binary_injector_utils::extract_bcast_strategies(
+                            post_ops.entry_, dst_d),
+                    broadcasting_strategy_t::per_mb_spatial);
+    const bool supported_channel_bcast
+            = IMPLICATION(is_binary_po_channel_bcast, (dst_d).ndims() == 4);
+
+    return supported_channel_bcast
+            && injector::post_ops_ok(
+                    post_ops_ok_args_t(avx512_common, {sum, eltwise, binary},
+                            post_ops, &dst_d, false /*sum_at_pos_0_only*/,
+                            false /*sum_requires_scale_one*/,
+                            {broadcasting_strategy_t::per_oc,
+                                    broadcasting_strategy_t::scalar,
+                                    broadcasting_strategy_t::per_mb_spatial,
+                                    broadcasting_strategy_t::no_broadcast}));
 }
 
 brgemm_broadcast_t get_zp_type(const primitive_attr_t &attr, int arg) {
@@ -83,13 +95,15 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
 
     const bool is_int8 = one_of(bgmmc.src_dt, u8, s8) && bgmmc.wei_dt == s8
             && one_of(bgmmc.dst_dt, u8, s8, s32, f32);
-    const bool is_amx = isa == avx512_core_bf16_amx_int8;
+    const bool is_bf16 = everyone_is(bf16, bgmmc.src_dt, bgmmc.wei_dt)
+            && one_of(bgmmc.dst_dt, bf16, f32);
+    const bool is_amx_int8 = isa == avx512_core_bf16_amx_int8;
+    const bool is_amx_bf16 = isa == avx512_core_bf16_amx_bf16;
+    const bool is_amx = is_amx_int8 || is_amx_bf16;
 
-    if (is_int8) {
-        bgmmc.acc_dt = s32;
-        bgmmc.with_scales = true;
-    }
+    bgmmc.acc_dt = is_int8 ? s32 : f32;
 
+    bgmmc.with_scales = !attr.output_scales_.has_default_values();
     if (bgmmc.with_scales) {
         const auto &oscales = attr.output_scales_;
         bgmmc.is_oscale_per_n = oscales.mask_ == 1 << (bgmmc.ndims - 1);
@@ -112,9 +126,13 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     bgmmc.wei_zp_type = get_zp_type(attr, DNNL_ARG_WEIGHTS);
     bgmmc.dst_zp_type = get_zp_type(attr, DNNL_ARG_DST);
 
-    if (IMPLICATION(is_int8,
-                !one_of(isa, avx512_core_vnni, avx512_core_bf16_amx_int8)))
+    if (!IMPLICATION(is_int8,
+                one_of(isa, avx512_core_vnni, avx512_core_bf16_amx_int8)))
         return status::unimplemented;
+
+    if (!IMPLICATION(is_bf16, isa == avx512_core_bf16_amx_bf16))
+        return status::unimplemented;
+
     matmul_helper_t helper(src_d, weights_d, dst_d);
 
     bgmmc.batch_ndims = bgmmc.ndims - 2;
@@ -134,10 +152,12 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     bgmmc.N = helper.N();
     bgmmc.K = helper.K();
     bgmmc.batch = helper.batch();
+    bgmmc.batch_without_first_dim
+            = bgmmc.batch_ndims > 1 ? helper.batch() / dst_d.dims()[0] : 0;
 
     // required granularity for k dimension
-    const int k_gran = is_amx ? 4 : 1;
-    const int k_blk_gran = is_amx ? 64 : 4;
+    const int k_gran = is_amx_int8 ? 4 : (is_amx_bf16 ? 2 : 1);
+    const int k_blk_gran = is_amx_int8 ? 64 : (is_amx_bf16 ? 32 : 4);
 
     auto set_or_check_tags = [&]() -> status_t {
         format_tag_t desired_src_tag = pick(bgmmc.batch_ndims, ab, abc, abcd,
@@ -198,6 +218,15 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
         }
     }
     if (bgmmc.M_blk == 1) bgmmc.M_blk = nstl::min(bgmmc.M, max_M);
+
+    if (bgmmc.use_buffer_b && is_amx_bf16) {
+        // reduce N block size for bf16 problems if number of parallel work
+        // is small
+        const auto num_parallel_work = bgmmc.batch
+                * div_up(bgmmc.M, bgmmc.M_blk)
+                * div_up(bgmmc.N, bgmmc.wei_n_blk);
+        if ((float)num_parallel_work < 1.5f * bgmmc.nthr) bgmmc.wei_n_blk = 32;
+    }
 
     bgmmc.N_blk = nstl::min(
             (dim_t)(bgmmc.wei_n_blk == 1 ? 64 : bgmmc.wei_n_blk), bgmmc.N);
@@ -263,8 +292,8 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     // Try to improve blocking wrt L2 size
     // TODO: improve blocking algorithm
     while (attempts > 0) {
-        bgmmc.use_buffer_c
-                = bgmmc.acc_dt != bgmmc.dst_dt && bgmmc.K > bgmmc.K_blk;
+        bgmmc.use_buffer_c = (bgmmc.acc_dt != bgmmc.dst_dt || bgmmc.with_sum)
+                && bgmmc.K > bgmmc.K_blk * bgmmc.brgemm_batch_size;
         bgmmc.LDA = get_actual_LDA();
 
         int num_M_blk = div_up(bgmmc.M, bgmmc.M_blk);
@@ -442,7 +471,7 @@ void init_scratchpad(memory_tracking::registrar_t &scratchpad,
                 bgmmc.nthr * bgmmc.zp_b_comp_elems_per_thr,
                 types::data_type_size(s32));
 
-    if (bgmmc.isa == avx512_core_bf16_amx_int8)
+    if (one_of(bgmmc.isa, avx512_core_bf16_amx_int8, avx512_core_bf16_amx_bf16))
         scratchpad.book(key_conv_amx_tile_buffer,
                 bgmmc.nthr * bgmmc.wsp_tile_per_thr_bytes, default_data_align);
 }

@@ -86,6 +86,8 @@ void brgemm_kernel_execute_postops(const brgemm_kernel_t *brg_kernel, int bs,
     brgemm_p.post_ops_binary_rhs_arg_vec = post_ops_data.binary_post_ops_rhs;
     brgemm_p.oc_logical_off = post_ops_data.oc_logical_off;
     brgemm_p.dst_row_logical_off = post_ops_data.dst_row_logical_off;
+    brgemm_p.data_C_ptr_ = post_ops_data.data_C_ptr_;
+    brgemm_p.first_mb_matrix_addr_off = post_ops_data.first_mb_matrix_addr_off;
     brgemm_p.a_zp_compensations = post_ops_data.a_zp_compensations;
     brgemm_p.b_zp_compensations = post_ops_data.b_zp_compensations;
     brgemm_p.c_zp_values = post_ops_data.c_zp_values;
@@ -112,6 +114,7 @@ void brgemm_kernel_execute_postops(const brgemm_kernel_t *brg_kernel, int bs,
     brgemm_p.post_ops_binary_rhs_arg_vec = post_ops_data.binary_post_ops_rhs;
     brgemm_p.oc_logical_off = post_ops_data.oc_logical_off;
     brgemm_p.dst_row_logical_off = post_ops_data.dst_row_logical_off;
+    brgemm_p.first_mb_matrix_addr_off = post_ops_data.first_mb_matrix_addr_off;
 
     (*brg_kernel)(&brgemm_p);
 }
@@ -381,7 +384,9 @@ status_t brgemm_desc_set_postops(brgemm_t *brg, const primitive_attr_t *attr,
                             post_ops, &dst_d, false /*sum_at_pos_0_only*/,
                             false /*sum_requires_scale_one*/,
                             {broadcasting_strategy_t::per_oc,
-                                    broadcasting_strategy_t::scalar})))
+                                    broadcasting_strategy_t::scalar,
+                                    broadcasting_strategy_t::per_mb_spatial,
+                                    broadcasting_strategy_t::no_broadcast})))
         return status::unimplemented;
 
     const int sum_idx = post_ops.find(primitive_kind::sum);
@@ -391,7 +396,8 @@ status_t brgemm_desc_set_postops(brgemm_t *brg, const primitive_attr_t *attr,
     const int eltwise_ind = post_ops.find(primitive_kind::eltwise);
     brg->with_eltwise = eltwise_ind != -1;
 
-    if (brg->is_int8) {
+    brg->with_scales = !attr->output_scales_.has_default_values();
+    if (brg->with_scales) {
         const auto &oscales = brg->attr->output_scales_;
         // Note. the current version supports only two different output scale
         // types:
@@ -405,7 +411,6 @@ status_t brgemm_desc_set_postops(brgemm_t *brg, const primitive_attr_t *attr,
         // type is per_n_dim_scale and driver which calls brgemm kernel checked
         // that mask has correct value for this case
         brg->is_oc_scale = oscales.mask_ != 0;
-        brg->with_scales = true;
     }
 
     auto init_zp_type

@@ -275,6 +275,9 @@ static bool rhs_arg_params_differ(size_t vmm_idx1, size_t vmm_idx2,
     const auto &oc_off_addr = rhs_arg_params.vmm_idx_to_oc_elem_off_addr;
     const auto &oc_off_val = rhs_arg_params.vmm_idx_to_oc_elem_off_val;
     const auto &oc_off_oprnd = rhs_arg_params.vmm_idx_to_oc_off_oprnd;
+    const auto &sp_off_addr = rhs_arg_params.vmm_idx_to_sp_elem_off_addr;
+    const auto &sp_off_val = rhs_arg_params.vmm_idx_to_sp_elem_off_val;
+    const auto &sp_off_oprnd = rhs_arg_params.vmm_idx_to_sp_off_oprnd;
 
     if (rhs_broadcasting_strategy == broadcasting_strategy_t::scalar) {
         return false;
@@ -289,6 +292,11 @@ static bool rhs_arg_params_differ(size_t vmm_idx1, size_t vmm_idx2,
         return params_differ(oc_off_addr, vmm_idx1, vmm_idx2)
                 || params_differ(oc_off_val, vmm_idx1, vmm_idx2)
                 || params_differ(oc_off_oprnd, vmm_idx1, vmm_idx2);
+    } else if (rhs_broadcasting_strategy
+            == broadcasting_strategy_t::per_mb_spatial) {
+        return params_differ(sp_off_addr, vmm_idx1, vmm_idx2)
+                || params_differ(sp_off_val, vmm_idx1, vmm_idx2)
+                || params_differ(sp_off_oprnd, vmm_idx1, vmm_idx2);
     }
     return true;
 }
@@ -514,6 +522,17 @@ Xbyak::Address jit_uni_binary_injector_t<isa, Vmm>::prepare_rhs_arg_addr(
                     ? host_->ptr_b[rhs_addr_reg]
                     : host_->ptr[rhs_addr_reg];
         }
+        case broadcasting_strategy_t::per_mb_spatial: {
+            append_offset_from_operand(rhs_arg_params.vmm_idx_to_sp_off_oprnd,
+                    vmm_idx, rhs_addr_reg, rhs_helper_reg, rhs_arg_elem_size);
+            append_offset_under_mem_addr(
+                    rhs_arg_params.vmm_idx_to_sp_elem_off_addr, vmm_idx,
+                    rhs_addr_reg, rhs_helper_reg, rhs_arg_elem_size);
+            append_value_offset(rhs_arg_params.vmm_idx_to_sp_elem_off_val,
+                    vmm_idx, rhs_addr_reg, rhs_arg_elem_size);
+
+            return host_->ptr[rhs_addr_reg];
+        }
         default: assert(false && "Broadcasting type not supported");
     }
 
@@ -637,9 +656,14 @@ void jit_uni_binary_injector_t<isa, Vmm>::load_rhs(
         bool with_tail) const {
     if (with_tail) {
         if (tail_load_mode == tail_lode_mode_t::DYNAMIC
-                || (tail_load_mode == tail_lode_mode_t::DEFAULT && is_avx512_))
-            load_rhs_tail_dynamically(data_type, tmp_reg, rhs_addr);
-        else
+                || (tail_load_mode == tail_lode_mode_t::DEFAULT
+                        && is_avx512_)) {
+            if (is_avx512_)
+                load_rhs_tail_dynamically_with_opmask(
+                        data_type, tmp_reg, rhs_addr);
+            else
+                load_rhs_tail_dynamically_with_gpr(data_type, tmp_reg);
+        } else
             load_rhs_tail_statically(data_type, tmp_reg, rhs_addr);
     } else
         load_rhs_no_tail(data_type, tmp_reg, rhs_addr);
@@ -688,18 +712,17 @@ template <cpu_isa_t isa, typename Vmm>
 void jit_uni_binary_injector_t<isa, Vmm>::execute_broadcast_s8u8_no_tail(
         const data_type_t &data_type, const Vmm &tmp_vmm,
         const Xbyak::Address &rhs_addr) const {
+    assert(utils::one_of(data_type, data_type::s8, data_type::u8)
+            && "unsupported data type");
+
     const Xbyak::Xmm xmm(tmp_vmm.getIdx());
-    switch (data_type) {
-        case data_type::s8:
-            host_->vpbroadcastb(xmm, rhs_addr);
-            host_->vpmovsxbd(tmp_vmm, xmm);
-            break;
-        case data_type::u8:
-            host_->vpbroadcastb(xmm, rhs_addr);
-            host_->vpmovzxbd(tmp_vmm, xmm);
-            break;
-        default: assert(!"unsupported data type");
-    }
+
+    host_->uni_vpinsrb(xmm, xmm, rhs_addr, 0);
+    if (data_type == data_type::s8)
+        host_->uni_vpmovsxbd(xmm, xmm);
+    else if (data_type == data_type::u8)
+        host_->uni_vpmovzxbd(tmp_vmm, xmm);
+    host_->uni_vpbroadcastd(tmp_vmm, xmm);
 }
 
 template <cpu_isa_t isa, typename Vmm>
@@ -799,14 +822,17 @@ void jit_uni_binary_injector_t<isa, Vmm>::execute_broadcast_tail(
             host_->vpbroadcastd(tmp_vmm | tail_opmask | host_->T_z, rhs_addr);
             break;
         case data_type::s8:
-            host_->vpbroadcastb(tmp_vmm | tail_opmask | host_->T_z,
-                    rhs_addr); // broadcast to tmm_xmm should be enough ?
-            host_->vpmovsxbd(tmp_vmm | tail_opmask | host_->T_z, tmp_vmm);
+        case data_type::u8: {
+            const Xbyak::Xmm xmm(tmp_vmm.getIdx());
+
+            host_->uni_vpinsrb(xmm, xmm, rhs_addr, 0);
+            if (data_type == data_type::s8)
+                host_->uni_vpmovsxbd(xmm, xmm);
+            else if (data_type == data_type::u8)
+                host_->uni_vpmovzxbd(xmm, xmm);
+            host_->uni_vpbroadcastd(tmp_vmm | tail_opmask | host_->T_z, xmm);
             break;
-        case data_type::u8:
-            host_->vpbroadcastb(tmp_vmm | tail_opmask | host_->T_z, rhs_addr);
-            host_->vpmovzxbd(tmp_vmm | tail_opmask | host_->T_z, tmp_vmm);
-            break;
+        }
         case data_type::bf16:
             if (is_avx512_
                     && utils::one_of(isa, avx512_core_bf16, avx512_core)) {
@@ -961,6 +987,9 @@ void jit_uni_binary_injector_t<avx, Xbyak::Ymm>::execute_broadcast_tail(
     } else if (data_type == data_type::u8 || data_type == data_type::s8) {
         const auto vmm_idx = tmp_vmm.getIdx();
         const auto tmp_xmm = Xbyak::Xmm(vmm_idx);
+        static const std::array<Xbyak::uint8, 2> imms {
+                {MM_SHUFFLE(3, 2, 0, 0), MM_SHUFFLE(3, 0, 0, 0)}};
+
         const auto cvt_to_dword = [&] {
             if (data_type == data_type::s8)
                 host_->vpmovsxbd(tmp_xmm, tmp_xmm);
@@ -968,28 +997,20 @@ void jit_uni_binary_injector_t<avx, Xbyak::Ymm>::execute_broadcast_tail(
                 host_->vpmovzxbd(tmp_xmm, tmp_xmm);
         };
 
-        const auto init_op
-                = [&] { host_->vpinsrb(tmp_xmm, tmp_xmm, rhs_addr, 0); };
+        const auto init_op = [&] {
+            host_->vpinsrb(tmp_xmm, tmp_xmm, rhs_addr, 0);
+            cvt_to_dword();
+        };
 
         const auto upper_half_op
                 = [&](int upper_half_data_size, bool should_load_lower_half) {
-                      for (int i = 1; i < upper_half_data_size; i++)
-                          host_->vpinsrb(tmp_xmm, tmp_xmm, rhs_addr, i);
-
-                      cvt_to_dword();
+                      if (upper_half_data_size > 1)
+                          host_->vshufps(tmp_xmm, tmp_xmm, tmp_xmm,
+                                  imms.at(upper_half_data_size - 2));
                   };
 
         const auto lower_half_op = [&](int upper_half_data_size) {
-            if (upper_half_data_size) {
-                const auto dword_to_copy = xmm_size_elem - upper_half_data_size;
-                for (int i = upper_half_data_size; i < dword_to_copy; i++)
-                    host_->vpinsrd(tmp_xmm, tmp_xmm, tmp_xmm, i);
-            } else {
-                for (int i = 1; i < xmm_size_elem; i++)
-                    host_->vpinsrb(tmp_xmm, tmp_xmm, rhs_addr, i);
-
-                cvt_to_dword();
-            }
+            host_->vshufps(tmp_xmm, tmp_xmm, tmp_xmm, 0);
         };
 
         load_tail_avx(host_, vmm_idx, tail_size, init_op, upper_half_op,
@@ -1057,8 +1078,10 @@ void jit_uni_binary_injector_t<isa, Vmm>::load_rhs_no_tail(
     switch (data_type) {
         case data_type::f32:
         case data_type::s32: host_->uni_vmovups(tmp_vmm, rhs_addr); break;
-        case data_type::s8: host_->uni_vpmovsxbd(tmp_vmm, rhs_addr); break;
-        case data_type::u8: host_->uni_vpmovzxbd(tmp_vmm, rhs_addr); break;
+        case data_type::s8:
+        case data_type::u8:
+            load_rhs_i8_no_tail(data_type, tmp_vmm, rhs_addr);
+            break;
         case data_type::bf16:
             if (is_avx512_
                     && utils::one_of(isa, avx512_core_bf16, avx512_core)) {
@@ -1071,10 +1094,45 @@ void jit_uni_binary_injector_t<isa, Vmm>::load_rhs_no_tail(
 }
 
 template <cpu_isa_t isa, typename Vmm>
-template <typename T>
-typename std::enable_if<std::is_same<T, Xbyak::Zmm>::value>::type
-jit_uni_binary_injector_t<isa, Vmm>::load_rhs_tail_dynamically(
-        const dnnl_data_type_t &data_type, const T &tmp_vmm,
+void jit_uni_binary_injector_t<isa, Vmm>::load_rhs_i8_no_tail(
+        const dnnl_data_type_t &data_type, const Vmm &tmp_vmm,
+        const Xbyak::Address &rhs_addr) const {
+    if (data_type == data_type::s8)
+        host_->uni_vpmovsxbd(tmp_vmm, rhs_addr);
+    else if (data_type == data_type::u8)
+        host_->uni_vpmovzxbd(tmp_vmm, rhs_addr);
+    else
+        assert(!"unsupported data type");
+}
+
+template <>
+void jit_uni_binary_injector_t<avx, Xbyak::Ymm>::load_rhs_i8_no_tail(
+        const dnnl_data_type_t &data_type, const Xbyak::Ymm &tmp_vmm,
+        const Xbyak::Address &rhs_addr) const {
+    static constexpr int xmm_size_elem = 4;
+    static constexpr int one_load_size = xmm_size_elem * sizeof(uint8_t);
+    const auto &rhs_addr_reg = rhs_arg_static_params_.rhs_addr_reg;
+    const auto tmp_xmm = Xbyak::Xmm(tmp_vmm.getIdx());
+
+    auto load_i8_fn = [&](const Xbyak::Address &addr) {
+        if (data_type == data_type::s8)
+            host_->uni_vpmovsxbd(tmp_xmm, addr);
+        else if (data_type == data_type::u8)
+            host_->uni_vpmovzxbd(tmp_xmm, addr);
+        else
+            assert(!"unsupported data type");
+    };
+
+    load_i8_fn(host_->ptr[rhs_addr_reg + one_load_size]);
+    push_vmm(host_, tmp_xmm);
+    load_i8_fn(rhs_addr);
+    host_->vinsertf128(tmp_vmm, tmp_vmm, host_->ptr[host_->rsp], 1);
+    restore_stack(host_, tmp_xmm);
+}
+
+template <cpu_isa_t isa, typename Vmm>
+void jit_uni_binary_injector_t<isa, Vmm>::load_rhs_tail_dynamically_with_opmask(
+        const dnnl_data_type_t &data_type, const Vmm &tmp_vmm,
         const Xbyak::Address &rhs_addr) const {
 
     assert(rhs_arg_static_params_.is_opmask_set()
@@ -1106,11 +1164,8 @@ jit_uni_binary_injector_t<isa, Vmm>::load_rhs_tail_dynamically(
 }
 
 template <cpu_isa_t isa, typename Vmm>
-template <typename T>
-typename std::enable_if<!std::is_same<T, Xbyak::Zmm>::value>::type
-jit_uni_binary_injector_t<isa, Vmm>::load_rhs_tail_dynamically(
-        const dnnl_data_type_t &data_type, const T &tmp_vmm,
-        const Xbyak::Address &rhs_addr) const {
+void jit_uni_binary_injector_t<isa, Vmm>::load_rhs_tail_dynamically_with_gpr(
+        const dnnl_data_type_t &data_type, const Vmm &tmp_vmm) const {
     const bool is_ymm = std::is_same<Vmm, Xbyak::Ymm>::value;
     const Xbyak::Reg64 &reg_addr = rhs_arg_static_params_.rhs_addr_reg;
     const Xbyak::Reg64 &reg_tmp = rhs_arg_static_params_.rhs_helper_reg;
@@ -1208,7 +1263,7 @@ void jit_uni_binary_injector_t<avx, Xbyak::Ymm>::load_rhs_tail_statically(
     } else if (data_type == data_type::u8 || data_type == data_type::s8) {
         const auto cvt_to_dword = [&](const Xbyak::Operand &operand) {
             if (data_type == data_type::s8)
-                host_->vpmovsxbd(tmp_vmm, operand);
+                host_->vpmovsxbd(tmp_xmm, operand);
             else
                 host_->vpmovzxbd(tmp_xmm, operand);
         };
@@ -1427,6 +1482,7 @@ void jit_uni_binary_injector_t<isa, Vmm>::compute_vector(size_t idx,
 template class jit_uni_binary_injector_t<avx512_core_bf16>;
 template class jit_uni_binary_injector_t<avx512_core>;
 template class jit_uni_binary_injector_t<avx512_common>;
+template class jit_uni_binary_injector_t<avx512_common, Xbyak::Ymm>;
 template class jit_uni_binary_injector_t<avx2, Xbyak::Ymm>;
 template class jit_uni_binary_injector_t<avx2, Xbyak::Xmm>;
 template class jit_uni_binary_injector_t<avx, Xbyak::Ymm>;

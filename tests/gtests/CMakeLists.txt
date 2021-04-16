@@ -24,13 +24,13 @@ add_subdirectory (gtest)
 set(APP_NAME "gtest")
 set(MAIN_SRC_GTEST ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 list(APPEND MAIN_SRC_GTEST ${TEST_THREAD})
-list(APPEND MAIN_SRC_GTEST ${CMAKE_CURRENT_SOURCE_DIR}/test_malloc.cpp)
 
 # Windows does not support weak/strong symbols and no guarrantees by the linker
 # for out_of_memory testing to work. Not tested on macOS
 if(UNIX)
     if(DNNL_ENABLE_MEM_DEBUG)
         add_definitions(-DDNNL_ENABLE_MEM_DEBUG)
+        list(APPEND MAIN_SRC_GTEST ${CMAKE_CURRENT_SOURCE_DIR}/test_malloc.cpp)
     endif()
 endif()
 
@@ -49,6 +49,7 @@ endif()
 
 # TODO: enable me!
 file(GLOB PRIM_TEST_CASES_SRC
+                              test_comparison_operators.cpp
                               test_primitive_cache_mt.cpp
                               test_iface_primitive_cache.cpp
                               test_iface_pd.cpp
@@ -149,8 +150,10 @@ if(WIN32 AND DNNL_WITH_SYCL)
 endif()
 
 # Tests that don't support '--engine' parameter
-set_source_files_properties(test_cross_engine_reorder.cpp
-        PROPERTIES NO_ENGINE_PARAM true)
+set_source_files_properties(
+            test_cross_engine_reorder.cpp
+            test_comparison_operators.cpp
+            PROPERTIES NO_ENGINE_PARAM true)
 
 function(register_gtest exe src)
     add_executable(${exe} ${MAIN_SRC_GTEST} ${src})

@@ -1545,6 +1545,7 @@ typedef enum {
     dnnl_memory_extra_flag_gpu_rnn_u8s8_compensation
     = dnnl_memory_extra_flag_rnn_u8s8_compensation,
     dnnl_memory_extra_flag_compensation_conv_asymmetric_src = 0x8U,
+    dnnl_memory_extra_flag_rnn_s8s8_compensation = 0x16U,
 } dnnl_memory_extra_flags_t;
 
 /// Description of extra information stored in memory
@@ -2594,8 +2595,8 @@ typedef const struct dnnl_primitive *const_dnnl_primitive_t;
 #define DNNL_ARG_ATTR_MULTIPLE_POST_OP(idx) \
     (DNNL_ARG_ATTR_MULTIPLE_POST_OP_BASE * ((idx) + 1))
 
-// XXX: next define should have a (1 << 20) = 1048576 value to preserve 5 bits
-// for DNNL_ARG_ATTR_MULTIPLE_POST_OP argument.
+/// Input scaling factors provided at execution time.
+#define DNNL_ARG_ATTR_INPUT_SCALES 1048576
 
 /// A structure that contains an index and a memory object, and is used to pass
 /// arguments to dnnl_primitive_execute().

@@ -694,7 +694,7 @@ private:
     }
     std::unique_ptr<bf16_emulation_t> bf16_emu_;
 
-    inline int interleave_w_reorder_size(int ur_w);
+    inline int interleave_w_reorder_size(int ur_w) const;
     inline int interleave_w_reorder_bytes(int ur_w);
     inline int interleave_stack_size(int ur_w, int ic_block_step);
     inline int permw_stack_size(int ur_w) {

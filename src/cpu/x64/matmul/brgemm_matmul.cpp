@@ -41,11 +41,21 @@ using namespace data_type;
 
 template <cpu_isa_t isa>
 status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
+    const auto src_dt = src_md_.data_type;
+    const auto wei_dt = weights_md_.data_type;
+    const auto dst_dt = dst_md_.data_type;
+
+    const bool is_int8 = one_of(src_dt, u8, s8) && wei_dt == s8
+            && one_of(dst_dt, u8, s8, s32, f32);
+    const bool is_bf16
+            = everyone_is(bf16, src_dt, wei_dt) && one_of(dst_dt, bf16, f32);
 
     auto check_bias = [&]() -> bool {
-        return IMPLICATION(with_bias(),
-                utils::one_of(weights_md(1)->data_type, f32, s32, s8, u8)
-                        && is_bias_1xN());
+        const bool is_bia_dt_correct
+                = (is_int8
+                          && one_of(weights_md(1)->data_type, f32, s32, s8, u8))
+                || (is_bf16 && one_of(weights_md(1)->data_type, f32, bf16));
+        return IMPLICATION(with_bias(), is_bia_dt_correct && is_bias_1xN());
     };
 
     auto check_attr_oscale = [&]() -> bool {
@@ -57,7 +67,9 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
     auto check_attr_zero_points
             = [&]() -> bool { return attr()->zero_points_.common(); };
 
-    bool ok = true && mayiuse(isa) && !has_runtime_dims_or_strides()
+    const bool problem_dt_correct = is_int8 || is_bf16;
+    bool ok = true && mayiuse(isa) && problem_dt_correct
+            && !has_runtime_dims_or_strides()
             && attr()->has_default_values(primitive_attr_t::skip_mask_t::oscale
                     | primitive_attr_t::skip_mask_t::zero_points
                     | primitive_attr_t::skip_mask_t::post_ops)
@@ -93,7 +105,7 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
         CHECK(brgemm_desc_set_postops(
                 &brg, attr(), &dst_md_, LDD, bgmmc_.bia_dt));
 
-        if (isa == avx512_core_bf16_amx_int8) {
+        if (one_of(isa, avx512_core_bf16_amx_int8, avx512_core_bf16_amx_bf16)) {
             brgemm_attr_t brgattr;
             brgattr.max_bs = bgmmc_.brgemm_batch_size;
             brgattr.wary_tail_read = false;
@@ -125,17 +137,17 @@ status_t brgemm_matmul_t<isa>::init(engine_t *engine) {
         brgemm_kernel_t *ker = nullptr;
         CHECK(brgemm_kernel_create(&ker, pd()->get_brg_desc(idx)));
         CHECK(safe_ptr_assign(brg_kernels_[idx], ker));
-        if (isa == avx512_core_bf16_amx_int8)
+        if (one_of(isa, avx512_core_bf16_amx_int8, avx512_core_bf16_amx_bf16))
             CHECK(brgemm_init_tiles(
                     pd()->get_brg_desc(idx), &brg_kernel_palettes_[idx][0]));
     }
 
     const auto &bgmmc = pd()->get_brgemm_matmul_conf();
     if (bgmmc.use_buffer_b)
-        CHECK(create_brgemm_matmul_copy_B(copy_B_kernel_, &bgmmc));
+        CHECK(create_brgemm_matmul_copy_b(copy_B_kernel_, &bgmmc));
 
     if (bgmmc.use_buffer_a || bgmmc.use_buffer_a_tail_only)
-        CHECK(create_brgemm_matmul_copy_A(copy_A_kernel_, &bgmmc));
+        CHECK(create_brgemm_matmul_copy_a(copy_A_kernel_, &bgmmc));
 
     return status::success;
 }
@@ -153,7 +165,8 @@ status_t brgemm_matmul_t<isa>::execute_body(const exec_ctx_t &ctx) const {
     const bool use_buffer_a
             = bgmmc.use_buffer_a || bgmmc.use_buffer_a_tail_only;
 
-    constexpr bool is_amx = isa == avx512_core_bf16_amx_int8;
+    constexpr bool is_amx
+            = one_of(isa, avx512_core_bf16_amx_int8, avx512_core_bf16_amx_bf16);
     int work_amount = bgmmc.batch * bgmmc.M_chunks * bgmmc.N_chunks;
 
     // If work_amount == 1 we limit num threads to 1 as parallel(1, ...) does
@@ -182,10 +195,10 @@ status_t brgemm_matmul_t<isa>::execute_body(const exec_ctx_t &ctx) const {
             for_(int kc = 0; kc < bgmmc.K_chunks; kc++)
             for (int nb = n_start; nb < n_end; nb++) {
                 if (bgmmc.use_buffer_b)
-                    copy_B_chunk_in_buffer(brgmm_ctx, ithr, b, nb, kc);
+                    copy_b_chunk_in_buffer(brgmm_ctx, ithr, b, nb, kc);
                 for (int mb = m_start; mb < m_end; mb++) {
                     if (use_buffer_a && nb == n_start)
-                        copy_A_chunk_in_buffer(brgmm_ctx, ithr, b, mb, kc);
+                        copy_a_chunk_in_buffer(brgmm_ctx, ithr, b, mb, kc);
                     compute_kernel(brgmm_ctx, ithr, b, mb, nb, kc);
                 }
             }
@@ -202,7 +215,8 @@ template <cpu_isa_t isa>
 void brgemm_matmul_t<isa>::compute_kernel(
         const brg_matmul_exec_ctx_t &brgmm_ctx, int ithr, int b_idx,
         int m_blk_idx, int n_blk_idx, int k_chunk_idx) const {
-    constexpr bool is_amx = isa == avx512_core_bf16_amx_int8;
+    constexpr bool is_amx
+            = one_of(isa, avx512_core_bf16_amx_int8, avx512_core_bf16_amx_bf16);
     const auto &bgmmc = pd()->get_brgemm_matmul_conf();
     const auto addr_batch = brgmm_ctx.get_batch_elem_ptr(ithr);
     const int base_brg_ker_idx = brgmm_ctx.get_base_brgemm_kernel_idx();
@@ -236,7 +250,8 @@ void brgemm_matmul_t<isa>::compute_kernel(
             = brgmm_ctx.get_post_ops_binary_rhs_arg_vec();
 
     if (gemm_batch > 0 && brg_kernel != nullptr) {
-        const bool is_tile_reconf_required = is_amx && is_M_tail;
+        const bool is_tile_reconf_required = is_amx
+                && (is_M_tail || (is_N_tail && !bgmmc.post_ops_applicable));
         if (is_tile_reconf_required)
             amx_tile_configure(&brg_kernel_palettes_[brg_ker_idx][0]);
 
@@ -251,11 +266,19 @@ void brgemm_matmul_t<isa>::compute_kernel(
 
             const size_t dst_row_logical_off
                     = b_idx * m_blk_idx * bgmmc.M_chunk_size;
+            const size_t batch_first_dim_idx = bgmmc.batch_ndims > 1
+                    ? b_idx / bgmmc.batch_without_first_dim
+                    : 0;
+            const size_t first_mb_matrix_addr_off
+                    = batch_first_dim_idx * (bgmmc.M * bgmmc.N)
+                    + (m * bgmmc.N + n);
             const brgemm_post_ops_data_t post_ops_data {
                     static_cast<const void *>(ptr_bias),
                     brgmm_ctx.get_oscales_ptr(n),
                     post_ops_binary_rhs_arg_vec.data(), static_cast<size_t>(n),
-                    dst_row_logical_off, static_cast<const void *>(zp_comp_a),
+                    dst_row_logical_off, brgmm_ctx.get_data_C_ptr(0, 0, 0),
+                    first_mb_matrix_addr_off,
+                    static_cast<const void *>(zp_comp_a),
                     static_cast<const void *>(zp_comp_b),
                     static_cast<const void *>(zp_c_val_ptr)};
 
@@ -289,11 +312,19 @@ void brgemm_matmul_t<isa>::compute_kernel(
 
             const size_t dst_row_logical_off
                     = b_idx * m_blk_idx * bgmmc.M_chunk_size;
+            const size_t batch_first_dim_idx = bgmmc.batch_ndims > 1
+                    ? b_idx / bgmmc.batch_without_first_dim
+                    : 0;
+            const size_t first_mb_matrix_addr_off
+                    = batch_first_dim_idx * (bgmmc.M * bgmmc.N)
+                    + (m * bgmmc.N + n);
             const brgemm_post_ops_data_t post_ops_data {
                     static_cast<const void *>(ptr_bias),
                     brgmm_ctx.get_oscales_ptr(n),
                     post_ops_binary_rhs_arg_vec.data(), static_cast<size_t>(n),
-                    dst_row_logical_off, static_cast<const void *>(zp_comp_a),
+                    dst_row_logical_off, brgmm_ctx.get_data_C_ptr(0, 0, 0),
+                    first_mb_matrix_addr_off,
+                    static_cast<const void *>(zp_comp_a),
                     static_cast<const void *>(zp_comp_b),
                     static_cast<const void *>(zp_c_val_ptr)};
 
@@ -309,12 +340,12 @@ void brgemm_matmul_t<isa>::compute_kernel(
 }
 
 template <cpu_isa_t isa>
-void brgemm_matmul_t<isa>::copy_A_chunk_in_buffer(
+void brgemm_matmul_t<isa>::copy_a_chunk_in_buffer(
         const brg_matmul_exec_ctx_t &brgmm_ctx, int ithr, int b_idx,
         int m_blk_idx, int k_chunk_idx) const {
     const auto &bgmmc = pd()->get_brgemm_matmul_conf();
 
-    auto ctx = jit_brgemm_matmul_copy_A_t::ctx_t();
+    auto ctx = jit_brgemm_matmul_copy_a_t::ctx_t();
     const int k_start = k_chunk_idx * bgmmc.K_chunk_elems;
     const bool is_K_tail
             = brgmm_ctx.is_last_K_chunk(k_chunk_idx) && bgmmc.K_tail > 0;
@@ -356,7 +387,7 @@ void brgemm_matmul_t<isa>::copy_A_chunk_in_buffer(
 }
 
 template <cpu_isa_t isa>
-void brgemm_matmul_t<isa>::copy_B_chunk_in_buffer(
+void brgemm_matmul_t<isa>::copy_b_chunk_in_buffer(
         const brg_matmul_exec_ctx_t &brgmm_ctx, int ithr, int b_idx,
         int n_blk_idx, int k_chunk_idx) const {
     const auto &bgmmc = pd()->get_brgemm_matmul_conf();
@@ -365,7 +396,7 @@ void brgemm_matmul_t<isa>::copy_B_chunk_in_buffer(
     const bool is_K_tail
             = brgmm_ctx.is_last_K_chunk(k_chunk_idx) && bgmmc.K_tail > 0;
     const int gemm_batch = brgmm_ctx.get_brgemm_batch_size(k_chunk_idx);
-    auto ctx = jit_brgemm_matmul_copy_B_t::ctx_t();
+    auto ctx = jit_brgemm_matmul_copy_b_t::ctx_t();
 
     const int n = n_blk_idx * bgmmc.N_blk;
     const bool is_N_tail = (bgmmc.N - n < bgmmc.N_blk);
@@ -431,7 +462,8 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
                 ? scratchpad.template get<char>(key_brgemm_primitive_buffer)
                 : nullptr;
 
-        is_amx_ = isa == avx512_core_bf16_amx_int8;
+        is_amx_ = one_of(
+                isa, avx512_core_bf16_amx_int8, avx512_core_bf16_amx_bf16);
         wsp_tile_ptr_ = is_amx_
                 ? ctx.get_scratchpad_grantor().template get<char>(
                         key_conv_amx_tile_buffer)
@@ -535,6 +567,22 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
 
         return buf_C_ptr_ + ithr * bgmmc_.buffer_c_per_thread_sz
                 + buf_idx * bgmmc_.buffer_c_chunk_sz;
+    }
+
+    // Auxiliary functions for getting offsets with pre-calculated memory
+    // strides for each tensor to get general sulution for all possible
+    // dimension without significant overhead
+    dim_t get_data_A_off(int b, int m, int k) const {
+        return bgmmc_.A_strides[2] * b + bgmmc_.A_strides[1] * m
+                + bgmmc_.A_strides[0] * k;
+    }
+    dim_t get_data_B_off(int b, int k, int n) const {
+        return bgmmc_.B_strides[2] * b + bgmmc_.B_strides[1] * k
+                + bgmmc_.B_strides[0] * n;
+    }
+    dim_t get_data_C_off(int b, int m, int n) const {
+        return bgmmc_.C_strides[2] * b + bgmmc_.C_strides[1] * m
+                + bgmmc_.C_strides[0] * n;
     }
 
     const char *get_bias_ptr(int n) const {
@@ -650,25 +698,10 @@ private:
     std::vector<const void *> post_ops_binary_rhs_arg_vec_;
 
     int base_brg_ker_idx_;
-
-    // Auxiliary functions for getting offsets with pre-calculated memory
-    // strides for each tensor to get general sulution for all possible
-    // dimension without significant overhead
-    dim_t get_data_A_off(int b, int m, int k) const {
-        return bgmmc_.A_strides[2] * b + bgmmc_.A_strides[1] * m
-                + bgmmc_.A_strides[0] * k;
-    }
-    dim_t get_data_B_off(int b, int k, int n) const {
-        return bgmmc_.B_strides[2] * b + bgmmc_.B_strides[1] * k
-                + bgmmc_.B_strides[0] * n;
-    }
-    dim_t get_data_C_off(int b, int m, int n) const {
-        return bgmmc_.C_strides[2] * b + bgmmc_.C_strides[1] * m
-                + bgmmc_.C_strides[0] * n;
-    }
 };
 
 template struct brgemm_matmul_t<avx512_core_bf16_amx_int8>;
+template struct brgemm_matmul_t<avx512_core_bf16_amx_bf16>;
 
 } // namespace matmul
 } // namespace x64
