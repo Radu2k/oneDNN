@@ -192,7 +192,7 @@ public:
         if (with_groups) return status::unimplemented;
         if (!post_ops_ok(conv_pd)) return status::unimplemented;
         fma_kind = fma_kind::get_supported_kind(
-                src_data_type, wei_data_type, dst_data_type);
+                src_data_type, wei_data_type, acc_data_type);
         if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
 
         // Disable using mad instruction backend until performance parity is
