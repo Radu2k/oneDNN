@@ -36,7 +36,10 @@ jit_prelu_backward_kernel_t::jit_prelu_backward_kernel_t(
     , diff_dst_dt_(pd->diff_dst_md(0)->data_type)
     , diff_wei_dt_(bcast_ == prelu::bcast::full
                       ? pd->diff_weights_md(0)->data_type
-                      : data_type::f32) {}
+                      : data_type::f32)
+    , diff_src_block_tail_(prelu::get_block_tail_size(pd->diff_src_md(0)))
+    , diff_wei_block_tail_(prelu::get_block_tail_size(pd->diff_weights_md(0))) {
+}
 
 #define PARAM_OFF(x) offsetof(call_params_t, x)
 
@@ -106,9 +109,10 @@ jit_uni_prelu_backward_kernel_t<Vmm>::jit_uni_prelu_backward_kernel_t(
                       ? reserve_vmm()
                       : 0)
     , io_(this, isa,
-              {src_dt_, wei_dt_, diff_src_dt_, diff_dst_dt_, diff_wei_dt_},
-              tail_size_, tail_opmask_, tail_vmm_mask_, reg_tmp_,
-              create_saturation_vmm_map()) {}
+              {src_dt_, wei_dt_, diff_src_dt_, diff_dst_dt_, diff_wei_dt_}, {},
+              io::io_tail_conf_t {simd_w_, tail_size_, tail_opmask_,
+                      tail_vmm_mask_.getIdx(), reg_tmp_},
+              io::io_emu_bf16_conf_t {}, create_saturation_vmm_map()) {}
 
 template <typename Vmm>
 jit_uni_prelu_backward_kernel_t<Vmm>::~jit_uni_prelu_backward_kernel_t()
@@ -117,6 +121,8 @@ jit_uni_prelu_backward_kernel_t<Vmm>::~jit_uni_prelu_backward_kernel_t()
 template <typename Vmm>
 void jit_uni_prelu_backward_kernel_t<Vmm>::prepare_kernel_const_vars() {
     uni_vxorps(vmm_zeros_, vmm_zeros_, vmm_zeros_);
+
+    io_.init_bf16();
     if (tail_size_) io_.prepare_tail_mask();
     if (saturation_needed_diff_src_ || saturation_needed_diff_weights_) {
         io_.init_saturate_f32({diff_src_dt_, diff_wei_dt_});
@@ -187,6 +193,9 @@ void jit_uni_prelu_backward_kernel_t<Vmm>::compute_dst(
         io_.at(diff_src_dt_)
                 ->store(src_diff_vmm, data_ptr(DNNL_ARG_DIFF_SRC, offset),
                         tail);
+        if (diff_src_block_tail_ && tail)
+            prelu::apply_zero_padding(this, tail_size_, diff_src_dt_,
+                    diff_src_block_tail_, reg_src_diff_, nullptr);
 
         accumulate_weights_diff(weights_diff_vmm, src_gt_zero_vmm,
                 data_ptr(DNNL_ARG_DIFF_WEIGHTS, offset), tail);
@@ -252,6 +261,9 @@ void jit_uni_prelu_backward_kernel_t<Xbyak::Zmm>::compute_dst(
         io_.at(diff_src_dt_)
                 ->store(src_diff_vmm, data_ptr(DNNL_ARG_DIFF_SRC, offset),
                         tail);
+        if (diff_src_block_tail_ && tail)
+            prelu::apply_zero_padding(this, tail_size_, diff_src_dt_,
+                    diff_src_block_tail_, reg_src_diff_, nullptr);
     }
 }
 
@@ -272,8 +284,12 @@ void jit_uni_prelu_backward_kernel_t<Vmm>::accumulate_weights_diff(
             uni_vaddps(partial_sum_vmm, partial_sum_vmm, tmp_vmm);
         }
         uni_vmovups(dst_addr, partial_sum_vmm);
-    } else
+    } else {
         io_.at(diff_wei_dt_)->store(partial_sum_vmm, dst_addr, tail);
+        if (diff_wei_block_tail_ && tail)
+            prelu::apply_zero_padding(this, tail_size_, diff_wei_dt_,
+                    diff_wei_block_tail_, reg_weights_diff_, nullptr);
+    }
 }
 
 template <typename Vmm>
@@ -331,18 +347,20 @@ void jit_uni_prelu_backward_kernel_t<Vmm>::finalize() {
 }
 
 template <typename Vmm>
-std::map<data_type_t, std::pair<Vmm, Vmm>>
+std::map<data_type_t, io::io_saturation_conf_t>
 jit_uni_prelu_backward_kernel_t<Vmm>::create_saturation_vmm_map() const {
 
-    std::map<data_type_t, std::pair<Vmm, Vmm>> saturation_map {};
+    std::map<data_type_t, io::io_saturation_conf_t> saturation_map {};
 
     if (saturation_needed_diff_src_)
         saturation_map.emplace(diff_src_dt_,
-                std::make_pair(vmm_zeros_, saturation_ubound_diff_src_));
+                io::io_saturation_conf_t {vmm_zeros_.getIdx(),
+                        saturation_ubound_diff_src_.getIdx(), reg_tmp_});
 
     if (saturation_needed_diff_weights_ && diff_src_dt_ != diff_wei_dt_)
         saturation_map.emplace(diff_wei_dt_,
-                std::make_pair(vmm_zeros_, saturation_ubound_diff_weights_));
+                io::io_saturation_conf_t {vmm_zeros_.getIdx(),
+                        saturation_ubound_diff_weights_.getIdx(), reg_tmp_});
 
     return saturation_map;
 }

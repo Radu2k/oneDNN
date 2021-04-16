@@ -40,6 +40,9 @@ template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type,
 rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
         acc_type>::cell_execution_ref)) {
     auto weights_scales = pd_->attr()->rnn_weights_qparams_.scales_;
+    auto weights_projection_scales = rnn.is_lstm_projection
+            ? pd_->attr()->rnn_weights_projection_qparams_.scales_
+            : nullptr;
 
     auto src_layer_ld = rnn.src_layer_ld(cell_position);
     auto src_iter_ld = rnn.src_iter_ld(cell_position);
@@ -84,7 +87,7 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
         rnn_postgemm_->execute_part2(rnn, cell_position, nullptr, dst_proj,
                 dst_layer_, nullptr, nullptr, w_proj_comp, nullptr, nullptr,
                 nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                nullptr, dst_iter_, weights_scales,
+                nullptr, dst_iter_, weights_projection_scales,
                 rnn.dlc * sizeof(dst_layer_t));
     }
 
@@ -94,6 +97,29 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
 template rnn_cell_execution_sig(ref_rnn_fwd_f32_t::cell_execution_ref);
 template rnn_cell_execution_sig(ref_rnn_fwd_bf16_t::cell_execution_ref);
 template rnn_cell_execution_sig(ref_rnn_fwd_u8s8_t::cell_execution_ref);
+template rnn_cell_execution_sig(ref_rnn_fwd_s8s8_t::cell_execution_ref);
+
+#if DNNL_X64
+
+struct amx_tile_configuration_loader_t {
+    /*
+     * Tile configurations are prepared in init phase. In execute we must load
+     * proper configuration for given situation. Tile configure is an expensive
+     * performance operation. We should avoid multiple reconfigurations as well
+     * as loading same configuration if it is already loaded.
+     */
+    void operator()(const char *requested_cfg_addr) {
+        if (current_cfg_addr != requested_cfg_addr) {
+            amx_tile_configure(requested_cfg_addr);
+            current_cfg_addr = requested_cfg_addr;
+        }
+    }
+
+private:
+    const char *current_cfg_addr = nullptr;
+};
+
+#endif
 
 template <prop_kind_t aprop, data_type_t src_type, data_type_t weights_type,
         data_type_t acc_type>
@@ -102,6 +128,12 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
 #if DNNL_X64
     auto weights_scales = pd_->attr()->rnn_weights_qparams_.scales_;
     auto weights_projectons_scales = rnn.is_lstm_projection
+            ? pd_->attr()->rnn_weights_projection_qparams_.scales_
+            : nullptr;
+    // pased the const weight scale to postgemm to avoid the shift
+    // in scale array for per_oc in brgemm
+    const auto wscales_postgemm = pd_->attr()->rnn_weights_qparams_.scales_;
+    const auto wscales_proj_postgemm = rnn.is_lstm_projection
             ? pd_->attr()->rnn_weights_projection_qparams_.scales_
             : nullptr;
 
@@ -160,6 +192,14 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
             ? rnn_brgemm_.kernel_iter_b1_[iter_desc_idx].get()
             : rnn_brgemm_.kernel_iter_b0_[iter_desc_idx].get();
 
+    const bool k_blocks_eq = rnn.k1_block == rnn.k2_block;
+    const char *pallete_buff_iter_main = k_blocks_eq
+            ? rnn_brgemm_.pallete_buff_layer_
+            : rnn_brgemm_.pallete_buff_iter_;
+    const char *pallete_buff_layer_n_tail = k_blocks_eq
+            ? rnn_brgemm_.pallete_buff_layer_n_tail_
+            : rnn_brgemm_.pallete_buff_iter_n_tail_;
+
     parallel(max_nthr, [&](const int ithr, const int nthr) {
         gemm_acc_t *amx_buffer = nullptr;
         x64::brgemm_batch_element_t *addr_batch = nullptr;
@@ -173,11 +213,13 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
 
         if (rnn.is_int8_amx() || rnn.is_bf16_amx()) {
             amx_buffer = amx_scratchpad + rnn.m_block * rnn.n_block * ithr;
-            amx_tile_configure(rnn_brgemm_.pallete_buff_);
         }
 
         int nb_i = 0, mb = 0;
         nd_iterator_init(start, nb_i, Nblocking, mb, rnn.M_blocks);
+
+        amx_tile_configuration_loader_t load_cfg_if_needed;
+
         while (start < end) {
             const int m = mb * rnn.m_block;
 
@@ -234,8 +276,16 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
                                   .get();
             }
             if (rnn.is_int8_amx() || rnn.is_bf16_amx()) {
-                if (do_n_tail)
-                    amx_tile_configure(rnn_brgemm_.pallete_buff_n_tail_);
+
+                const char *pallete_buff_iter = pallete_buff_iter_main;
+                const char *pallete_buff_layer
+                        = rnn_brgemm_.pallete_buff_layer_;
+
+                if (do_n_tail) {
+                    pallete_buff_iter = pallete_buff_layer_n_tail;
+                    pallete_buff_layer = rnn_brgemm_.pallete_buff_layer_n_tail_;
+                }
+
                 for (int g = 0; g < n_gates; g++) {
                     const int lg = g + g_unfused;
                     auto Bl_g = Bl_n + lg * Bl_g_offset;
@@ -247,31 +297,33 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
                             addr_batch[k1].ptr.A = Al_m + k1 * rnn.k1_block;
                             addr_batch[k1].ptr.B = Bl_g + k1 * Bl_kb_offset;
                         }
+                        load_cfg_if_needed(pallete_buff_layer);
                         brgemm_kernel_execute(brgemm_kernel_layer_b0,
                                 rnn.KB1_blocks, addr_batch, (void *)C_g,
                                 amx_buffer);
                     }
+
                     for (int k2 = 0; k2 < rnn.KB2_blocks; k2++) {
                         addr_batch[k2].ptr.A = Ai_m + k2 * rnn.k2_block;
                         addr_batch[k2].ptr.B = Bi_g + k2 * Bi_kb_offset;
                     }
+
+                    load_cfg_if_needed(pallete_buff_iter);
                     brgemm_kernel_execute(brgemm_kernel_iter, rnn.KB2_blocks,
                             addr_batch, (void *)C_g, amx_buffer);
                 }
 
                 if (rnn.k1_tail || rnn.k2_tail) {
-                    const char *tail_cfg_k1, *tail_cfg_k2, *tail_recfg;
+                    const char *tail_cfg_k1, *tail_cfg_k2;
                     if (do_n_tail) {
                         tail_cfg_k1 = rnn_brgemm_.pallete_buff_nk1_tail_;
                         tail_cfg_k2 = rnn_brgemm_.pallete_buff_nk2_tail_;
-                        tail_recfg = rnn_brgemm_.pallete_buff_n_tail_;
                     } else {
                         tail_cfg_k1 = rnn_brgemm_.pallete_buff_k1_tail_;
                         tail_cfg_k2 = rnn_brgemm_.pallete_buff_k2_tail_;
-                        tail_recfg = rnn_brgemm_.pallete_buff_;
                     }
                     if (rnn.k1_tail && rnn.need_gemm_layer(cell_position)) {
-                        amx_tile_configure(tail_cfg_k1);
+                        load_cfg_if_needed(tail_cfg_k1);
                         for (int g = 0; g < n_gates; g++) {
                             int lg = g + g_unfused;
                             auto Bl_g = Bl_n + lg * Bl_g_offset;
@@ -284,7 +336,7 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
                         }
                     }
                     if (rnn.k2_tail) {
-                        amx_tile_configure(tail_cfg_k2);
+                        load_cfg_if_needed(tail_cfg_k2);
                         for (int g = 0; g < n_gates; g++) {
                             int lg = g + g_unfused;
                             auto Bi_g = Bi_n + lg * Bi_g_offset;
@@ -296,7 +348,6 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
                                     addr_batch, (void *)C_g, amx_buffer);
                         }
                     }
-                    amx_tile_configure(tail_recfg);
                 }
             } else {
                 for (int g = 0; g < n_gates; g++) {
@@ -355,7 +406,7 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
                 diff_src_layer_, diff_src_iter_, diff_src_iter_c_,
                 diff_dst_layer_, diff_dst_iter_, diff_dst_iter_c_,
                 weights_peephole_, bias_[0], ws_grid_, scratch_cell_, dst_iter_,
-                weights_scales, rnn.dhc * sizeof(scratch_t));
+                wscales_postgemm, rnn.dhc * sizeof(scratch_t));
     }
     if (rnn.is_lstm_projection) {
         // Here, because the accumulation type is likely different
@@ -490,7 +541,7 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
             rnn_postgemm_->execute_part2(rnn, cell_position, nullptr, Cp,
                     dst_layer_, nullptr, nullptr, w_proj_comp, nullptr, nullptr,
                     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                    nullptr, nullptr, dst_iter_, weights_scales,
+                    nullptr, nullptr, dst_iter_, wscales_proj_postgemm,
                     rnn.dlc * sizeof(dst_layer_t));
         }
     }
@@ -501,6 +552,7 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
 template rnn_cell_execution_sig(ref_rnn_fwd_f32_t::cell_execution_brgemm);
 template rnn_cell_execution_sig(ref_rnn_fwd_bf16_t::cell_execution_brgemm);
 template rnn_cell_execution_sig(ref_rnn_fwd_u8s8_t::cell_execution_brgemm);
+template rnn_cell_execution_sig(ref_rnn_fwd_s8s8_t::cell_execution_brgemm);
 
 template <typename scratch_data_t, typename acc_data_t>
 void lstm_bwd_weights_peephole_and_bias(const rnn_utils::rnn_conf_t &rnn,

@@ -202,7 +202,13 @@ enum class tail_lode_mode_t { STATIC, DYNAMIC, DEFAULT };
  * passed as raw value intended to use in per_oc broadcast strategies.
  * @param vmm_idx_to_oc_off_oprnd - vmm mapped to output channel offset in elements inside
  * operand intended to use in per_oc broadcast strategies.
- * @param vmm_tail_idx - vmm idxes that contains data don't fill the whole vector (tail).
+ * @param vmm_idx_to_sp_elem_off_addr - vmm mapped to proper output spatial offset in
+ * elements stored under memory address intended to use in per_mb_spatial strategies.
+ * @param vmm_idx_to_sp_elem_off_val - vmm mapped to proper output spatial offset in
+ * elements passed as raw value intended to use in per_mb_spatial strategies.
+ * @param vmm_idx_to_sp_off_oprnd - vmm mapped to proper output spatial offset in 
+ * elements inside operand intended to use in per_mb_spatial strategies.
+ * @param vmm_tail_idx - vmm indices that contains data don't fill the whole vector (tail).
  * @param is_dynamic_tail_load - determines whether to load with tail in
  * runtime (based on the value from reg_tail_size or opmask) or based on given
  * integer.
@@ -216,6 +222,11 @@ struct rhs_arg_dynamic_params_t {
     std::map<int, Xbyak::Address> vmm_idx_to_oc_elem_off_addr;
     std::map<int, int> vmm_idx_to_oc_elem_off_val;
     std::map<int, Xbyak::Operand> vmm_idx_to_oc_off_oprnd;
+
+    std::map<int, Xbyak::Address> vmm_idx_to_sp_elem_off_addr;
+    std::map<int, int> vmm_idx_to_sp_elem_off_val;
+    std::map<int, Xbyak::Operand> vmm_idx_to_sp_off_oprnd;
+
     std::unordered_set<int> vmm_tail_idx_;
     tail_lode_mode_t tail_load_mode = tail_lode_mode_t::DEFAULT;
 };
@@ -348,14 +359,11 @@ private:
             bool with_tail = false) const;
     void execute_broadcast_tail(const dnnl_data_type_t &data_type,
             const Vmm &tmp_reg, const Xbyak::Address &rhs_addr) const;
-    template <typename T>
-    typename std::enable_if<std::is_same<T, Xbyak::Zmm>::value>::type
-    load_rhs_tail_dynamically(const dnnl_data_type_t &data_type,
-            const T &tmp_vmm, const Xbyak::Address &rhs_addr) const;
-    template <typename T>
-    typename std::enable_if<!std::is_same<T, Xbyak::Zmm>::value>::type
-    load_rhs_tail_dynamically(const dnnl_data_type_t &data_type,
-            const T &tmp_vmm, const Xbyak::Address &rhs_addr) const;
+    void load_rhs_tail_dynamically_with_opmask(
+            const dnnl_data_type_t &data_type, const Vmm &tmp_vmm,
+            const Xbyak::Address &rhs_addr) const;
+    void load_rhs_tail_dynamically_with_gpr(
+            const dnnl_data_type_t &data_type, const Vmm &tmp_vmm) const;
     void load_rhs_tail_statically(const dnnl_data_type_t &data_type,
             const Vmm &tmp_vmm, const Xbyak::Address &rhs_addr) const;
     void execute_broadcast_no_tail(const dnnl_data_type_t &data_type,
@@ -364,6 +372,8 @@ private:
             const Vmm &tmp_vmm, const Xbyak::Address &rhs_addr) const;
     void load_rhs_no_tail(const dnnl_data_type_t &data_type, const Vmm &tmp_reg,
             const Xbyak::Address &rhs_addr) const;
+    void load_rhs_i8_no_tail(const dnnl_data_type_t &data_type,
+            const Vmm &tmp_reg, const Xbyak::Address &rhs_addr) const;
     void cvt_to_f32(const Vmm &tmp_reg) const;
     /*
      * Returns pair consisting of flag indication preservation is needed for vmm
@@ -382,7 +392,7 @@ private:
     const rhs_arg_static_params_t rhs_arg_static_params_;
     const Xbyak::Reg64 param1_;
     const bcast_set_t supported_strategy_set_;
-    static constexpr bool is_avx512_ = std::is_same<Vmm, Xbyak::Zmm>::value;
+    const bool is_avx512_ = is_superset(isa, avx512_common);
 
     static constexpr int sizeof_reg64 = 8;
     /*

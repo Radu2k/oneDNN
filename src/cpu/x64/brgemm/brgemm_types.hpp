@@ -196,7 +196,10 @@ struct brgemm_kernel_params_t {
      */
     const void *post_ops_binary_rhs_arg_vec;
     size_t oc_logical_off;
+    size_t first_mb_matrix_addr_off;
     size_t dst_row_logical_off;
+
+    char *data_C_ptr_;
 
     const void *a_zp_compensations = nullptr;
     const void *b_zp_compensations = nullptr;
@@ -237,7 +240,8 @@ struct brgemm_post_ops_data_t {
     brgemm_post_ops_data_t() = default;
     brgemm_post_ops_data_t(const void *bias, const float *scales,
             const void *binary_post_ops_rhs, size_t oc_logical_off,
-            const size_t dst_row_logical_off = 0,
+            const size_t dst_row_logical_off = 0, char *data_C_ptr_ = nullptr,
+            const size_t first_mb_matrix_addr_off = 0,
             const void *a_zp_compensations = nullptr,
             const void *b_zp_compensations = nullptr,
             const void *c_zp_values = nullptr)
@@ -246,6 +250,8 @@ struct brgemm_post_ops_data_t {
         , binary_post_ops_rhs(binary_post_ops_rhs)
         , oc_logical_off(oc_logical_off)
         , dst_row_logical_off(dst_row_logical_off)
+        , data_C_ptr_(data_C_ptr_)
+        , first_mb_matrix_addr_off(first_mb_matrix_addr_off)
         , a_zp_compensations(a_zp_compensations)
         , b_zp_compensations(b_zp_compensations)
         , c_zp_values(c_zp_values) {}
@@ -255,6 +261,8 @@ struct brgemm_post_ops_data_t {
     const void *binary_post_ops_rhs = nullptr;
     size_t oc_logical_off = 0;
     size_t dst_row_logical_off = 0;
+    char *data_C_ptr_ = nullptr;
+    size_t first_mb_matrix_addr_off = 0;
     const void *a_zp_compensations = nullptr;
     const void *b_zp_compensations = nullptr;
     const void *c_zp_values = nullptr;

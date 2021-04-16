@@ -46,7 +46,9 @@
 
 int check_pd_cache(dnnl_primitive_desc_t pd) {
 #ifndef DNNL_DISABLE_PRIMITIVE_CACHE
-    if (!dnnl::impl::is_pd_in_cache(pd)) {
+    int capacity = 0;
+    DNN_SAFE(dnnl_get_primitive_cache_capacity(&capacity), CRIT);
+    if (capacity && !dnnl::impl::is_pd_in_cache(pd)) {
         BENCHDNN_PRINT(0, "error: %s\n",
                 "primitive descriptor is expected to be fetched from "
                 "the primitive cache");
@@ -58,7 +60,9 @@ int check_pd_cache(dnnl_primitive_desc_t pd) {
 
 int check_primitive_cache(dnnl_primitive_t p) {
 #ifndef DNNL_DISABLE_PRIMITIVE_CACHE
-    if (!dnnl::impl::is_primitive_in_cache(p)) {
+    int capacity = 0;
+    DNN_SAFE(dnnl_get_primitive_cache_capacity(&capacity), CRIT);
+    if (capacity && !dnnl::impl::is_primitive_in_cache(p)) {
         BENCHDNN_PRINT(0, "error: %s\n",
                 "primitive is expected to be fetched from the primitive "
                 "cache");
@@ -265,12 +269,11 @@ int measure_perf(benchdnn_timer_t &t, dnnl_primitive_t prim, args_t &args) {
     return measure_perf(t, perf_func, args);
 }
 
-void maybe_prepare_runtime_scales(dnn_mem_t &scales_m, const attr_t &attr,
-        int64_t scale_cnt, const float *scales) {
-    if (!attr.oscale.runtime) return;
+void maybe_prepare_runtime_scales(dnn_mem_t &scales_m,
+        const attr_t::scale_t &scale, int64_t scale_cnt, const float *scales) {
+    if (!scale.runtime) return;
 
-    const int64_t count
-            = attr.oscale.policy == policy_t::COMMON ? 1 : scale_cnt;
+    const int64_t count = scale.policy == policy_t::COMMON ? 1 : scale_cnt;
 
     scales_m = dnn_mem_t(1, &count, dnnl_f32, tag::x, get_test_engine());
     for (int64_t c = 0; c < count; ++c)
@@ -728,9 +731,7 @@ engine_t::engine_t(const engine_t &other) {
 #else
         DNN_SAFE_V(dnnl_engine_create(&engine_, dnnl_cpu, 0));
 #endif
-    }
-
-    if (engine_kind == dnnl_gpu) {
+    } else if (engine_kind == dnnl_gpu) {
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         cl_device_id dev;
         cl_context ctx;
@@ -744,6 +745,8 @@ engine_t::engine_t(const engine_t &other) {
         DNN_SAFE_V(dnnl_sycl_interop_engine_get_context(other.engine_, &ctx));
         DNN_SAFE_V(dnnl_sycl_interop_engine_create(&engine_, dev, ctx));
 #endif
+    } else {
+        assert(!"unsupported engine kind");
     }
 }
 
