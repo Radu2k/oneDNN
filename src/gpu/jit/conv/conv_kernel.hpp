@@ -523,7 +523,8 @@ public:
         requireGRF(cfg_.regs);
         requireSIMD(cfg_.simd_size);
         requireBarrier();
-        requireDPAS();
+        if (utils::one_of(cfg_.fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw))
+            requireDPAS();
         if (cfg_.do_atomic_update) requireGlobalAtomics();
 
         for (int i = 0; i < kernel_arg_info.nargs(); i++) {
@@ -553,8 +554,13 @@ public:
         slmfence(tmp, r0);
         mov<int32_t>(dwords, null, tmp);
 
-        mov<uint32_t>(8, r255, r0);
-        threadend(r255);
+        if (hw != ngen::HW::Gen9) {
+            mov<uint32_t>(8, r255, r0);
+            threadend(r255);
+        } else {
+            mov<uint32_t>(8, r127, r0);
+            threadend(r127);
+        }
         ra_.safeRelease(tmp);
     }
 
@@ -2558,7 +2564,7 @@ private:
             auto rd_mov = rd;
             rd_mov.setType(ngen::DataType::f);
             auto mod_mov = ~mod;
-            mod_mov.setSWSB({});
+            if (hw != ngen::HW::Gen9) mod_mov.setSWSB({});
             int step = send_func.mask_count() * sizeof(uint32_t);
             for (int i = 0; i < send_func.register_size(); i += step) {
                 auto sub_rd_mov = ngen_reg_data(hw, rd_mov, i,
@@ -2629,7 +2635,7 @@ conv_kernel_t<hw>::conv_kernel_t(const conv_config_t &cfg,
     setup_interface(body, kernel_arg_info);
 
     setDefaultNoMask();
-    setDefaultAutoSWSB(true);
+    if (hw != ngen::HW::Gen9) setDefaultAutoSWSB(true);
 
     prologue();
 

@@ -43,8 +43,9 @@ fma_kind_t fma_kind::from_string(std::string enum_string) {
 }
 
 fma_kind_t fma_kind::get_supported_kind(
-        const type_t &a, const type_t &b, const type_t &c) {
-    if (dpas_t::matches_types(a, b, c)) return fma_kind_t::dpasw;
+        const type_t &a, const type_t &b, const type_t &c, ngen::HW hw) {
+    if (hw >= ngen::HW::Xe_HP && dpas_t::matches_types(a, b, c))
+        return fma_kind_t::dpasw;
     if (mad_t::matches_types(a, b, c)) return fma_kind_t::mad;
     return fma_kind_t::unknown;
 }

@@ -2630,7 +2630,7 @@ private:
             s = sub_slm_bufs(s, it, /*is_read=*/true);
         }
 
-        if (it.is_first_mul()) {
+        if (it.is_first_mul() && cfg_.hw >= ngen::HW::Xe_HP) {
             for (auto &m : mul) {
                 m = sub_fma_acc_with_zero(m);
             }

@@ -39,15 +39,6 @@ public:
     static status_t init_pd(T *pd, engine_t *engine) {
         auto *compute_engine = utils::downcast<compute_engine_t *>(engine);
 
-        if (!compute_engine->is_xe_hp()
-#if DNNL_WITH_XE_HPG
-                && !compute_engine->is_xe_hpg()
-#endif
-#if DNNL_WITH_XE_HPC
-                && !compute_engine->is_xe_hpc()
-#endif
-        )
-            return status::unimplemented;
         if (!compute_engine->mayiuse_ngen_kernels())
             return status::unimplemented;
         if (!pd->set_default_alg_kind(alg_kind::convolution_direct))
@@ -73,6 +64,14 @@ public:
 
         std::unique_ptr<jit::jit_generator_base> jit_gen_convolution;
         switch (device_info->gpu_arch()) {
+            case gpu_arch_t::gen9:
+                jit_gen_convolution.reset(new conv_kernel_t<gpu_gen9>(
+                        cfg(primitive), primitive->pd(), kernel_arg_info_));
+                break;
+            case gpu_arch_t::xe_lp:
+                jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_lp>(
+                        cfg(primitive), primitive->pd(), kernel_arg_info_));
+                break;
             case gpu_arch_t::xe_hp:
                 jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hp>(
                         get_cfg(primitive), primitive->pd(),

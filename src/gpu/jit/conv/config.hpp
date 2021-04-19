@@ -232,8 +232,7 @@ public:
         ow_thr_blk = getenv_int("ow_thr_blk", ow_thr_blk);
 #endif
 
-        regs = 256;
-
+        regs = hw < ngen::HW::Xe_LP ? 128 : 256;
         tg_grid_dim[0] = std::min(4, utils::div_up(oc, oc_thr_blk));
         tg_grid_dim[1] = std::min(4, utils::div_up(ow, ow_thr_blk));
         tg_grid_dim[2] = 1;
@@ -276,7 +275,6 @@ public:
         kernel_grid_dim[1] = od * oh * ow_tg_dim;
         kernel_grid_dim[2] = mb_tg_dim;
 
-        CHECK(init_common_config(engine));
 
         // Do not perform full unrolling when there are too many inner
         // iterations.
@@ -690,6 +688,8 @@ public:
         auto device_info = compute_engine->device_info();
 
         switch (device_info->gpu_arch()) {
+            case gpu_arch_t::gen9: hw = ngen::HW::Gen9; break;
+            case gpu_arch_t::xe_lp: hw = ngen::HW::Xe_LP; break;
 #if DNNL_WITH_XE_HP
             case gpu_arch_t::xe_hp: hw = ngen::HW::Xe_HP; break;
 #endif

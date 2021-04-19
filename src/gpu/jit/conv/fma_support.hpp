@@ -42,7 +42,7 @@ std::string to_string(fma_kind_t val);
 fma_kind_t from_string(std::string enum_string);
 
 fma_kind_t get_supported_kind(
-        const type_t &a, const type_t &b, const type_t &c);
+        const type_t &a, const type_t &b, const type_t &c, ngen::HW hw);
 
 int get_simd_size(ngen::HW hw, fma_kind_t kind, const type_t &a,
         const type_t &b, const type_t &c);
