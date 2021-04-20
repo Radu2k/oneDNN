@@ -70,6 +70,7 @@ void xe_hp_systolic_gemm_kernel_t<hw>::scattered_setup_c(
         int stride, bool load) {
     // Set up SIMD16 scattered access pointers to emulate block access to C
     //   (2 columns x 8 regs/column).
+    auto a_elem_bytes = getBytes(cfg.a_type);
     mov<uint16_t>(4, uheaders[15],
             Immediate::uv(0 * stride, 1 * stride, 2 * stride, 3 * stride, 0, 0,
                     0, 0));
@@ -77,7 +78,12 @@ void xe_hp_systolic_gemm_kernel_t<hw>::scattered_setup_c(
     eadd<uint64_t>(4, uheaders[0], uc_base, uheaders[15].uw(0)(4));
     eadd<uint64_t>(4, uheaders[1], uheaders[0], stride * 4);
     eadd<uint64_t>(8, uheaders[2], uheaders[0], stride * 8);
-    if (cfg.c_packed) {
+    if (cfg.c_packed && a_elem_bytes == 1) {
+        eadd<uint64_t>(8, uheaders[4], uheaders[0], stride * 16);
+        eadd<uint64_t>(8, uheaders[6], uheaders[0], stride * 24);
+        for (int q = 8; q < 16; q += 2)
+            eadd<uint64_t>(8, uheaders[q], uheaders[q - 8], stride * 32);
+    } else if (cfg.c_packed && a_elem_bytes == 2) {
         eadd<uint64_t>(8, uheaders[4], uheaders[0], stride * 16 * cfg.tile_n);
         eadd<uint64_t>(
                 8, uheaders[6], uheaders[0], stride * (16 * cfg.tile_n + 8));
@@ -94,11 +100,17 @@ void xe_hp_systolic_gemm_kernel_t<hw>::scattered_setup_c(
 template <HW hw>
 void xe_hp_systolic_gemm_kernel_t<hw>::block_setup_c(
         bool remainder, bool load) {
+    auto a_elem_bytes = getBytes(cfg.a_type);
     auto c_elem_bytes = getBytes(cfg.c_type);
     if (remainder) {
         // 8 blocks, each 16x1.
         emov<uint64_t>(1, uheaders[0][0], uc_base);
-        if (cfg.c_packed) {
+        if (cfg.c_packed && a_elem_bytes == 1) {
+            eadd<uint64_t>(1, uheaders[1][0], uc_base, c_elem_bytes * 16);
+            for (int q = 2; q < 16; q += 2)
+                eadd<uint64_t>(
+                        8, uheaders[q], uheaders[0], c_elem_bytes * 32 * q / 2);
+        } else if (cfg.c_packed && a_elem_bytes == 2) {
             eadd<uint64_t>(
                     1, uheaders[1][0], uc_base, c_elem_bytes * 16 * cfg.tile_n);
             for (int q = 2; q < 16; q += 2)
@@ -115,7 +127,12 @@ void xe_hp_systolic_gemm_kernel_t<hw>::block_setup_c(
     } else {
         // 4 blocks, each 32x1.
         emov<uint64_t>(1, uheaders[0][0], uc_base);
-        if (cfg.c_packed) {
+        if (cfg.c_packed && a_elem_bytes == 1) {
+            eadd<uint64_t>(1, uheaders[1][0], uc_base, c_elem_bytes * 32);
+            eadd<uint64_t>(8, uheaders[2], uheaders[0], c_elem_bytes * 32 * 2);
+            eadd<uint64_t>(8, uheaders[4], uheaders[0], c_elem_bytes * 32 * 4);
+            eadd<uint64_t>(8, uheaders[6], uheaders[0], c_elem_bytes * 32 * 6);
+        } else if (cfg.c_packed && a_elem_bytes == 2) {
             eadd<uint64_t>(
                     1, uheaders[1][0], uc_base, c_elem_bytes * 16 * cfg.tile_n);
             eadd<uint64_t>(8, uheaders[2], uheaders[0], c_elem_bytes * 16 * 2);
@@ -150,6 +167,7 @@ void xe_hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
     bool beta1 = cfg.beta1;
     bool float_update = !(alpha1 && (beta0 || beta1)) || cfg.have_post_op();
 
+    const auto a_elem_bytes = getBytes(cfg.a_type);
     const auto c_elem_bytes = getBytes(cfg.c_type);
     bool c32 = (c_elem_bytes == 4);
 
@@ -218,7 +236,7 @@ void xe_hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
                         if (cfg.c_packed)
                             eadd<uint64_t>(8, uheaders[8 * j1 + q],
                                     uheaders[8 * j1 + q],
-                                    c_elem_bytes * 16 * 2);
+                                    c_elem_bytes * packed_ldc() * 2);
                         else
                             eadd<uint64_t>(8, uheaders[8 * j1 + q],
                                     uheaders[8 * j1 + q], uldc_x2);
@@ -234,9 +252,11 @@ void xe_hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
                 if (remainder) {
                     if (cfg.c_packed) {
                         eadd<uint64_t>(1, uheaders[2 * jj + 0],
-                                uheaders[2 * jj + 0], c_elem_bytes * 16 * 8);
+                                uheaders[2 * jj + 0],
+                                c_elem_bytes * packed_ldc() * 8);
                         eadd<uint64_t>(1, uheaders[2 * jj + 1],
-                                uheaders[2 * jj + 1], c_elem_bytes * 16 * 8);
+                                uheaders[2 * jj + 1],
+                                c_elem_bytes * packed_ldc() * 8);
                     } else {
                         eadd<uint64_t>(1, uheaders[2 * jj + 0],
                                 uheaders[2 * jj + 0], uldc_x8);
@@ -246,7 +266,7 @@ void xe_hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
                 } else {
                     if (cfg.c_packed)
                         eadd<uint64_t>(1, uheaders[jj], uheaders[jj],
-                                c_elem_bytes * 16 * 8);
+                                c_elem_bytes * packed_ldc() * 8);
                     else
                         eadd<uint64_t>(1, uheaders[jj], uheaders[jj], uldc_x8);
                 }
@@ -278,7 +298,7 @@ void xe_hp_systolic_gemm_kernel_t<hw>::load_update_c_internal(
 
         // Get (sub)register in loaded C submatrix at offset (ii*8, jj).
         auto get_load_reg = [&](DataType dt, int ii, int jj) {
-            if (cfg.c_packed && c_align16 && !remainder) {
+            if (cfg.c_packed && c_align16 && !remainder && a_elem_bytes == 2) {
                 int bi = (ii & 2) >> 1;
                 int bj = (jj & 1) << 1;
                 ii = (ii & ~2) | bj;
@@ -415,6 +435,7 @@ template <HW hw>
 void xe_hp_systolic_gemm_kernel_t<hw>::store_c(bool remainder, bool c_align16) {
     Label done;
 
+    const auto a_elem_bytes = getBytes(cfg.a_type);
     const auto c_elem_bytes = getBytes(cfg.c_type);
     bool c32 = (c_elem_bytes == 4);
 
@@ -437,7 +458,7 @@ void xe_hp_systolic_gemm_kernel_t<hw>::store_c(bool remainder, bool c_align16) {
 
         // Get (sub)register in stored C submatrix at offset (ii*8, jj).
         auto get_store_reg = [&](int ii, int jj) {
-            if (cfg.c_packed && c_align16 && !remainder) {
+            if (cfg.c_packed && c_align16 && !remainder && a_elem_bytes == 2) {
                 int bi = (ii & 2) >> 1;
                 int bj = (jj & 1) << 1;
                 ii = (ii & ~2) | bj;
@@ -500,7 +521,7 @@ void xe_hp_systolic_gemm_kernel_t<hw>::store_c(bool remainder, bool c_align16) {
                     for (int q = 0; q < (remainder ? 16 : 8); q += 2) {
                         if (cfg.c_packed)
                             eadd<uint64_t>(8, uheaders[q], uheaders[q],
-                                    c_elem_bytes * 16 * 8);
+                                    c_elem_bytes * packed_ldc() * 8);
                         else
                             eadd<uint64_t>(
                                     8, uheaders[q], uheaders[q], uldc_x8);
@@ -532,7 +553,7 @@ void xe_hp_systolic_gemm_kernel_t<hw>::store_c(bool remainder, bool c_align16) {
                     for (int q = 0; q < 16; q += 2) {
                         if (cfg.c_packed)
                             eadd<uint64_t>(8, uheaders[q], uheaders[q],
-                                    c_elem_bytes * 16 * 2);
+                                    c_elem_bytes * packed_ldc() * 2);
                         else
                             eadd<uint64_t>(
                                     8, uheaders[q], uheaders[q], uldc_x2);

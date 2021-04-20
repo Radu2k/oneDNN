@@ -300,6 +300,8 @@ private:
                 : 10240; //   4k A (128x32)                 + 6k B (192x32)
     }
 
+    int packed_ldc() const { return 32 / getBytes(cfg.b_type); }
+
     void barrier_prep(
             const ngen::InstructionModifier &swsb, const ngen::GRF &header);
     void mul_constant(const ngen::InstructionModifier &mod,

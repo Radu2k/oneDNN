@@ -94,8 +94,12 @@ status_t xe_hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
 
     if (dt_int_ok) attr_skip_mask |= smask_t::zero_points_runtime;
 
-    ok = true && limits_ok && (dt_float_ok || dt_int_ok)
-            && utils::one_of(arch, arch_t::xe_hp, arch_t::gen12p7)
+    bool arch_ok = (arch == arch_t::xe_hp);
+#if DNNL_WITH_XE_HPG
+    arch_ok |= (arch == arch_t::xe_hpg);
+#endif
+
+    ok = true && limits_ok && (dt_float_ok || dt_int_ok) && arch_ok
             && compute_engine->mayiuse(compute::device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate)
             && attr()->has_default_values(attr_skip_mask)
@@ -337,17 +341,19 @@ status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
                                 &kernel_[first_k_block][last_k_block], kernel);
                         break;
                     }
-                    case arch_t::gen12p7: {
-                        using kernel_12p7_t
-                                = xe_hp_systolic_gemm_kernel_t<gpu_gen12p7>;
+#if DNNL_WITH_XE_HPG
+                    case arch_t::xe_hpg: {
+                        using kernel_xe_hpg_t
+                                = xe_hp_systolic_gemm_kernel_t<gpu_xe_hpg>;
                         cfg_copy.emulate64 = true;
-                        auto kernel = kernel_12p7_t(
-                                cfg_copy.cast<kernel_12p7_t::config_t>());
+                        auto kernel = kernel_xe_hpg_t(
+                                cfg_copy.cast<kernel_xe_hpg_t::config_t>());
 
                         create_kernel(engine,
                                 &kernel_[first_k_block][last_k_block], kernel);
                         break;
                     }
+#endif
                     default:
                         assert(!"Unsupported GPU architecture.");
                         return status::unimplemented;
@@ -571,9 +577,8 @@ status_t xe_hp_systolic_gemm_t::launch_clear_sum(const gemm_exec_ctx_t &ctx,
     auto elt_size = types::data_type_size(pd()->desc()->a_type());
     size_t threads = !copyb ? utils::div_up(r, unroll_m_)
                             : utils::div_up(c, unroll_n_);
-    size_t sg
-            = ocl::xe_hp_systolic_gemm_copy_kernel_t::subgroup_size_clear_sum(
-                    elt_size, copyb);
+    size_t sg = ocl::xe_hp_systolic_gemm_copy_kernel_t::subgroup_size_clear_sum(
+            elt_size, copyb);
 
     size_t gws[3] = {threads * sg, 1, 1};
     size_t lws[3] = {sg, 1, 1};

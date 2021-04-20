@@ -91,11 +91,14 @@ struct xe_hp_systolic_gemm_t : public gpu_gemm_t {
         }
 
         bool with_batch() const { return desc()->is_batched(); }
+        bool with_ab_zero_points() const { return a_zp_ || b_zp_; }
+        bool with_c_zero_points() const { return c_zp_; }
 
     private:
         attr_info_t attr_info_ = {};
         bool any_prepacked_ = false;
         bool packed_a_ = false, packed_b_ = false, packed_c_ = false;
+        bool a_zp_ = false, b_zp_ = false, c_zp_ = false;
     };
 
     status_t init(engine_t *engine) override;
@@ -143,7 +146,6 @@ private:
     int unroll_n_ = 0;
 
     char co_kind_;
-    bool ab_zero_points_;
     bool walk_n_first_;
 
     const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
