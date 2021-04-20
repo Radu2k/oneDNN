@@ -47,54 +47,8 @@ struct xe_hp_systolic_gemm_t : public gpu_gemm_t {
 
         status_t init(engine_t *engine);
 
-        bool set_default_formats(data_type_t dt) {
-            using namespace format_tag;
-
-            auto sz = types::data_type_size(dt);
-
-            // Packed not implemented for int8 yet.
-            if (sz == 2) {
-                memory_desc_wrapper a_mdw(&desc_.b_desc);
-                memory_desc_wrapper b_mdw(&desc_.a_desc);
-                memory_desc_wrapper c_mdw(&desc_.c_desc);
-
-                bool a_any = a_mdw.format_any();
-                bool b_any = b_mdw.format_any();
-                bool c_any = c_mdw.format_any();
-                bool batch = desc()->is_batched();
-
-                format_tag_t a_packed_tag = batch
-                        ? ((sz == 2) ? aCB4c8b8c2b : aCB4c8b8c4b)
-                        : ((sz == 2) ? BA4b8a8b2a : BA4b8a8b4a);
-                format_tag_t b_packed_tag = batch
-                        ? ((sz == 2) ? aBC48b16c : aBC48b32c)
-                        : ((sz == 2) ? AB48a16b : AB48a32b);
-
-                if (a_any)
-                    CHECK(memory_desc_init_by_tag(desc_.b_desc, a_packed_tag));
-                else if (a_mdw.matches_one_of_tag(
-                                 a_packed_tag, ab, ba, abc, acb)
-                        == undef)
-                    return false;
-                if (b_any)
-                    CHECK(memory_desc_init_by_tag(desc_.a_desc, b_packed_tag));
-                else if (b_mdw.matches_one_of_tag(
-                                 b_packed_tag, ab, ba, abc, acb)
-                        == undef)
-                    return false;
-                if (c_any)
-                    CHECK(memory_desc_init_by_tag(desc_.c_desc, b_packed_tag));
-                else if (c_mdw.matches_one_of_tag(b_packed_tag, ab, abc)
-                        == undef)
-                    return false;
-
-                packed_a_ = a_mdw.matches_tag(a_packed_tag);
-                packed_b_ = b_mdw.matches_tag(b_packed_tag);
-                packed_c_ = c_mdw.matches_tag(b_packed_tag);
-            }
-
-            return gpu_gemm_pd_t::set_default_formats();
-        }
+        bool use_fma();
+        bool set_default_formats(data_type_t dt);
 
         size_t dyn_offset_a = 0;
         size_t dyn_offset_b = 0;
@@ -140,6 +94,7 @@ struct xe_hp_systolic_gemm_t : public gpu_gemm_t {
 
     private:
         attr_info_t attr_info_ = {};
+        bool any_prepacked_ = false;
         bool packed_a_ = false, packed_b_ = false, packed_c_ = false;
     };
 

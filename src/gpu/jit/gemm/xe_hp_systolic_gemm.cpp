@@ -29,23 +29,6 @@ namespace impl {
 namespace gpu {
 namespace jit {
 
-struct nocopy_table_t {
-    int mn_limit[2][2]; // Use no-copy if m*n < mn_limit * mn_limit and
-    int k_limit[2][2]; // Use no-copy if k < k_limit
-};
-
-const nocopy_table_t xe_hp_f16_nocopy_table[] = {
-        // NN     NT     TN    TT
-        {{{1280, 768}, {512, 384}}, {{512, 768}, {1024, 512}}}};
-
-const nocopy_table_t xe_hp_bf16_nocopy_table[] = {
-        // NN   NT     TN   TT
-        {{{512, 256}, {512, 512}}, {{512, 256}, {384, 384}}}};
-
-const nocopy_table_t xe_hp_x8x8s32_nocopy_table[] = {
-        // NN   NT     TN   TT
-        {{{384, 384}, {384, 384}}, {{384, 512}, {384, 256}}}};
-
 status_t xe_hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     using namespace prop_kind;
     using namespace data_type;
@@ -60,33 +43,38 @@ status_t xe_hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
 
     auto arch = compute_engine->device_info()->gpu_arch();
 
-    const auto d = desc();
+    const auto &d = desc();
 
-    // Use FMA implementation for very small cases.
-    if (d->m() < 32 && d->n() < 32) return status::unimplemented;
-    if (d->m() < 32 && d->k() < 32) return status::unimplemented;
-    if (d->n() < 32 && d->k() < 32) return status::unimplemented;
+    bool dt_float_ok = (d->a_type() == d->b_type()
+            && utils::one_of(d->a_type(), bf16, f16)
+            && utils::one_of(d->c_type(), f32, d->a_type()));
 
-    bool is_bf16_with_bias
-            = d->c_type() == bf16 && with_bias() && d->bias_type() == bf16;
+    bool dt_int_ok = (utils::one_of(d->a_type(), u8, s8)
+            && utils::one_of(d->b_type(), u8, s8) && (d->c_type() == s32));
 
-    // Use FMA for small/medium sizes
-    if (utils::one_of(d->c_type(), bf16, f16, s32) && !is_bf16_with_bias) {
-        const nocopy_table_t *all_tables[3] = {xe_hp_f16_nocopy_table,
-                xe_hp_bf16_nocopy_table, xe_hp_x8x8s32_nocopy_table};
-        const int type_idx
-                = (d->c_type() == f16) ? 0 : (d->c_type() == bf16) ? 1 : 2;
-        const nocopy_table_t *table = all_tables[type_idx];
-        const long mnl = table->mn_limit[d->transa()][d->transb()];
-        const long kl = table->k_limit[d->transa()][d->transb()];
-
-        if ((d->m() * d->n() < mnl * mnl) && (d->k() < kl)) {
+    if (dt_int_ok) {
+        if (attr()->zero_points_.defined(DNNL_ARG_SRC)) {
+            const int *ao_i32 = nullptr;
+            attr()->zero_points_.get(DNNL_ARG_SRC, nullptr, nullptr, &ao_i32);
+            a_zp_ = (*ao_i32 != 0);
+        } else if (!attr()->zero_points_.has_default_values(DNNL_ARG_SRC))
             return status::unimplemented;
-        }
+
+        if (attr()->zero_points_.defined(DNNL_ARG_WEIGHTS)) {
+            const int *bo_i32 = nullptr;
+            attr()->zero_points_.get(
+                    DNNL_ARG_WEIGHTS, nullptr, nullptr, &bo_i32);
+            b_zp_ = (*bo_i32 != 0);
+        } else if (!attr()->zero_points_.has_default_values(DNNL_ARG_WEIGHTS))
+            return status::unimplemented;
+
+        c_zp_ = !attr()->zero_points_.has_default_values(DNNL_ARG_DST);
     }
 
     bool ok = set_default_formats(d->a_type());
     if (!ok) return status::unimplemented;
+
+    if (use_fma()) return status::unimplemented;
 
     // LIMITATIONS:
     // - batch is not supported for unpacked inputs.
@@ -102,23 +90,12 @@ status_t xe_hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     if (!packed_c())
         limits_ok = limits_ok && (d->ldc() != DNNL_RUNTIME_DIM_VAL);
 
-    bool dt_float_ok = (d->a_type() == d->b_type()
-            && utils::one_of(d->a_type(), bf16, f16)
-            && utils::one_of(d->c_type(), f32, d->a_type()));
-
-    bool dt_int_ok = (utils::one_of(d->a_type(), u8, s8)
-            && utils::one_of(d->b_type(), u8, s8) && (d->c_type() == s32));
-
     auto attr_skip_mask = smask_t::oscale | smask_t::post_ops;
 
     if (dt_int_ok) attr_skip_mask |= smask_t::zero_points_runtime;
 
     ok = true && limits_ok && (dt_float_ok || dt_int_ok)
-#if DNNL_WITH_XE_HPG
-            && utils::one_of(arch, arch_t::xe_hp, arch_t::xe_hpg)
-#else
-            && arch == arch_t::xe_hp
-#endif
+            && utils::one_of(arch, arch_t::xe_hp, arch_t::gen12p7)
             && compute_engine->mayiuse(compute::device_ext_t::
                             intel_subgroup_split_matrix_multiply_accumulate)
             && attr()->has_default_values(attr_skip_mask)
@@ -135,15 +112,16 @@ status_t xe_hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
                             && utils::one_of(bias_cmask(), 0, 1 << 0, 1 << 1));
 
     if (dt_int_ok) {
-        ok &= attr()->zero_points_.defined(DNNL_ARG_SRC)
-                && attr()->zero_points_.defined(DNNL_ARG_WEIGHTS)
-                && (attr()->zero_points_.has_default_values(DNNL_ARG_DST)
-                        || !attr()->zero_points_.defined(DNNL_ARG_DST));
+        ok &= IMPLICATION(a_zp_, !packed_b()) && IMPLICATION(b_zp_, !packed_a())
+                && IMPLICATION(
+                        c_zp_, !attr()->zero_points_.defined(DNNL_ARG_DST));
 
-        int cmask = 0;
-        attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
-        ok &= utils::one_of(cmask, 0, 1 << 0, 1 << 1);
-        ok &= !packed_a() && !packed_b();
+        int cmask_a = 0, cmask_b = 0, cmask_c = 0;
+        attr()->zero_points_.get(DNNL_ARG_WEIGHTS, nullptr, &cmask_b, nullptr);
+        attr()->zero_points_.get(DNNL_ARG_SRC, nullptr, &cmask_a, nullptr);
+        attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask_c, nullptr);
+        ok &= (cmask_a == 0) && (cmask_b == 0)
+                && utils::one_of(cmask_c, 0, 1 << 0, 1 << 1);
     }
 
     attr_info_ = attr_info_t::create(attr());
@@ -154,6 +132,102 @@ status_t xe_hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     if (!ok) return status::unimplemented;
 
     return status::success;
+}
+
+namespace {
+struct nocopy_table_t {
+    int mn_limit[2][2]; // Use no-copy if m*n < mn_limit * mn_limit and
+    int k_limit[2][2]; // Use no-copy if k < k_limit
+};
+
+const nocopy_table_t xe_hp_f16_nocopy_table[] = {
+        // NN     NT     TN    TT
+        {{{1280, 768}, {512, 384}}, {{512, 768}, {1024, 512}}}};
+
+const nocopy_table_t xe_hp_bf16_nocopy_table[] = {
+        // NN   NT     TN   TT
+        {{{512, 256}, {512, 512}}, {{512, 256}, {384, 384}}}};
+
+const nocopy_table_t xe_hp_x8x8s32_nocopy_table[] = {
+        // NN   NT     TN   TT
+        {{{384, 384}, {384, 384}}, {{384, 512}, {384, 256}}}};
+} // namespace
+
+bool xe_hp_systolic_gemm_t::pd_t::use_fma() {
+    using namespace data_type;
+
+    const auto &d = desc();
+
+    if (any_prepacked_) return false;
+
+    // Use FMA implementation if one matrix is very small.
+    if (d->m() < 32 && d->n() < 32) return true;
+    if (d->m() < 32 && d->k() < 32) return true;
+    if (d->n() < 32 && d->k() < 32) return true;
+
+    bool is_bf16_with_bias
+            = d->c_type() == bf16 && with_bias() && d->bias_type() == bf16;
+
+    // Use FMA for small/medium sizes
+    if (utils::one_of(d->c_type(), bf16, f16, s32) && !is_bf16_with_bias) {
+        const nocopy_table_t *all_tables[3] = {xe_hp_f16_nocopy_table,
+                xe_hp_bf16_nocopy_table, xe_hp_x8x8s32_nocopy_table};
+        const int type_idx
+                = (d->c_type() == f16) ? 0 : (d->c_type() == bf16) ? 1 : 2;
+        const nocopy_table_t *table = all_tables[type_idx];
+        const long mnl = table->mn_limit[d->transa()][d->transb()];
+        const long kl = table->k_limit[d->transa()][d->transb()];
+
+        if ((d->m() * d->n() < mnl * mnl) && (d->k() < kl)) return true;
+    }
+
+    return false;
+}
+
+bool xe_hp_systolic_gemm_t::pd_t::set_default_formats(data_type_t dt) {
+    using namespace format_tag;
+
+    auto sz = types::data_type_size(dt);
+
+    memory_desc_wrapper a_mdw(&desc_.b_desc);
+    memory_desc_wrapper b_mdw(&desc_.a_desc);
+    memory_desc_wrapper c_mdw(&desc_.c_desc);
+
+    bool a_any = a_mdw.format_any();
+    bool b_any = b_mdw.format_any();
+    bool c_any = c_mdw.format_any();
+    bool batch = desc()->is_batched();
+
+    format_tag_t a_packed_tag = batch ? ((sz == 2) ? aCB4c8b8c2b : aCB4c8b8c4b)
+                                      : ((sz == 2) ? BA4b8a8b2a : BA4b8a8b4a);
+    format_tag_t b_packed_tag = batch ? ((sz == 2) ? aBC48b16c : aBC48b32c)
+                                      : ((sz == 2) ? AB48a16b : AB48a32b);
+    format_tag_t unpacked_tag = batch ? abc : ab;
+
+    any_prepacked_ = a_mdw.matches_tag(a_packed_tag)
+            || b_mdw.matches_tag(b_packed_tag)
+            || c_mdw.matches_tag(b_packed_tag);
+
+    if (a_any)
+        CHECK(memory_desc_init_by_tag(
+                desc_.b_desc, b_zp_ ? unpacked_tag : a_packed_tag));
+    else if (a_mdw.matches_one_of_tag(a_packed_tag, ab, ba, abc, acb) == undef)
+        return false;
+    if (b_any)
+        CHECK(memory_desc_init_by_tag(
+                desc_.a_desc, a_zp_ ? unpacked_tag : b_packed_tag));
+    else if (b_mdw.matches_one_of_tag(b_packed_tag, ab, ba, abc, acb) == undef)
+        return false;
+    if (c_any)
+        CHECK(memory_desc_init_by_tag(desc_.c_desc, b_packed_tag));
+    else if (c_mdw.matches_one_of_tag(b_packed_tag, ab, abc) == undef)
+        return false;
+
+    packed_a_ = a_mdw.matches_tag(a_packed_tag);
+    packed_b_ = b_mdw.matches_tag(b_packed_tag);
+    packed_c_ = c_mdw.matches_tag(b_packed_tag);
+
+    return gpu_gemm_pd_t::set_default_formats();
 }
 
 status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
@@ -174,8 +248,6 @@ status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
 
     if (utils::one_of(acc_type, f16, bf16)) acc_type = f32;
 
-    ab_zero_points_ = (c_type == s32);
-
     // Initialize compute kernels (assembly)
     using kernel_t = xe_hp_systolic_gemm_kernel_t<gpu_xe_hp>;
     kernel_t::config_t cfg;
@@ -194,7 +266,7 @@ status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
         cfg.eltwise_beta = attr_info->eltwise_beta;
         cfg.eltwise_scale = attr_info->eltwise_scale;
     }
-    cfg.a_bias = cfg.b_bias = ab_zero_points_;
+    cfg.a_bias = cfg.b_bias = pd()->with_ab_zero_points();
     cfg.c_packed = pd()->packed_c();
     cfg.batch = pd()->with_batch();
     walk_n_first_ = cfg.walk_n_first
@@ -204,7 +276,7 @@ status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
 
     int cmask = -1;
 
-    if (c_type == s32) {
+    if (pd()->with_c_zero_points()) {
         cfg.co_type = cfg.c_type;
         pd()->attr()->zero_points_.get(DNNL_ARG_DST, nullptr, &cmask, nullptr);
     } else if (pd()->with_bias()) {
@@ -265,10 +337,9 @@ status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
                                 &kernel_[first_k_block][last_k_block], kernel);
                         break;
                     }
-#if DNNL_WITH_XE_HPG
-                    case arch_t::xe_hpg: {
+                    case arch_t::gen12p7: {
                         using kernel_12p7_t
-                                = xe_hp_systolic_gemm_kernel_t<gpu_xe_hpg>;
+                                = xe_hp_systolic_gemm_kernel_t<gpu_gen12p7>;
                         cfg_copy.emulate64 = true;
                         auto kernel = kernel_12p7_t(
                                 cfg_copy.cast<kernel_12p7_t::config_t>());
@@ -277,7 +348,6 @@ status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
                                 &kernel_[first_k_block][last_k_block], kernel);
                         break;
                     }
-#endif
                     default:
                         assert(!"Unsupported GPU architecture.");
                         return status::unimplemented;
@@ -290,7 +360,7 @@ status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
     // Initialize copy kernels (OpenCL)
     for (bool copy_b : {false, true}) {
         for (bool clear_sum : {false, true}) {
-            if (clear_sum && !ab_zero_points_) continue;
+            if (clear_sum && !pd()->with_ab_zero_points()) continue;
             if (!copy_b ? pd()->packed_a() : pd()->packed_b()) continue;
 
             compute::kernel_ctx_t kernel_ctx;
@@ -300,7 +370,7 @@ status_t xe_hp_systolic_gemm_t::init(engine_t *engine) {
             auto status
                     = ocl::xe_hp_systolic_gemm_copy_kernel_t::init_kernel_ctx(
                             kernel_ctx, !copy_b ? a_type : b_type, copy_b,
-                            trans, ab_zero_points_, clear_sum);
+                            trans, pd()->with_ab_zero_points(), clear_sum);
             if (status != status::success) return status;
 
             create_kernel(engine, &copy_kernel_[copy_b][clear_sum],
@@ -329,7 +399,8 @@ status_t xe_hp_systolic_gemm_t::init_res_storage(
     auto m_aligned = utils::rnd_up(m, align_m);
     auto n_aligned = utils::rnd_up(n, align_n);
 
-    auto max_ldab_packed = kernel_t::max_ld_packed(k, a_type, ab_zero_points_);
+    auto max_ldab_packed
+            = kernel_t::max_ld_packed(k, a_type, pd()->with_ab_zero_points());
 
     if (!pd()->packed_a()) {
         memory_storage_t *a_packed_ptr;
@@ -433,7 +504,7 @@ status_t xe_hp_systolic_gemm_t::launch_copy(const gemm_exec_ctx_t &ctx,
     using compute_kernel_t = xe_hp_systolic_gemm_kernel_t<gpu_xe_hp>;
     using copy_kernel_t = ocl::xe_hp_systolic_gemm_copy_kernel_t;
 
-    if (ab_zero_points_) {
+    if (pd()->with_ab_zero_points()) {
         auto status
                 = launch_clear_sum(ctx, r, c, dst, offset_dst, ld_dst, copyb);
         if (status) return status;
@@ -500,8 +571,9 @@ status_t xe_hp_systolic_gemm_t::launch_clear_sum(const gemm_exec_ctx_t &ctx,
     auto elt_size = types::data_type_size(pd()->desc()->a_type());
     size_t threads = !copyb ? utils::div_up(r, unroll_m_)
                             : utils::div_up(c, unroll_n_);
-    size_t sg = ocl::xe_hp_systolic_gemm_copy_kernel_t::subgroup_size_clear_sum(
-            elt_size, copyb);
+    size_t sg
+            = ocl::xe_hp_systolic_gemm_copy_kernel_t::subgroup_size_clear_sum(
+                    elt_size, copyb);
 
     size_t gws[3] = {threads * sg, 1, 1};
     size_t lws[3] = {sg, 1, 1};
@@ -552,13 +624,11 @@ status_t xe_hp_systolic_gemm_t::launch_compute(const gemm_exec_ctx_t &ctx,
     arg_list.set(argn++, beta);
     arg_list.set(argn++, lda);
     arg_list.set(argn++, ldb);
-    if (ab_zero_points_) {
+    if (pd()->with_ab_zero_points()) {
         uint32_t abo = (uint16_t(ao) | (uint16_t(bo) << 16));
         arg_list.set(argn++, abo);
     }
-    if (last_k_block
-            && (pd()->with_bias()
-                    || pd()->desc()->c_type() == data_type::s32)) {
+    if (last_k_block && (pd()->with_bias() || pd()->with_c_zero_points())) {
         arg_list.set(argn++, co);
         arg_list.set(argn++, offset_co);
     }
@@ -631,7 +701,7 @@ status_t xe_hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
             = c.offset() / types::data_type_size(c_type) + pd()->dyn_offset_c;
     size_t off_co0 = 0;
 
-    if (c_type == data_type::s32) {
+    if (pd()->with_ab_zero_points()) {
         const int *ao_i32 = nullptr;
         const int *bo_i32 = nullptr;
         pd()->attr()->zero_points_.get(DNNL_ARG_SRC, nullptr, nullptr, &ao_i32);
@@ -639,7 +709,9 @@ status_t xe_hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
                 DNNL_ARG_WEIGHTS, nullptr, nullptr, &bo_i32);
         ao = -*ao_i32;
         bo = -*bo_i32;
-    } else if (pd()->with_bias()) {
+    }
+
+    if (pd()->with_bias()) {
         off_co0 = bias.offset() / types::data_type_size(bias_type);
         co = &bias;
     }
@@ -647,8 +719,8 @@ status_t xe_hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
     int64_t block_m = 0, block_n = 0, block_k = 0;
     std::tie(block_m, block_n, block_k) = get_blocking();
 
-    auto ld_packed
-            = compute_kernel_t::get_ld_packed(k, a_type, ab_zero_points_);
+    auto ld_packed = compute_kernel_t::get_ld_packed(
+            k, a_type, pd()->with_ab_zero_points());
     auto lda_packed = packed_a ? pd()->lda_packed() : ld_packed;
     auto ldb_packed = packed_b ? pd()->ldb_packed() : ld_packed;
 
@@ -714,4 +786,5 @@ status_t xe_hp_systolic_gemm_t::execute(const gemm_exec_ctx_t &ctx) const {
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
+
 // vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s
