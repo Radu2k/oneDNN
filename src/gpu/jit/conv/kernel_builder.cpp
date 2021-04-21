@@ -355,19 +355,13 @@ private:
     }
 
     static func_t create_half_send(const send_t &send) {
-        for (auto &_s : send_t::get_all()) {
-            auto &s = _s.as<send_t>();
-            if (s.access_type != send.access_type) continue;
-            if (s.type != send.type) continue;
-            if (s.slots != send.slots) continue;
-            if (s.alignment != send.alignment) continue;
-            if (s.address_model != send.address_model) continue;
-            if (s.data_elems * 2 != send.data_elems) continue;
-            return _s;
-        }
-        ir_error_not_expected()
+        ir_assert(send.data_elems % 2 == 0) << "Can't create half-send.";
+        auto _s = send.with_data_elems(send.data_elems / 2);
+        auto &s = _s.as<send_t>();
+        ir_assert(s.is_supported())
                 << "Can't find send reading half of the original send.";
-        return func_t();
+        MAYBE_UNUSED(s);
+        return _s;
     }
 
     bool try_convert_to_dpasw(dpas_info_t &a, grf_permutator_t &grf_perm) {
@@ -2750,15 +2744,18 @@ class access_builder_t {
 public:
     access_builder_t() = default;
 
-    access_builder_t(const constraint_set_t &cset, const view_t &mem_view,
-            const expr_t &mem_buf, const expr_t &reg_buf, bool is_slm,
-            bool is_load)
-        : cset_(&cset)
+    access_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
+            const view_t &mem_view, const expr_t &mem_buf,
+            const expr_t &reg_buf, bool is_slm, bool is_load,
+            ngen_proxy::AtomicOp atomic_op)
+        : ir_ctx_(&ir_ctx)
+        , cset_(&cset)
         , mem_view_(mem_view)
         , mem_buf_(mem_buf)
         , reg_buf_(reg_buf)
         , is_slm_(is_slm)
-        , is_load_(is_load) {
+        , is_load_(is_load)
+        , atomic_op_(atomic_op) {
         build();
     }
 
@@ -2783,17 +2780,7 @@ public:
 
 private:
     void build() {
-        // List of send functions that can be used for the access.
-        auto send_list = send_t::get_all([&](const func_t &_s) {
-            auto &s = _s.as<send_t>();
-            bool is_read = (s.access_type == ngen_proxy::Access::Read);
-            bool ok = true;
-            ok &= is_slm_
-                    ? (s.address_model == ngen_proxy::AddressModel::ModelSLM)
-                    : (s.address_model == ngen_proxy::AddressModel::ModelA64);
-            ok &= (is_load_ == is_read);
-            return ok;
-        });
+        auto send_list = get_send_list(mem_view_.type());
 
         // Find the first send candidate matching the layout.
         func_t _send;
@@ -2843,11 +2830,26 @@ private:
                     auto reg_sub_buf = reg_buf_[reg_view_(start)
                             * reg_view_.type().size()];
                     stmt_ = stmt_seq_t::make(stmt_,
-                            create_send_stmt(*cset_, send, mem_buf_,
+                            create_send_stmt(*ir_ctx_, *cset_, send, mem_buf_,
                                     reg_sub_buf, sub_view));
                 });
     }
 
+    // Returns a list of send functions that can be used for the access.
+    std::vector<func_t> get_send_list(const type_t &data_type) const {
+        using namespace ngen_proxy;
+        bool is_atomic = (atomic_op_ != AtomicOp::undef);
+        Access access_type = (is_load_ ? Access::Read : Access::Write);
+        AddressModel address_model
+                = (is_slm() ? AddressModel::ModelSLM
+                            : is_atomic ? AddressModel::ModelBTS
+                                        : AddressModel::ModelA64);
+        auto send_list = send_t::get_all(
+                data_type, access_type, address_model, atomic_op_);
+        return send_list;
+    }
+
+    ir_context_t *ir_ctx_;
     const constraint_set_t *cset_;
 
     view_t mem_view_;
@@ -2858,26 +2860,30 @@ private:
     bool is_slm_;
     bool is_load_;
     stmt_t stmt_;
+    ngen_proxy::AtomicOp atomic_op_;
 };
 
 class read_builder_t : public access_builder_t {
 public:
     read_builder_t() = default;
 
-    read_builder_t(const constraint_set_t &cset, const view_t &view,
-            const expr_t &mem_buf, const expr_t &reg_buf, bool is_slm)
-        : access_builder_t(
-                cset, view, mem_buf, reg_buf, is_slm, /*is_load=*/true) {}
+    read_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
+            const view_t &view, const expr_t &mem_buf, const expr_t &reg_buf,
+            bool is_slm)
+        : access_builder_t(ir_ctx, cset, view, mem_buf, reg_buf, is_slm,
+                /*is_load=*/true, ngen_proxy::AtomicOp::undef) {}
 };
 
 class write_builder_t : public access_builder_t {
 public:
     write_builder_t() = default;
 
-    write_builder_t(const constraint_set_t &cset, const view_t &view,
-            const expr_t &mem_buf, const expr_t &reg_buf, bool is_slm)
-        : access_builder_t(
-                cset, view, mem_buf, reg_buf, is_slm, /*is_load=*/false) {}
+    write_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
+            const view_t &view, const expr_t &mem_buf, const expr_t &reg_buf,
+            bool is_slm,
+            ngen_proxy::AtomicOp atomic_op = ngen_proxy::AtomicOp::undef)
+        : access_builder_t(ir_ctx, cset, view, mem_buf, reg_buf, is_slm,
+                /*is_load=*/false, atomic_op) {}
 };
 
 // Generates loads to the post-op buffer and applies a single post-op.
@@ -2930,8 +2936,8 @@ public:
     stmt_t build_pre_load() {
         if (!do_preload_) return stmt_t();
 
-        read_builder_t read(cset_, post_op_.rhs_view(), post_op_.rhs_buf(),
-                rhs_orig_reg_buf_, /*is_slm=*/false);
+        read_builder_t read(ir_ctx_, cset_, post_op_.rhs_view(),
+                post_op_.rhs_buf(), rhs_orig_reg_buf_, /*is_slm=*/false);
         pre_load_rhs_reg_view_ = read.reg_view();
         rhs_reg_buf_ = rhs_orig_reg_buf_;
         rhs_orig_reg_buf_size_ = read.reg_buf_size();
@@ -2966,7 +2972,7 @@ public:
         if (post_op_.needs_load() && !do_preload_) {
             // Load and convert now.
             auto po = post_op_.create_sub_post_op(rhs_tile);
-            read_builder_t read(cset_, po.rhs_view(), po.rhs_buf(),
+            read_builder_t read(ir_ctx_, cset_, po.rhs_view(), po.rhs_buf(),
                     rhs_orig_reg_buf_,
                     /*is_slm=*/false);
             stmt = stmt.append(read.stmt());
@@ -3344,8 +3350,8 @@ private:
         bool restore_zero_padding = post_op_ctx_.need_to_restore_zero_padding();
 
         // S_y -> GMEM.
-        write_builder_t r2g(
-                cset_, mem_sub_view, mem_buf_, tmp_reg_buf, /*is_slm=*/false);
+        write_builder_t r2g(ir_ctx_, cset_, mem_sub_view, mem_buf_, tmp_reg_buf,
+                /*is_slm=*/false, /*atomic_op=*/ngen_proxy::AtomicOp::undef);
 
         // Initialize stages.
         std::vector<stage_t> stages;
@@ -3715,7 +3721,7 @@ public:
         for (int i = 0; i < cfg_.a_sub_tiles; i++) {
             // Load A_i.
             auto a_i_view = _a_i_view.substitute(a_idx, i);
-            read_builder_t a_read(cset_, a_i_view,
+            read_builder_t a_read(ir_ctx_, cset_, a_i_view,
                     cfg_.use_a_slm ? a_slm_buf : ap_buf_, a_buf,
                     /*is_slm=*/cfg_.use_a_slm);
             ir_trace() << "A GMEM/SLM to GRF load #" << i << ":\n"
@@ -3723,7 +3729,7 @@ public:
             for (int j = 0; j < cfg_.b_sub_tiles; j++) {
                 // Load B_i.
                 auto b_j_view = _b_j_view.substitute(b_idx, j);
-                read_builder_t b_read(cset_, b_j_view,
+                read_builder_t b_read(ir_ctx_, cset_, b_j_view,
                         cfg_.use_b_slm ? b_slm_buf : bp_buf_, b_buf,
                         /*is_slm=*/cfg_.use_b_slm);
                 ir_trace() << "B GMEM/SLM to GRF load #" << j << ":\n"
@@ -3856,8 +3862,8 @@ private:
         auto x_g2s_view = x_tg_view.split(tg_grid_);
 
         // GMEM -> GRF load.
-        read_builder_t x_read(
-                cset_, x_g2s_view, xp_buf, x_g2s_reg_buf, /*is_slm=*/false);
+        read_builder_t x_read(ir_ctx_, cset_, x_g2s_view, xp_buf, x_g2s_reg_buf,
+                /*is_slm=*/false);
         ir_trace() << tag << " GMEM to GRF load:\n"
                    << x_read.str() << std::endl;
 
@@ -3873,7 +3879,7 @@ private:
                 x_slm_buf, xp_slm_view_layout.size(), alloc_kind_t::slm);
 
         // GRF -> SLM store.
-        write_builder_t x_write(cset_,
+        write_builder_t x_write(ir_ctx_, cset_,
                 xp_slm_view.create_sub_view(
                         x_g2s_view.vtensor(), /*relative_vstart=*/false),
                 x_slm_buf, x_g2s_reg_buf, /*is_slm=*/true);

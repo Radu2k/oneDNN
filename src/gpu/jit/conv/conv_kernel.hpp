@@ -126,6 +126,14 @@ ngen::InstructionModifier to_ngen(
     return mod;
 }
 
+ngen::AtomicOp to_ngen(ngen_proxy::AtomicOp atomic_op) {
+    switch (atomic_op) {
+        case ngen_proxy::AtomicOp::fadd: return ngen::AtomicOp::fadd;
+        default: ir_error_not_expected();
+    }
+    return ngen::AtomicOp(std::numeric_limits<uint16_t>::max());
+}
+
 ngen::ConditionModifier cmp_op_to_ngen(op_kind_t op_kind) {
     ir_assert(is_cmp_op(op_kind));
     switch (op_kind) {
@@ -1087,6 +1095,30 @@ private:
     ngen_register_scope_t &scope_;
 };
 
+template <typename DataSpecT, typename = void>
+struct atomic_helper_t {
+    template <typename GeneratorT>
+    static void call(GeneratorT *, ngen::AtomicOp,
+            const ngen::InstructionModifier &, const DataSpecT &,
+            ngen::AddressBase, const ngen::RegData &, const ngen::RegData &) {
+        ir_error_not_expected()
+                << "Unknown DataSpec: atomics are not supported.";
+    }
+};
+
+template <typename DataSpecT>
+struct atomic_helper_t<DataSpecT,
+        typename std::enable_if<
+                std::is_same<DataSpecT, ngen::scattered_dword>::value>::type> {
+    template <typename GeneratorT>
+    static void call(GeneratorT *host, ngen::AtomicOp atomic_op,
+            const ngen::InstructionModifier &mod, const DataSpecT &spec,
+            ngen::AddressBase base, const ngen::RegData &addr,
+            const ngen::RegData &data) {
+        host->atomic(atomic_op, mod, spec, base, addr, data);
+    }
+};
+
 // Helper to emit send instructions.
 class send_impl_t {
 public:
@@ -1102,6 +1134,7 @@ public:
         auto data_type = send_.data_type;
         auto data_elems = send_.data_elems;
         auto address_model = send_.address_model;
+        auto atomic_op = send_.atomic_op;
 
         bool is_read = (access_type == ngen_proxy::Access::Read);
         ngen::AddressBase address_base;
@@ -1116,22 +1149,22 @@ public:
         }
 
         if (data_type == type_t::byte()) {
-            emit_load_or_store(is_read, host, mod,
+            emit_load_or_store(is_read, atomic_op, host, mod,
                     ngen::scattered_byte(data_elems), address_base, header,
                     data);
         } else if (data_type == type_t::dword()) {
-            emit_load_or_store(is_read, host, mod,
+            emit_load_or_store(is_read, atomic_op, host, mod,
                     ngen::scattered_dword(data_elems), address_base, header,
                     data);
         } else if (data_type == type_t::qword()) {
-            emit_load_or_store(is_read, host, mod,
+            emit_load_or_store(is_read, atomic_op, host, mod,
                     ngen::scattered_qword(data_elems), address_base, header,
                     data);
         } else if (data_type == type_t::oword()) {
-            emit_load_or_store(is_read, host, mod,
+            emit_load_or_store(is_read, atomic_op, host, mod,
                     ngen::block_oword(data_elems), address_base, header, data);
         } else if (data_type == type_t::hword()) {
-            emit_load_or_store(is_read, host, mod,
+            emit_load_or_store(is_read, atomic_op, host, mod,
                     ngen::block_hword(data_elems), address_base, header, data);
         } else {
             ir_error_not_expected();
@@ -1140,14 +1173,21 @@ public:
 
 private:
     template <typename GeneratorT, typename DataSpecT>
-    void emit_load_or_store(bool is_read, GeneratorT *host,
-            const ngen::InstructionModifier &mod, const DataSpecT &spec,
-            ngen::AddressBase base, const ngen::RegData &addr,
-            const ngen::RegData &data) {
+    void emit_load_or_store(bool is_read, ngen_proxy::AtomicOp atomic_op,
+            GeneratorT *host, const ngen::InstructionModifier &mod,
+            const DataSpecT &spec, ngen::AddressBase base,
+            const ngen::RegData &addr, const ngen::RegData &data) {
+        bool is_atomic = (atomic_op != ngen_proxy::AtomicOp::undef);
         if (is_read) {
+            ir_assert(!is_atomic) << "Unexpected atomic loads.";
             host->load(mod, data, spec, base, addr);
         } else {
-            host->store(mod, spec, base, addr, data);
+            if (is_atomic) {
+                atomic_helper_t<DataSpecT>::call(
+                        host, to_ngen(atomic_op), mod, spec, base, addr, data);
+            } else {
+                host->store(mod, spec, base, addr, data);
+            }
         }
     }
 
@@ -2043,6 +2083,7 @@ public:
         } else if (func.is<send_t>()) {
             auto &send_func = func.as<send_t>();
             auto args = obj->args;
+            auto &mem_buf = send_t::arg_mem_buf(args);
             auto &mask = send_t::arg_mask(args);
             // If all channels are disabled for writing, quick return.
             if (is_const_broadcast(mask, expr_t(false)) && send_func.is_write())
@@ -2050,7 +2091,7 @@ public:
             // If all channels are enabled, do not use mask.
             if (is_const_broadcast(mask, expr_t(true))) { mask = expr_t(); }
             auto arg_ops = eval(args, scope);
-            send(scope, func.as<send_t>(), arg_ops, obj->attr);
+            send(scope, func.as<send_t>(), mem_buf, arg_ops, obj->attr);
         } else if (func.is<eltwise_t>()) {
             auto &eltwise_func = func.as<eltwise_t>();
             auto arg_ops = eval(obj->args, scope);
@@ -2250,17 +2291,28 @@ private:
     }
 
     void send(ngen_register_scope_t &scope, const send_t &send_func,
-            const std::vector<ngen_operand_t> &args,
+            const expr_t &mem_buf, const std::vector<ngen_operand_t> &args,
             const func_call_attr_t &attr) {
         send_impl_t spec_impl(send_func);
-        auto &mem_buf_op = send_t::arg_mem_buf(args);
         auto &mem_off_op = send_t::arg_mem_off(args);
         auto &reg_buf_op = send_t::arg_reg_buf(args);
         auto &mask_op = send_t::arg_mask(args);
 
-        ngen::RegData mem_buf;
-        if (send_func.address_model != ngen_proxy::AddressModel::ModelSLM) {
-            mem_buf = mem_buf_op.reg_data();
+        ngen::RegData mem_buf_rd;
+        int surf_bti = -1;
+        switch (send_func.address_model) {
+            case ngen_proxy::AddressModel::ModelSLM: break;
+            case ngen_proxy::AddressModel::ModelBTS: {
+                auto &buf_name = mem_buf.as<var_t>().name;
+                surf_bti = host_->getArgumentSurface(buf_name);
+                break;
+            }
+            case ngen_proxy::AddressModel::ModelA64: {
+                auto &mem_buf_op = send_t::arg_mem_buf(args);
+                mem_buf_rd = mem_buf_op.reg_data();
+                break;
+            }
+            default: ir_error_not_expected();
         }
         ngen::InstructionModifier mod = send_func.eff_mask_count;
         ir_assert(math::is_pow2(mod.getExecSize()));
@@ -2284,8 +2336,8 @@ private:
         }
 
         // Emit send instruction.
-        spec_impl.emit(
-                host_, scope, mod, mem_buf, 0, mem_off_op.reg_data(), rd);
+        spec_impl.emit(host_, scope, mod, mem_buf_rd, surf_bti,
+                mem_off_op.reg_data(), rd);
     }
 
     void eltwise(ngen_register_scope_t &scope, const eltwise_t &func,

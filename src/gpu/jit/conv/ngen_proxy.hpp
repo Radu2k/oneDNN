@@ -37,6 +37,8 @@ enum AddressModel {
     ModelSLM,
 };
 
+enum AtomicOp { undef, fadd };
+
 class Bundle {
 public:
     Bundle() : bundle_id(any), bank_id(any) {}

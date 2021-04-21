@@ -42,8 +42,9 @@ expr_t create_mask_expr(
     return mask_vec_retyped.to_expr(send.eff_mask_count);
 }
 
-stmt_t create_send_stmt(const constraint_set_t &cset, const send_t &send,
-        const expr_t &mem_buf, const expr_t &reg_buf, const view_t &view) {
+stmt_t create_send_stmt(ir_context_t &ir_ctx, const constraint_set_t &cset,
+        const send_t &send, const expr_t &mem_buf, const expr_t &reg_buf,
+        const view_t &view) {
     using namespace ir_utils;
     ir_assert(mem_buf.type().is_ptr()) << mem_buf;
     ir_assert(reg_buf.type().is_ptr()) << reg_buf;
@@ -63,16 +64,41 @@ stmt_t create_send_stmt(const constraint_set_t &cset, const send_t &send,
             expr_t off_in_bytes = simplify(view.offset_in_bytes());
             return send(mem_buf, off_in_bytes, reg_buf, mask_expr);
         }
-        case message_type_t::scattered: {
+        case message_type_t::scattered:
+        case message_type_t::atomic: {
             int elems_per_slot = send.block_size() / view.type().size();
             auto slot_tile = view.split_into_max_tile(
                     elems_per_slot, /*is_dense=*/true);
+            ir_assert(slot_tile.elems() == elems_per_slot);
             std::vector<expr_t> off_vec;
-            view.for_each_tile(slot_tile, [&](const std::vector<dim_t> &start) {
-                auto estart = expr_cast<expr_t>(start);
-                off_vec.push_back(simplify(view.offset_in_bytes(estart)));
-            });
-            return send(mem_buf, shuffle_t::make(off_vec), reg_buf, mask_expr);
+            stmt_t ret;
+            // Prefer iterating through a layout: in this case we can split the
+            // offset into the base offset and the tile offset and have less
+            // overhead on simplify() calls.
+            if (view.can_convert_to_vlayout()) {
+                auto layout = view.create_vlayout();
+                expr_t off0_value = simplify(layout.offset_in_bytes());
+                auto off0 = ir_ctx.create_tmp_var(off0_value.type());
+                layout.for_each_tile(
+                        slot_tile, [&](const std::vector<dim_t> &start) {
+                            dim_t tile_off = layout.offset_in_bytes(
+                                    start, /*ignore_offset=*/true);
+                            off_vec.push_back(off0 + tile_off);
+                        });
+                auto body = send(
+                        mem_buf, shuffle_t::make(off_vec), reg_buf, mask_expr);
+                ret = let_t::make(off0, off0_value, body);
+            } else {
+                view.for_each_tile(
+                        slot_tile, [&](const std::vector<dim_t> &start) {
+                            auto estart = expr_cast<expr_t>(start);
+                            off_vec.push_back(
+                                    simplify(view.offset_in_bytes(estart)));
+                        });
+                ret = send(
+                        mem_buf, shuffle_t::make(off_vec), reg_buf, mask_expr);
+            }
+            return ret;
         }
         default: ir_error_not_expected();
     }
