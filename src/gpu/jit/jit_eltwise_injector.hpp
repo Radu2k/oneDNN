@@ -31,7 +31,8 @@ namespace jit {
 inline bool jit_eltwise_injector_f32_is_supported(alg_kind_t alg) {
     using namespace alg_kind;
     return utils::one_of(alg, eltwise_relu, eltwise_square, eltwise_abs,
-            eltwise_round, eltwise_linear, eltwise_clip, eltwise_gelu_tanh);
+            eltwise_round, eltwise_linear, eltwise_clip, eltwise_gelu_tanh,
+            eltwise_logistic);
 }
 
 template <gpu_gen_t hw>
@@ -87,6 +88,7 @@ private:
     void clip_compute_fwd(int simd, const ngen::GRF &r, int phase);
     void gelu_tanh_compute_fwd(
             int simd, const ngen::GRF &r, int phase, int off);
+    void logistic_compute_fwd(int simd, const ngen::GRF &r, int phase);
 
     void relu_compute_bwd(int simd, const ngen::GRF &r);
     void abs_compute_bwd(int simd, const ngen::GRF &r, int phase);
