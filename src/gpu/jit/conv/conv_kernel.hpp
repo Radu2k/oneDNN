@@ -25,6 +25,7 @@
 #include "gpu/jit/conv/message_support.hpp"
 #include "gpu/jit/conv/ngen_proxy.hpp"
 #include "gpu/jit/conv/post_op_support.hpp"
+#include "gpu/jit/conv/reduce_support.hpp"
 #include "gpu/jit/conv/reorder_support.hpp"
 #include "gpu/jit/jit_eltwise_injector.hpp"
 #include "gpu/jit/jit_generator.hpp"
@@ -492,7 +493,7 @@ public:
     friend class send_impl_t;
 
     conv_kernel_t(const conv_config_t &cfg, const convolution_pd_t *pd,
-            kernel_arg_info_t &kernel_arg_info);
+            const kernel_arg_info_t &kernel_arg_info);
 
     void setup_interface(const stmt_t &kernel_body,
             const kernel_arg_info_t &kernel_arg_info) {
@@ -811,26 +812,6 @@ public:
     }
 
 private:
-    void init_kernel_arg_info(kernel_arg_info_t &kernel_arg_info) {
-        ir_assert(cfg_.is_fwd || cfg_.is_bwd_d);
-        if (cfg_.is_fwd) {
-            kernel_arg_info.register_user_arg(
-                    make_buffer("src"), DNNL_ARG_SRC, /*is_input=*/true);
-            kernel_arg_info.register_user_arg(
-                    make_buffer("wei"), DNNL_ARG_WEIGHTS, /*is_input=*/true);
-            kernel_arg_info.register_user_arg(
-                    make_buffer("dst"), DNNL_ARG_DST, /*is_input=*/false);
-        } else if (cfg_.is_bwd_d) {
-            kernel_arg_info.register_user_arg(
-                    make_buffer("dst"), DNNL_ARG_DIFF_DST, /*is_input=*/true);
-            kernel_arg_info.register_user_arg(
-                    make_buffer("wei"), DNNL_ARG_WEIGHTS, /*is_input=*/true);
-            kernel_arg_info.register_user_arg(
-                    make_buffer("src"), DNNL_ARG_DIFF_SRC, /*is_input=*/false);
-        } else
-            ir_error_not_expected();
-    }
-
     const conv_config_t &cfg_;
     ngen::RegisterAllocator ra_;
     ngen::GRF signal_header_;
@@ -2118,6 +2099,65 @@ private:
     bool with_permutation_ = false;
 };
 
+class reduce_impl_t {
+public:
+    reduce_impl_t(ngen::HW hw, const reduce_t &reduce) : hw_(hw) {
+        src_layout_ = reduce.src_layout.normalize();
+        dst_layout_ = reduce.dst_layout.normalize();
+    }
+
+    template <typename GeneratorT>
+    void emit(GeneratorT *host, ngen_register_scope_t &scope,
+            const ngen::RegData &_src_rd, const ngen::RegData &_dst_rd) {
+        auto &src_type = src_layout_.type();
+        auto &dst_type = dst_layout_.type();
+        auto src_rd = ngen_reg_data(hw_, _src_rd, 0, to_ngen(src_type), 1);
+        auto dst_rd = ngen_reg_data(hw_, _dst_rd, 0, to_ngen(dst_type), 1);
+
+        tensor_t tile = find_1d_tile();
+        src_layout_.for_each_tile(
+                tile, [&](const std::vector<dim_t> &src_start) {
+                    auto dst_start = src_start;
+                    for (int i = 0; i < dst_layout_.ndims(); i++) {
+                        if (dst_layout_.dims()[i] == 1) dst_start[i] = 0;
+                    }
+                    int src_off = int(src_layout_(src_start) * src_type.size());
+                    int dst_off = int(dst_layout_(dst_start) * dst_type.size());
+                    auto sub_src = ngen_subregister(hw_, src_rd, src_off);
+                    auto sub_dst = ngen_subregister(hw_, dst_rd, dst_off);
+                    host->add(int(tile.elems()), sub_dst(1), sub_dst(1),
+                            sub_src(1));
+                });
+    }
+
+private:
+    tensor_t find_1d_tile() const {
+        auto a = src_layout_;
+        auto b = src_layout_;
+        layout_t::align_layouts(a, b);
+
+        ir_assert(!a.blocks().empty());
+        ir_assert(!b.blocks().empty());
+
+        auto &a0 = a.blocks()[0];
+        auto &b0 = b.blocks()[0];
+
+        ir_assert(a0.is_equal(b0)) << "Incompatible layouts for reduction.";
+        ir_assert(dim_t(a0.stride) == 1) << "Reduction is not supported.";
+        ir_assert(utils::one_of(a0.block, 8, 16))
+                << "Reduction is not supported.";
+
+        std::vector<dim_t> tile_dims(src_layout_.ndims(), 1);
+        tile_dims[a0.dim_idx] = a0.block;
+
+        return tensor_t(tile_dims);
+    }
+
+    ngen::HW hw_;
+    layout_t src_layout_;
+    layout_t dst_layout_;
+};
+
 // Lowers IR to nGEN.
 template <ngen::HW hw>
 class ir_to_ngen_t : public ir_visitor_t {
@@ -2168,6 +2208,10 @@ public:
         } else if (func.is<mad_t>()) {
             auto arg_ops = eval(obj->args, scope);
             mad(func.as<mad_t>(), arg_ops, obj->attr);
+        } else if (func.is<reduce_t>()) {
+            auto arg_ops = eval(obj->args, scope);
+            ir_assert(obj->attr.is_empty()) << "Unexpected attribute.";
+            reduce(scope, func.as<reduce_t>(), arg_ops);
         } else if (func.is<reorder_t>()) {
             auto arg_ops = eval(obj->args, scope);
             ir_assert(obj->attr.is_empty()) << "Unexpected attribute.";
@@ -2203,6 +2247,9 @@ public:
     }
 
     void _visit(const if_t *obj) override {
+        ir_assert(obj->cond.is<shuffle_t>());
+        ir_assert(obj->cond.as<shuffle_t>().elems() == simd_size_);
+
         bool has_else = !obj->else_body.is_empty();
         auto scope = register_scope();
         auto cond_op = eval(obj->cond, scope);
@@ -2379,6 +2426,15 @@ private:
         host_->mad(mod, dst, src0, src1, src2);
     }
 
+    void reduce(ngen_register_scope_t &scope, const reduce_t &reduce_func,
+            const std::vector<ngen_operand_t> &args) {
+        auto &src_op = reduce_t::arg_src_buf(args);
+        auto &dst_op = reduce_t::arg_dst_buf(args);
+
+        reduce_impl_t reduce_impl(hw, reduce_func);
+        reduce_impl.emit(host_, scope, src_op.reg_data(), dst_op.reg_data());
+    }
+
     void reorder(ngen_register_scope_t &scope, const reorder_t &reorder_func,
             const expr_t &src_buf, const std::vector<ngen_operand_t> &args) {
         auto &src_op = reorder_t::arg_src_buf(args);
@@ -2488,10 +2544,13 @@ private:
 
 template <ngen::HW hw>
 conv_kernel_t<hw>::conv_kernel_t(const conv_config_t &cfg,
-        const convolution_pd_t *pd, kernel_arg_info_t &kernel_arg_info)
+        const convolution_pd_t *pd, const kernel_arg_info_t &kernel_arg_info)
     : cfg_(cfg), ra_(hw) {
 
-    init_kernel_arg_info(kernel_arg_info);
+    // XXX: BWD_W does 32x32 multiplication in the inner loop which may cause
+    // hangs when using with split barrier. Switch to emulation to work around
+    // the issue.
+    if (cfg_.is_bwd_w) emu_strategy.emulate64 = true;
 
     // Build IR for the kernel.
     kernel_builder_t builder(cfg, pd, kernel_arg_info);

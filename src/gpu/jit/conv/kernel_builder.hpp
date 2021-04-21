@@ -31,7 +31,7 @@ namespace jit {
 class kernel_builder_t {
 public:
     kernel_builder_t(const conv_config_t &cfg, const convolution_pd_t *pd,
-            kernel_arg_info_t &kernel_arg_info)
+            const kernel_arg_info_t &kernel_arg_info)
         : cfg_(cfg), pd_(pd), kernel_arg_info_(kernel_arg_info) {
         build();
     }
@@ -48,15 +48,24 @@ private:
     void build();
     void init_fwd(constraint_set_t &init_cset, std::vector<stmt_t> &init_stmts,
             std::vector<stmt_t> &reduction_loops, view_t &src_tg_view,
-            view_t &wei_tg_view, view_t &dst_tg_view, view_t &dst_view);
-    void init_bwd_data(constraint_set_t &init_cset,
+            view_t &wei_tg_view, view_t &dst_tg_view, view_t &dst_view,
+            expr_t &src_buf, expr_t &wei_buf, expr_t &dst_buf);
+    void init_bwd_d(constraint_set_t &init_cset,
             std::vector<stmt_t> &init_stmts,
-            std::vector<stmt_t> &reduction_loops, view_t &src_tg_view,
-            view_t &wei_tg_view, view_t &dst_tg_view, view_t &dst_view);
+            std::vector<stmt_t> &reduction_loops, view_t &dst_tg_view,
+            view_t &wei_tg_view, view_t &src_tg_view, view_t &src_view,
+            expr_t &dst_buf, expr_t &wei_buf, expr_t &src_buf);
+    void init_bwd_w(constraint_set_t &init_cset,
+            std::vector<stmt_t> &init_stmts,
+            std::vector<stmt_t> &reduction_loops,
+            std::vector<stmt_t> &inner_lets, view_t &src_tg_view,
+            view_t &dst_tg_view, view_t &wei_tg_view, view_t &wei_view,
+            view_t &bia_view, expr_t &src_buf, expr_t &dst_buf, expr_t &wei_buf,
+            expr_t &bia_buf, expr_t &b_reduction_condition);
 
     const conv_config_t &cfg_;
     const convolution_pd_t *pd_;
-    kernel_arg_info_t &kernel_arg_info_;
+    const kernel_arg_info_t &kernel_arg_info_;
 
     expr_t local_id_[3]; // Local IDs (OpenCL) for the 0-th lane.
     grid_info_t kernel_grid_; // Kernel grid (consisting of thread groups).

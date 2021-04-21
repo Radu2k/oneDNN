@@ -96,6 +96,7 @@ const impl_list_item_t gpu_impl_list[] = {
         // Convolution
         INSTANCE(jit::gen_convolution_fwd_t),
         INSTANCE(jit::gen_convolution_bwd_data_t),
+        INSTANCE(jit::gen_convolution_bwd_weights_t),
 #if DNNL_WITH_XE_HPC
         INSTANCE(ocl::xe_hpc_1x1_convolution_fwd_t),
         INSTANCE(ocl::xe_hpc_bf16_convolution_bwd_weights_t),

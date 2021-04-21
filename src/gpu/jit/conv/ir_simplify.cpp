@@ -1835,6 +1835,54 @@ expr_t simplify_cmp_reduce_lhs_rhs(const expr_t &e) {
     return binary_op_t::make(new_op_kind, x, (sign ? -1 : 1) * div);
 }
 
+bool const_to_const_binary(const expr_t &e, op_kind_t op_kind,
+        const type_t &a_type, const type_t &b_type, expr_t &a, expr_t &b) {
+    bool is_true = to_cpp<bool>(e);
+    // Assume:
+    // - a0 < b1
+    // - a1 > b0
+    // - a_eq == b_eq
+    expr_t a0 = to_expr(0, a_type);
+    expr_t a1 = to_expr(1, a_type);
+    expr_t b0 = to_expr(0, b_type);
+    expr_t b1 = to_expr(1, b_type);
+    expr_t a_eq = to_expr(0, a_type);
+    expr_t b_eq = to_expr(0, b_type);
+    if (!a.is_empty()) {
+        a0 = a1 = a;
+        b0 = a - 1;
+        b1 = a + 1;
+        a_eq = b_eq = a;
+    } else if (!b.is_empty()) {
+        b0 = b1 = b;
+        a0 = b - 1;
+        a1 = b + 1;
+        a_eq = b_eq = b;
+    }
+    switch (op_kind) {
+        case op_kind_t::_and: a = b = e; return true;
+        case op_kind_t::_le:
+        case op_kind_t::_lt:
+            a = (is_true ? a0 : a1);
+            b = (is_true ? b1 : b0);
+            return true;
+        case op_kind_t::_ge:
+        case op_kind_t::_gt:
+            a = (is_true ? a1 : a0);
+            b = (is_true ? b0 : b1);
+            return true;
+        case op_kind_t::_eq:
+            a = (is_true ? a_eq : a0);
+            b = (is_true ? b_eq : b1);
+            return true;
+        case op_kind_t::_ne:
+            a = (is_true ? a0 : a_eq);
+            b = (is_true ? b1 : b_eq);
+            return true;
+        default: return false;
+    }
+}
+
 expr_t simplify_propagate_shuffle(const expr_t &e) {
     if (!e.type().is_bool()) return e;
 
@@ -1843,24 +1891,64 @@ expr_t simplify_propagate_shuffle(const expr_t &e) {
 
     // Handle binary operation.
     {
+        type_t a_type;
+        type_t b_type;
+        expr_t a_common_const;
+        expr_t b_common_const;
         op_kind_t op_kind = op_kind_t::undef;
+        bool found_binary = false;
+        for (int i : shuffle->idx) {
+            if (is_binary_op(shuffle->vec[i])) {
+                found_binary = true;
+                auto &op = shuffle->vec[i].as<binary_op_t>();
+                a_type = op.a.type();
+                b_type = op.b.type();
+                op_kind = op.op_kind;
+                if (is_const(op.a)) a_common_const = op.a;
+                if (is_const(op.b)) b_common_const = op.b;
+                break;
+            }
+        }
+        if (!found_binary) return e;
+
+        for (int i : shuffle->idx) {
+            auto &elem = shuffle->vec[i];
+            if (is_binary_op(elem, op_kind)) {
+                auto &op = elem.as<binary_op_t>();
+                if (!a_common_const.is_equal(op.a)) {
+                    a_common_const = expr_t();
+                }
+                if (!b_common_const.is_equal(op.b)) {
+                    b_common_const = expr_t();
+                }
+            }
+        }
+
         bool ok = true;
         std::vector<expr_t> a;
         std::vector<expr_t> b;
         for (int i : shuffle->idx) {
-            if (!is_binary_op(shuffle->vec[i])) {
-                ok = false;
-                break;
+            auto &elem = shuffle->vec[i];
+            if (is_binary_op(elem, op_kind)) {
+                auto &op = elem.as<binary_op_t>();
+                a.push_back(op.a);
+                b.push_back(op.b);
+                continue;
             }
-            auto &op = shuffle->vec[i].as<binary_op_t>();
-            if (op_kind == op_kind_t::undef) {
-                op_kind = op.op_kind;
-            } else if (op.op_kind != op_kind) {
-                ok = false;
-                break;
+            if (is_const(elem)) {
+                expr_t op_a = a_common_const;
+                expr_t op_b = b_common_const;
+                if (!const_to_const_binary(
+                            elem, op_kind, a_type, b_type, op_a, op_b)) {
+                    ok = false;
+                    break;
+                }
+                a.push_back(op_a);
+                b.push_back(op_b);
+                continue;
             }
-            a.push_back(op.a);
-            b.push_back(op.b);
+            ok = false;
+            break;
         }
         if (ok) {
             auto _a = simplify_propagate_shuffle(shuffle_t::make(a));

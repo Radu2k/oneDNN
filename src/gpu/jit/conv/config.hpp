@@ -48,23 +48,21 @@ public:
 
         is_fwd = conv_pd->is_fwd();
         is_bwd_d = conv_pd->is_bwd_d();
+        is_bwd_w = conv_pd->is_bwd_w();
         with_bias = conv_pd->with_bias();
         with_groups = conv_pd->with_groups();
 
-        if (is_fwd) {
-            orig_src_md = *conv_pd->arg_md(DNNL_ARG_SRC);
-            orig_wei_md = *conv_pd->arg_md(DNNL_ARG_WEIGHTS);
-            orig_dst_md = *conv_pd->arg_md(DNNL_ARG_DST);
-        } else if (is_bwd_d) {
-            orig_src_md = *conv_pd->arg_md(DNNL_ARG_DIFF_SRC);
-            orig_wei_md = *conv_pd->arg_md(DNNL_ARG_WEIGHTS);
-            orig_dst_md = *conv_pd->arg_md(DNNL_ARG_DIFF_DST);
-        } else
-            return status::unimplemented;
+        orig_src_md = *conv_pd->invariant_src_md();
+        orig_wei_md = *conv_pd->invariant_wei_md();
+        orig_dst_md = *conv_pd->invariant_dst_md();
+        orig_bia_md = *conv_pd->invariant_bia_md();
 
         src_data_type = orig_src_md.data_type;
         wei_data_type = orig_wei_md.data_type;
         dst_data_type = orig_dst_md.data_type;
+        bia_data_type = orig_bia_md.data_type;
+
+        if (with_bias) { bia_layout = layout_t(orig_bia_md, "a"); }
 
         ndims = conv_pd->ndims();
 
@@ -159,17 +157,21 @@ public:
     memory_desc_t orig_src_md;
     memory_desc_t orig_wei_md;
     memory_desc_t orig_dst_md;
+    memory_desc_t orig_bia_md;
 
     layout_t src_layout;
     layout_t wei_layout;
     layout_t dst_layout;
+    layout_t bia_layout;
 
     data_type_t src_data_type;
     data_type_t wei_data_type;
     data_type_t dst_data_type;
+    data_type_t bia_data_type;
 
     bool is_fwd;
     bool is_bwd_d;
+    bool is_bwd_w;
     bool with_bias;
     bool with_groups;
 
@@ -192,11 +194,12 @@ public:
     conv_config_t() = default;
 
     status_t init(convolution_pd_t *conv_pd, engine_t *engine) {
-        using namespace ir_utils;
-
         CHECK(conv_problem_t::init(conv_pd));
+        CHECK(init_abc_data_types());
         CHECK(init_acc_data_type());
+        CHECK(init_fma_kind());
 
+        if (!data_types_ok()) return status::unimplemented;
         if (!post_ops_ok(conv_pd)) return status::unimplemented;
 
         // Groups are not supported yet.
@@ -206,25 +209,17 @@ public:
             CHECK(init_fwd(conv_pd, engine));
         else if (is_bwd_d)
             CHECK(init_bwd_d(conv_pd, engine));
+        else if (is_bwd_w)
+            CHECK(init_bwd_w(conv_pd, engine));
         else
-            return status::unimplemented;
+            ir_error_not_expected();
+
         return status::success;
     }
 
     status_t init_fwd(convolution_pd_t *conv_pd, engine_t *engine) {
         using namespace ir_utils;
 
-        fma_kind = fma_kind::get_supported_kind(
-                src_data_type, wei_data_type, acc_data_type);
-        if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
-
-        // Disable using mad instruction backend until performance parity is
-        // reached with OpenCL kernels.
-        if (fma_kind == fma_kind_t::mad) return status::unimplemented;
-
-        // Cases below are not supported yet.
-        if (utils::one_of(data_type::f32, src_data_type, wei_data_type))
-            return status::unimplemented;
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
 
@@ -378,17 +373,6 @@ public:
     status_t init_bwd_d(convolution_pd_t *conv_pd, engine_t *engine) {
         using namespace ir_utils;
 
-        fma_kind = fma_kind::get_supported_kind(
-                dst_data_type, wei_data_type, acc_data_type);
-        if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
-
-        // Disable using mad instruction backend until performance parity is
-        // reached with OpenCL kernels.
-        if (fma_kind == fma_kind_t::mad) return status::unimplemented;
-
-        // Cases below are not supported yet.
-        if (utils::one_of(data_type::f32, dst_data_type, wei_data_type))
-            return status::unimplemented;
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
 
@@ -527,6 +511,165 @@ public:
         return status::success;
     }
 
+    status_t init_bwd_w(convolution_pd_t *conv_pd, engine_t *engine) {
+        using namespace ir_utils;
+
+        // First convolution is not supported.
+        if (ic < 16) return status::unimplemented;
+        if (mb < 16) return status::unimplemented;
+
+        oc_thr_blk = (oc <= 16 ? 16 : 32);
+        ic_thr_blk = (ic <= 16 ? 16 : 32);
+
+#ifdef GEN_CONV_DEBUG
+        oc_thr_blk = getenv_int("oc_thr_blk", oc_thr_blk);
+        ic_thr_blk = getenv_int("ic_thr_blk", ic_thr_blk);
+#endif
+
+        simd_size = 8;
+        regs = 256;
+        tg_grid_dim[0] = std::min(4, utils::div_up(oc, oc_thr_blk));
+        tg_grid_dim[1] = std::min(4, utils::div_up(ic, ic_thr_blk));
+        tg_grid_dim[2] = 1;
+
+        // Round down to a power of 2.
+        tg_grid_dim[0] = (1 << math::ilog2q(tg_grid_dim[0]));
+        tg_grid_dim[1] = (1 << math::ilog2q(tg_grid_dim[1]));
+        tg_grid_dim[2] = (1 << math::ilog2q(tg_grid_dim[2]));
+
+#ifdef GEN_CONV_DEBUG
+        tg_grid_dim[0] = getenv_int("tg0", tg_grid_dim[0]);
+        tg_grid_dim[1] = getenv_int("tg1", tg_grid_dim[1]);
+#endif
+
+        oc_tg_blk = tg_grid_dim[0] * oc_thr_blk;
+        ic_tg_blk = tg_grid_dim[1] * ic_thr_blk;
+        mb_blk = 16;
+        mb_tg_blk = 32;
+
+        init_bwd_w_spatial_blocks();
+
+        m_tg_blk = ic_tg_blk;
+        n_tg_blk = oc_tg_blk;
+        k_tg_blk = mb_blk;
+
+        int oc_tg_padded = utils::rnd_up(oc, oc_tg_blk);
+        int ic_tg_padded = utils::rnd_up(ic, ic_tg_blk);
+        int mb_tg_padded = utils::rnd_up(mb, mb_tg_blk);
+        int od_tg_padded = utils::rnd_up(od, od_tg_blk);
+        int oh_tg_padded = utils::rnd_up(oh, oh_tg_blk);
+        int ow_tg_padded = utils::rnd_up(ow, ow_tg_blk);
+
+        oc_tg_dim = oc_tg_padded / oc_tg_blk;
+        ic_tg_dim = ic_tg_padded / ic_tg_blk;
+
+        mb_tg_dim = mb_tg_padded / mb_tg_blk;
+        od_tg_dim = od_tg_padded / od_tg_blk;
+        oh_tg_dim = oh_tg_padded / oh_tg_blk;
+        ow_tg_dim = ow_tg_padded / ow_tg_blk;
+
+        kernel_grid_dim[0] = oc_tg_dim;
+        kernel_grid_dim[1]
+                = ic_tg_dim * kd * kh * kw * od_tg_dim * oh_tg_dim * ow_tg_dim;
+        kernel_grid_dim[2] = mb_tg_dim;
+
+        CHECK(init_common_config(engine));
+
+        // Set BWD_W-specific settings.
+        do_b_reduction = with_bias;
+        do_loop_unroll = false;
+        allow_grf_reorder = true;
+        zero_out_output = true;
+        do_atomic_update = true;
+        do_post_wei_reorder = (wei_data_type == data_type::bf16);
+        do_post_bia_reorder = (with_bias && bia_data_type == data_type::bf16);
+
+        fixup_inference_consistency();
+        try_reduce_grf_usage();
+
+        std::string src_tag;
+        std::string wei_tag;
+        std::string dst_tag;
+        src_tag = "ABx32a16b";
+        wei_tag = "ABx16b16a";
+        dst_tag = "ABx32a16b";
+
+#ifdef GEN_CONV_DEBUG
+        src_tag = getenv_str("stag", src_tag);
+        wei_tag = getenv_str("wtag", wei_tag);
+        dst_tag = getenv_str("dtag", dst_tag);
+#endif
+
+        auto &src_md = *conv_pd->invariant_src_md();
+        auto &wei_md = *conv_pd->invariant_wei_md();
+        auto &dst_md = *conv_pd->invariant_dst_md();
+
+        // Select layouts.
+        src_layout = init_layout(src_md, src_tag);
+        wei_layout = init_layout(wei_md, wei_tag);
+        dst_layout = init_layout(dst_md, dst_tag);
+
+        if (src_layout != layout_t(src_md, src_tag))
+            return status::unimplemented;
+        if (wei_layout != layout_t(wei_md, wei_tag))
+            return status::unimplemented;
+        if (dst_layout != layout_t(dst_md, dst_tag))
+            return status::unimplemented;
+
+        if (do_post_wei_reorder) {
+            wei_layout = wei_layout.retype(type_t::f32());
+            orig_wei_md.data_type = data_type::f32;
+        }
+        if (do_post_bia_reorder) {
+            bia_layout = bia_layout.retype(type_t::f32());
+            orig_bia_md.data_type = data_type::f32;
+        }
+
+        return status::success;
+    }
+
+    void init_bwd_w_spatial_blocks() {
+        od_tg_blk = 1;
+        oh_tg_blk = 1;
+        ow_tg_blk = 1;
+        int sp_min_blk = 24;
+        int sp_max_blk = 64;
+
+        auto get_score = [&](int oh_blk, int ow_blk) {
+            int sp_blk = oh_blk * ow_blk;
+            int oh_padded = utils::rnd_up(oh, oh_blk);
+            int ow_padded = utils::rnd_up(ow, ow_blk);
+
+            double extra_work
+                    = (oh_padded * ow_padded - oh * ow) / double(oh * ow);
+            // ohw_eff == 0: no useful computation
+            // ohw_eff == 1: all computation is useful
+            double ohw_eff = 1 - std::min(extra_work, 1.0);
+            int score = int(ohw_eff * 1000);
+            // Prefer [sp_min_blk; sp_max_blk] range for the total spatial size.
+            if (sp_blk >= sp_min_blk && sp_blk <= sp_max_blk) score += 100;
+            return score;
+        };
+
+        int max_score = 0;
+        for (int oh_blk = 1; oh_blk <= sp_max_blk; oh_blk++) {
+            for (int ow_blk = 1; ow_blk <= sp_max_blk; ow_blk++) {
+                int score = get_score(oh_blk, ow_blk);
+                if (score > max_score) {
+                    oh_tg_blk = oh_blk;
+                    ow_tg_blk = ow_blk;
+                    max_score = score;
+                }
+            }
+        }
+
+#ifdef GEN_CONV_DEBUG
+        od_tg_blk = getenv_int("od_tg_blk", od_tg_blk);
+        oh_tg_blk = getenv_int("oh_tg_blk", oh_tg_blk);
+        ow_tg_blk = getenv_int("ow_tg_blk", ow_tg_blk);
+#endif
+    }
+
     status_t init_common_config(engine_t *engine) {
         using namespace ir_utils;
         using namespace compute;
@@ -548,6 +691,7 @@ public:
             default: return status::unimplemented;
         }
 
+        do_b_reduction = false;
         use_a_slm = true;
         use_b_slm = true;
         pad_slm = true;
@@ -558,6 +702,10 @@ public:
         do_loop_unroll = true;
         reduce_grf_usage = true;
         allow_grf_reorder = false;
+        zero_out_output = false;
+        do_atomic_update = false;
+        do_post_wei_reorder = false;
+        do_post_bia_reorder = false;
         a_sub_tiles = 1;
         b_sub_tiles = 1;
 
@@ -578,7 +726,7 @@ public:
 #endif
 
         simd_size = fma_kind::get_simd_size(
-                hw, fma_kind, dst_data_type, wei_data_type, acc_data_type);
+                hw, fma_kind, a_data_type, b_data_type, acc_data_type);
 
         return status::success;
     }
@@ -586,10 +734,14 @@ public:
     bool post_ops_ok(const convolution_pd_t *pd) const {
         auto *attr = pd->attr();
 
-        auto attr_skip_mask = primitive_attr_t::skip_mask_t::post_ops
-                | primitive_attr_t::skip_mask_t::oscale_runtime
-                | primitive_attr_t::skip_mask_t::sum_dt;
-        if (!attr->has_default_values(attr_skip_mask)) return false;
+        if (is_fwd) {
+            auto attr_skip_mask = primitive_attr_t::skip_mask_t::post_ops
+                    | primitive_attr_t::skip_mask_t::oscale_runtime
+                    | primitive_attr_t::skip_mask_t::sum_dt;
+            if (!attr->has_default_values(attr_skip_mask)) return false;
+        } else {
+            if (!attr->has_default_values()) return status::unimplemented;
+        }
 
         if (!attr->output_scales_.has_default_values()) {
             // Only common and per_oc output scales were tested.
@@ -623,7 +775,37 @@ public:
         return true;
     }
 
+    bool data_types_ok() const {
+        if (is_fwd) {
+            if (utils::one_of(data_type::f32, src_data_type, wei_data_type))
+                return false;
+            return true;
+        }
+        if (is_bwd_d) {
+            bool ok = true;
+            ok &= (dst_data_type == wei_data_type);
+            ok &= utils::one_of(dst_data_type, data_type::f16, data_type::bf16);
+            ok &= utils::one_of(src_data_type, data_type::f16, data_type::bf16,
+                    data_type::f32);
+            return ok;
+        }
+        if (is_bwd_w) {
+            bool ok = true;
+            ok &= (src_data_type == data_type::bf16);
+            ok &= (dst_data_type == data_type::bf16);
+            ok &= utils::one_of(wei_data_type, data_type::bf16, data_type::f32);
+            if (with_bias) {
+                ok &= utils::one_of(
+                        bia_data_type, data_type::bf16, data_type::f32);
+            }
+            return ok;
+        }
+        return false;
+    }
+
     bool is_s32_accumulator() const { return acc_data_type == data_type::s32; }
+
+    int grf_size() const { return ngen::GRF::bytes(hw); }
 
     compute::nd_range_t nd_range() const {
         size_t gws[3];
@@ -645,6 +827,8 @@ public:
         oss << "  Weights layout:             " << wei_layout << std::endl;
         oss << "  Destination layout:         " << dst_layout << std::endl;
         oss << "  MB TG block:                " << mb_tg_blk << std::endl;
+        oss << "  OD TG block:                " << od_tg_blk << std::endl;
+        oss << "  OH TG block:                " << oh_tg_blk << std::endl;
         oss << "  OW TG block:                " << ow_tg_blk << std::endl;
         oss << "  OC TG block:                " << oc_tg_blk << std::endl;
         oss << "  Thread group:               " << make_seq_print_helper(tg_grid_dim, " x ") << std::endl;
@@ -663,6 +847,9 @@ public:
         return oss.str();
     }
 
+    data_type_t a_data_type;
+    data_type_t b_data_type;
+    data_type_t c_data_type;
     data_type_t acc_data_type;
 
     ngen::HW hw = ngen::HW::Unknown;
@@ -675,16 +862,26 @@ public:
     // Number of thread groups across dimensions (kernel grid).
     std::array<int, 3> kernel_grid_dim;
 
+    int mb_tg_dim;
+    int od_tg_dim;
+    int oh_tg_dim;
     int ow_tg_dim;
     int iw_tg_dim;
+    int oc_tg_dim;
+    int ic_tg_dim;
 
     // Block sizes per thread group (convolution notation).
-    int mb_tg_blk;
-    int oc_tg_blk;
-    int ow_tg_blk;
-    int ic_blk;
     int ic_tg_blk;
     int iw_tg_blk;
+    int mb_tg_blk;
+    int oc_tg_blk;
+    int od_tg_blk;
+    int oh_tg_blk;
+    int ow_tg_blk;
+
+    // Block sizes per iteration.
+    int mb_blk;
+    int ic_blk;
     int oc_blk;
 
     int oc_thr_blk;
@@ -694,6 +891,8 @@ public:
     int m_tg_blk;
     int n_tg_blk;
     int k_tg_blk;
+
+    bool do_b_reduction;
 
     fma_kind_t fma_kind; // Which instruction backend to use.
 
@@ -706,6 +905,12 @@ public:
     bool do_loop_unroll; // Whether to fully unroll inner loops.
     bool reduce_grf_usage; // Whether to try to reduce GRF usage based on heuristics.
     bool allow_grf_reorder; // Whether to allow GRF reorders to FMA-friendly layouts.
+    bool zero_out_output; // Whether to zero out outputs before the main kernel.
+    bool do_atomic_update; // Whether to use atomics during C update.
+
+    // Specific to BWD_W.
+    bool do_post_bia_reorder; // Whether to perform extra reorder for weights.
+    bool do_post_wei_reorder; // Whether to perform extra reorder for bias.
 
     // Sub-tiles to split into for the inner A x B multiplication:
     // for i in range(0, a_sub_tiles):
@@ -720,32 +925,66 @@ public:
     int b_sub_tiles;
 
 private:
+    // Initializes A/B/C data types (GEMM notation: C += A * B) according to
+    // the following convention:
+    // FWD:        src -> A,      wei -> B,      dst -> C
+    // BWD_D: diff_dst -> A,      wei -> B, diff_src -> C
+    // BWD_W:      src -> A, diff_dst -> B, diff_wei -> C
+    status_t init_abc_data_types() {
+        if (is_fwd) {
+            a_data_type = src_data_type;
+            b_data_type = wei_data_type;
+            c_data_type = dst_data_type;
+        } else if (is_bwd_d) {
+            a_data_type = dst_data_type;
+            b_data_type = wei_data_type;
+            c_data_type = src_data_type;
+        } else if (is_bwd_w) {
+            a_data_type = src_data_type;
+            b_data_type = dst_data_type;
+            // Always use f32 for accumulation/storing in the main kernel.
+            c_data_type = data_type::f32;
+        } else {
+            ir_error_not_expected();
+        }
+        return status::success;
+    }
+
     status_t init_acc_data_type() {
-        data_type_t sdt = src_data_type;
-        data_type_t wdt = wei_data_type;
-        data_type_t ddt = dst_data_type;
-        if (utils::one_of(sdt, data_type::s8, data_type::u8)
-                && utils::one_of(wdt, data_type::s8, data_type::u8)) {
+        auto a = a_data_type;
+        auto b = b_data_type;
+        auto c = c_data_type;
+        if (utils::one_of(a, data_type::s8, data_type::u8)
+                && utils::one_of(b, data_type::s8, data_type::u8)) {
             acc_data_type = data_type::s32;
             return status::success;
         }
-        if (is_fwd
-                && (utils::everyone_is(data_type::f16, sdt, wdt)
-                        || utils::everyone_is(data_type::bf16, sdt, wdt))) {
+        if (utils::everyone_is(data_type::f16, a, b)
+                || utils::everyone_is(data_type::bf16, a, b)) {
             acc_data_type = data_type::f32;
             return status::success;
         }
-        if (is_bwd_d
-                && (utils::everyone_is(data_type::f16, ddt, wdt)
-                        || utils::everyone_is(data_type::bf16, ddt, wdt))) {
-            acc_data_type = data_type::f32;
-            return status::success;
-        }
-        if (utils::everyone_is(data_type::f32, sdt, wdt, ddt)) {
+        if (utils::everyone_is(data_type::f32, a, b, c)) {
             acc_data_type = data_type::f32;
             return status::success;
         }
         return status::unimplemented;
+    }
+
+    status_t init_fma_kind() {
+        fma_kind = fma_kind::get_supported_kind(
+                a_data_type, b_data_type, acc_data_type);
+        if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
+
+        // Disable using mad instruction backend until performance parity is
+        // reached with OpenCL kernels.
+        if (fma_kind == fma_kind_t::mad) return status::unimplemented;
+
+        // Cases below are not supported yet.
+        if (utils::one_of(data_type::f32, a_data_type, b_data_type))
+            return status::unimplemented;
+
+        return status::success;
     }
 
     // Overwrites parameters that are implied by other parameters.
@@ -760,8 +999,15 @@ private:
             use_a_slm = false;
             use_b_slm = false;
         }
-        if (tg_grid_dim[0] % 2 != 0 && fma_kind == fma_kind_t::dpasw)
-            fma_kind = fma_kind_t::dpas;
+        // Downgrade dpasw -> dpas for some cases.
+        if (fma_kind == fma_kind_t::dpasw) {
+            // dpasw is executed by fused EUs (across X thread group
+            // dimension). Do not use dpasw if X is uneven.
+            if (tg_grid_dim[0] % 2 != 0) fma_kind = fma_kind_t::dpas;
+            // dpasw can't be generated in case of direct load from GMEM and reorder.
+            if (is_bwd_w && allow_grf_reorder && (!use_a_slm || !use_b_slm))
+                fma_kind = fma_kind_t::dpas;
+        }
         if (!do_loop_unroll) {
             gmem_bufs = 1;
             // Double/triple SLM buffering is not supported when only one
@@ -785,8 +1031,9 @@ private:
         }
 
         // Try to use sub-tiles for B.
-        if (b_sub_tiles == 1) {
-            b_sub_tiles = 2;
+        int max_b_sub_tiles = (use_b_slm ? 4 : 2);
+        while (b_sub_tiles < max_b_sub_tiles) {
+            b_sub_tiles *= 2;
             int regs = estimate_register_count();
             if (regs <= max_regs) return;
         }
@@ -817,18 +1064,20 @@ private:
         int n_thr_blk = utils::div_up(n_tg_blk, tg_grid_dim[0]);
         int k_thr_blk = k_tg_blk;
 
-        int ssize = int(types::data_type_size(orig_src_md.data_type));
-        int wsize = int(types::data_type_size(orig_wei_md.data_type));
-        int asize = int(types::data_type_size(acc_data_type));
+        int a_size = int(types::data_type_size(a_data_type));
+        int b_size = int(types::data_type_size(b_data_type));
+        int acc_size = int(types::data_type_size(acc_data_type));
 
         // Registers for C += A * B operation.
-        int a_bytes = utils::div_up(m_thr_blk * k_thr_blk * ssize, a_sub_tiles);
-        int b_bytes = utils::div_up(k_thr_blk * n_thr_blk * wsize, b_sub_tiles);
-        int c_bytes = m_thr_blk * n_thr_blk * asize;
+        int a_bytes
+                = utils::div_up(m_thr_blk * k_thr_blk * a_size, a_sub_tiles);
+        int b_bytes
+                = utils::div_up(k_thr_blk * n_thr_blk * b_size, b_sub_tiles);
+        int acc_bytes = m_thr_blk * n_thr_blk * acc_size;
 
         int a_regs = utils::div_up(a_bytes, reg_bytes);
         int b_regs = utils::div_up(b_bytes, reg_bytes);
-        int c_regs = utils::div_up(c_bytes, reg_bytes);
+        int acc_regs = utils::div_up(acc_bytes, reg_bytes);
 
         int a_headers = utils::div_up(
                 a_bytes, use_a_slm ? slm_msg_bytes : gmem_msg_bytes);
@@ -848,10 +1097,10 @@ private:
 
         // Temporary registers for GMEM -> SLM load.
         int a_g2s_bytes
-                = (use_a_slm ? utils::div_up(m_tg_blk * k_tg_blk * ssize, nthr)
+                = (use_a_slm ? utils::div_up(m_tg_blk * k_tg_blk * a_size, nthr)
                              : 0);
         int b_g2s_bytes
-                = (use_b_slm ? utils::div_up(k_tg_blk * n_tg_blk * wsize, nthr)
+                = (use_b_slm ? utils::div_up(k_tg_blk * n_tg_blk * b_size, nthr)
                              : 0);
 
         int a_g2s_regs = utils::div_up(a_g2s_bytes, reg_bytes);
@@ -863,10 +1112,18 @@ private:
         int b_g2s_headers = utils::div_up(b_g2s_bytes, gmem_msg_bytes)
                 + utils::div_up(b_g2s_bytes, slm_msg_bytes);
 
+        // Assume A/B need reorders to temporary buffers.
+        if (is_bwd_w) {
+            a_g2s_regs *= 2;
+            b_g2s_regs *= 2;
+            a_g2s_headers *= 2;
+            b_g2s_headers *= 2;
+        }
+
         int g2s_regs = gmem_bufs * (a_g2s_regs + b_g2s_regs);
         int g2s_headers = a_g2s_headers + b_g2s_headers;
 
-        int data_regs = a_regs + b_regs + c_regs + g2s_regs;
+        int data_regs = a_regs + b_regs + acc_regs + g2s_regs;
         int header_regs = a_headers + b_headers + g2s_headers;
 
         return data_regs + header_regs;

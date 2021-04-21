@@ -1671,6 +1671,9 @@ public:
     static stmt_label_t c_zero_out(int index = -1) {
         return stmt_label_t(kind_t::_c_zero_out, index);
     }
+    static stmt_label_t b_reduced_zero_out(int index = -1) {
+        return stmt_label_t(kind_t::_b_reduced_zero_out, index);
+    }
     static stmt_label_t g2s_load(int index = -1) {
         return stmt_label_t(kind_t::_g2s_load, index);
     }
@@ -1721,6 +1724,7 @@ private:
         _compute_loop, // Compute loop.
         _c_store, // GRF to GMEM store of C.
         _c_zero_out, // Zeroing-out of C.
+        _b_reduced_zero_out, // Zeroing-out of B reduced buffer.
         _g2r_load, // GMEM to GRF load for further multiplication.
         _g2s_load, // GMEM to GRF load for GMEM -> SLM copy.
         _g2s_store, // GRF to SLM store for GMEM -> SLM copy.
@@ -1941,7 +1945,9 @@ public:
 private:
     func_call_t(const func_t &func, const std::vector<expr_t> &args,
             const func_call_attr_t &attr)
-        : func(func), args(args), attr(attr) {}
+        : func(func), args(args), attr(attr) {
+        ir_assert(!func.is_empty());
+    }
 };
 
 inline stmt_t func_impl_t::call(

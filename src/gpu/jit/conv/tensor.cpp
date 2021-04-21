@@ -180,6 +180,9 @@ format_tag_t layout_t::to_format_tag() const {
     CASE(BAcd2b8a16b4a);
     CASE(BAcde2b8a16b4a);
     CASE(BAcde2b8a16b2a);
+    CASE(ABc16b16a);
+    CASE(ABcd16b16a);
+    CASE(ABcde16b16a);
 
 #undef CASE
 

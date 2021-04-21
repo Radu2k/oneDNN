@@ -31,6 +31,7 @@ namespace jit {
 
 class gen_convolution_t;
 class conv_config_t;
+class kernel_arg_info_t;
 
 class gen_convolution_fwd_t : public gpu_primitive_t {
 public:
@@ -46,6 +47,7 @@ public:
         status_t init(engine_t *engine);
 
         std::shared_ptr<conv_config_t> cfg;
+        std::shared_ptr<kernel_arg_info_t> kernel_arg_info;
     };
 
     using gpu_primitive_t::gpu_primitive_t;
@@ -76,6 +78,7 @@ public:
         status_t init(engine_t *engine);
 
         std::shared_ptr<conv_config_t> cfg;
+        std::shared_ptr<kernel_arg_info_t> kernel_arg_info;
     };
 
     using gpu_primitive_t::gpu_primitive_t;
@@ -85,7 +88,53 @@ public:
 
 private:
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
+
     std::shared_ptr<gen_convolution_t> impl_;
+};
+
+class gen_convolution_bwd_weights_t : public gpu_primitive_t {
+public:
+    friend gen_convolution_t;
+
+    struct pd_t : public gpu_convolution_bwd_weights_pd_t {
+        friend gen_convolution_t;
+
+        using gpu_convolution_bwd_weights_pd_t::
+                gpu_convolution_bwd_weights_pd_t;
+
+        DECLARE_COMMON_PD_T("jit:ir", gen_convolution_bwd_weights_t);
+
+        status_t init(engine_t *engine);
+        status_t init_scratchpad(kernel_arg_info_t &kernel_arg_info);
+
+        std::shared_ptr<conv_config_t> cfg;
+        std::shared_ptr<kernel_arg_info_t> kernel_arg_info;
+
+        memory_desc_t tmp_wei_md;
+        memory_desc_t tmp_bia_md;
+        std::shared_ptr<primitive_desc_t> wei_reorder_pd;
+        std::shared_ptr<primitive_desc_t> bia_reorder_pd;
+    };
+
+    using gpu_primitive_t::gpu_primitive_t;
+
+    status_t init(engine_t *engine) override;
+    status_t execute(const exec_ctx_t &ctx) const override;
+
+protected:
+    primitive_list_t nested_primitives() const override {
+        primitive_list_t ret;
+        if (wei_reorder_) ret.push_back(wei_reorder_.get());
+        if (bia_reorder_) ret.push_back(bia_reorder_.get());
+        return ret;
+    }
+
+private:
+    const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
+
+    std::shared_ptr<gen_convolution_t> impl_;
+    std::shared_ptr<primitive_t> wei_reorder_;
+    std::shared_ptr<primitive_t> bia_reorder_;
 };
 
 } // namespace jit
