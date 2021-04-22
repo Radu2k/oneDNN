@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <algorithm>
 #include <CL/cl.h>
 
 #include "gpu/ocl/ocl_gpu_engine.hpp"
@@ -124,24 +125,37 @@ status_t ocl_gpu_engine_t::create_kernels(
     return ocl::create_kernels(this, kernel_list, kernel_ctx);
 }
 
-static status_t get_program_binaries(
-        cl_program program, std::shared_ptr<compute::binary_t> &binary) {
+static status_t get_program_binaries(cl_program program,
+        std::shared_ptr<compute::binary_t> &binary, cl_device_id &device) {
 
-    // Get the size of the program binary in bytes.
-    size_t binary_size = 0;
-    cl_int err = clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES,
-            sizeof(binary_size), &binary_size, nullptr);
+    size_t n_devices = 0;
+    cl_int err = clGetProgramInfo(program, CL_PROGRAM_NUM_DEVICES,
+            sizeof(size_t), &n_devices, nullptr);
     OCL_CHECK(err);
 
-    // Binary is not available for the device.
-    if (binary_size == 0) return status::runtime_error;
-
-    // Get program binary.
-    binary = std::make_shared<compute::binary_t>(binary_size);
-    unsigned char *binary_buffer = binary->data();
-    err = clGetProgramInfo(
-            program, CL_PROGRAM_BINARIES, binary_size, &binary_buffer, nullptr);
+    std::vector<size_t> binarySize(n_devices);
+    err = clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES,
+            sizeof(size_t) * n_devices, binarySize.data(), nullptr);
     OCL_CHECK(err);
+
+    std::vector<cl_device_id> devices(n_devices);
+    err = clGetProgramInfo(program, CL_PROGRAM_DEVICES,
+            sizeof(cl_device_id) * n_devices, devices.data(), nullptr);
+    OCL_CHECK(err);
+
+    size_t device_idx = std::distance(
+            devices.begin(), std::find(devices.begin(), devices.end(), device));
+    std::vector<uint8_t *> binary_pointers(n_devices);
+    std::vector<std::shared_ptr<compute::binary_t>> binaries(n_devices);
+    for (size_t i = 0; i < n_devices; ++i) {
+        binaries[i] = std::make_shared<compute::binary_t>(binarySize[i]);
+        binary_pointers[i] = binaries[i]->data();
+    }
+
+    err = clGetProgramInfo(program, CL_PROGRAM_BINARIES,
+            sizeof(uint8_t *) * n_devices, binary_pointers.data(), nullptr);
+    OCL_CHECK(err);
+    binary = binaries[device_idx];
 
     return status::success;
 }
@@ -186,7 +200,7 @@ status_t ocl_gpu_engine_t::create_kernels_from_ocl_source(
     }
 
     std::shared_ptr<compute::binary_t> shared_binary;
-    CHECK(get_program_binaries(program, shared_binary));
+    CHECK(get_program_binaries(program, shared_binary, dev));
 
     *kernels = std::vector<compute::kernel_t>(kernel_names.size());
     for (size_t i = 0; i < kernel_names.size(); ++i) {
