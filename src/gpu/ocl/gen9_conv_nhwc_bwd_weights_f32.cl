@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 *******************************************************************************/
 
 #include "gpu/ocl/ocl_math_utils.h"
+#include "gpu/ocl/ocl_types.h"
 
 #if ID > 1
 #define CASE_3D 1
@@ -55,6 +56,7 @@ __kernel void
 gen9_conv_nhwc_bwd_weights(__global float *src,
         volatile __global atomic_float *diff_wei,
         volatile __global atomic_float *diff_bias, __global float *diff_dst) {
+    MAYBE_SKIP_NON_UNIFORM_WG();
     const int ksp = get_global_id(1);
 #if CASE_3D
     const int kd = ksp / (KW * KH);
