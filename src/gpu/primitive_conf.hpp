@@ -630,7 +630,8 @@ enum reorder_kernel_t {
     reorder_nchw,
     unaligned_sizes,
     reorder_alt,
-    vectorize_groups
+    vectorize_groups,
+    pad_innermost
 };
 
 struct vectorize_group {
@@ -638,6 +639,7 @@ struct vectorize_group {
     int src_loop_dim;
     int dst_loop_dim;
     int group_size;
+    int innermost_size;
 };
 
 union reorder_implementation {
