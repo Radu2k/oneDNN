@@ -175,6 +175,7 @@ bool mad_t::matches_types(const type_t &a, const type_t &b, const type_t &c) {
 
     if (a.is_f32() && c.is_f32()) return true;
     if (a.is_f16() && c.is_f16()) return true;
+    if (a.is_f16() && c.is_f32()) return true;
     if (a.is_bf16() && c.is_f32()) return true;
     if (a.is_f32() && c.is_bf16()) return true;
 
