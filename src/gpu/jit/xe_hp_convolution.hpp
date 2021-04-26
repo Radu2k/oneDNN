@@ -254,8 +254,12 @@ struct xe_hp_convolution_bwd_weights_t : public gpu_primitive_t {
             auto *compute_engine
                     = utils::downcast<compute::compute_engine_t *>(engine);
 
-            if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpc())
+#if DNNL_WITH_XE_HPG
+            if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
                 return status::unimplemented;
+#else
+            if (!compute_engine->is_xe_hp()) return status::unimplemented;
+#endif
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;
 

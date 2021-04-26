@@ -1589,25 +1589,22 @@ status_t xe_hp_conv_bwd_weights_create_kernels(const conv_conf_t &conf,
     switch (device_info->gpu_arch()) {
         case gpu_arch_t::xe_hp:
             jit_gen_wei_init.reset(
-                    new xe_hp_conv_bwd_wei_init_kernel_t<ngen::HW::Xe_HP>(
-                            conf));
+                    new xe_hp_conv_bwd_wei_init_kernel_t<gpu_xe_hp>(conf));
             jit_gen_wei_cvt.reset(
-                    new xe_hp_conv_bwd_wei_cvt_kernel_t<ngen::HW::Xe_HP>(conf));
+                    new xe_hp_conv_bwd_wei_cvt_kernel_t<gpu_xe_hp>(conf));
             jit_gen_convolution.reset(
-                    new xe_hp_conv_bwd_wei_conv_kernel_t<ngen::HW::Xe_HP>(
-                            conf));
+                    new xe_hp_conv_bwd_wei_conv_kernel_t<gpu_xe_hp>(conf));
             break;
-        case gpu_arch_t::xe_hpc:
+#if DNNL_WITH_XE_HPG
+        case gpu_arch_t::xe_hpg:
             jit_gen_wei_init.reset(
-                    new xe_hp_conv_bwd_wei_init_kernel_t<ngen::HW::Xe_HPC>(
-                            conf));
+                    new xe_hp_conv_bwd_wei_init_kernel_t<gpu_xe_hpg>(conf));
             jit_gen_wei_cvt.reset(
-                    new xe_hp_conv_bwd_wei_cvt_kernel_t<ngen::HW::Xe_HPC>(
-                            conf));
+                    new xe_hp_conv_bwd_wei_cvt_kernel_t<gpu_xe_hpg>(conf));
             jit_gen_convolution.reset(
-                    new xe_hp_conv_bwd_wei_conv_kernel_t<ngen::HW::Xe_HPC>(
-                            conf));
+                    new xe_hp_conv_bwd_wei_conv_kernel_t<gpu_xe_hpg>(conf));
             break;
+#endif
         default: return status::runtime_error;
     }
 
