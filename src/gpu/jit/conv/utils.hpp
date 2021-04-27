@@ -190,7 +190,7 @@ private:
                     __FILE__, __LINE__, #cond)
 #else
 #define ir_assert(cond) \
-    (false) \
+    (false) && !(cond) \
             && dnnl::impl::gpu::jit::ir_utils::error_stream_t( \
                     __FILE__, __LINE__, #cond)
 #endif
