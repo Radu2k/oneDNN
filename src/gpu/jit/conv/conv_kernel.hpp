@@ -840,7 +840,15 @@ public:
         expr_binding_.mark_as_evaluated(obj);
     }
 
-    void _visit(const bool_imm_t *obj) override { ir_error_not_implemented(); }
+    void _visit(const bool_imm_t *obj) override {
+        // Scalar booleans must never be directly lowered:
+        // - Booleans are mapped to flag registers
+        // - Flag register stores vector of boolean vectors
+        // - All boolean values in IR must be expressed by shuffle_t objects
+        // - _visit(shuffle_t *) must properly handle vector of booleans -> flag
+        //   register lowering
+        ir_error_not_expected();
+    }
 
     void _visit(const cast_t *obj) override {
         auto &from_type = obj->expr.type();
@@ -918,26 +926,13 @@ public:
 
     void _visit(const shuffle_t *obj) override {
         int elems = obj->elems();
-        if (obj->is_broadcast()) {
-            if (obj->type.is_bool()) {
-                auto dst_op = alloc_op(obj);
-                eval(obj->vec[0], dst_op);
-                expr_binding_.mark_as_evaluated(obj);
-            } else {
-                auto scalar_op = eval(obj->vec[0]);
-                bind(obj, scalar_op);
-            }
-            return;
-        }
-
-        auto dst_op = alloc_op(obj);
-        if (obj->type.is_bool()) {
+        if (obj->type.is_bool() && is_shuffle_const(obj)) {
+            auto dst_op = alloc_op(obj);
             auto e_shuffle = expr_t(obj);
             ir_assert(dst_op.is_flag_register()) << e_shuffle;
             ir_assert(!dst_op.is_negated()) << e_shuffle;
-            ir_assert(is_shuffle_const(obj)) << e_shuffle;
             uint16_t flag_mask = 0;
-            for (int i = obj->elems() - 1; i >= 0; i--) {
+            for (int i = elems - 1; i >= 0; i--) {
                 flag_mask <<= 1;
                 flag_mask |= (to_cpp<bool>(e_shuffle[i]) ? 1 : 0);
             }
@@ -952,6 +947,18 @@ public:
             return;
         }
 
+        if (obj->is_broadcast()) {
+            if (obj->type.is_bool()) {
+                auto dst_op = alloc_op(obj);
+                eval(obj->vec[0], dst_op);
+                expr_binding_.mark_as_evaluated(obj);
+            } else {
+                auto scalar_op = eval(obj->vec[0]);
+                bind(obj, scalar_op);
+            }
+            return;
+        }
+
         // tuples: <offset, length, idx>
         std::vector<std::tuple<int, int, int>> chunks;
         for (int i = 0; i < elems; i++) {
@@ -963,6 +970,7 @@ public:
             }
         }
 
+        auto dst_op = alloc_op(obj);
         for (auto &chunk : chunks) {
             int off = std::get<0>(chunk);
             int exec_size = std::get<1>(chunk);
