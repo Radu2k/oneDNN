@@ -102,7 +102,7 @@ public:
                 }
                 case arg_kind_t::resource: {
                     auto &arg_storage
-                            = res_storage(primitive, args_[i].dnnl_arg);
+                            = res_storage(ctx, primitive, args_[i].dnnl_arg);
                     arg_list.set(idx++, arg_storage);
                     break;
                 }
@@ -140,7 +140,7 @@ private:
     };
 
     static const memory_storage_t &res_storage(
-            const gpu_primitive_t *primitive, int arg) {
+            const exec_ctx_t &ctx, const gpu_primitive_t *primitive, int arg) {
 #ifdef DNNL_USE_RT_OBJECTS_IN_PRIMITIVE_CACHE
         return *(primitive->cached_mapper()
                          ->template get<gpu_resource_t>(primitive)
