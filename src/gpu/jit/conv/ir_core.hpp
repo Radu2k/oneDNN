@@ -29,17 +29,15 @@
 // Auxiliary macros to reduce boilerplate.
 #define IR_DECL_TYPE_ID(class_name) \
     using self_type = class_name; \
-    static int64_t _type_id() { return reinterpret_cast<int64_t>(&_type_id); } \
+    static int64_t _type_id() { return ir_id_helper_t<class_name>::id(); } \
     static int64_t _dispatch_type_id() { return _type_id(); } \
     int64_t type_id() const override { return _type_id(); }
 
 #define IR_DECL_DERIVED_TYPE_ID(class_name, base_name) \
     using self_type = class_name; \
-    static int64_t _type_id() { return reinterpret_cast<int64_t>(&_type_id); } \
+    static int64_t _type_id() { return ir_id_helper_t<class_name>::id(); } \
     int64_t type_id() const override { return _type_id(); } \
-    static int64_t _dispatch_type_id() { \
-        return reinterpret_cast<int64_t>(&base_name::_type_id); \
-    } \
+    static int64_t _dispatch_type_id() { return base_name::_type_id(); } \
     int64_t dispatch_type_id() const override { return _dispatch_type_id(); }
 
 #define IR_DECL_EXPR_TYPE_ID(class_name) \
@@ -359,6 +357,15 @@ public:
 
 private:
     uint32_t value_ = 0;
+};
+
+// Helper class to generate unique IDs for IR classes.
+template <typename T>
+struct ir_id_helper_t {
+    static int64_t id() {
+        static int dummy;
+        return reinterpret_cast<int64_t>(&dummy);
+    }
 };
 
 // Base class for all IR objects. Implemented as an intrusive pointer, with
