@@ -26,13 +26,14 @@ std::string fma_kind::to_string(fma_kind_t val) {
         case fma_kind_t::mad: return "mad";
         case fma_kind_t::dpas: return "dpas";
         case fma_kind_t::dpasw: return "dpasw";
+        case fma_kind_t::unknown: return "unknown";
         default: assert(!"unknown fma kind"); return "unknown";
     }
 }
 
 fma_kind_t fma_kind::from_string(std::string enum_string) {
     for (int enum_int = static_cast<int>(fma_kind_t::mad);
-            enum_int < static_cast<int>(fma_kind_t::unknown); enum_int++) {
+            enum_int <= static_cast<int>(fma_kind_t::unknown); enum_int++) {
         fma_kind_t enum_val = static_cast<fma_kind_t>(enum_int);
         if (fma_kind::to_string(enum_val).compare(enum_string) == 0)
             return enum_val;
