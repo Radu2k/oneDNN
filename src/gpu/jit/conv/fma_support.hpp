@@ -256,8 +256,18 @@ private:
         , dst_simd_size(dst_simd_size)
         , src1_simd_size(src1_simd_size)
         , src2_simd_size(src2_simd_size) {
+        const int max_exec_size = 32;
+        const int max_exec_size_bytes = 64;
+
         ir_assert(math::is_pow2(dst_simd_size));
-        ir_assert(dst_simd_size <= reg_size / dst_type.size());
+
+        ir_assert(dst_simd_size <= max_exec_size);
+        ir_assert(dst_simd_size * dst_type.size() <= max_exec_size_bytes);
+        ir_assert(src1_simd_size <= max_exec_size);
+        ir_assert(src1_simd_size * src1_type.size() <= max_exec_size_bytes);
+        ir_assert(src2_simd_size <= max_exec_size);
+        ir_assert(src2_simd_size * src2_type.size() <= max_exec_size_bytes);
+
         ir_assert(utils::one_of(src1_simd_size, 1, dst_simd_size));
         ir_assert(utils::one_of(src2_simd_size, 1, dst_simd_size));
     }
