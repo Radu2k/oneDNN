@@ -777,6 +777,16 @@ stmt_t get_stmt_body(const stmt_t &stmt);
 
 stmt_t replace_stmt_body(const stmt_t &stmt, const stmt_t &new_body);
 
+// Describes the linear transformation F(x) for variable x: F(x) = (a * x + b),
+// where a and b are integer constants.
+struct linear_transform_t {
+    expr_t x;
+    int a;
+    int b;
+
+    bool is_identity() const { return a == 1 && b == 0; }
+};
+
 // Relation: (lhs op rhs), where:
 // - lhs is a variable
 // - rhs is an integer constant
@@ -794,6 +804,9 @@ public:
     op_kind_t op_kind() const { return expr_.as<binary_op_t>().op_kind; }
 
     bool implies(const relation_t &other) const;
+
+    // Applies linear transformation to left and right hand sides of the relation.
+    relation_t transform(const linear_transform_t &t, const expr_t &new_var);
 
     std::string str() const {
         std::ostringstream oss;
@@ -880,6 +893,8 @@ public:
     }
 
     bool is_single_value(const expr_t &e, expr_t &value) const;
+
+    int max_proven_gcd(const expr_t &var) const;
 
 private:
     bool can_prove_modulus(const expr_t &e) const {

@@ -16,6 +16,7 @@
 
 #include <sstream>
 
+#include "common/math_utils.hpp"
 #include "gpu/jit/conv/ir.hpp"
 
 namespace dnnl {
@@ -444,6 +445,12 @@ bool relation_t::implies(const relation_t &other) const {
     return false;
 }
 
+relation_t relation_t::transform(
+        const linear_transform_t &t, const expr_t &new_var) {
+    ir_assert(t.a == 1) << "Not implemented.";
+    return relation_t(binary_op_t::make(op_kind(), new_var, rhs() + t.b));
+}
+
 expr_t relation_t::normalize(const expr_t &e) {
     ir_assert(is_relation_constraint(e)) << e;
     auto &op = e.as<binary_op_t>();
@@ -481,7 +488,57 @@ bool modulus_info_t::is_modulus_constraint(const expr_t &e) {
     return true;
 }
 
+bool is_linear_var_transform(const expr_t &e, linear_transform_t &t) {
+    if (is_var(e)) {
+        t.x = e;
+        t.a = 1;
+        t.b = 0;
+        return true;
+    }
+
+    auto *binary_op = e.as_ptr<binary_op_t>();
+    if (!binary_op) return false;
+
+    auto vars = find_objects<var_t>(e);
+    if (vars.size() != 1) return false;
+
+    auto &var = vars[0];
+
+    // TODO: Extend to match multiplication: (a * var).
+    if (!utils::one_of(binary_op->op_kind, op_kind_t::_add, op_kind_t::_sub))
+        return false;
+
+    auto &a = binary_op->a;
+    auto &b = binary_op->b;
+
+    bool is_sub = (binary_op->op_kind == op_kind_t::_sub);
+
+    // var op b -> (t.a = 1, t.b = +/-b)
+    if (a.is_same(var) && is_const(b)) {
+        t.x = var;
+        t.a = 1;
+        t.b = (is_sub ? -1 : 1) * to_cpp<int>(b);
+        return true;
+    }
+
+    // a op var -> (t.a = +/-1, t.b = a)
+    if (is_const(a) && b.is_same(var)) {
+        t.x = var;
+        t.a = (is_sub ? -1 : 1);
+        t.b = to_cpp<int>(a);
+        return true;
+    }
+
+    return false;
+}
+
 void constraint_set_t::add_constraint(const expr_t &e) {
+    auto *shuffle = e.as_ptr<shuffle_t>();
+    if (shuffle) {
+        if (shuffle->is_broadcast()) add_constraint(shuffle->vec[0]);
+        return;
+    }
+
     if (modulus_info_t::is_modulus_constraint(e)) {
         modulus_info_t mi(e);
         modulus_infos_[mi.var()].push_back(mi);
@@ -499,19 +556,22 @@ void constraint_set_t::add_constraint(const expr_t &e) {
     if (binary_op && binary_op->op_kind == op_kind_t::_eq) {
         auto &a = binary_op->a;
         auto &b = binary_op->b;
-        if (is_var(a) && is_var(b)) {
+        linear_transform_t t;
+        if (is_var(a) && is_linear_var_transform(b, t)) {
             // Relations.
-            auto r_it = relations_.find(b);
+            auto r_it = relations_.find(t.x);
             if (r_it != relations_.end()) {
                 for (auto &c : r_it->second) {
-                    add_constraint(substitute(c.expr(), b, a));
+                    add_constraint(c.transform(t, a).expr());
                 }
             }
             // Modulus.
-            auto m_it = modulus_infos_.find(b);
-            if (m_it != modulus_infos_.end()) {
-                for (auto &c : m_it->second) {
-                    add_constraint(substitute(c.expr(), b, a));
+            if (t.is_identity()) {
+                auto m_it = modulus_infos_.find(t.x);
+                if (m_it != modulus_infos_.end()) {
+                    for (auto &c : m_it->second) {
+                        add_constraint(substitute(c.expr(), b, a));
+                    }
                 }
             }
             return;
@@ -581,6 +641,16 @@ bool constraint_set_t::can_prove_impl(
 
     // Can't prove.
     return false;
+}
+
+int constraint_set_t::max_proven_gcd(const expr_t &var) const {
+    auto it = modulus_infos_.find(var);
+    if (it == modulus_infos_.end()) return 1;
+    int ret = 1;
+    for (auto &c : it->second) {
+        ret = math::lcm(ret, to_cpp<int>(c.mod()));
+    }
+    return ret;
 }
 
 } // namespace jit
