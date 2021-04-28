@@ -4495,9 +4495,11 @@ void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
 
     int wei_oc = int(cfg_.wei_layout.dim(cfg_.with_groups ? 1 : 0));
     int dst_oc = int(cfg_.dst_layout.dim(1));
-    int wei_oc_inner_blk
-            = int(cfg_.wei_layout.inner_block(cfg_.with_groups ? 1 : 0));
-    int dst_oc_inner_blk = int(cfg_.dst_layout.inner_block(1));
+
+    int wei_oc_inner_blk = ir_utils::max_pow2_divisor(wei_oc);
+    int dst_oc_inner_blk = ir_utils::max_pow2_divisor(dst_oc);
+    wei_oc_inner_blk = std::min(wei_oc_inner_blk, cfg_.oc_thr_blk);
+    dst_oc_inner_blk = std::min(dst_oc_inner_blk, cfg_.oc_thr_blk);
 
     bool check_wei_oc = (wei_oc % cfg_.oc_tg_blk != 0);
     bool check_dst_oc = (dst_oc % cfg_.oc_tg_blk != 0);
@@ -4658,10 +4660,10 @@ void kernel_builder_t::init_bwd_data(constraint_set_t &init_cset,
     int wei_ic = int(cfg_.wei_layout.dim(cfg_.with_groups ? 2 : 1));
     int src_ic = int(cfg_.src_layout.dim(1));
 
-    int wei_ic_inner_blk
-            = int(cfg_.wei_layout.inner_block(cfg_.with_groups ? 2 : 1));
-
-    int src_ic_inner_blk = int(cfg_.src_layout.inner_block(1));
+    int wei_ic_inner_blk = ir_utils::max_pow2_divisor(wei_ic);
+    int src_ic_inner_blk = ir_utils::max_pow2_divisor(src_ic);
+    wei_ic_inner_blk = std::min(wei_ic_inner_blk, cfg_.ic_thr_blk);
+    src_ic_inner_blk = std::min(src_ic_inner_blk, cfg_.ic_thr_blk);
 
     bool check_wei_ic = (wei_ic % cfg_.ic_tg_blk != 0);
     bool check_src_ic = (src_ic % cfg_.ic_tg_blk != 0);

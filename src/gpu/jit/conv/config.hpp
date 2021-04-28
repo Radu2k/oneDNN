@@ -229,7 +229,7 @@ public:
 
         // Set dispatch and kernel parameters.
         int mb_thr_blk = (mb < 16 ? 1 : 32);
-        int oc_thr_blk = 32;
+        oc_thr_blk = 32;
         int ow_thr_blk = (mb < 16 ? 16 : 1);
         if (ow < ow_thr_blk) ow_thr_blk = 8;
 
@@ -372,7 +372,7 @@ public:
 
         // Set dispatch and kernel parameters.
         int mb_thr_blk = (mb < 16 ? 1 : 32);
-        int ic_thr_blk = 32;
+        ic_thr_blk = 32;
         int iw_thr_blk = (mb < 16 ? 16 : 1);
         if (iw < iw_thr_blk) iw_thr_blk = 8;
 
@@ -616,6 +616,9 @@ public:
     int ic_tg_blk;
     int iw_tg_blk;
     int oc_blk;
+
+    int oc_thr_blk;
+    int ic_thr_blk;
 
     // Block sizes per thread group (GEMM notation).
     int m_tg_blk;

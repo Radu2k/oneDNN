@@ -350,18 +350,6 @@ public:
 
     const std::vector<block_t> &blocks() const { return blocks_; }
 
-    dim_t inner_block(int dim_idx) const {
-        dim_t block0 = -1;
-        int nblocks = 0;
-        for (auto &b : blocks_) {
-            if (b.dim_idx == dim_idx) {
-                nblocks++;
-                if (block0 == -1) block0 = b.block;
-            }
-        }
-        return nblocks > 1 ? block0 : 1;
-    }
-
     void set_offset(const expr_t &offset) { offset_ = offset; }
 
     bool is_strictly_equal(

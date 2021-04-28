@@ -308,6 +308,12 @@ inline T max_divisor(T n, std::initializer_list<T> divisors) {
     return ret;
 }
 
+// Equivalent of BLSI instruction (extract lowest set isolated bit).
+template <typename T>
+inline T max_pow2_divisor(T n) {
+    return n & ~(n - 1);
+}
+
 } // namespace ir_utils
 } // namespace jit
 } // namespace gpu
