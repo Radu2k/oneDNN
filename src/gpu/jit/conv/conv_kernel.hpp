@@ -297,7 +297,8 @@ public:
     ngen_operand_t reinterpret(ngen::HW hw, const type_t &new_type) const {
         ir_assert(is_reg_data());
         ir_assert(new_type.is_scalar());
-        return ngen_reg_data(hw, reg_data(), 0, to_ngen(new_type), 1);
+        return ngen_operand_t(
+                ngen_reg_data(hw, reg_data(), 0, to_ngen(new_type), 1), mod_);
     }
 
     // Creates an operand with the requested register region based on the
@@ -850,6 +851,9 @@ public:
     // result.
     ngen_operand_t eval(const expr_t &e,
             const ngen_operand_t &out_operand = ngen_operand_t()) {
+        if (!out_operand.is_invalid()) {
+            ir_assert(out_operand.mod().getExecSize() != 0);
+        }
         if (expr_binding_.is_evaluated(e)) {
             if (!out_operand.is_invalid()) {
                 host_->emov(
@@ -921,27 +925,33 @@ public:
             return;
         }
 
-        auto expr_op = eval(obj->expr);
+        auto dst_op = alloc_op(obj);
 
         // Handle ptr -> u64 and u64 -> ptr casts.
         if (utils::one_of(obj->type, type_t::u64(), type_t::byte_ptr())
                 && utils::one_of(
                         obj->expr.type(), type_t::u64(), type_t::byte_ptr())) {
-            bind(obj, expr_op);
+            eval(obj->expr, dst_op);
+            expr_binding_.mark_as_evaluated(obj);
             return;
         }
 
-        // Handle integer down-conversion preserving signedness.
-        if (from_type.is_signed(1) && to_type.is_signed(1)
-                && (from_type.size() > to_type.size())) {
-            bind(obj, expr_op.reinterpret(hw, to_type));
+        // Handle integer (down-)conversion, assume bitwise equality in this
+        // case. Examples: d <-> ud, d -> w, q -> d.
+        bool is_int_convert = (from_type.is_scalar() && to_type.is_scalar()
+                && from_type.is_int() && to_type.is_int()
+                && from_type.size() >= to_type.size());
+        if (is_int_convert) {
+            eval(obj->expr, dst_op.reinterpret(hw, from_type));
+            expr_binding_.mark_as_evaluated(obj);
             return;
         }
 
-        auto dst_op = alloc_op(obj);
+        auto expr_op = eval(obj->expr);
         auto mod = dst_op.mod();
         if (obj->saturate) mod |= host_->sat;
         host_->emov(mod, dst_op, expr_op);
+        expr_binding_.mark_as_evaluated(obj);
     }
 
     void _visit(const float_imm_t *obj) override { bind(obj, to_ngen(obj)); }
@@ -1037,7 +1047,7 @@ public:
             int exec_size = std::get<1>(chunk);
             int idx = std::get<2>(chunk);
             auto chunk_op = dst_op.sub_reg_data(hw, off, exec_size);
-            eval(obj->vec[idx], chunk_op);
+            eval(obj->vec[idx], ngen_operand_t(chunk_op, exec_size));
         }
         expr_binding_.mark_as_evaluated(obj);
     }
@@ -1074,7 +1084,10 @@ public:
 
 private:
     ngen_operand_t alloc_op(const expr_t &e) {
-        if (expr_binding_.is_bound(e)) return expr_binding_.get(e);
+        if (expr_binding_.is_bound(e)) {
+            ir_assert(!expr_binding_.is_evaluated(e)) << "Already evaluated.";
+            return expr_binding_.get(e);
+        }
 
         // Expression is not bound yet, allocate new storage and bind.
         ngen_operand_t op;
@@ -2219,8 +2232,9 @@ public:
 
         auto scope = register_scope();
         if (is_const(obj->value) || obj->var.type() != obj->value.type()) {
-            auto var_op = scope.alloc_reg_data(obj->var.type());
-            eval(obj->value, scope, var_op);
+            auto &var_type = obj->var.type();
+            auto var_op = scope.alloc_reg_data(var_type);
+            eval(obj->value, scope, ngen_operand_t(var_op, var_type.elems()));
             expr_binding_.bind(obj->var, var_op);
         } else {
             auto value_op = eval(obj->value, scope);
