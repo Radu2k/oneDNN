@@ -594,6 +594,41 @@ public:
         }
     }
 
+    void eadd3(const ngen::InstructionModifier &mod, const ngen_operand_t &dst,
+            const ngen_operand_t &src0, const ngen_operand_t &src1,
+            const ngen_operand_t &src2) {
+#if DNNL_WITH_XE_HP
+        if (hw >= ngen::HW::Xe_HP) {
+            if (src2.is_reg_data()) {
+                add3(mod, dst.reg_data(), src0.reg_data(), src1.reg_data(),
+                        src2.reg_data());
+            } else {
+                add3(mod, dst.reg_data(), src0.reg_data(), src1.reg_data(),
+                        src2.immediate());
+            }
+            return;
+        }
+#endif
+        add(mod, dst.reg_data(), src0.reg_data(), src1.reg_data());
+        if (src2.is_reg_data()) {
+            add(mod, dst.reg_data(), dst.reg_data(), src2.reg_data());
+        } else {
+            add(mod, dst.reg_data(), dst.reg_data(), src2.immediate());
+        }
+    }
+
+    void emad(const ngen::InstructionModifier &mod, const ngen_operand_t &dst,
+            const ngen_operand_t &src0, const ngen_operand_t &src1,
+            const ngen_operand_t &src2) {
+        if (src2.is_reg_data()) {
+            mad(mod, dst.reg_data(), src0.reg_data(), src1.reg_data(),
+                    src2.reg_data());
+        } else {
+            mad(mod, dst.reg_data(), src0.reg_data(), src1.reg_data(),
+                    src2.immediate());
+        }
+    }
+
     void ediv(const ngen::InstructionModifier &mod, const ngen_operand_t &dst,
             const ngen_operand_t &src0, const ngen_operand_t &src1) {
         ir_assert(src1.is_immediate());
@@ -1005,6 +1040,26 @@ public:
             eval(obj->vec[idx], chunk_op);
         }
         expr_binding_.mark_as_evaluated(obj);
+    }
+
+    void _visit(const ternary_op_t *obj) override {
+        switch (obj->op_kind) {
+            case op_kind_t::_add3:
+            case op_kind_t::_mad: {
+                auto dst_op = alloc_op(obj);
+                auto mod = dst_op.mod();
+                auto src0_op = eval(obj->a);
+                auto src1_op = eval(obj->b);
+                auto src2_op = eval(obj->c);
+                if (obj->op_kind == op_kind_t::_add3) {
+                    host_->eadd3(mod, dst_op, src0_op, src1_op, src2_op);
+                } else {
+                    host_->emad(mod, dst_op, src0_op, src1_op, src2_op);
+                }
+                break;
+            }
+            default: ir_error_not_expected();
+        }
     }
 
     void _visit(const unary_op_t *obj) override {

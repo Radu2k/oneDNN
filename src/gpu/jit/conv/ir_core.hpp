@@ -698,6 +698,9 @@ enum class op_kind_t {
     _eq,
 
     _and,
+
+    _add3, // a + b + c
+    _mad, // a + b * c
 };
 
 std::string to_string(op_kind_t kind);
@@ -720,6 +723,9 @@ type_t common_type(const type_t &a, const type_t &b);
 type_t common_type(const expr_t &a, const expr_t &b);
 
 type_t binary_op_type(op_kind_t op_kind, const expr_t &a, const expr_t &b);
+
+type_t ternary_op_type(
+        op_kind_t op_kind, const expr_t &a, const expr_t &b, const expr_t &c);
 
 type_t nary_op_type(op_kind_t op_kind, const std::vector<expr_t> &args);
 
@@ -897,13 +903,6 @@ public:
         return make(imm.value, new_type);
     }
 
-    int64_t value;
-
-private:
-    int_imm_t(int64_t value, const type_t &type = type_t::undef())
-        : expr_impl_t(type.is_undef() ? shrink_type(value) : type)
-        , value(value) {}
-
     template <typename T>
     static bool try_shrink_type(int64_t v) {
         if (v >= std::numeric_limits<T>::min()
@@ -911,6 +910,13 @@ private:
             return true;
         return false;
     }
+
+    int64_t value;
+
+private:
+    int_imm_t(int64_t value, const type_t &type = type_t::undef())
+        : expr_impl_t(type.is_undef() ? shrink_type(value) : type)
+        , value(value) {}
 
     static type_t shrink_type(int64_t v) {
         if (try_shrink_type<int32_t>(v)) return type_t::s32();
@@ -1158,6 +1164,51 @@ private:
         return elem_type.with_elems(elems);
     }
 };
+
+// Ternary operation: op(a, b, c).
+class ternary_op_t : public expr_impl_t {
+public:
+    IR_DECL_EXPR_TYPE_ID(ternary_op_t)
+
+    static expr_t make(op_kind_t op_kind, const expr_t &a, const expr_t &b,
+            const expr_t &c) {
+        return expr_t(new ternary_op_t(op_kind, a, b, c));
+    }
+
+    bool is_equal(const object_impl_t *obj) const override {
+        if (!obj->is<self_type>()) return false;
+        auto &other = obj->as<self_type>();
+
+        return (op_kind == other.op_kind) && a.is_equal(other.a)
+                && b.is_equal(other.b) && c.is_equal(other.c);
+    }
+
+    size_t get_hash() const override {
+        return ir_utils::get_hash(op_kind, a, b, c);
+    }
+
+    op_kind_t op_kind;
+    expr_t a;
+    expr_t b;
+    expr_t c;
+
+private:
+    ternary_op_t(op_kind_t op_kind, const expr_t &a, const expr_t &b,
+            const expr_t &c)
+        : expr_impl_t(ternary_op_type(op_kind, a, b, c))
+        , op_kind(op_kind)
+        , a(a)
+        , b(b)
+        , c(c) {}
+};
+
+inline expr_t ternary_mad(const expr_t &a, const expr_t &b, const expr_t &c) {
+    return ternary_op_t::make(op_kind_t::_mad, a, b, c);
+}
+
+inline expr_t ternary_add3(const expr_t &a, const expr_t &b, const expr_t &c) {
+    return ternary_op_t::make(op_kind_t::_add3, a, b, c);
+}
 
 // Unary operation: (op a).
 class unary_op_t : public expr_impl_t {
@@ -1949,6 +2000,7 @@ private:
     HANDLE_IR_OBJECT(load_t) \
     HANDLE_IR_OBJECT(ptr_t) \
     HANDLE_IR_OBJECT(shuffle_t) \
+    HANDLE_IR_OBJECT(ternary_op_t) \
     HANDLE_IR_OBJECT(unary_op_t) \
     HANDLE_IR_OBJECT(var_t)
 

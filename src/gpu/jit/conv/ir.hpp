@@ -128,6 +128,12 @@ public:
         visit(obj->mask);
     }
 
+    virtual void _visit(const ternary_op_t *obj) {
+        visit(obj->a);
+        visit(obj->b);
+        visit(obj->c);
+    }
+
     virtual void _visit(const unary_op_t *obj) { visit(obj->a); }
 
     bool is_supported(const object_t &obj) const {
@@ -357,6 +363,17 @@ public:
             return obj;
 
         return store_t::make(buf, off, value, obj->stride, mask);
+    }
+
+    virtual object_t _mutate(const ternary_op_t *obj) {
+        auto a = mutate(obj->a);
+        auto b = mutate(obj->b);
+        auto c = mutate(obj->c);
+
+        if (a.is_same(obj->a) && b.is_same(obj->b) && c.is_same(obj->c))
+            return obj;
+
+        return ternary_op_t::make(obj->op_kind, a, b, c);
     }
 
     virtual object_t _mutate(const unary_op_t *obj) {
@@ -930,6 +947,10 @@ private:
 // Simplifies expression or statement. An optional constraint set is used to
 // pass known equalities and inequalities which may be used for simplification.
 object_t simplify(const object_t &obj, const constraint_set_t &cset = {});
+
+// Searches for expression patterns to reduce them to the equivalent ternary
+// operations.
+expr_t simplify_rewrite_with_ternary(const expr_t &e, bool recursive = true);
 
 // Moves constants to the right hand side of an expression.
 // Example: (c0 + x) op c1 -> x op (c1 - c0)

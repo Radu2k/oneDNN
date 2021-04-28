@@ -119,6 +119,9 @@ std::string to_string(op_kind_t kind) {
 
         case op_kind_t::_and: return "&&";
 
+        case op_kind_t::_add3: return "add3";
+        case op_kind_t::_mad: return "mad";
+
         default: ir_error_not_expected() << "Unknown op_kind_t value.";
     }
     return "";
@@ -208,17 +211,35 @@ type_t common_type(const expr_t &a, const expr_t &b) {
     return common_type(a.type(), b.type());
 }
 
-type_t binary_op_type(op_kind_t op_kind, const expr_t &a, const expr_t &b) {
-    if (a.type().is_undef() || b.type().is_undef()) return type_t::undef();
-    ir_assert(a.type().elems() == b.type().elems())
+type_t binary_op_type(op_kind_t op_kind, const type_t &a, const type_t &b) {
+    if (a.is_undef() || b.is_undef()) return type_t::undef();
+    ir_assert(a.elems() == b.elems())
             << "Types must have the same number of components.";
-    if (is_cmp_op(op_kind)) return type_t::_bool(a.type().elems());
+    if (is_cmp_op(op_kind)) return type_t::_bool(a.elems());
     if (utils::one_of(op_kind, op_kind_t::_shl, op_kind_t::_shr)) {
-        ir_assert(a.type().is_unsigned())
+        ir_assert(a.is_unsigned())
                 << "a must be unsigned for shift left/right.";
-        return type_t::u32(a.type().elems());
+        return type_t::u32(a.elems());
     }
     return common_type(a, b);
+}
+
+type_t binary_op_type(op_kind_t op_kind, const expr_t &a, const expr_t &b) {
+    return binary_op_type(op_kind, a.type(), b.type());
+}
+
+type_t ternary_op_type(
+        op_kind_t op_kind, const expr_t &a, const expr_t &b, const expr_t &c) {
+    switch (op_kind) {
+        case op_kind_t::_add3:
+            return binary_op_type(op_kind_t::_add, a.type(),
+                    binary_op_type(op_kind_t::_add, b, c));
+        case op_kind_t::_mad:
+            return binary_op_type(op_kind_t::_add, a.type(),
+                    binary_op_type(op_kind_t::_mul, b, c));
+        default: ir_error_not_expected();
+    }
+    return type_t::undef();
 }
 
 type_t nary_op_type(op_kind_t op_kind, const std::vector<expr_t> &args) {

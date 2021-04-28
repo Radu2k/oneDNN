@@ -323,11 +323,31 @@ expr_t simplify_try_rules(const expr_t &_e) {
         REWRITE_NO_STATIC(x & _false, _false);
     }
 
-#undef REWRITE
-#undef REWRITE_NO_STATIC
+    return e;
+}
+
+expr_t simplify_try_ternary_rules(const expr_t &_e) {
+    static auto x = pexpr_t::x();
+    static auto y = pexpr_t::y();
+    static auto z = pexpr_t::z();
+
+    auto e = _e;
+
+    // add3 rules.
+    REWRITE((x + y) + z, ternary_add3(x, y, z));
+    REWRITE(x + (y + z), ternary_add3(x, y, z));
+
+    // mad rules.
+    REWRITE(x + y * z, ternary_mad(x, y, z));
+    REWRITE(x - y * z, ternary_mad(x, -y, z));
+    REWRITE(y * z + x, ternary_mad(x, y, z));
+    REWRITE(y * z - x, ternary_mad(-x, y, z));
 
     return e;
 }
+
+#undef REWRITE
+#undef REWRITE_NO_STATIC
 
 class term_rewrite_transformer_t : public ir_mutator_t {
 public:
@@ -352,6 +372,35 @@ expr_t simplify_rewrite(const expr_t &e) {
         ret = e;
     } else {
         term_rewrite_transformer_t trt;
+        ret = trt.mutate(e);
+    }
+    return ret;
+}
+
+class ternary_rewrite_transformer_t : public ir_mutator_t {
+public:
+    object_t _mutate(const binary_op_t *obj) override {
+        return mutate_expr(obj);
+    }
+    object_t _mutate(const iif_t *obj) override { return mutate_expr(obj); }
+
+    template <typename T>
+    expr_t mutate_expr(const T *obj) {
+        auto e_old = ir_mutator_t::_mutate(obj);
+        auto e = simplify_try_ternary_rules(e_old);
+        if (e.is_same(e_old)) return e_old;
+        return mutate(e);
+    }
+};
+
+expr_t simplify_rewrite_with_ternary(const expr_t &e, bool recursive) {
+    expr_t ret;
+    if (is_const(e) || is_var(e)) {
+        ret = e;
+    } else if (!recursive) {
+        ret = simplify_try_ternary_rules(e);
+    } else {
+        ternary_rewrite_transformer_t trt;
         ret = trt.mutate(e);
     }
     return ret;

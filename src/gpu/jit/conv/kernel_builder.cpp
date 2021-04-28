@@ -2794,6 +2794,74 @@ stmt_t split_wide_stores(ngen::HW hw, const stmt_t &s) {
     return ret;
 }
 
+class peephole_optimizer_t : public ir_mutator_t {
+public:
+    object_t _mutate(const binary_op_t *obj) override {
+        auto old_obj = ir_mutator_t::_mutate(obj);
+        auto new_obj
+                = simplify_rewrite_with_ternary(old_obj, /*recursive=*/false);
+        auto *ternary = new_obj.as_ptr<ternary_op_t>();
+        if (!ternary) return std::move(new_obj);
+
+        switch (ternary->op_kind) {
+            case op_kind_t::_add3: {
+                bool ok = true;
+                // Allowed form: add3(dword/word, dword/word, dword/word).
+                ok &= add3_type_ok(ternary->a);
+                ok &= add3_type_ok(ternary->b);
+                ok &= add3_type_ok(ternary->c);
+                ok &= !is_const(ternary->a);
+                ok &= !is_const(ternary->b);
+                if (!ok) new_obj = old_obj;
+                break;
+            }
+            case op_kind_t::_mad: {
+                auto a_type = real_type(ternary->a);
+                auto b_type = real_type(ternary->b);
+                auto c_type = real_type(ternary->c);
+                bool ok = true;
+                // Allowed form: mad(dword, dword, word).
+                ok &= utils::one_of(a_type, type_t::s32(), type_t::u32());
+                ok &= utils::one_of(b_type, type_t::s32(), type_t::u32());
+                ok &= utils::one_of(c_type, type_t::s16(), type_t::u16());
+                if (!ok) new_obj = old_obj;
+                break;
+            }
+            default: ir_error_not_expected();
+        }
+        return std::move(new_obj);
+    }
+
+private:
+    static type_t real_type(const expr_t &e) {
+        auto *imm = e.as_ptr<int_imm_t>();
+        if (!imm) return e.type();
+        if (int_imm_t::try_shrink_type<int16_t>(imm->value))
+            return type_t::s16();
+        if (int_imm_t::try_shrink_type<int32_t>(imm->value))
+            return type_t::s32();
+        return type_t::s64();
+    }
+
+    static bool add3_type_ok(const expr_t &e) {
+        auto t = real_type(e);
+        if (!t.is_scalar()) return false;
+        switch (t.kind()) {
+            case type_kind_t::s32:
+            case type_kind_t::u32: return !is_const(e);
+            case type_kind_t::s16:
+            case type_kind_t::u16: return true;
+            default: return false;
+        }
+    }
+};
+
+stmt_t optimize_peephole(const stmt_t &s) {
+    auto ret = peephole_optimizer_t().mutate(s);
+    trace_pass("optimize_peephole", ret);
+    return ret;
+}
+
 stmt_t create_reorder_stmt(const view_t &src, const view_t &dst,
         const expr_t &src_buf, const expr_t &dst_buf) {
     auto src_layout = src.create_vlayout();
@@ -4682,6 +4750,7 @@ void kernel_builder_t::build() {
     }
     stmt_ = simplify(stmt_, init_cset);
     stmt_ = optimize_let(stmt_);
+    stmt_ = optimize_peephole(stmt_);
     stmt_ = stmt_group_t::make(stmt_label_t::kernel(), stmt_);
 
     ir_trace() << "Kernel body:\n" << stmt_ << std::endl;
