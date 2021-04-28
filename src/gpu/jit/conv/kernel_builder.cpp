@@ -3669,7 +3669,7 @@ class multiply_builder_t {
 public:
     multiply_builder_t() = default;
 
-    multiply_builder_t(fma_kind_t kind, const layout_t &a_layout,
+    multiply_builder_t(fma_kind_t kind, int simd_size, const layout_t &a_layout,
             const layout_t &b_layout, const expr_t &a_buf, const expr_t &b_buf,
             const expr_t &c_buf)
         : a_layout_(a_layout)
@@ -3681,10 +3681,10 @@ public:
         switch (kind) {
             case fma_kind_t::dpasw:
             case fma_kind_t::dpas:
-                if (try_build_dpas()) return;
+                if (try_build_dpas(simd_size)) return;
                 break;
             case fma_kind_t::mad:
-                if (try_build_mad()) return;
+                if (try_build_mad(simd_size)) return;
                 break;
             default: break;
         }
@@ -3722,10 +3722,13 @@ public:
     }
 
 private:
-    bool try_build_dpas() {
+    bool try_build_dpas(int simd_size) {
         multiply_desc_t desc(a_layout_, b_layout_, true);
         if (!dpas_t::matches_types(desc.a_type(), desc.b_type(), desc.c_type()))
             return false;
+
+        // Only one size is supported
+        if (simd_size != dpas_t::simd_size) return false;
 
         auto _dpas = dpas_t::make(/*is_dpasw=*/false, /*sdepth=*/8,
                 /*rcount=*/8, desc.c_type(), desc.a_type(), desc.b_type());
@@ -3781,13 +3784,11 @@ private:
         return c_layout;
     }
 
-    bool try_build_mad() {
+    bool try_build_mad(int simd_size) {
         multiply_desc_t desc(a_layout_, b_layout_, true);
         if (!mad_t::matches_types(desc.a_type(), desc.b_type(), desc.c_type()))
             return false;
 
-        int simd_size = mad_t::get_simd_size(
-                desc.a_type(), desc.b_type(), desc.c_type());
         auto _mad = mad_t::make(desc.c_type(), simd_size, desc.a_type(), 1,
                 desc.b_type(), simd_size);
         if (_mad.as<mad_t>().matches(desc)) {
@@ -3990,8 +3991,8 @@ public:
                         b_read.reg_view(), {mnk_kind_t::k, mnk_kind_t::n});
 
                 // Multiply C_i_j += A_i x B_j in GEMM notation.
-                multiply_builder_t mul_builder(cfg_.fma_kind, a_layout,
-                        b_layout, a_buf, b_buf, c_buf[c_buf_off]);
+                multiply_builder_t mul_builder(cfg_.fma_kind, cfg_.simd_size,
+                        a_layout, b_layout, a_buf, b_buf, c_buf[c_buf_off]);
                 ir_trace() << "Multiply (" << i << ", " << j << "):\n"
                            << mul_builder.str() << std::endl;
                 load_mul_stmt_ = load_mul_stmt_.append(stmt_group_t::make(

@@ -232,10 +232,18 @@ public:
     static bool matches_types(
             const type_t &a, const type_t &b, const type_t &c);
 
-    static const int reg_size = 32;
+    static const int max_exec_size = 32;
+    static const int max_exec_size_bytes = 64;
     static int get_simd_size(
             const type_t &a, const type_t &b, const type_t &c) {
-        return reg_size / c.size();
+        int max_size = max_exec_size;
+        if (max_exec_size_bytes / a.size() < max_size)
+            max_size = max_exec_size_bytes / a.size();
+        if (max_exec_size_bytes / b.size() < max_size)
+            max_size = max_exec_size_bytes / b.size();
+        if (max_exec_size_bytes / c.size() < max_size)
+            max_size = max_exec_size_bytes / c.size();
+        return max_size;
     }
     int get_simd_size() const { return dst_simd_size; }
 
@@ -256,8 +264,6 @@ private:
         , dst_simd_size(dst_simd_size)
         , src1_simd_size(src1_simd_size)
         , src2_simd_size(src2_simd_size) {
-        const int max_exec_size = 32;
-        const int max_exec_size_bytes = 64;
 
         ir_assert(math::is_pow2(dst_simd_size));
 

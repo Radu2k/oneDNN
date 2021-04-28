@@ -239,8 +239,6 @@ public:
         ow_thr_blk = getenv_int("ow_thr_blk", ow_thr_blk);
 #endif
 
-        simd_size = fma_kind::get_simd_size(
-                fma_kind, src_data_type, wei_data_type, acc_data_type);
         regs = 256;
 
         tg_grid_dim[0] = std::min(4, utils::div_up(oc, oc_thr_blk));
@@ -301,6 +299,12 @@ public:
             src_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
             wei_tag = "BAx16b16a";
             dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
+            // This initial restriction is due to a bug encountered in
+            // OpenCL compilation. It can be removed once this issue is
+            // resolved and replaced with max_simd_size=16.
+            int max_simd_size = 32 / type_t(acc_data_type).size();
+            if (max_simd_size > 16) max_simd_size = 16;
+            if (simd_size > max_simd_size) simd_size = max_simd_size;
         } else if (is_s32_accumulator()) {
             src_tag = (mb_thr_blk == 1 ? "aBx32b" : "ABx32a32b");
             wei_tag = "ABx4a8b8a4b";
@@ -382,8 +386,6 @@ public:
         iw_thr_blk = getenv_int("iw_thr_blk", iw_thr_blk);
 #endif
 
-        simd_size = fma_kind::get_simd_size(
-                fma_kind, dst_data_type, wei_data_type, acc_data_type);
         regs = 256;
 
         tg_grid_dim[0] = std::min(4, utils::div_up(ic, ic_thr_blk));
@@ -519,6 +521,9 @@ public:
         a_sub_tiles = getenv_int("a_sub_tiles", a_sub_tiles);
         b_sub_tiles = getenv_int("b_sub_tiles", b_sub_tiles);
 #endif
+
+        simd_size = fma_kind::get_simd_size(
+                fma_kind, dst_data_type, wei_data_type, acc_data_type);
     }
 
     bool post_ops_ok(const convolution_pd_t *pd) const {
