@@ -123,25 +123,34 @@ bool dpas_t::matches_types(const type_t &a, const type_t &b, const type_t &c) {
 }
 
 layout_t mad_t::a_layout() const {
-    if (src1_type.size() == 1) return layout_t(src1_type, 0, "1a1b");
-    if (src1_type.size() == 2) return layout_t(src1_type, 0, "1a1b");
-    if (src1_type.size() == 4) return layout_t(src1_type, 0, "1a1b");
+    if (src1_simd_size == 1) return layout_t(src1_type, 0, "1a1b");
+    if (src1_simd_size == 2) return layout_t(src1_type, 0, "1a2b");
+    if (src1_simd_size == 4) return layout_t(src1_type, 0, "1a4b");
+    if (src1_simd_size == 8) return layout_t(src1_type, 0, "1a8b");
+    if (src1_simd_size == 16) return layout_t(src1_type, 0, "1a16b");
+    if (src1_simd_size == 32) return layout_t(src1_type, 0, "1a32b");
     ir_error_not_expected();
     return layout_t();
 }
 
 layout_t mad_t::b_layout() const {
-    if (src2_type.size() == 1) return layout_t(src2_type, 0, "1a32b");
-    if (src2_type.size() == 2) return layout_t(src2_type, 0, "1a16b");
-    if (src2_type.size() == 4) return layout_t(src2_type, 0, "1a8b");
+    if (src2_simd_size == 1) return layout_t(src2_type, 0, "1a1b");
+    if (src2_simd_size == 2) return layout_t(src2_type, 0, "1a2b");
+    if (src2_simd_size == 4) return layout_t(src2_type, 0, "1a4b");
+    if (src2_simd_size == 8) return layout_t(src2_type, 0, "1a8b");
+    if (src2_simd_size == 16) return layout_t(src2_type, 0, "1a16b");
+    if (src2_simd_size == 32) return layout_t(src2_type, 0, "1a32b");
     ir_error_not_expected();
     return layout_t();
 }
 
 layout_t mad_t::c_layout() const {
-    if (src1_type.size() == 1) return layout_t(dst_type, 0, "1a32b");
-    if (src1_type.size() == 2) return layout_t(dst_type, 0, "1a16b");
-    if (src1_type.size() == 4) return layout_t(dst_type, 0, "1a8b");
+    if (dst_simd_size == 1) return layout_t(dst_type, 0, "1a1b");
+    if (dst_simd_size == 2) return layout_t(dst_type, 0, "1a2b");
+    if (dst_simd_size == 4) return layout_t(dst_type, 0, "1a4b");
+    if (dst_simd_size == 8) return layout_t(dst_type, 0, "1a8b");
+    if (dst_simd_size == 16) return layout_t(dst_type, 0, "1a16b");
+    if (dst_simd_size == 32) return layout_t(dst_type, 0, "1a32b");
     ir_error_not_expected();
     return layout_t();
 }
