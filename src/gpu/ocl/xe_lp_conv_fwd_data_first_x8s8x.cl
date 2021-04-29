@@ -153,7 +153,22 @@ conv_fwd_first_x8s8x(const __global uchar *src, const __global char *wei,
                 }
             }
 #endif
-
+            /* right tail */
+#if ZERO_TAIL > 0
+            if (right_tail) {
+                for (int i = SLM_TAIL; i < SW * OW_BLOCK + (KW - 1) * (1 + DW);
+                        i++) {
+                    S_part[i] = 0;
+                }
+            }
+#if SLM_NCHUNK < OW_NCHUNK
+            if (empty) {
+                for (int i = 0; i < SW * OW_BLOCK + (KW - 1) * (1 + DW); i++) {
+                    S_part[i] = 0;
+                }
+            }
+#endif
+#endif
 #if SLM_NCHUNK < OW_NCHUNK || OW != OWX
             if (iw + PW < IW) {
 #endif
