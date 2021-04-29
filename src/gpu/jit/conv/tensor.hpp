@@ -74,6 +74,15 @@ public:
 
     bool is_empty() const { return dims_.empty(); }
 
+    bool is_equal(const tensor_t &other) const {
+        if (ndims() != other.ndims()) return false;
+        for (int i = 0; i < ndims(); i++) {
+            if (dims_[i] != other.dims_[i]) return false;
+            if (!start_[i].is_equal(other.start_[i])) return false;
+        }
+        return true;
+    }
+
     std::string str() const {
         using ir_utils::operator<<;
 
@@ -92,23 +101,6 @@ public:
         return true;
     }
 
-    // Iterates through tiles of the tensor, callback `f` is called with
-    // relative offsets for each tile.
-    template <typename F>
-    void for_each_tile(const tensor_t &tile, const F &f) const {
-        ir_assert(tile.ndims() == ndims());
-        ir_assert(tile.has_zero_start());
-
-        std::vector<dim_t> outer_dims(ndims(), 1);
-        for (int i = 0; i < ndims(); i++) {
-            ir_assert(dims()[i] % tile.dims()[i] == 0);
-            outer_dims[i] = dims()[i] / tile.dims()[i];
-        }
-
-        std::vector<dim_t> off(ndims());
-        for_each_tile_impl(0, outer_dims, off, f);
-    }
-
     dim_t to_1d_offset(const std::vector<dim_t> &args) const {
         ir_assert(has_zero_start());
 
@@ -121,21 +113,6 @@ public:
     }
 
 private:
-    template <typename F>
-    void for_each_tile_impl(int idx, const std::vector<dim_t> &outer_dims,
-            const std::vector<dim_t> &off, const F &f) const {
-        if (idx == ndims()) {
-            f(off);
-            return;
-        }
-
-        for (int i = 0; i < outer_dims[idx]; i++) {
-            std::vector<dim_t> off_tmp = off;
-            off_tmp[idx] += i * (dims()[idx] / outer_dims[idx]);
-            for_each_tile_impl(idx + 1, outer_dims, off_tmp, f);
-        }
-    }
-
     std::vector<dim_t> dims_;
     std::vector<expr_t> start_;
 };
@@ -326,9 +303,30 @@ public:
         return max_stride * type().size();
     }
 
-    const expr_t &offset() const { return offset_; }
+    template <typename T = expr_t>
+    T offset(
+            const std::vector<T> &args = {}, bool ignore_offset = false) const {
+        if (args.empty()) return expr_cast<T>(offset_);
 
-    expr_t offset_in_bytes() const { return offset_ * type().size(); }
+        ir_assert(int(args.size()) == ndims()) << "Dimensions do not match.";
+
+        T off = 0;
+        auto _args = args;
+        for (auto &eb : enumerated_blocks()) {
+            auto &b = eb.second;
+            auto &idx = _args[b.dim_idx];
+            if (ir_utils::is_equal(idx, T(0))) continue;
+
+            // Do not use modulus for outermost blocks.
+            auto i = is_outermost(eb) ? idx : (idx % b.block);
+            off = i * dim_t(b.stride) + off;
+            idx /= b.block;
+        }
+        if (ignore_offset) return off;
+
+        T off0 = expr_cast<T>(offset_);
+        return off0 + off;
+    }
 
     const type_t &type() const { return type_; }
 
@@ -370,22 +368,13 @@ public:
 
     template <typename T>
     T operator()(const std::vector<T> &args) const {
-        ir_assert(int(args.size()) == ndims()) << "Dimensions do not match.";
+        return offset(args);
+    }
 
-        T off0 = expr_cast<T>(offset());
-        T off = 0;
-        auto _args = args;
-        for (auto &eb : enumerated_blocks()) {
-            auto &b = eb.second;
-            auto &idx = _args[b.dim_idx];
-            if (ir_utils::is_equal(idx, T(0))) continue;
-
-            // Do not use modulus for outermost blocks.
-            auto i = is_outermost(eb) ? idx : (idx % b.block);
-            off = i * dim_t(b.stride) + off;
-            idx /= b.block;
-        }
-        return off0 + off;
+    template <typename T = expr_t>
+    T offset_in_bytes(
+            const std::vector<T> &args = {}, bool ignore_offset = false) const {
+        return offset(args, ignore_offset) * type().size();
     }
 
     std::string desc_str(bool dnnl_style = false) const {
@@ -508,6 +497,15 @@ public:
         return ret;
     }
 
+    bool is_dense() const {
+        stride_t stride = 1;
+        for (auto &b : blocks_) {
+            if (b.stride != stride) return false;
+            stride *= b.block;
+        }
+        return true;
+    }
+
     // Returns a packed layout where all blocks are contiguous, without gaps.
     layout_t make_dense() const {
         dim_t stride = 1;
@@ -548,9 +546,67 @@ public:
         return layout_t(type(), ndims(), offset(), new_blocks);
     }
 
+    // Iterates through tiles of the layout, calling `f` with relative offsets
+    // for each tile. The iteration order is defined by the layout blocks -
+    // absolute 1D offsets are increasing between callback calls.
     template <typename F>
     void for_each_tile(const tensor_t &tile, const F &f) const {
-        return tensor_t(dims()).for_each_tile(tile, f);
+        ir_assert(tile.ndims() == ndims());
+        ir_assert(tile.has_zero_start());
+        for (int i = 0; i < ndims(); i++) {
+            ir_assert(dim(i) % tile.dims()[i] == 0);
+        }
+
+        int nblocks = int(blocks().size());
+        std::vector<dim_t> sub_blocks(nblocks);
+        for (int i = 0; i < nblocks; i++)
+            sub_blocks[i] = blocks()[i].block;
+
+        for (int i = 0; i < ndims(); i++) {
+            dim_t dim = tile.dims()[i];
+            for (auto &eb : enumerated_blocks()) {
+                auto &b = eb.second;
+                if (b.dim_idx != i) continue;
+                int block_idx = eb.first;
+                if (b.block >= dim) {
+                    ir_assert(b.block % dim == 0);
+                    sub_blocks[block_idx] = b.block / dim;
+                    break;
+                }
+                sub_blocks[block_idx] = 1;
+                ir_assert(dim % b.block == 0);
+                dim /= b.block;
+            }
+        }
+
+        int ntiles = int(elems() / tile.elems());
+
+        std::vector<dim_t> sub_block_idxs(nblocks);
+        for (int i = 0; i < ntiles; i++) {
+            // Convert sub-block indices to dimension indices.
+            std::vector<dim_t> dims(ndims(), 1);
+            std::vector<dim_t> start(ndims());
+            for (int j = 0; j < nblocks; j++) {
+                auto &b = blocks()[j];
+                dim_t k = sub_block_idxs[j]
+                        * (blocks()[j].block / sub_blocks[j]);
+                start[b.dim_idx] += dims[b.dim_idx] * k;
+                dims[b.dim_idx] *= b.block;
+            }
+
+            // Pass dimension offsets to the callback.
+            f(start);
+
+            // Move to the next vector of indices.
+            for (int j = 0; j < nblocks; j++) {
+                auto &idx = sub_block_idxs[j];
+                if (idx + 1 < sub_blocks[j]) {
+                    idx++;
+                    break;
+                }
+                idx = 0;
+            }
+        }
     }
 
     // eb is <block index, block> pair, see enumerated_blocks().
@@ -1074,13 +1130,15 @@ public:
 
     const type_t &type() const { return tlayout_.type(); }
 
-    expr_t offset(const std::vector<expr_t> &vargs = {}) const {
+    expr_t offset(const std::vector<expr_t> &vargs = {},
+            bool ignore_offset = false) const {
         auto targs = cvt_vargs_to_targs(vargs);
-        return tlayout_(targs);
+        return tlayout_.offset(targs, ignore_offset);
     }
 
-    expr_t offset_in_bytes(const std::vector<expr_t> &vargs = {}) const {
-        return offset(vargs) * type().size();
+    expr_t offset_in_bytes(const std::vector<expr_t> &vargs = {},
+            bool ignore_offset = false) const {
+        return offset(vargs, ignore_offset) * type().size();
     }
 
     tensor_t vtensor(bool force_zero_start = false) const {
@@ -1120,6 +1178,16 @@ public:
         return ret;
     }
 
+    bool can_convert_to_vlayout() const {
+        if (is_direct_) return true;
+        if (nvdims() != ntdims()) return false;
+        for (int i = 0; i < nvdims(); i++) {
+            if (!tdims_[i].expr().is_same(vvars_[i])) return false;
+            if (!tdims_[i].is_fixed_stride(0)) return false;
+        }
+        return true;
+    }
+
     // FIXME: Offset of the returned layout is always 0.
     layout_t create_pseudo_vlayout() const {
         if (is_direct_) return create_vlayout(/*force_zero_offset=*/true);
@@ -1131,10 +1199,10 @@ public:
     }
 
     layout_t create_vlayout(bool force_zero_offset = false) const {
-        ir_assert(is_direct_)
-                << "Can't create view layout for non-direct views.";
+        ir_assert(can_convert_to_vlayout()) << "Can't convert view to layout.";
         if (force_zero_offset) return tlayout_.map(tensor_t(vdims_));
-        return tlayout_.map(tensor_t(vdims_, vdirect_start_));
+        if (is_direct_) return tlayout_.map(tensor_t(vdims_, vdirect_start_));
+        return tlayout_.map(tensor_t(vdims_, vstart_));
     }
 
     dim_t vlayout_size() const { return create_vlayout().size(); }
@@ -1175,7 +1243,8 @@ public:
 
     template <typename F>
     void for_each_tile(const tensor_t &tile, const F &f) const {
-        tensor_t(vdims_).for_each_tile(tile, f);
+        auto vlayout = create_dense_vlayout();
+        vlayout.for_each_tile(tile, f);
     }
 
     view_t substitute(const expr_t &from, const expr_t &to) const;

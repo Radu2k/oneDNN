@@ -219,11 +219,17 @@ layout_t layout_t::map(const tensor_t &tensor) const {
 }
 
 layout_t layout_t::reinterpret(const type_t &new_type) const {
-    if (!has_zero_offset()) ir_error_not_implemented();
-
     int old_size = type().size();
     int new_size = new_type.size();
     if (new_size == old_size) return *this;
+
+    expr_t new_offset = 0;
+    if (!has_zero_offset()) {
+        ir_assert(is_const(offset_)) << "Expected constant offset.";
+        int64_t off = to_cpp<int64_t>(offset_) * old_size;
+        ir_assert(off % new_size == 0);
+        new_offset = off / new_size;
+    }
 
     if (old_size % new_size != 0 && new_size % old_size != 0)
         ir_error_not_expected();
@@ -251,7 +257,7 @@ layout_t layout_t::reinterpret(const type_t &new_type) const {
         }
     }
 
-    return layout_t(new_type, ndims(), 0, new_blocks);
+    return layout_t(new_type, ndims(), new_offset, new_blocks);
 }
 
 layout_t layout_t::split_block(
