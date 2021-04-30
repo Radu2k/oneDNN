@@ -114,6 +114,9 @@ struct amx_tile_configuration_loader_t {
             current_cfg_addr = requested_cfg_addr;
         }
     }
+    ~amx_tile_configuration_loader_t() {
+        if (current_cfg_addr) amx_tile_release();
+    }
 
 private:
     const char *current_cfg_addr = nullptr;
@@ -535,6 +538,7 @@ rnn_cell_execution_sig((_ref_rnn_common_t<aprop, src_type, weights_type,
                 ++start;
                 nd_iterator_step(nb, rnn.Nproj_blocks, mb, rnn.M_blocks);
             }
+            if (rnn.is_int8_amx() || rnn.is_bf16_amx()) { amx_tile_release(); }
         });
         // we have to downconvert the output to dst_layer_t and copy to dst_iter if needed
         if (rnn.unfused_post_gemm) {

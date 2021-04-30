@@ -69,7 +69,7 @@ bool post_ops_ok(jit_brgemm_conv_conf_t &jcp, const primitive_attr_t &attr,
 
     const auto &post_ops = attr.post_ops_;
 
-    return injector::post_ops_ok(post_ops_ok_args_t(avx512_common,
+    return injector::post_ops_ok(post_ops_ok_args_t(get_max_cpu_isa(),
             {sum, eltwise, binary}, post_ops, &dst_d,
             false /*sum_at_pos_0_only*/, false /*sum_requires_scale_one*/,
             {broadcasting_strategy_t::per_oc,
@@ -1353,6 +1353,11 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     // TODO: optimize depthwise convolutions (for now direct approach is faster)
     const bool is_depthwise = with_groups && everyone_is(1, jcp.ic, jcp.oc);
     if (is_depthwise) return status::unimplemented;
+
+    // TODO: optimize grouped convolutions with small ic
+    const bool is_grouped_small_ic
+            = with_groups && jcp.ngroups > 1 && jcp.ic <= 16;
+    if (is_grouped_small_ic) return status::unimplemented;
 
     // TODO: support s8 by brgemm convolutions
     if (jcp.src_dt == s8) return status::unimplemented;

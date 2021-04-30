@@ -1,5 +1,5 @@
 #===============================================================================
-# Copyright 2016-2020 Intel Corporation
+# Copyright 2016-2021 Intel Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(${PROJECT_SOURCE_DIR}/examples)
 
 if(UNIX)
-    find_library(LIBM m)
+    find_library(LIBM m REQUIRED)
 endif()
 
 file(GLOB_RECURSE sources *.cpp *.c)
