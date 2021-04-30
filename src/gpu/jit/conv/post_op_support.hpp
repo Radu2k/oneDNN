@@ -332,6 +332,7 @@ private:
             const memory_desc_t &rhs_md, uint32_t &rhs_mask) const {
         layout_t rhs_layout(rhs_md);
         std::vector<dim_t> rhs_dims(rhs_md.dims, rhs_md.dims + rhs_md.ndims);
+        maybe_reshape_rhs_dims(cfg_->ndims, rhs_layout, rhs_dims);
         rhs_layout = normalize_spatial(
                 rhs_layout, cfg_->ndims - 2, cfg_->reduced_to_1d);
         rhs_dims = normalize_spatial(
@@ -351,6 +352,16 @@ private:
         rhs_mask = utils::get_dims_mask(
                 lhs_view_.vdims().data(), rhs_dims.data(), lhs_ndims());
         return view_t(rhs_layout, lhs_view_.vvars(), bound_check_mask);
+    }
+
+    static void maybe_reshape_rhs_dims(
+            int ndims, layout_t &rhs_layout, std::vector<dim_t> &rhs_dims) {
+        ir_assert(rhs_layout.ndims() == int(rhs_dims.size()));
+        if (rhs_layout.ndims() < ndims) {
+            rhs_layout = layout_t(rhs_layout.type(), ndims, rhs_layout.offset(),
+                    rhs_layout.blocks());
+            rhs_dims.resize(ndims, 1);
+        }
     }
 
     const convolution_pd_t *pd_;
