@@ -730,10 +730,10 @@ public:
         auto &old_cse_expr = it->second;
         auto new_cse_expr = cse_expr_t(new_expr, old_cse_expr.path,
                 old_cse_expr.refs, old_cse_expr.cse_var);
+        cse_exprs_.erase(it);
         auto ret = cse_exprs_.insert({new_expr, new_cse_expr});
         ir_assert(ret.second);
         MAYBE_UNUSED(ret);
-        cse_exprs_.erase(it);
     }
 
     template <typename F>
