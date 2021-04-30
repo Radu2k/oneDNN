@@ -971,8 +971,17 @@ private:
             acc_data_type = data_type::s32;
             return status::success;
         }
-        if (utils::everyone_is(data_type::f16, a, b)
-                || utils::everyone_is(data_type::bf16, a, b)) {
+        if (is_fwd && (utils::everyone_is(data_type::f16, sdt, wdt))) {
+            acc_data_type = sdt;
+            return status::success;
+        }
+        if (is_fwd && utils::everyone_is(data_type::bf16, sdt, wdt)) {
+            acc_data_type = data_type::f32;
+            return status::success;
+        }
+        if (is_bwd_d
+                && (utils::everyone_is(data_type::f16, ddt, wdt)
+                        || utils::everyone_is(data_type::bf16, ddt, wdt))) {
             acc_data_type = data_type::f32;
             return status::success;
         }

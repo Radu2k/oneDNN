@@ -3949,7 +3949,7 @@ private:
     }
 
     bool try_build_mad(int simd_size) {
-        multiply_desc_t desc(a_layout_, b_layout_, true);
+        multiply_desc_t desc(a_layout_, b_layout_, false);
         if (!mad_t::matches_types(desc.a_type(), desc.b_type(), desc.c_type()))
             return false;
 
@@ -3992,6 +3992,7 @@ private:
         int m_blk = c_layout.dim(0);
         c_layout = c_layout.add_outer_block(1, desc.n() / n_blk);
         c_layout = c_layout.add_outer_block(0, desc.m() / m_blk);
+        c_layout = c_layout.retype(desc.c_type());
         return c_layout;
     }
 

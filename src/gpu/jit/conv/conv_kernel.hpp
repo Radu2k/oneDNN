@@ -554,7 +554,7 @@ public:
         slmfence(tmp, r0);
         mov<int32_t>(dwords, null, tmp);
 
-        if (hw != ngen::HW::Gen9) {
+        if (cfg_.regs == 256) {
             mov<uint32_t>(8, r255, r0);
             threadend(r255);
         } else {
@@ -2496,8 +2496,11 @@ private:
             src1.setRegion(0, mad_func.src1_simd_size, 0);
         if (mad_func.src2_simd_size == 1)
             src2.setRegion(0, mad_func.src2_simd_size, 0);
-
-        host_->mad(mod, dst, src0, src1, src2);
+        if (src0.isNull()) {
+            host_->mul(mod, dst, src1, src2);
+        } else {
+            host_->mad(mod, dst, src0, src1, src2);
+        }
     }
 
     void reduce(ngen_register_scope_t &scope, const reduce_t &reduce_func,
