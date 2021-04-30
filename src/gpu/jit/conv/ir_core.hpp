@@ -1849,8 +1849,9 @@ public:
         return *this;
     }
 
-    stmt_t call(const std::vector<expr_t> &args = {}) const {
-        return ((const func_impl_t *)impl())->call(args);
+    stmt_t call(const std::vector<expr_t> &args = {},
+            const func_call_attr_t &attr = {}) const {
+        return ((const func_impl_t *)impl())->call(args, attr);
     }
 
 private:

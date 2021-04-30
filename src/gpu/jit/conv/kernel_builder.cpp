@@ -510,7 +510,7 @@ public:
         std::vector<expr_t> new_args = obj->args;
         send_t::arg_mem_buf(new_args) = base;
         send_t::arg_mem_off(new_args) += off;
-        return obj->func.call(new_args);
+        return obj->func.call(new_args, obj->attr);
     }
 };
 
@@ -541,7 +541,8 @@ public:
         auto off_store = simplify_store(
                 send->create_offset_store(header_buf, mem_buf, mem_off));
 
-        auto new_call = (*send)(mem_buf, header_buf, reg_buf, mask);
+        auto new_call = func_call_t::make(
+                obj->func, {mem_buf, header_buf, reg_buf, mask}, obj->attr);
         auto body = stmt_seq_t::make(off_store, new_call);
 
         // Allocate header.
