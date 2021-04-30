@@ -59,7 +59,7 @@ public:
             orig_wei_md = *conv_pd->arg_md(DNNL_ARG_WEIGHTS);
             orig_dst_md = *conv_pd->arg_md(DNNL_ARG_DIFF_DST);
         } else
-            ir_error_not_expected(); // not implemented yet
+            return status::unimplemented;
 
         src_data_type = orig_src_md.data_type;
         wei_data_type = orig_wei_md.data_type;
@@ -206,7 +206,7 @@ public:
         else if (is_bwd_d)
             CHECK(init_bwd_d(conv_pd, engine));
         else
-            ir_error_not_expected(); // not implemented yet
+            return status::unimplemented;
         return status::success;
     }
 
@@ -447,7 +447,7 @@ public:
             wei_tag = "BAx4b8a8b2a";
             dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
         } else
-            ir_error_not_expected(); // not implemented yet
+            return status::unimplemented;
 
 #ifdef GEN_CONV_DEBUG
         src_tag = getenv_str("stag", src_tag);
