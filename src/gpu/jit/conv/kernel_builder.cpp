@@ -1614,14 +1614,33 @@ struct loop_info_t {
         auto &loop = s.as<for_t>();
         stmt = s;
         var = loop.var;
-        init = to_cpp<int>(loop.init);
-        bound = to_cpp<int>(loop.bound);
+        init_ = loop.init;
+        bound_ = loop.bound;
+
+        auto e_size = simplify(bound_ - init_);
+        ir_assert(is_const(e_size));
+        size_ = to_cpp<int>(e_size);
     }
+
+    int init() const {
+        ir_assert(is_const(init_));
+        return to_cpp<int>(init_);
+    }
+
+    int bound() const {
+        ir_assert(is_const(bound_));
+        return to_cpp<int>(bound_);
+    }
+
+    int size() const { return size_; }
 
     stmt_t stmt;
     expr_t var;
-    int init;
-    int bound;
+
+private:
+    expr_t init_;
+    expr_t bound_;
+    int size_;
 };
 
 // Iterates through multiple nested loops with fixed bounds. Used to unroll
@@ -1632,7 +1651,7 @@ public:
     multi_loop_iterator_t(const std::vector<loop_info_t> &loops)
         : loops_(loops) {
         for (auto &l : loops)
-            var_values_.push_back(l.init);
+            var_values_.push_back(l.init());
     }
 
     int var_value(const expr_t &var) const {
@@ -1647,10 +1666,10 @@ public:
         if (loops_.empty()) return;
         for (size_t i = 0; i < loops_.size(); i++) {
             auto &l = loops_[i];
-            if (++var_values_[i] < l.bound) break;
-            var_values_[i] = l.init;
+            if (++var_values_[i] < l.bound()) break;
+            var_values_[i] = l.init();
         }
-        ir_assert(var_values_.back() < loops_.back().bound);
+        ir_assert(var_values_.back() < loops_.back().bound());
     }
 
     std::string str() const {
@@ -1878,7 +1897,7 @@ public:
         auto &outer_info = loops_.back();
         auto &outer_loop = outer_info.stmt.as<for_t>();
         if (count_object(outer_loop.body, outer_loop.var) == 0) {
-            outer_loop_size_ = outer_info.bound - outer_info.init;
+            outer_loop_size_ = outer_info.size();
         } else {
             outer_loop_size_ = 1;
         }
@@ -1890,7 +1909,7 @@ public:
     int size() const {
         int ret = 1;
         for (auto &l : loops_)
-            ret *= (l.bound - l.init);
+            ret *= l.size();
         return ret;
     }
 
