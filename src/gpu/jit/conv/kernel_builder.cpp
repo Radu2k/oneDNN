@@ -2088,6 +2088,84 @@ private:
     int cur_time_ = 0;
 };
 
+// Helper to assign SBIDs to IR function calls.
+class sbid_assigner_t {
+public:
+    sbid_assigner_t() = default;
+
+    sbid_assigner_t(sbid_manager_t &external_sbid_mgr)
+        : external_sbid_mgr_(&external_sbid_mgr) {}
+
+    stmt_t assign(const stmt_t &stmt) {
+        auto stmt_vec = flatten_statements(stmt);
+        stmt_t ret = stmt;
+        for (auto &_s : stmt_vec) {
+            if (!_s.is<func_call_t>()) continue;
+            auto s = _s;
+            if (is_slm_send(s) && is_read_send(s)) {
+                auto sbid = get_sbid(send_t::arg_reg_buf(s));
+                s = update_call_with_sbid(s, sbid);
+            } else if (is_slm_send(s) && !is_read_send(s)) {
+                auto sbid = get_sbid(send_t::arg_reg_buf(s));
+                s = update_call_with_sbid(s, sbid);
+            } else if (is_read_send(s)) {
+                auto sbid = get_sbid(send_t::arg_reg_buf(s));
+                s = update_call_with_sbid(s, sbid);
+            } else if (is_func_call<dpas_t>(s)) {
+                auto &attr = s.as<func_call_t>().attr;
+                auto *mod_attr = attr.as_ptr<instruction_modifier_attr_t>();
+                if (!mod_attr || !mod_attr->mod.is_atomic) {
+                    // Last dpas in Atomic chain.
+                    auto sbid = get_sbid(dpas_t::arg_src1(s));
+                    s = update_call_with_sbid(s, sbid);
+                }
+            } else if (s.is<func_call_t>()) {
+                auto &c = s.as<func_call_t>();
+                if (c.func.is_equal(funcs::signal_func())
+                        || c.func.is_equal(funcs::slm_fence_func())
+                        || c.func.is_equal(funcs::barrier_func())) {
+                    // Use 0 as the key for signals and SLM fences.
+                    auto sbid = get_sbid(expr_t(0));
+                    s = update_call_with_sbid(s, sbid);
+                }
+            } else {
+                ir_error_not_expected() << s;
+            }
+            ret = substitute(ret, _s, s);
+        }
+        return ret;
+    }
+
+private:
+    ngen_proxy::SBID get_sbid(const expr_t &ptr) {
+        auto &sbid_mgr
+                = (external_sbid_mgr_ ? *external_sbid_mgr_ : local_sbid_mgr_);
+        return sbid_mgr.get_sbid(ptr);
+    }
+
+    static bool is_slm_send(const stmt_t &s) {
+        if (!is_func_call<send_t>(s)) return false;
+        auto &send = s.as<func_call_t>().func.as<send_t>();
+        return send.address_model == ngen_proxy::AddressModel::ModelSLM;
+    }
+
+    static bool is_read_send(const stmt_t &s) {
+        if (!is_func_call<send_t>(s)) return false;
+        auto &send = s.as<func_call_t>().func.as<send_t>();
+        return send.access_type == ngen_proxy::Access::Read;
+    }
+
+    static stmt_t update_call_with_sbid(
+            const stmt_t &s, const ngen_proxy::SBID &sbid) {
+        return instruction_modifier_attr_t::make(
+                ngen_proxy::InstructionModifier().with_sbid(sbid))
+                .apply_to(s);
+    }
+
+    sbid_manager_t local_sbid_mgr_;
+    sbid_manager_t *external_sbid_mgr_ = nullptr;
+};
+
 class simple_slm_buffering_injector_t {
 public:
     simple_slm_buffering_injector_t(
@@ -2161,14 +2239,14 @@ public:
 
         auto g2s_store = g2s_store_orig;
 
+        ir_assert(s2r_load.size() == mul.size());
+
         stmt_t s2r_mul;
-        for (auto &s : s2r_load) {
-            s2r_mul = s2r_mul.append(s);
-            loop = substitute(loop, s, stmt_t(), 1);
-        }
-        for (auto &s : mul) {
-            s2r_mul = s2r_mul.append(s);
-            loop = substitute(loop, s, stmt_t(), 1);
+        for (int i = 0; i < int(mul.size()); i++) {
+            s2r_mul = s2r_mul.append(s2r_load[i]);
+            loop = substitute(loop, s2r_load[i], stmt_t(), 1);
+            s2r_mul = s2r_mul.append(mul[i]);
+            loop = substitute(loop, mul[i], stmt_t(), 1);
         }
 
         loop = remove_synchronization(loop);
@@ -2189,7 +2267,6 @@ public:
             g2s_store = g2s_store.append(funcs::barrier());
         } else {
             s2r_mul_body = funcs::barrier_wait().append(s2r_mul_body);
-            s2r_mul_body = s2r_mul_body.append(funcs::slm_fence());
             s2r_mul_body = s2r_mul_body.append(funcs::signal());
         }
 
@@ -2211,6 +2288,8 @@ public:
             if (cfg_.slm_bufs == 3 && i + 1 < rem_iters)
                 loop = loop.append(funcs::signal());
         }
+
+        if (cfg_.assign_sbids) loop = sbid_assigner_t().assign(loop);
 
         loop = alloc_t::make(
                 slm_idx_buf, reg_bytes, alloc_kind_t::grf, {}, loop);
@@ -2461,7 +2540,7 @@ private:
         }
 
         if (cfg_.assign_sbids)
-            iter_stmt = assign_sbids(iter_stmt, it, sbid_mgr);
+            iter_stmt = sbid_assigner_t(sbid_mgr).assign(iter_stmt);
 
         iter_stmt = inject_local_let(iter_stmt, lets, it.linear_id);
 
@@ -2570,77 +2649,6 @@ private:
             auto &buf = (is_mem ? send_t::arg_mem_buf(_c)
                                 : send_t::arg_reg_buf(_c));
             ret.insert(buf.as<ptr_t>().base);
-        }
-        return ret;
-    }
-
-    stmt_t assign_sbids(const stmt_t &stmt, const compute_iterator_t &it,
-            sbid_manager_t &sbid_mgr) const {
-        auto is_slm_send = [](const stmt_t &s) {
-            if (!is_func_call<send_t>(s)) return false;
-            auto &send = s.as<func_call_t>().func.as<send_t>();
-            return send.address_model == ngen_proxy::AddressModel::ModelSLM;
-        };
-
-        auto is_read_send = [](const stmt_t &s) {
-            if (!is_func_call<send_t>(s)) return false;
-            auto &send = s.as<func_call_t>().func.as<send_t>();
-            return send.access_type == ngen_proxy::Access::Read;
-        };
-
-        auto g2r_loads = find_stmt_groups(stmt, stmt_label_t::g2r_load());
-        auto is_g2r_load = [&](const stmt_t &s) {
-            for (auto &l : g2r_loads) {
-                if (count_object(l, s) > 0) return true;
-            }
-            return false;
-        };
-
-        auto update_call_with_sbid
-                = [](const stmt_t &s, const ngen_proxy::SBID &sbid) {
-                      return instruction_modifier_attr_t::make(
-                              ngen_proxy::InstructionModifier().with_sbid(sbid))
-                              .apply_to(s);
-                  };
-        auto stmt_vec = flatten_statements(stmt);
-        int g2s_store_idx = it.do_s2r_load() ? it.gmem_read_buf_index() : 0;
-        int g2s_load_idx = it.do_g2s_load() ? it.gmem_write_buf_index() : 0;
-        stmt_t ret = stmt;
-        for (auto &_s : stmt_vec) {
-            if (!_s.is<func_call_t>()) continue;
-            auto s = _s;
-            if (is_slm_send(s) && is_read_send(s)) {
-                auto sbid = sbid_mgr.get_sbid(send_t::arg_reg_buf(s));
-                s = update_call_with_sbid(s, sbid);
-            } else if (is_slm_send(s) && !is_read_send(s)) {
-                auto sbid = sbid_mgr.get_sbid(
-                        send_t::arg_reg_buf(s), g2s_store_idx);
-                s = update_call_with_sbid(s, sbid);
-            } else if (is_read_send(s)) {
-                int idx = is_g2r_load(s) ? 0 : g2s_load_idx;
-                auto sbid = sbid_mgr.get_sbid(send_t::arg_reg_buf(s), idx);
-                s = update_call_with_sbid(s, sbid);
-            } else if (is_func_call<dpas_t>(s)) {
-                auto &attr = s.as<func_call_t>().attr;
-                auto *mod_attr = attr.as_ptr<instruction_modifier_attr_t>();
-                if (!mod_attr || !mod_attr->mod.is_atomic) {
-                    // Last dpas in Atomic chain.
-                    auto sbid = sbid_mgr.get_sbid(dpas_t::arg_src1(s));
-                    s = update_call_with_sbid(s, sbid);
-                }
-            } else if (s.is<func_call_t>()) {
-                auto &c = s.as<func_call_t>();
-                if (c.func.is_equal(funcs::signal_func())
-                        || c.func.is_equal(funcs::slm_fence_func())
-                        || c.func.is_equal(funcs::barrier_func())) {
-                    // Use 0 as the key for signals and SLM fences.
-                    auto sbid = sbid_mgr.get_sbid(expr_t(0));
-                    s = update_call_with_sbid(s, sbid);
-                }
-            } else {
-                ir_error_not_expected() << s;
-            }
-            ret = substitute(ret, _s, s, 1);
         }
         return ret;
     }
