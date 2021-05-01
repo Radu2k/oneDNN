@@ -1092,6 +1092,23 @@ private:
         if (is_const(expr) || is_shuffle_const(expr) || is_var(expr))
             return expr;
 
+        auto hoisted_expr = hoist_expr_with_add(expr, expr_var, fully_hoisted);
+        if (!hoisted_expr.is_equal(expr)) return hoisted_expr;
+
+        // hoist_expr_with_add() doesn't handle cast so try to hoist it manually.
+        auto *cast = expr.as_ptr<cast_t>();
+        if (!cast) return hoisted_expr;
+
+        auto hoisted_cast_expr = hoist_expr(cast->expr);
+        if (!hoisted_cast_expr.is_equal(cast->expr)) {
+            hoisted_expr = cast_t::make(
+                    cast->type, hoisted_cast_expr, cast->saturate);
+        }
+        return hoisted_expr;
+    }
+
+    expr_t hoist_expr_with_add(const expr_t &expr, const expr_t &expr_var = {},
+            bool *fully_hoisted = nullptr) {
         auto cur_expr = nary_op_canonicalize(expr);
 
         auto is_nary_add = [](const expr_t &e) {
