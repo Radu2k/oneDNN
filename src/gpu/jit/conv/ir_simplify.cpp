@@ -1073,12 +1073,31 @@ public:
         return obj;
     }
 
-    object_t mutate_with_add(const binary_op_t *obj) {
+    expr_t mutate_with_add(const binary_op_t *obj) {
+        expr_t e = obj;
+        if (reduce_v1(e)) return e;
+        if (reduce_v2(e)) return e;
+        return e;
+    }
+
+    // Applies the following rules:
+    // 1) (A + B) % C -> B % C, when
+    //     - A % C == 0
+    //     - B >= 0
+    // 2) (A + B) / C -> (A / C) + (B / C), when
+    //     - A % C == 0
+    //     - B >= 0
+    bool reduce_v1(expr_t &expr) {
+        auto *binary_op = expr.as_ptr<binary_op_t>();
+        if (!binary_op) return false;
+
+        auto op_kind = binary_op->op_kind;
+        auto &a = binary_op->a;
+        auto &b = binary_op->b;
+
         std::vector<expr_t> lhs_args; // Reducible summands.
         std::vector<expr_t> rhs_args; // Non-reducible summands.
 
-        auto &a = obj->a;
-        auto &b = obj->b;
         auto *a_nary = a.as_ptr<nary_op_t>();
         for (auto &e : a_nary->args) {
             if (is_div_reducible(e, b)) {
@@ -1089,29 +1108,115 @@ public:
         }
 
         // Nothing to reduce, return expression as is.
-        if (lhs_args.empty()) return obj;
+        if (lhs_args.empty()) return false;
 
         auto rhs_nary = make_nary_op(op_kind_t::_add, rhs_args);
         auto _rhs = nary_op_back_transform(rhs_nary);
         bool rhs_ge_0 = cset.can_prove(_rhs >= 0);
 
-        if (obj->op_kind == op_kind_t::_mod) {
-            if (rhs_args.empty()) return to_expr(0, obj->type);
-            if (!rhs_ge_0) return obj;
-            return rhs_nary % b;
+        if (op_kind == op_kind_t::_mod) {
+            if (rhs_args.empty()) {
+                expr = to_expr(0, expr.type());
+                return true;
+            }
+            if (!rhs_ge_0) return false;
+            expr = rhs_nary % b;
+            return true;
         }
 
-        if (obj->op_kind == op_kind_t::_div) {
-            if (rhs_args.empty()) return obj;
-            if (!rhs_ge_0) return obj;
+        if (op_kind == op_kind_t::_div) {
+            if (rhs_args.empty()) return false;
+            if (!rhs_ge_0) return false;
             auto lhs_div = make_nary_op(op_kind_t::_add, lhs_args) / b;
             auto rhs_div = rhs_nary / b;
-            return mutate(lhs_div) + mutate(rhs_div);
+            expr = mutate(lhs_div) + mutate(rhs_div);
+            return true;
         }
 
-        ir_error_not_expected() << obj;
+        ir_error_not_expected() << expr;
 
-        return obj;
+        return false;
+    }
+
+    // Applies the following rules:
+    // 1) (A * B + D) / (A * C) -> (A * B) / (A * C), when
+    //     - A > 0
+    //     - C > 0
+    //     - 0 <= D < A
+    // 2) (A * B + D) % (A * C) -> (A * B) % (A * C) + D % (A * C), when
+    //     - A > 0
+    //     - C > 0
+    //     - 0 <= D < A
+    bool reduce_v2(expr_t &expr) {
+        auto *binary_op = expr.as_ptr<binary_op_t>();
+        if (!binary_op) return false;
+
+        auto op_kind = binary_op->op_kind;
+        auto &a = binary_op->a;
+        auto &b = binary_op->b;
+        if (!is_const(b)) return false;
+
+        auto const_factor = [&](const expr_t &e) {
+            auto _fe = factored_expr_t::make(e);
+            auto &fe = _fe.as<factored_expr_t>();
+            auto ret = to_cpp<int64_t>(fe.const_factor());
+            for (auto &f : fe.factors)
+                if (is_var(f)) ret *= cset.max_proven_gcd(f);
+            return ret;
+        };
+
+        // TODO: Check 0.
+        // Find max constant GCD.
+        int64_t b_gcd = const_factor(b);
+        int64_t max_gcd = 0;
+        auto *a_nary = a.as_ptr<nary_op_t>();
+        for (auto &e : a_nary->args) {
+            int64_t gcd = math::gcd(b_gcd, const_factor(e));
+            if (gcd > max_gcd) max_gcd = gcd;
+        }
+
+        if (max_gcd == 0) return false;
+
+        std::vector<expr_t> lhs_args; // Reducible summands.
+        std::vector<expr_t> rhs_args; // Non-reducible summands.
+        for (auto &e : a_nary->args) {
+            if (is_div_reducible(e, max_gcd)) {
+                lhs_args.push_back(e);
+            } else {
+                rhs_args.push_back(e);
+            }
+        }
+
+        // max_gcd is the GCD for some summand so at least one summand must be
+        // reducible.
+        ir_assert(!lhs_args.empty());
+
+        if (rhs_args.empty()) return false;
+
+        int64_t A = max_gcd;
+        int64_t C = to_cpp<int64_t>(b) / A;
+        if (A <= 0 || C <= 0) return false;
+
+        auto rhs_nary = make_nary_op(op_kind_t::_add, rhs_args);
+        auto D = nary_op_back_transform(rhs_nary);
+        if (!cset.can_prove(D >= 0) || !cset.can_prove(D < A)) return false;
+
+        if (op_kind == op_kind_t::_mod) {
+            auto lhs_mod = make_nary_op(op_kind_t::_add, lhs_args) % b;
+            auto rhs_mod = rhs_nary % b;
+            expr = mutate(lhs_mod) + mutate(rhs_mod);
+            return true;
+        }
+
+        if (op_kind == op_kind_t::_div) {
+            auto lhs_div = make_nary_op(op_kind_t::_add, lhs_args) / b;
+            expr = lhs_div;
+            return true;
+        }
+
+        ir_error_not_expected() << expr;
+
+        return false;
     }
 
     bool is_div_reducible(const expr_t &a, const expr_t &b) const {
@@ -1257,6 +1362,33 @@ public:
         return simplify(obj, cset_);
     }
 
+    object_t _mutate(const if_t *obj) override {
+        auto cond = simplify(obj->cond);
+
+        if (is_const(cond)) {
+            if (to_cpp<bool>(cond)) return mutate(obj->body);
+            return mutate(obj->else_body);
+        }
+
+        auto body = obj->body;
+        if (!body.is_empty()) {
+            auto cset_old = cset_;
+            cset_.add_constraint(cond);
+            auto body = ir_mutator_t::mutate(obj->body);
+            cset_ = cset_old;
+        }
+
+        auto else_body = obj->else_body;
+        if (!else_body.is_empty()) {
+            auto cset_old = cset_;
+            cset_.add_constraint(flip_condition(cond));
+            else_body = ir_mutator_t::mutate(else_body);
+            cset_ = cset_old;
+        }
+
+        return if_t::make(cond, body, else_body);
+    }
+
     object_t _mutate(const let_t *obj) override {
         // External variable.
         if (obj->value.is_empty()) return ir_mutator_t::_mutate(obj);
@@ -1292,6 +1424,40 @@ public:
     }
 
 private:
+    static op_kind_t flip_cmp_op(op_kind_t op_kind) {
+        switch (op_kind) {
+            case op_kind_t::_eq: return op_kind_t::_ne;
+            case op_kind_t::_ge: return op_kind_t::_lt;
+            case op_kind_t::_gt: return op_kind_t::_le;
+            case op_kind_t::_le: return op_kind_t::_gt;
+            case op_kind_t::_lt: return op_kind_t::_ge;
+            case op_kind_t::_ne: return op_kind_t::_eq;
+            default: ir_error_not_expected();
+        }
+        return op_kind_t::undef;
+    }
+
+    static expr_t flip_condition(const expr_t &cond) {
+        ir_assert(cond.type().is_bool());
+
+        auto *binary_op = cond.as_ptr<binary_op_t>();
+        if (binary_op) {
+            auto &a = binary_op->a;
+            auto &b = binary_op->b;
+            auto op_kind = binary_op->op_kind;
+            return binary_op_t::make(flip_cmp_op(op_kind), a, b);
+        }
+
+        auto *shuffle = cond.as_ptr<shuffle_t>();
+        if (shuffle && shuffle->is_broadcast()) {
+            return shuffle_t::make_broadcast(
+                    flip_condition(shuffle->vec[0]), shuffle->elems());
+        }
+
+        ir_error_not_expected();
+        return expr_t();
+    }
+
     constraint_set_t cset_;
 };
 
