@@ -91,49 +91,73 @@ public:
             try_convert_to_dpasw(dpas_infos_[i], grf_perm);
             ++i;
         }
-        int src2_off = 0;
+        int src2_size = 0;
+        object_map_t<stmt_t, int> send2off;
+        std::function<int(const stmt_t &)> get_src2_off;
+        get_src2_off = [&](const stmt_t &s) {
+            auto &si = find_send_info(s);
+            if (!si.base_call.is_empty()) return get_src2_off(si.base_call);
+            if (!si.prev_send.is_empty()) return get_src2_off(si.prev_send);
+
+            auto it = send2off.find(s);
+            if (it != send2off.end()) return it->second;
+
+            auto ret = send2off.insert({s, src2_size});
+            if (!ret.second) return ret.first->second;
+
+            int new_size = si.new_reg_buf_size();
+            src2_size += new_size;
+            return ret.first->second;
+        };
         for (auto &si : send_infos_) {
             if (!si.reg_buf_base().is_equal(src2_base)) continue;
+
+            int src2_off = get_src2_off(si.call);
             auto src2_sub = src2_base[src2_off];
-            auto new_call = (si.promote_to_dpasw ? si.new_call : si.call);
+            auto new_call = si.new_call;
             if (!new_call.is_empty()) {
                 new_call = substitute(
                         new_call, send_t::arg_reg_buf(new_call), src2_sub, 1);
             }
+
             load_mul_stmt_ = substitute(load_mul_stmt_, si.call, new_call, 1);
             for (auto &d : si.dpas_consumers) {
                 auto &di = find_dpas_info(d);
                 ir_assert(si.promote_to_dpasw == di.promote_to_dpasw)
                         << "Both send and dpas must be updated.";
-                if (di.update_applied) continue;
-                auto new_call = (di.promote_to_dpasw ? di.new_call : di.call);
+                if (di.update_applied) {
+                    ir_error_not_expected() << "Can it happen?";
+                    continue;
+                }
+                auto new_call = di.new_call;
                 new_call = substitute(new_call, dpas_t::arg_src2(new_call),
                         src2_sub[di.src2_relative_off], 1);
                 load_mul_stmt_
                         = substitute(load_mul_stmt_, di.call, new_call, 1);
                 di.update_applied = true;
             }
-            if (!new_call.is_empty()) {
-                auto &new_send = new_call.as<func_call_t>().func.as<send_t>();
-                src2_off += new_send.register_size();
-            }
         }
 
         // Apply permutation to C store.
         c_store_stmt_ = apply_permutation_to_reorder(c_store_stmt_, grf_perm);
 
-        int new_src2_size = src2_off;
-        alloc_updater_.resize(src2_base, new_src2_size);
+        // Update src2 size after applying send updates.
+        alloc_updater_.resize(src2_base, src2_size);
     }
 
 private:
     struct send_info_t {
         send_info_t() = default;
 
-        send_info_t(const stmt_t &call) : call(call) {}
+        send_info_t(const stmt_t &call) : call(call), new_call(call) {}
 
         const send_t &send() const {
             return call.as<func_call_t>().func.as<send_t>();
+        }
+
+        const send_t &new_send() const {
+            ir_assert(!new_call.is_same(call));
+            return new_call.as<func_call_t>().func.as<send_t>();
         }
 
         const std::vector<expr_t> &args() const {
@@ -148,13 +172,27 @@ private:
 
         int reg_buf_size() const { return send().register_size(); }
 
-        void set_new_call(const stmt_t &s) {
+        int new_reg_buf_size() const {
+            if (new_call.is_same(call)) return 0;
+            return new_send().register_size();
+        }
+
+        void set_new_call(const stmt_t &s, const stmt_t &base = stmt_t()) {
             if (!promote_to_dpasw) {
                 promote_to_dpasw = true;
                 new_call = s;
+                base_call = base;
                 return;
             }
             ir_assert(new_call.is_equal(s));
+            ir_assert(base_call.is_equal(base));
+        }
+
+        void set_prev_send(const stmt_t &s) {
+            int prev_size
+                    = s.as<func_call_t>().func.as<send_t>().register_size();
+            if (reg_buf_size() != prev_size) return;
+            prev_send = s;
         }
 
         stmt_t call;
@@ -162,12 +200,14 @@ private:
 
         bool promote_to_dpasw = false;
         stmt_t new_call;
+        stmt_t base_call;
+        stmt_t prev_send;
     };
 
     struct dpas_info_t {
         dpas_info_t() = default;
 
-        dpas_info_t(const stmt_t &call) : call(call) {}
+        dpas_info_t(const stmt_t &call) : call(call), new_call(call) {}
 
         const dpas_t &dpas() const {
             return call.as<func_call_t>().func.as<dpas_t>();
@@ -216,21 +256,20 @@ private:
         ir_error_not_expected();
         return dpas_infos_.front();
     }
+    static bool is_send(const stmt_t &s, send_info_t &info) {
+        if (!is_func_call<send_t>(s)) return false;
+        info = send_info_t(s);
+        return true;
+    }
+
+    static bool is_dpas(const stmt_t &s, dpas_info_t &info) {
+        if (!is_func_call<dpas_t>(s)) return false;
+        info = dpas_info_t(s);
+        return true;
+    }
 
     void extract_dpas_calls(expr_t &src2_base) {
         object_eq_map_t<expr_t, stmt_t> buf2send;
-
-        auto is_send = [](const stmt_t &s, send_info_t &info) {
-            if (!is_func_call<send_t>(s)) return false;
-            info = send_info_t(s);
-            return true;
-        };
-
-        auto is_dpas = [](const stmt_t &s, dpas_info_t &info) {
-            if (!is_func_call<dpas_t>(s)) return false;
-            info = dpas_info_t(s);
-            return true;
-        };
 
         auto set_src2_base = [&](const expr_t &ptr) {
             auto &ptr_base = ptr.as<ptr_t>().base;
@@ -247,8 +286,15 @@ private:
         for (auto &s : stmt_vec) {
             send_info_t send_info;
             if (is_send(s, send_info)) {
-                buf2send[send_info.reg_buf()] = s;
+                auto &buf = send_info.reg_buf();
+                stmt_t prev_send;
+                auto it = buf2send.find(buf);
+                if (it != buf2send.end()) prev_send = it->second;
+                buf2send[buf] = s;
                 send_infos_.push_back(send_info);
+                if (!prev_send.is_empty()) {
+                    send_infos_.back().set_prev_send(prev_send);
+                }
                 continue;
             }
             dpas_info_t dpas_info;
@@ -348,18 +394,15 @@ private:
                 += (tg_idx0_ % 2) * to_cpp<int64_t>(ab_addr_diff);
 
         a_send.set_new_call(a_send.send().call(new_send_args));
-        b_send.set_new_call(stmt_t());
+        b_send.set_new_call(stmt_t(), a_send.call);
 
-        for (auto &d : b_send.dpas_consumers) {
-            a_send.dpas_consumers.push_back(d);
-            b.send_producer = a_send.call;
-        }
-        b_send.dpas_consumers.clear();
         return true;
     }
 
-    static bool can_convert_to_dpasw(const dpas_info_t &a) {
-        return a.dpas().rcount % 2 == 0;
+    static bool can_convert_to_dpasw(const dpas_info_t &a_dpas,
+            const send_info_t &a_send, const expr_t &tg_idx0) {
+        if (contains_object(a_send.call, tg_idx0)) return false;
+        return a_dpas.dpas().rcount % 2 == 0;
     }
 
     static func_t create_half_send(const send_t &send) {
@@ -376,7 +419,8 @@ private:
 #if DNNL_WITH_XE_HPC
         if (hw_ >= ngen::HW::Xe_HPC) return false;
 #endif
-        if (!can_convert_to_dpasw(a)) return false;
+        if (!can_convert_to_dpasw(a, find_send_info(a.send_producer), tg_idx0_))
+            return false;
 
         // Perform the transformation:
         // Before:
