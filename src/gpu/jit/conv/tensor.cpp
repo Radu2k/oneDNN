@@ -803,6 +803,11 @@ layout_t mnk_mapper_t::map_to_mnk(
     ir_assert(view.is_direct())
             << "Only direct views can be mapped to mnk layouts.";
     auto layout = view.create_pseudo_vlayout();
+    return map_to_mnk(layout, view, mnk_kinds);
+}
+
+layout_t mnk_mapper_t::map_to_mnk(const layout_t &layout, const view_t &view,
+        const std::vector<mnk_kind_t> &mnk_kinds) const {
     std::vector<block_t> blocks;
     for (auto &b : layout.blocks()) {
         auto mnk_kind = view.vmnk_kinds()[b.dim_idx];

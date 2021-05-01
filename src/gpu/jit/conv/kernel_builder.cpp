@@ -3663,11 +3663,434 @@ private:
     stmt_t stmt_;
 };
 
+layout_t get_fma_friendly_layout(const layout_t &mnk_layout, bool is_a,
+        const type_t &a_type, const type_t &b_type, const type_t &c_type) {
+    auto _dpas = dpas_t::make(/*is_dpasw=*/false, /*sdepth=*/8,
+            /*rcount=*/8, c_type, b_type, a_type);
+    auto &dpas = _dpas.as<dpas_t>();
+
+    int mn_idx = (is_a ? 0 : 1);
+    int k_idx = (is_a ? 1 : 0);
+
+    dim_t mn_blk = mnk_layout.dim(mn_idx);
+    dim_t k_blk = mnk_layout.dim(k_idx);
+
+    auto dpas_layout = (is_a ? dpas.b_layout() : dpas.a_layout());
+    dpas_layout = dpas_layout.transpose();
+
+    ir_assert(dpas_layout.dim(k_idx) == k_blk);
+    MAYBE_UNUSED(k_blk);
+
+    dim_t dpas_mn_blk = dpas_layout.dim(mn_idx);
+    dpas_layout = dpas_layout.add_outer_block(mn_idx, mn_blk / dpas_mn_blk);
+
+    return dpas_layout;
+}
+
+layout_t convert_to_fma_friendly_layout(const conv_config_t &cfg,
+        const view_t &view, bool is_a, const type_t &a_type,
+        const type_t &b_type, const type_t &c_type, bool *changed = nullptr) {
+    if (changed) *changed = false;
+    auto layout = view.create_dense_vlayout();
+    if (!cfg.allow_grf_reorder) return layout;
+
+    mnk_mapper_t mnk_mapper;
+    layout_t mnk_layout;
+    if (is_a) {
+        mnk_layout = mnk_mapper.map_to_mnk(
+                layout, view, {mnk_kind_t::m, mnk_kind_t::k});
+    } else {
+        mnk_layout = mnk_mapper.map_to_mnk(
+                layout, view, {mnk_kind_t::k, mnk_kind_t::n});
+    }
+
+    auto dpas_layout
+            = get_fma_friendly_layout(mnk_layout, is_a, a_type, b_type, c_type);
+    if (dpas_layout == mnk_layout) return layout;
+
+    if (changed) *changed = true;
+
+    int mn_idx = (is_a ? 0 : 1);
+    auto blocks = layout.blocks();
+    std::vector<block_t> new_blocks;
+
+    for (auto &mnk_b : dpas_layout.blocks()) {
+        if (mnk_b.block == 1) continue;
+        bool is_mn = (mnk_b.dim_idx == mn_idx);
+        dim_t mnk_block = mnk_b.block;
+        for (auto &prb_b : blocks) {
+            if (prb_b.block == 1) continue;
+            bool is_prb_mn = utils::one_of(view.vmnk_kinds()[prb_b.dim_idx],
+                    mnk_kind_t::m, mnk_kind_t::n);
+            if (is_prb_mn != is_mn) continue;
+            if (prb_b.block >= mnk_block) {
+                ir_assert(prb_b.block % mnk_block == 0);
+                new_blocks.emplace_back(prb_b.dim_idx, mnk_block, 1);
+                prb_b.block /= mnk_block;
+                mnk_block = 1;
+                break;
+            }
+            ir_assert(mnk_block % prb_b.block == 0);
+            new_blocks.emplace_back(prb_b.dim_idx, prb_b.block, 1);
+            mnk_block /= prb_b.block;
+            prb_b.block = 1;
+        }
+        ir_assert(mnk_block == 1);
+    }
+
+    auto ret = layout_t(layout.type(), layout.ndims(), 0, new_blocks);
+    ret = ret.make_dense().normalize();
+    return ret;
+}
+
+class load_multiply_builder_t {
+public:
+    load_multiply_builder_t(const conv_config_t &cfg, ir_context_t &ir_ctx,
+            const constraint_set_t &cset, const expr_t &ap_buf,
+            const expr_t &a_slm_buf, const expr_t &bp_buf,
+            const expr_t &b_slm_buf, const view_t &ap_tg_view,
+            const view_t &ap_x_view, const view_t &bp_tg_view,
+            const view_t &bp_x_view, const view_t &cp_tg_view,
+            const grid_info_t &tg_grid)
+        : cfg_(cfg)
+        , ir_ctx_(ir_ctx)
+        , cset_(cset)
+        , ap_buf_(ap_buf)
+        , a_slm_buf_(a_slm_buf)
+        , bp_buf_(bp_buf)
+        , b_slm_buf_(b_slm_buf)
+        , cp_tg_view_(cp_tg_view) {
+        ir_assert(cfg_.a_sub_tiles == 1 || cfg_.b_sub_tiles == 1)
+                << "At most one tensor can be tiled.";
+
+        ab_tmp_buf_ = make_buffer("ab_tmp");
+        a_buf_ = make_buffer("a");
+        b_buf_ = make_buffer("b");
+        c_buf_ = make_buffer("c");
+
+        // Split A across tg1, B across tg0.
+        int m_thr_blk = cfg_.m_tg_blk / tg_grid.dim(1);
+        int n_thr_blk = cfg_.n_tg_blk / tg_grid.dim(0);
+
+        // Views to multiply by a thread.
+        ap_thr_view_
+                = ap_x_view.split(mnk_tensor_t({mnk_kind_t::m, mnk_kind_t::k},
+                                          {m_thr_blk, cfg_.k_tg_blk}),
+                        tg_grid.sub_grid({1}));
+        bp_thr_view_
+                = bp_x_view.split(mnk_tensor_t({mnk_kind_t::k, mnk_kind_t::n},
+                                          {cfg_.k_tg_blk, n_thr_blk}),
+                        tg_grid.sub_grid({0}));
+
+        cp_thr_mem_view_ = create_cp_thr_mem_view(
+                ap_tg_view, ap_thr_view_, bp_tg_view, bp_thr_view_, cp_tg_view);
+
+        // Sub-tile indices.
+        a_idx_ = ir_ctx_.create_tmp_var(type_t::s32(), "a_idx");
+        b_idx_ = ir_ctx_.create_tmp_var(type_t::s32(), "b_idx");
+
+        // Sub-tile views.
+        a_i_view_ = ap_thr_view_.split(
+                mnk_tensor_t({mnk_kind_t::m, mnk_kind_t::k},
+                        {m_thr_blk / cfg_.a_sub_tiles, cfg_.k_tg_blk}),
+                grid_info_t({cfg_.a_sub_tiles}, {a_idx_}), &a_i_outer_blocks_);
+        b_j_view_ = bp_thr_view_.split(
+                mnk_tensor_t({mnk_kind_t::k, mnk_kind_t::n},
+                        {cfg_.k_tg_blk, n_thr_blk / cfg_.b_sub_tiles}),
+                grid_info_t({cfg_.b_sub_tiles}, {b_idx_}), &b_j_outer_blocks_);
+
+        build();
+    }
+
+    const std::vector<stmt_t> &allocs() const { return allocs_; }
+
+    const stmt_t &load_mul_stmt() const { return load_mul_stmt_; }
+
+    const expr_t &c_buf() const { return c_buf_; }
+    view_t cp_thr_mem_view() const { return cp_thr_mem_view_; }
+    view_t cp_thr_reg_view() const { return cp_thr_reg_view_; }
+
+    alloc_attr_t c_attr() const { return c_attr_; }
+
+private:
+    struct sub_tile_info_t {
+        bool is_loaded = false;
+        view_t reg_view;
+        layout_t mnk_layout;
+        int reg_buf_size;
+    };
+
+    const type_t &a_type() const { return a_i_view_.type(); }
+    const type_t &b_type() const { return b_j_view_.type(); }
+    const type_t &c_type() const { return cp_tg_view_.type(); }
+
+    void build() {
+        a_sub_tiles_.resize(cfg_.a_sub_tiles);
+        b_sub_tiles_.resize(cfg_.b_sub_tiles);
+        for (int i = 0; i < cfg_.a_sub_tiles; i++) {
+            for (int j = 0; j < cfg_.b_sub_tiles; j++) {
+                build_sub_tile(i, j);
+            }
+        }
+
+        mnk_mapper_.push_blocks(a_i_outer_blocks_, ap_thr_view_, cp_tg_view_);
+        mnk_mapper_.push_blocks(b_j_outer_blocks_, bp_thr_view_, cp_tg_view_);
+
+        // C layout in GEMM notation.
+        auto c_layout = c_sub_tile_layout_;
+
+        // Add outer blocks coming from A/B sub-tiles.
+        c_layout = c_layout.add_outer_block(0, cfg_.a_sub_tiles);
+        c_layout = c_layout.add_outer_block(1, cfg_.b_sub_tiles);
+
+        // C layout in the problem notation.
+        auto cp_thr_reg_layout
+                = mnk_mapper_.map_from_mnk(c_layout, cp_thr_mem_view_.nvdims());
+        cp_thr_reg_layout = cp_thr_reg_layout.normalize();
+
+        cp_thr_reg_view_ = view_t(cp_thr_mem_view_, cp_thr_reg_layout);
+    }
+
+    void build_sub_tile(int i, int j) {
+        bool is_first = (i == 0 && j == 0);
+
+        stmt_t ab_s2r_load;
+        stmt_t ab_g2r_load;
+        load_a_sub_tile(i, ab_s2r_load, ab_g2r_load);
+        load_b_sub_tile(j, ab_s2r_load, ab_g2r_load);
+
+        load_mul_stmt_ = load_mul_stmt_.append(
+                stmt_group_t::make(stmt_label_t::g2r_load(i + j), ab_g2r_load));
+        load_mul_stmt_ = load_mul_stmt_.append(
+                stmt_group_t::make(stmt_label_t::s2r_load(i + j), ab_s2r_load));
+
+        auto &a_i_view = a_sub_tiles_[i].reg_view;
+        auto &b_j_view = b_sub_tiles_[j].reg_view;
+        auto &a_layout = a_sub_tiles_[i].mnk_layout;
+        auto &b_layout = b_sub_tiles_[j].mnk_layout;
+
+        // Multiply C_i_j += A_i x B_j in GEMM notation.
+        multiply_builder_t mul_builder(cfg_.fma_kind, cfg_.simd_size, a_layout,
+                b_layout, a_buf_, b_buf_, c_buf_[c_buf_off_]);
+        c_sub_tile_layout_ = mul_builder.c_layout();
+        c_buf_off_ += c_sub_tile_layout_.size();
+        ir_trace() << "Multiply (" << i << ", " << j << "):\n"
+                   << mul_builder.str() << std::endl;
+
+        load_mul_stmt_ = load_mul_stmt_.append(stmt_group_t::make(
+                stmt_label_t::mul(i + j), mul_builder.stmt()));
+
+        if (!is_first) {
+            ir_assert(mul_builder.c_layout() == c_sub_tile_layout_)
+                    << "Sub-tile layouts must be equal.";
+            return;
+        }
+
+        mnk_mapper_.push_view(a_i_view, cp_tg_view_);
+        mnk_mapper_.push_view(b_j_view, cp_tg_view_);
+        c_attr_ = grf_alloc_attr_t::make(mul_builder.c_grf_bundle());
+
+        auto a_attr = grf_alloc_attr_t::make(mul_builder.a_grf_bundle());
+        register_buffer(a_buf_, a_sub_tiles_[i].reg_buf_size, alloc_kind_t::grf,
+                a_attr);
+
+        auto b_attr = grf_alloc_attr_t::make(mul_builder.b_grf_bundle());
+        register_buffer(b_buf_, b_sub_tiles_[j].reg_buf_size, alloc_kind_t::grf,
+                b_attr);
+
+        if (tmp_buf_size_ > 0) {
+            register_buffer(ab_tmp_buf_, tmp_buf_size_, alloc_kind_t::grf);
+        }
+    }
+
+    // Loads A_i sub-tile.
+    void load_a_sub_tile(int i, stmt_t &ab_s2r_load, stmt_t &ab_g2r_load) {
+        auto &info = a_sub_tiles_[i];
+        if (info.is_loaded) return;
+
+        auto view = a_i_view_.substitute(a_idx_, i);
+        read_builder_t read(ir_ctx_, cset_, a_i_view_,
+                cfg_.use_a_slm ? a_slm_buf_ : ap_buf_, a_buf_,
+                /*is_slm=*/cfg_.use_a_slm);
+        ir_trace() << "A GMEM/SLM to GRF load #" << i << ":\n"
+                   << read.str() << std::endl;
+
+        auto reg_view = read.reg_view();
+        auto stmt = read.stmt();
+
+        bool changed;
+        auto fma_layout = convert_to_fma_friendly_layout(cfg_, reg_view,
+                /*is_a=*/true, a_type(), b_type(), c_type(), &changed);
+
+        if (changed) {
+            reg_view = view_t(reg_view, fma_layout);
+            stmt = substitute(stmt, a_buf_, ab_tmp_buf_);
+            stmt = stmt.append(create_reorder_stmt(
+                    read.reg_view(), reg_view, ab_tmp_buf_, a_buf_));
+            tmp_buf_size_
+                    = std::max(tmp_buf_size_, int(reg_view.vlayout_size()));
+        }
+
+        if (read.is_slm()) {
+            ab_s2r_load = ab_s2r_load.append(stmt);
+        } else {
+            ab_g2r_load = ab_g2r_load.append(stmt);
+        }
+        info.is_loaded = true;
+        info.reg_view = reg_view;
+        info.reg_buf_size = read.reg_buf_size();
+        info.mnk_layout = mnk_mapper_.map_to_mnk(
+                reg_view, {mnk_kind_t::m, mnk_kind_t::k});
+    }
+
+    // Loads B_j sub-tile.
+    void load_b_sub_tile(int j, stmt_t &ab_s2r_load, stmt_t &ab_g2r_load) {
+        auto &info = b_sub_tiles_[j];
+        if (info.is_loaded) return;
+
+        auto view = b_j_view_.substitute(b_idx_, j);
+        read_builder_t read(ir_ctx_, cset_, view,
+                cfg_.use_b_slm ? b_slm_buf_ : bp_buf_, b_buf_,
+                /*is_slm=*/cfg_.use_b_slm);
+        ir_trace() << "B GMEM/SLM to GRF load #" << j << ":\n"
+                   << read.str() << std::endl;
+
+        auto reg_view = read.reg_view();
+        auto stmt = read.stmt();
+
+        bool changed;
+        auto fma_layout = convert_to_fma_friendly_layout(cfg_, reg_view,
+                /*is_a=*/false, a_type(), b_type(), c_type(), &changed);
+
+        if (changed) {
+            reg_view = view_t(reg_view, fma_layout);
+            stmt = substitute(stmt, b_buf_, ab_tmp_buf_);
+            stmt = stmt.append(create_reorder_stmt(
+                    read.reg_view(), reg_view, ab_tmp_buf_, b_buf_));
+            tmp_buf_size_
+                    = std::max(tmp_buf_size_, int(reg_view.vlayout_size()));
+        }
+
+        if (read.is_slm()) {
+            ab_s2r_load = ab_s2r_load.append(stmt);
+        } else {
+            ab_g2r_load = ab_g2r_load.append(stmt);
+        }
+        info.is_loaded = true;
+        info.reg_view = reg_view;
+        info.reg_buf_size = read.reg_buf_size();
+        info.mnk_layout = mnk_mapper_.map_to_mnk(
+                reg_view, {mnk_kind_t::k, mnk_kind_t::n});
+    }
+
+    void register_buffer(const stmt_t &alloc) {
+        ir_assert(alloc.is<alloc_t>());
+        allocs_.push_back(alloc);
+    }
+
+    void register_buffer(const expr_t &buf, int size, alloc_kind_t kind,
+            const alloc_attr_t &attr = {}) {
+        register_buffer(alloc_t::make(buf, size, kind, attr));
+    }
+
+    view_t create_cp_thr_mem_view(const view_t &ap_tg_view,
+            const view_t &ap_thr_view, const view_t &bp_tg_view,
+            const view_t &bp_thr_view, const view_t &cp_tg_view) const {
+        std::vector<dim_t> thr_dims(cp_tg_view.nvdims(), 1);
+        std::vector<expr_t> thr_start(cp_tg_view.nvdims(), 0);
+
+        for (int i = 0; i < cp_tg_view.nvdims(); i++) {
+            auto &cvar = cp_tg_view.vvar(i);
+
+            bool found = false;
+            for (int j = 0; j < ap_thr_view.nvdims(); j++) {
+                if (ap_thr_view.vvar(j).is_same(cvar)) {
+                    found = true;
+                    thr_dims[i] = ap_thr_view.vdims()[j];
+
+                    auto off = ap_tg_view.vstart(j) - cp_tg_view.vstart(i);
+                    thr_start[i] = simplify(ap_thr_view.vstart(j) - off);
+                }
+            }
+            if (found) continue;
+            for (int j = 0; j < bp_thr_view.nvdims(); j++) {
+                if (bp_thr_view.vvar(j).is_same(cvar)) {
+                    found = true;
+                    thr_dims[i] = bp_thr_view.vdims()[j];
+
+                    auto off = bp_tg_view.vstart(j) - cp_tg_view.vstart(i);
+                    thr_start[i] = simplify(bp_thr_view.vstart(j) - off);
+                }
+            }
+            auto mnk_kind = cp_tg_view.vmnk_kinds()[i];
+            if (mnk_kind == mnk_kind_t::undef) {
+                // Dimension is not shared with A/B, copy from TG view.
+                thr_dims[i] = cp_tg_view.vdims()[i];
+                thr_start[i] = cp_tg_view.vstart(i);
+                continue;
+            }
+            ir_assert(found) << "Unknown dimension: " << cvar;
+        }
+        return cp_tg_view.create_sub_view(
+                tensor_t(thr_dims, thr_start), /*relative_vstart=*/false);
+    }
+
+    const conv_config_t &cfg_;
+    ir_context_t ir_ctx_;
+    const constraint_set_t &cset_;
+
+    expr_t ap_buf_;
+    expr_t a_slm_buf_;
+
+    expr_t bp_buf_;
+    expr_t b_slm_buf_;
+
+    view_t cp_tg_view_;
+
+    expr_t ab_tmp_buf_;
+    expr_t a_buf_;
+    expr_t b_buf_;
+    expr_t c_buf_;
+
+    int tmp_buf_size_ = 0;
+
+    // Per-thread views to multiply.
+    view_t ap_thr_view_;
+    view_t bp_thr_view_;
+
+    // Sub-tile indices.
+    expr_t a_idx_;
+    expr_t b_idx_;
+
+    // Sub-tile views.
+    view_t a_i_view_;
+    view_t b_j_view_;
+
+    std::vector<sub_tile_info_t> a_sub_tiles_;
+    std::vector<sub_tile_info_t> b_sub_tiles_;
+
+    std::vector<block_t> a_i_outer_blocks_;
+    std::vector<block_t> b_j_outer_blocks_;
+
+    std::vector<stmt_t> allocs_;
+
+    stmt_t load_mul_stmt_;
+
+    mnk_mapper_t mnk_mapper_;
+
+    int c_buf_off_ = 0;
+    layout_t c_sub_tile_layout_;
+    alloc_attr_t c_attr_;
+
+    view_t cp_thr_mem_view_;
+    view_t cp_thr_reg_view_;
+};
+
 class compute_builder_t {
 public:
     compute_builder_t(const conv_config_t &cfg, ir_context_t &ir_ctx,
             const constraint_set_t &cset)
-        : cfg_(cfg), ir_ctx_(ir_ctx), cset_(cset) {}
+        : cfg_(cfg), ir_ctx_(ir_ctx), cset_(cset), g2s_ctx_(ir_ctx) {}
 
     const std::vector<stmt_t> &allocs() const { return allocs_; }
 
@@ -3682,6 +4105,7 @@ public:
                 stmt_group_t::make(stmt_label_t::g2s_store(), g2s_store_stmt_));
         stmt = stmt.append(funcs::barrier());
         stmt = stmt.append(load_mul_stmt_);
+        stmt = g2s_ctx_.inject_grid_idx_let_stmts(stmt);
         return stmt;
     }
 
@@ -3713,159 +4137,44 @@ public:
         expr_t a_slm_buf = make_buffer("a_slm");
         expr_t b_slm_buf = make_buffer("b_slm");
 
-        // Initialize GRF buffers.
-        expr_t a_g2s_reg_buf = make_buffer("a_g2s");
-        expr_t b_g2s_reg_buf = make_buffer("b_g2s");
-
-        expr_t a_buf = make_buffer("a");
-        expr_t b_buf = make_buffer("b");
-        expr_t c_buf = make_buffer("c");
-
         view_t ap_slm_view;
         view_t bp_slm_view;
 
         prepare_gmem_to_slm("A", cfg_.use_a_slm, ap_tg_view_, ap_buf_,
-                a_g2s_reg_buf, a_slm_buf, ap_slm_view);
+                a_slm_buf, ap_slm_view, g2s_ctx_);
         prepare_gmem_to_slm("B", cfg_.use_b_slm, bp_tg_view_, bp_buf_,
-                b_g2s_reg_buf, b_slm_buf, bp_slm_view);
+                b_slm_buf, bp_slm_view, g2s_ctx_);
 
-        // Split A across tg1, B across tg0.
-        int m_thr_blk = m_tg_blk_ / tg_grid_.dim(1);
-        int n_thr_blk = n_tg_blk_ / tg_grid_.dim(0);
+        for (auto &bi : g2s_ctx_.bufs) {
+            register_buffer(bi.buf, bi.size, alloc_kind_t::grf);
+        }
 
         // Views to multiply by a thread group.
         auto &ap_x_view = (cfg_.use_a_slm ? ap_slm_view : ap_tg_view_);
         auto &bp_x_view = (cfg_.use_b_slm ? bp_slm_view : bp_tg_view_);
 
-        // Views to multiply by a thread.
-        view_t ap_thr_view
-                = ap_x_view.split(mnk_tensor_t({mnk_kind_t::m, mnk_kind_t::k},
-                                          {m_thr_blk, k_tg_blk_}),
-                        tg_grid_.sub_grid({1}));
-        view_t bp_thr_view
-                = bp_x_view.split(mnk_tensor_t({mnk_kind_t::k, mnk_kind_t::n},
-                                          {k_tg_blk_, n_thr_blk}),
-                        tg_grid_.sub_grid({0}));
+        load_multiply_builder_t load_mul_builder(cfg_, ir_ctx_, cset_, ap_buf_,
+                a_slm_buf, bp_buf_, b_slm_buf, ap_tg_view_, ap_x_view,
+                bp_tg_view_, bp_x_view, cp_tg_view_, tg_grid_);
 
-        auto a_idx = ir_ctx_.create_tmp_var(type_t::s32(), "a_idx");
-        auto b_idx = ir_ctx_.create_tmp_var(type_t::s32(), "b_idx");
+        load_mul_stmt_ = load_mul_builder.load_mul_stmt();
+        allocs_.insert(allocs_.end(), load_mul_builder.allocs().begin(),
+                load_mul_builder.allocs().end());
 
-        std::vector<block_t> a_i_outer_blocks;
-        std::vector<block_t> b_j_outer_blocks;
-        auto _a_i_view = ap_thr_view.split(
-                mnk_tensor_t({mnk_kind_t::m, mnk_kind_t::k},
-                        {m_thr_blk / cfg_.a_sub_tiles, k_tg_blk_}),
-                grid_info_t({cfg_.a_sub_tiles}, {a_idx}), &a_i_outer_blocks);
-        auto _b_j_view = bp_thr_view.split(
-                mnk_tensor_t({mnk_kind_t::k, mnk_kind_t::n},
-                        {k_tg_blk_, n_thr_blk / cfg_.b_sub_tiles}),
-                grid_info_t({cfg_.b_sub_tiles}, {b_idx}), &b_j_outer_blocks);
-
-        mnk_mapper_t mnk_mapper;
-        bool is_first = true;
-        int c_buf_off = 0;
-        layout_t c_sub_tile_layout;
-        alloc_attr_t c_attr;
-        ir_assert(cfg_.a_sub_tiles == 1 || cfg_.b_sub_tiles == 1)
-                << "At most one tensor can be tiled.";
-        for (int i = 0; i < cfg_.a_sub_tiles; i++) {
-            // Load A_i.
-            auto a_i_view = _a_i_view.substitute(a_idx, i);
-            read_builder_t a_read(ir_ctx_, cset_, a_i_view,
-                    cfg_.use_a_slm ? a_slm_buf : ap_buf_, a_buf,
-                    /*is_slm=*/cfg_.use_a_slm);
-            ir_trace() << "A GMEM/SLM to GRF load #" << i << ":\n"
-                       << a_read.str() << std::endl;
-            for (int j = 0; j < cfg_.b_sub_tiles; j++) {
-                // Load B_i.
-                auto b_j_view = _b_j_view.substitute(b_idx, j);
-                read_builder_t b_read(ir_ctx_, cset_, b_j_view,
-                        cfg_.use_b_slm ? b_slm_buf : bp_buf_, b_buf,
-                        /*is_slm=*/cfg_.use_b_slm);
-                ir_trace() << "B GMEM/SLM to GRF load #" << j << ":\n"
-                           << b_read.str() << std::endl;
-
-                stmt_t ab_g2r_load;
-                stmt_t ab_s2r_load;
-                if (j == 0) {
-                    if (a_read.is_slm()) {
-                        ab_s2r_load = ab_s2r_load.append(a_read.stmt());
-                    } else {
-                        ab_g2r_load = ab_g2r_load.append(a_read.stmt());
-                    }
-                }
-                if (b_read.is_slm()) {
-                    ab_s2r_load = ab_s2r_load.append(b_read.stmt());
-                } else {
-                    ab_g2r_load = ab_g2r_load.append(b_read.stmt());
-                }
-                load_mul_stmt_ = load_mul_stmt_.append(stmt_group_t::make(
-                        stmt_label_t::g2r_load(i + j), ab_g2r_load));
-                load_mul_stmt_ = load_mul_stmt_.append(stmt_group_t::make(
-                        stmt_label_t::s2r_load(i + j), ab_s2r_load));
-
-                auto a_layout = mnk_mapper.map_to_mnk(
-                        a_read.reg_view(), {mnk_kind_t::m, mnk_kind_t::k});
-                auto b_layout = mnk_mapper.map_to_mnk(
-                        b_read.reg_view(), {mnk_kind_t::k, mnk_kind_t::n});
-
-                // Multiply C_i_j += A_i x B_j in GEMM notation.
-                multiply_builder_t mul_builder(cfg_.fma_kind, cfg_.simd_size,
-                        a_layout, b_layout, a_buf, b_buf, c_buf[c_buf_off]);
-                ir_trace() << "Multiply (" << i << ", " << j << "):\n"
-                           << mul_builder.str() << std::endl;
-                load_mul_stmt_ = load_mul_stmt_.append(stmt_group_t::make(
-                        stmt_label_t::mul(i + j), mul_builder.stmt()));
-                if (is_first) {
-                    is_first = false;
-                    mnk_mapper.push_view(a_read.reg_view(), cp_tg_view_);
-                    mnk_mapper.push_view(b_read.reg_view(), cp_tg_view_);
-                    c_sub_tile_layout = mul_builder.c_layout();
-                    c_attr = grf_alloc_attr_t::make(mul_builder.c_grf_bundle());
-                    auto a_attr = grf_alloc_attr_t::make(
-                            mul_builder.a_grf_bundle());
-                    auto b_attr = grf_alloc_attr_t::make(
-                            mul_builder.b_grf_bundle());
-                    register_buffer(a_buf, a_read.reg_buf_size(),
-                            alloc_kind_t::grf, a_attr);
-                    register_buffer(b_buf, b_read.reg_buf_size(),
-                            alloc_kind_t::grf, b_attr);
-                } else {
-                    ir_assert(mul_builder.c_layout() == c_sub_tile_layout)
-                            << "Sub-tile layouts must be equal.";
-                }
-                c_buf_off += c_sub_tile_layout.size();
-            }
-        }
-
-        mnk_mapper.push_blocks(a_i_outer_blocks, ap_thr_view, cp_tg_view_);
-        mnk_mapper.push_blocks(b_j_outer_blocks, bp_thr_view, cp_tg_view_);
-
-        // C layout in GEMM notation.
-        auto c_layout = c_sub_tile_layout;
-
-        // Add outer blocks coming from A/B sub-tiles.
-        c_layout = c_layout.add_outer_block(0, cfg_.a_sub_tiles);
-        c_layout = c_layout.add_outer_block(1, cfg_.b_sub_tiles);
-
-        view_t cp_thr_mem_view
-                = create_cp_thr_mem_view(ap_thr_view, bp_thr_view);
-
-        // C layout in the problem notation.
-        auto cp_thr_reg_layout
-                = mnk_mapper.map_from_mnk(c_layout, cp_thr_mem_view.nvdims());
-        cp_thr_reg_layout = cp_thr_reg_layout.normalize();
-
-        auto cp_thr_reg_view = view_t(cp_thr_mem_view, cp_thr_reg_layout);
+        auto c_buf = load_mul_builder.c_buf();
+        auto cp_thr_mem_view = load_mul_builder.cp_thr_mem_view();
+        auto cp_thr_reg_view = load_mul_builder.cp_thr_reg_view();
 
         epilogue_builder_t c_m2g(ir_ctx_, cset_, post_op_ctx_, cp_thr_mem_view,
                 cp_thr_reg_view, cp_buf_, c_buf);
         ir_trace() << "C GRF to GMEM store:\n" << c_m2g.stmt() << std::endl;
 
-        register_buffer(c_buf, c_layout.size(), alloc_kind_t::grf, c_attr);
+        auto c_attr = load_mul_builder.c_attr();
+        int c_size = cp_thr_reg_view.vlayout_size();
+        register_buffer(c_buf, c_size, alloc_kind_t::grf, c_attr);
 
         int step_bytes = 2 * reg_bytes;
-        for (int i = 0; i < c_layout.size(); i += step_bytes) {
+        for (int i = 0; i < c_size; i += step_bytes) {
             c_zero_out_stmt_ = c_zero_out_stmt_.append(store_t::make(c_buf, i,
                     shuffle_t::make_broadcast(
                             expr_t(0.0f), step_bytes / sizeof(float))));
@@ -3889,6 +4198,86 @@ public:
     }
 
 private:
+    struct buf_info_t {
+        buf_info_t(const std::string &tag, const expr_t &buf)
+            : tag(tag), buf(buf) {}
+
+        std::string tag;
+        expr_t buf;
+        int size = 0;
+    };
+
+    struct g2s_context_t {
+        g2s_context_t(ir_context_t &ir_ctx) : ir_ctx(ir_ctx) {}
+
+        expr_t create_buf(const char *tag, bool force_reuse = false) {
+            if (reuse_buffers || force_reuse) {
+                for (auto &bi : bufs) {
+                    if (bi.tag == tag) return bi.buf;
+                }
+            }
+            auto buf = ir_ctx.create_tmp_var(type_t::byte_ptr(), tag);
+            bufs.emplace_back(tag, buf);
+            return buf;
+        }
+
+        void set_buf_size(const expr_t &buf, int size) {
+            for (auto &bi : bufs) {
+                if (bi.buf.is_same(buf)) bi.size = std::max(bi.size, size);
+            }
+        }
+
+        expr_t create_tmp_grid_idx() {
+            auto var = ir_ctx.create_tmp_var(type_t::s32(), "idx");
+            tmp_grid_idxs.insert({var, expr_t()});
+            return var;
+        }
+
+        void set_grid_idx_value(const expr_t &idx, const expr_t &value) {
+            auto &old = tmp_grid_idxs[idx];
+            ir_assert(old.is_empty());
+            old = substitute_grid_idx_value(value);
+        }
+
+        expr_t substitute_grid_idx_value(const expr_t &_e) {
+            auto e = _e;
+            auto vars = find_unique_objects<var_t>(e);
+            for (auto &v : vars) {
+                auto it = tmp_grid_idxs.find(v);
+                if (it == tmp_grid_idxs.end()) continue;
+                e = substitute(e, v, it->second);
+            }
+            return e;
+        }
+
+        void register_grid(const grid_info_t &grid) {
+            for (int i = 0; i < grid.ndims(); i++) {
+                auto &idx = grid.idx(i);
+                auto it = tmp_grid_idxs.find(idx);
+                if (it == tmp_grid_idxs.end()) continue;
+                grid_idxs.insert({idx, it->second});
+            }
+        }
+
+        stmt_t inject_grid_idx_let_stmts(const stmt_t &s) const {
+            if (grid_idxs.empty()) return s;
+
+            auto ret = s;
+            for (auto &kv : grid_idxs) {
+                ret = let_t::make(kv.first, kv.second, ret);
+            }
+            return ret;
+        }
+
+        ir_context_t &ir_ctx;
+        grid_info_t prev_load_grid;
+        bool reuse_buffers = false;
+        std::vector<buf_info_t> bufs;
+
+        object_map_t<expr_t, expr_t> tmp_grid_idxs;
+        object_map_t<expr_t, expr_t> grid_idxs;
+    };
+
     void register_buffer(const stmt_t &alloc) {
         ir_assert(alloc.is<alloc_t>());
         allocs_.push_back(alloc);
@@ -3904,12 +4293,68 @@ private:
     // 2. Store: GRF (temporary) -> SLM
     void prepare_gmem_to_slm(const char *tag, bool use_x_slm,
             const view_t &x_tg_view, const expr_t &xp_buf,
-            const expr_t &x_g2s_reg_buf, const expr_t &x_slm_buf,
-            view_t &xp_slm_view) {
+            const expr_t &x_slm_buf, view_t &xp_slm_view,
+            g2s_context_t &g2s_ctx) {
         if (!use_x_slm) return;
 
+        grid_info_t load_grid = tg_grid_;
+        for (;;) {
+            bool ok = prepare_gmem_to_slm_impl(tag, use_x_slm, x_tg_view,
+                    xp_buf, x_slm_buf, xp_slm_view, load_grid, g2s_ctx);
+            if (ok) {
+                g2s_ctx.prev_load_grid = load_grid;
+                g2s_ctx.register_grid(load_grid);
+                return;
+            }
+
+            // Reduce grid and try again.
+            auto grid_idx = g2s_ctx.create_tmp_grid_idx();
+            expr_t grid_idx_value;
+            auto new_load_grid = load_grid.halven(grid_idx, grid_idx_value);
+            if (new_load_grid.is_empty()) break;
+
+            if (new_load_grid == g2s_ctx.prev_load_grid) {
+                new_load_grid = load_grid.halven(
+                        grid_idx, grid_idx_value, /*first=*/false);
+                g2s_ctx.reuse_buffers = true;
+            }
+            g2s_ctx.set_grid_idx_value(grid_idx, grid_idx_value);
+            load_grid = new_load_grid;
+        }
+        ir_error_not_expected() << "Can't create GMEM -> SLM loads/stores.";
+    }
+
+    bool prepare_gmem_to_slm_impl(const char *tag, bool use_x_slm,
+            const view_t &x_tg_view, const expr_t &xp_buf,
+            const expr_t &x_slm_buf, view_t &xp_slm_view,
+            const grid_info_t &load_grid, g2s_context_t &g2s_ctx) {
+        bool is_a = (tag[0] == 'A');
+        auto xp_slm_layout = create_slm_layout(x_tg_view, is_a);
+        if (cfg_.pad_slm)
+            xp_slm_layout = pad_slm_layout(xp_slm_layout, load_grid);
+
+        auto grid_cond = load_grid.slice_condition();
+        if (!grid_cond.is_empty()) {
+            grid_cond = shuffle_t::make_broadcast(grid_cond, cfg_.simd_size);
+        }
+
         // Per-thread view to load from GMEM to SLM.
-        auto x_g2s_view = x_tg_view.split(tg_grid_);
+        auto x_g2s_view = x_tg_view.split(load_grid);
+
+        auto tmp_xp_slm_view = view_t(x_tg_view, xp_slm_layout);
+
+        // Ensure that each thread writes a dense region to SLM.
+        auto xp_slm_thr_view = tmp_xp_slm_view.create_sub_view(
+                x_g2s_view.vtensor(), /*relative_vstart=*/false);
+        auto write_layout = xp_slm_thr_view.create_vlayout().normalize();
+        // If the layout is not dense, return and try with smaller grid.
+        if (!write_layout.is_dense()) return false;
+
+        xp_slm_view = std::move(tmp_xp_slm_view);
+        register_buffer(x_slm_buf, xp_slm_layout.size(), alloc_kind_t::slm);
+
+        // Temporary GRF buffer.
+        expr_t x_g2s_reg_buf = g2s_ctx.create_buf("g2s");
 
         // GMEM -> GRF load.
         read_builder_t x_read(ir_ctx_, cset_, x_g2s_view, xp_buf, x_g2s_reg_buf,
@@ -3917,29 +4362,51 @@ private:
         ir_trace() << tag << " GMEM to GRF load:\n"
                    << x_read.str() << std::endl;
 
-        register_buffer(
-                x_g2s_reg_buf, x_read.reg_buf_size(), alloc_kind_t::grf);
-        g2s_load_stmt_ = g2s_load_stmt_.append(x_read.stmt());
+        g2s_ctx.set_buf_size(x_g2s_reg_buf, x_read.reg_buf_size());
 
-        auto xp_slm_view_layout = x_tg_view.create_dense_vlayout();
-        if (cfg_.pad_slm)
-            xp_slm_view_layout = pad_slm_layout(xp_slm_view_layout);
-        xp_slm_view = view_t(x_tg_view, xp_slm_view_layout);
-        register_buffer(
-                x_slm_buf, xp_slm_view_layout.size(), alloc_kind_t::slm);
+        auto load_stmt = x_read.stmt();
+        if (!grid_cond.is_empty()) load_stmt = if_t::make(grid_cond, load_stmt);
+        g2s_load_stmt_ = g2s_load_stmt_.append(load_stmt);
 
         // GRF -> SLM store.
-        write_builder_t x_write(ir_ctx_, cset_,
-                xp_slm_view.create_sub_view(
-                        x_g2s_view.vtensor(), /*relative_vstart=*/false),
-                x_slm_buf, x_g2s_reg_buf, /*is_slm=*/true);
+        write_builder_t x_write(ir_ctx_, cset_, xp_slm_thr_view, x_slm_buf,
+                x_g2s_reg_buf, /*is_slm=*/true);
         ir_trace() << tag << " GRF to SLM store:\n"
                    << x_write.str() << std::endl;
+        auto store_stmt = x_write.stmt();
 
-        g2s_store_stmt_ = g2s_store_stmt_.append(x_write.stmt());
+        auto &read_view = x_read.reg_view();
+        auto &write_view = x_write.reg_view();
+        if (!read_view.has_same_vlayout(write_view)) {
+            if (cfg_.allow_grf_reorder) {
+                // Temporary GRF buffer.
+                expr_t tmp_buf
+                        = g2s_ctx.create_buf("g2s_tmp", /*force_reuse=*/true);
+                auto reorder_stmt = create_reorder_stmt(
+                        read_view, write_view, x_g2s_reg_buf, tmp_buf);
+                g2s_ctx.set_buf_size(tmp_buf, x_write.reg_buf_size());
+                store_stmt = substitute(store_stmt, x_g2s_reg_buf, tmp_buf);
+                store_stmt = reorder_stmt.append(store_stmt);
+            } else {
+                ir_error_not_expected()
+                        << "Requested register layouts for " << tag
+                        << " do not match: "
+                        << "read: " << read_view << ", write: " << write_view;
+            }
+        }
+        if (!grid_cond.is_empty())
+            store_stmt = if_t::make(grid_cond, store_stmt);
+        g2s_store_stmt_ = g2s_store_stmt_.append(store_stmt);
 
-        ir_assert(x_read.reg_view().has_same_vlayout(x_write.reg_view()))
-                << "Requested register layouts for " << tag << " do not match.";
+        return true;
+    }
+
+    layout_t create_slm_layout(const view_t &tg_view, bool is_a) const {
+        auto &a_type = ap_tg_view_.type();
+        auto &b_type = bp_tg_view_.type();
+        auto &c_type = cp_tg_view_.type();
+        return convert_to_fma_friendly_layout(
+                cfg_, tg_view, is_a, a_type, b_type, c_type);
     }
 
     // SLM has 65 dword-granularity banks (Xe_HP):
@@ -3951,12 +4418,13 @@ private:
     // Assume that every X-axis thread (across tg_dim[0]) writes the
     // corresponding outer block of the layout. The goal is to ensure that the
     // stride between outer blocks allows to avoid duplicated banks.
-    layout_t pad_slm_layout(const layout_t &layout) const {
-        auto tg_dim0 = tg_grid_.dim(0);
-        auto tg_dim1 = tg_grid_.dim(1);
+    layout_t pad_slm_layout(
+            const layout_t &layout, const grid_info_t &load_grid) const {
+        auto tg_dim0 = load_grid.dim(0);
+        auto tg_dim1 = load_grid.dim(1);
         ir_assert(layout.elems() % tg_dim0 == 0) << layout;
 
-        dim_t inner_block = layout.elems() / tg_grid_.dim(0);
+        dim_t inner_block = layout.elems() / load_grid.dim(0);
         std::vector<dim_t> multi_blocks = {inner_block, tg_dim0};
         auto l = layout.split_into_multi_blocks(multi_blocks);
 
@@ -4023,44 +4491,12 @@ private:
         return dense_stride_bytes;
     }
 
-    view_t create_cp_thr_mem_view(
-            const view_t &ap_thr_view, const view_t &bp_thr_view) const {
-        std::vector<dim_t> thr_dims(cp_tg_view_.nvdims(), 1);
-        std::vector<expr_t> thr_start(cp_tg_view_.nvdims(), 0);
-
-        for (int i = 0; i < cp_tg_view_.nvdims(); i++) {
-            auto &cvar = cp_tg_view_.vvar(i);
-
-            bool found = false;
-            for (int j = 0; j < ap_thr_view.nvdims(); j++) {
-                if (ap_thr_view.vvar(j).is_same(cvar)) {
-                    found = true;
-                    thr_dims[i] = ap_thr_view.vdims()[j];
-
-                    auto off = ap_tg_view_.vstart(j) - cp_tg_view_.vstart(i);
-                    thr_start[i] = simplify(ap_thr_view.vstart(j) - off);
-                }
-            }
-            if (found) continue;
-            for (int j = 0; j < bp_thr_view.nvdims(); j++) {
-                if (bp_thr_view.vvar(j).is_same(cvar)) {
-                    found = true;
-                    thr_dims[i] = bp_thr_view.vdims()[j];
-
-                    auto off = bp_tg_view_.vstart(j) - cp_tg_view_.vstart(i);
-                    thr_start[i] = simplify(bp_thr_view.vstart(j) - off);
-                }
-            }
-            ir_assert(found) << "Unknown dimension: " << cvar;
-        }
-        return cp_tg_view_.create_sub_view(
-                tensor_t(thr_dims, thr_start), /*relative_vstart=*/false);
-    }
-
     const conv_config_t &cfg_;
     ir_context_t &ir_ctx_;
     const constraint_set_t &cset_;
     post_op_context_t post_op_ctx_;
+
+    g2s_context_t g2s_ctx_;
 
     grid_info_t tg_grid_;
 

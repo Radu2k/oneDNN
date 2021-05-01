@@ -504,6 +504,7 @@ public:
         gmem_bufs = 2;
         do_loop_unroll = true;
         reduce_grf_usage = true;
+        allow_grf_reorder = false;
         a_sub_tiles = 1;
         b_sub_tiles = 1;
 
@@ -518,6 +519,7 @@ public:
         gmem_bufs = getenv_int("gmem_bufs", gmem_bufs);
         do_loop_unroll = getenv_bool("do_loop_unroll", do_loop_unroll);
         reduce_grf_usage = getenv_bool("reduce_grf_usage", reduce_grf_usage);
+        allow_grf_reorder = getenv_bool("allow_grf_reorder", allow_grf_reorder);
         a_sub_tiles = getenv_int("a_sub_tiles", a_sub_tiles);
         b_sub_tiles = getenv_int("b_sub_tiles", b_sub_tiles);
 #endif
@@ -599,6 +601,7 @@ public:
         oss << "  SLM buffers:                " << slm_bufs << std::endl;
         oss << "  GMEM to SLM, GRF buffers:   " << gmem_bufs << std::endl;
         oss << "  Reduce GRF usage:           " << to_string(reduce_grf_usage) << std::endl;
+        oss << "  Allow GRF reorder:          " << to_string(allow_grf_reorder) << std::endl;
         oss << "  A sub-tiles:                " << a_sub_tiles << std::endl;
         oss << "  B sub-tiles:                " << b_sub_tiles << std::endl;
         // clang-format on
@@ -646,6 +649,7 @@ public:
     int gmem_bufs; // Number of GRF buffers to use for GMEM -> SLM copy.
     bool do_loop_unroll; // Whether to fully unroll inner loops.
     bool reduce_grf_usage; // Whether to try to reduce GRF usage based on heuristics.
+    bool allow_grf_reorder; // Whether to allow GRF reorders to FMA-friendly layouts.
 
     // Sub-tiles to split into for the inner A x B multiplication:
     // for i in range(0, a_sub_tiles):

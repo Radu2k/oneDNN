@@ -713,16 +713,35 @@ inline std::ostream &operator<<(std::ostream &out, const layout_t &layout) {
 class grid_info_t {
 public:
     grid_info_t() = default;
-    grid_info_t(int ndims) : dims_(ndims), idxs_(ndims) {}
+    grid_info_t(int ndims) : dims_(ndims), offs_(ndims), idxs_(ndims) {}
     grid_info_t(const std::vector<int> &dims, const std::vector<expr_t> &idxs)
-        : dims_(dims), idxs_(idxs) {
-        ir_assert(dims.size() == idxs_.size());
+        : grid_info_t(dims, {}, idxs) {}
+    grid_info_t(const std::vector<int> &dims, const std::vector<int> &offs,
+            const std::vector<expr_t> &idxs)
+        : dims_(dims), offs_(offs), idxs_(idxs) {
+        if (offs_.empty()) offs_.resize(dims.size());
+        ir_assert(dims_.size() == offs_.size());
+        ir_assert(dims_.size() == idxs_.size());
     }
 
+    bool operator==(const grid_info_t &other) const {
+        if (ndims() != other.ndims()) return false;
+        for (int i = 0; i < ndims(); i++) {
+            if (dim(i) != other.dim(i)) return false;
+            if (off(i) != other.off(i)) return false;
+            if (!idx(i).is_equal(other.idx(i))) return false;
+        }
+        return true;
+    }
+
+    bool is_empty() const { return dims_.empty(); }
+
     int &dim(int dim_idx) { return dims_[dim_idx]; }
+    int &off(int dim_idx) { return offs_[dim_idx]; }
     expr_t &idx(int dim_idx) { return idxs_[dim_idx]; }
 
     const int &dim(int dim_idx) const { return dims_[dim_idx]; }
+    const int &off(int dim_idx) const { return offs_[dim_idx]; }
     const expr_t &idx(int dim_idx) const { return idxs_[dim_idx]; }
 
     int ndims() const { return int(dims_.size()); }
@@ -730,14 +749,56 @@ public:
         return utils::array_product(dims_.data(), dims_.size());
     }
 
-    grid_info_t sub_grid(std::initializer_list<int> old_dim_idxs) {
+    grid_info_t sub_grid(std::initializer_list<int> old_dim_idxs) const {
         grid_info_t ret(int(old_dim_idxs.size()));
         int new_dim_idx = 0;
         for (auto old_dim_idx : old_dim_idxs) {
             ret.dim(new_dim_idx) = dim(old_dim_idx);
+            ret.off(new_dim_idx) = off(old_dim_idx);
             ret.idx(new_dim_idx) = idx(old_dim_idx);
             new_dim_idx++;
         }
+        return ret;
+    }
+
+    grid_info_t slice(int dim_idx, int new_off, int new_dim,
+            const expr_t &new_idx, expr_t &new_idx_value) const {
+        ir_assert(dim_idx >= 0 && dim_idx < ndims());
+        ir_assert(new_dim > 0 && new_off >= 0);
+        ir_assert(new_off + new_dim <= dims_[dim_idx]);
+
+        grid_info_t ret = *this;
+        ret.offs_[dim_idx] += new_off;
+        ret.dims_[dim_idx] = new_dim;
+        if (new_off > 0) {
+            new_idx_value = ret.idxs_[dim_idx] - new_off;
+            ret.idxs_[dim_idx] = new_idx;
+        } else {
+            new_idx_value = expr_t();
+        }
+        ret.parent_dims_ = (parent_dims_.empty() ? dims_ : parent_dims_);
+        return ret;
+    }
+
+    grid_info_t halven(const expr_t &new_idx, expr_t &new_idx_value,
+            bool first = true) const {
+        for (int i = ndims() - 1; i >= 0; i--) {
+            if (dim(i) == 1 || dim(i) % 2 != 0) continue;
+            if (first) return slice(i, 0, dim(i) / 2, new_idx, new_idx_value);
+            return slice(i, dim(i) / 2, dim(i) / 2, new_idx, new_idx_value);
+        }
+        return grid_info_t();
+    }
+
+    expr_t slice_condition() const {
+        if (parent_dims_.empty()) return expr_t();
+        expr_t ret(true);
+        for (int i = 0; i < ndims(); i++) {
+            auto &idx = idxs_[i];
+            if (offs_[i] > 0) ret &= (idx >= 0);
+            if (offs_[i] + dims_[i] < parent_dims_[i]) ret &= (idx < dims_[i]);
+        }
+        if (ret.is_equal(expr_t(true))) return expr_t();
         return ret;
     }
 
@@ -751,7 +812,10 @@ public:
 
 private:
     std::vector<int> dims_;
+    std::vector<int> offs_;
     std::vector<expr_t> idxs_;
+
+    std::vector<int> parent_dims_;
 };
 
 inline std::ostream &operator<<(
@@ -1351,6 +1415,9 @@ public:
 
     layout_t map_to_mnk(
             const view_t &view, const std::vector<mnk_kind_t> &mnk_kinds) const;
+
+    layout_t map_to_mnk(const layout_t &layout, const view_t &view,
+            const std::vector<mnk_kind_t> &mnk_kinds) const;
 
     layout_t map_from_mnk(const layout_t &mnk_layout, int prb_ndims) const;
 
