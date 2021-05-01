@@ -3398,11 +3398,11 @@ private:
 // - Store to the destination
 class epilogue_builder_t {
 public:
-    epilogue_builder_t(ngen::HW hw, ir_context_t &ir_ctx,
+    epilogue_builder_t(const conv_config_t &cfg, ir_context_t &ir_ctx,
             const constraint_set_t &cset, const post_op_context_t &post_op_ctx,
             const view_t &mem_view, const view_t &reg_view,
             const expr_t &mem_buf, const expr_t &reg_buf)
-        : hw_(hw)
+        : cfg_(cfg)
         , ir_ctx_(ir_ctx)
         , cset_(cset)
         , post_op_ctx_(post_op_ctx)
@@ -3415,7 +3415,7 @@ public:
         for (auto &po : post_op_ctx_.post_ops()) {
             auto sub_po = po.create_sub_post_op(mem_view.vtensor());
             post_op_builders_.emplace_back(
-                    hw_, ir_ctx, cset_, sub_po, pre_load_size);
+                    cfg.hw, ir_ctx, cset_, sub_po, pre_load_size);
         }
         build();
     }
@@ -3449,9 +3449,13 @@ private:
             ir_assert(view.is_direct()) << "Expected direct view.";
         }
 
-        void set_next(ngen::HW hw, ir_context_t &ir_ctx, stage_t *next) {
+        void set_next(ngen::HW hw, ir_context_t &ir_ctx, stage_t *next,
+                bool force_reorder) {
             if (!next) return;
-            if (!view.has_same_vlayout(next->view, /*compare_offset=*/false)) {
+            bool do_reorder = !view.has_same_vlayout(
+                    next->view, /*compare_offset=*/false);
+            if (force_reorder) do_reorder = true;
+            if (do_reorder) {
                 ir_assert(stmt.is_empty());
                 // Generate reorder between stages.
                 stmt = create_reorder_stmt(view, next->view, buf, next->buf);
@@ -3537,7 +3541,10 @@ private:
         bool restore_zero_padding = post_op_ctx_.need_to_restore_zero_padding();
 
         // S_y -> GMEM.
-        write_builder_t r2g(hw_, ir_ctx_, cset_, mem_sub_view, mem_buf_,
+        ngen_proxy::AtomicOp atomic_op
+                = (cfg_.do_atomic_update ? ngen_proxy::AtomicOp::fadd
+                                         : ngen_proxy::AtomicOp::undef);
+        write_builder_t r2g(cfg_.hw, ir_ctx_, cset_, mem_sub_view, mem_buf_,
                 tmp_reg_buf,
                 /*is_slm=*/false, /*atomic_op=*/ngen_proxy::AtomicOp::undef);
 
@@ -3557,11 +3564,16 @@ private:
         }
         stages.emplace_back(r2g.reg_view(), tmp_reg_buf, r2g.stmt()); // S_y
 
+        bool is_dpasw = (cfg_.fma_kind == fma_kind_t::dpasw);
+
         // Generate reorders between stages and create buffers.
         int nstages = int(stages.size());
         for (int i = 0; i < nstages; i++) {
             auto *next_stage = (i + 1 < nstages ? &stages[i + 1] : nullptr);
-            stages[i].set_next(hw_, ir_ctx_, next_stage);
+            // Always perform reorder when dpasw is used. This is to ensure
+            // that C is properly restored and permuted after dpasw.
+            stages[i].set_next(cfg_.hw, ir_ctx_, next_stage,
+                    /*force_reorder=*/i == 0 && is_dpasw);
         }
 
         stmt_t tile_stmt;
@@ -3603,7 +3615,7 @@ private:
         stmt_ = stmt_.append(tile_stmt);
     }
 
-    ngen::HW hw_;
+    const conv_config_t &cfg_;
     ir_context_t &ir_ctx_;
     const constraint_set_t &cset_;
     const post_op_context_t &post_op_ctx_;
@@ -4303,7 +4315,7 @@ public:
         auto cp_thr_mem_view = load_mul_builder.cp_thr_mem_view();
         auto cp_thr_reg_view = load_mul_builder.cp_thr_reg_view();
 
-        epilogue_builder_t c_m2g(hw_, ir_ctx_, cset_, post_op_ctx_,
+        epilogue_builder_t c_m2g(cfg_, ir_ctx_, cset_, post_op_ctx_,
                 cp_thr_mem_view, cp_thr_reg_view, cp_buf_, c_buf);
         ir_trace() << "C GRF to GMEM store:\n" << c_m2g.stmt() << std::endl;
 
