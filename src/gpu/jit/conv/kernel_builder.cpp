@@ -863,7 +863,8 @@ private:
         auto it = to_check_.find(obj);
         if (it != to_check_.end()) {
             for (auto &e : it->second) {
-                ir_assert(is_expr_defined(e));
+                ir_assert(is_expr_defined(e))
+                        << "Expression contains undefined variables: " << e;
                 MAYBE_UNUSED(e);
             }
             to_check_.erase(it);
@@ -1576,11 +1577,11 @@ private:
 //             ...
 //         }
 //     }
-stmt_t upate_loops_for_unrolled_slm_buffering(
+stmt_t update_loops_for_unrolled_slm_buffering(
         const stmt_t &s, const conv_config_t &cfg) {
     auto ret = s;
     if (cfg.do_loop_unroll) ret = slm_buffering_loop_updater_t().mutate(s);
-    trace_pass("upate_loops_for_unrolled_slm_buffering", ret);
+    trace_pass("update_loops_for_unrolled_slm_buffering", ret);
     return ret;
 }
 
@@ -4162,7 +4163,7 @@ void kernel_builder_t::build() {
     if (cfg_.do_loop_unroll) stmt_ = loop_strength_reduce(stmt_);
     stmt_ = optimize_let(stmt_);
     if (cfg_.do_loop_unroll) {
-        stmt_ = upate_loops_for_unrolled_slm_buffering(stmt_, cfg_);
+        stmt_ = update_loops_for_unrolled_slm_buffering(stmt_, cfg_);
         stmt_ = inject_unrolled_slm_buffering(stmt_, cfg_, ir_ctx);
     }
     stmt_ = simplify(stmt_, init_cset);
