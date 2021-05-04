@@ -824,11 +824,7 @@ public:
     }
 
     bool data_types_ok() const {
-        if (is_fwd) {
-            if (utils::one_of(data_type::f32, src_data_type, wei_data_type))
-                return false;
-            return true;
-        }
+        if (is_fwd) { return true; }
         if (is_bwd_d) {
             if (utils::one_of(data_type::f32, dst_data_type, wei_data_type))
                 return false;
@@ -1029,7 +1025,8 @@ private:
 
         // Disable using mad instruction backend until performance parity is
         // reached with OpenCL kernels.
-        if (fma_kind == fma_kind_t::mad) return status::unimplemented;
+        if (fma_kind == fma_kind_t::mad && (!is_fwd || hw < ngen::HW::Xe_HP))
+            return status::unimplemented;
 
         return status::success;
     }
