@@ -97,8 +97,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
 3. Instrumentation and Tracing Technology API (src/common/ittnotify/)
-Copyright (c) 2011, Intel Corporation
-All rights reserved.
+Copyright (c) 2011, Intel Corporation. All rights reserved.
+Copyright (c) 2005-2014 Intel Corporation. All rights reserved.
 
 3-Clause BSD License
 
@@ -168,18 +168,20 @@ Copyright 2011 The Roboto Project Authors (https://github.com/google/roboto)
 
 MathJax (doc/assets/mathjax)
 Copyright (c) 2009-2018 The MathJax Consortium
+Copyright (c) 2010-2018 The MathJax Consortium
+Copyright (c) 2011-2015 The MathJax Consortium
 Copyright (c) 2015-2017 Martin Hensel
-Copyright (c) 2007, Apostolos Syropoulos (<asyropoulos@yahoo.com)
 
 Xbyak_aarch64 (src/cpu/aarch64/xbyak_aarch64/)
 Copyright 2019-2020 FUJITSU LIMITED
 
-oneDNN
-Copyright 2016-2020 Intel Corporation
+oneDNN (*)
+Copyright 2016-2021 Intel Corporation
 Copyright 2018 YANDEX LLC
+Copyright 2019-2021 FUJITSU LIMITED
 Copyright 2020 Arm Limited and affiliates
 Copyright 2020 Codeplay Software Limited
-Copyright 2019-2020 FUJITSU LIMITED
+Copyright 2021 Alanna Tempest 
 
 Apache License, Version 2.0
 
@@ -436,6 +438,13 @@ Copyright Dave Gandy 2016. All rights reserved.
 Font Lato (doc/assets/fonts/lato*)
 Copyright (c) 2010-2014 by tyPoland Lukasz Dziedzic (team@latofonts.com)
 with Reserved Font Name "Lato"
+
+Font Asana Math (doc/assets/mathjax/fonts/HTML-CSS/Asana-Math)
+Copyright (c) 2007, Apostolos Syropoulos (<asyropoulos@yahoo.com),
+with Reserved Font Name Asana Math.
+
+Copyright (c) 2013, The MathJax Consortium,
+with Reserved Font Name Asana MathJax.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
