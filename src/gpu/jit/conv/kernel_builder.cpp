@@ -58,9 +58,11 @@ private:
 
 class dpasw_injector_t {
 public:
-    dpasw_injector_t(const stmt_t &load_mul_stmt, const stmt_t &c_store_stmt,
-            alloc_updater_t &alloc_updater, const expr_t &tg_idx0)
+    dpasw_injector_t(const stmt_t &load_mul_stmt, const expr_t &c_buf,
+            const stmt_t &c_store_stmt, alloc_updater_t &alloc_updater,
+            const expr_t &tg_idx0)
         : load_mul_stmt_(load_mul_stmt)
+        , c_buf_(c_buf)
         , c_store_stmt_(c_store_stmt)
         , alloc_updater_(alloc_updater)
         , tg_idx0_(tg_idx0) {}
@@ -73,7 +75,7 @@ public:
         expr_t src2_base;
         extract_dpas_calls(src2_base);
 
-        grf_permutator_t grf_perm;
+        grf_permutator_t grf_perm(c_buf_);
 
         int dpas_count = int(dpas_infos_.size());
         for (int i = 0; i < dpas_count;) {
@@ -403,6 +405,7 @@ private:
     }
 
     stmt_t load_mul_stmt_;
+    expr_t c_buf_;
     stmt_t c_store_stmt_;
     alloc_updater_t &alloc_updater_;
     expr_t tg_idx0_;
@@ -412,10 +415,11 @@ private:
 };
 
 // Transforms DPAS to DPASW.
-void inject_dpasw(stmt_t &load_mul_stmt, stmt_t &c_store_stmt,
-        alloc_updater_t &alloc_updater, const expr_t &tg_idx0) {
+void inject_dpasw(stmt_t &load_mul_stmt, const expr_t &c_buf,
+        stmt_t &c_store_stmt, alloc_updater_t &alloc_updater,
+        const expr_t &tg_idx0) {
     dpasw_injector_t injector(
-            load_mul_stmt, c_store_stmt, alloc_updater, tg_idx0);
+            load_mul_stmt, c_buf, c_store_stmt, alloc_updater, tg_idx0);
     injector.inject();
 
     load_mul_stmt = injector.load_mul_stmt();
@@ -3828,7 +3832,7 @@ public:
         // Replace DPAS by DPASW when applicable.
         if (cfg_.fma_kind == fma_kind_t::dpasw) {
             alloc_updater_t alloc_updater;
-            inject_dpasw(load_mul_stmt_, c_store_stmt_, alloc_updater,
+            inject_dpasw(load_mul_stmt_, c_buf, c_store_stmt_, alloc_updater,
                     tg_grid_.idx(0));
             for (auto &a : allocs_) {
                 a = alloc_updater.update(a);

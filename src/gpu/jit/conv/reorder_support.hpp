@@ -33,7 +33,12 @@ namespace jit {
 // DPAS -> DPASW transformation.
 class grf_permutator_t {
 public:
-    grf_permutator_t() { permutation_.fill(-1); }
+    grf_permutator_t(const expr_t &grf_buf_base = expr_t())
+        : grf_buf_base_(grf_buf_base) {
+        permutation_.fill(-1);
+    }
+
+    const expr_t &grf_buf_base() const { return grf_buf_base_; }
 
     int map(int base) const {
         ir_assert(grf_base_ != -1) << "GRF base not bound.";
@@ -43,6 +48,7 @@ public:
     }
 
     bool is_empty() const {
+        if (grf_buf_base_.is_empty()) return true;
         for (int i = 0; i < int(permutation_.size()); i++) {
             if (permutation_[i] != -1 && permutation_[i] != i) return false;
         }
@@ -52,11 +58,8 @@ public:
     void set_permute(const expr_t &old_grf, const expr_t &new_grf) {
         auto &old_base = old_grf.as<ptr_t>().base;
         auto &new_base = new_grf.as<ptr_t>().base;
-        ir_assert(old_base.is_same(new_base));
-        MAYBE_UNUSED(new_base);
-
-        if (grf_buf_base_.is_empty()) grf_buf_base_ = old_base;
         ir_assert(old_base.is_same(grf_buf_base_));
+        ir_assert(new_base.is_same(grf_buf_base_));
 
         int old_off = to_cpp<int>(old_grf.as<ptr_t>().off);
         int new_off = to_cpp<int>(new_grf.as<ptr_t>().off);

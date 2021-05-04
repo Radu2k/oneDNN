@@ -1913,7 +1913,8 @@ void emit_1d_tile(GeneratorT *host, ngen_register_scope_t &scope,
 
 class reorder_impl_t {
 public:
-    reorder_impl_t(const reorder_t &reorder) {
+    reorder_impl_t(const reorder_t &reorder, const grf_permutator_t &grf_perm)
+        : grf_perm_(grf_perm) {
         src_layout_ = reorder.src_layout.normalize();
         dst_layout_ = reorder.dst_layout.normalize();
         try_reinterpret_to_wider_type(src_layout_, dst_layout_);
@@ -1925,7 +1926,6 @@ public:
             dst_layout_ = dst_layout_.retype(type_t::u16());
         }
 
-        if (reorder.grf_perm) grf_perm_ = *reorder.grf_perm;
         with_permutation_ = !grf_perm_.is_empty();
     }
 
@@ -2079,7 +2079,8 @@ public:
         } else if (func.is<reorder_t>()) {
             auto arg_ops = eval(obj->args, scope);
             ir_assert(obj->attr.is_empty()) << "Unexpected attribute.";
-            reorder(scope, func.as<reorder_t>(), arg_ops);
+            reorder(scope, func.as<reorder_t>(), reorder_t::arg_src_buf(obj),
+                    arg_ops);
         } else if (func.is<send_t>()) {
             auto &send_func = func.as<send_t>();
             auto args = obj->args;
@@ -2282,11 +2283,21 @@ private:
     }
 
     void reorder(ngen_register_scope_t &scope, const reorder_t &reorder_func,
-            const std::vector<ngen_operand_t> &args) {
+            const expr_t &src_buf, const std::vector<ngen_operand_t> &args) {
         auto &src_op = reorder_t::arg_src_buf(args);
         auto &dst_op = reorder_t::arg_dst_buf(args);
 
-        reorder_impl_t reorder_impl(reorder_func);
+        auto &src_buf_base
+                = (src_buf.is<ptr_t>() ? src_buf.as<ptr_t>().base : src_buf);
+        grf_permutator_t grf_perm;
+        if (reorder_func.grf_perm) {
+            auto &perm_base = reorder_func.grf_perm->grf_buf_base();
+            if (perm_base.is_equal(src_buf_base)) {
+                grf_perm = *reorder_func.grf_perm;
+            }
+        }
+
+        reorder_impl_t reorder_impl(reorder_func, grf_perm);
         reorder_impl.emit(host_, scope, src_op.reg_data(), dst_op.reg_data());
     }
 
