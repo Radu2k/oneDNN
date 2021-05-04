@@ -528,6 +528,12 @@ public:
 
     bool post_ops_ok(const convolution_pd_t *pd) const {
         auto *attr = pd->attr();
+
+        auto attr_skip_mask = primitive_attr_t::skip_mask_t::post_ops
+                | primitive_attr_t::skip_mask_t::oscale_runtime
+                | primitive_attr_t::skip_mask_t::sum_dt;
+        if (!attr->has_default_values(attr_skip_mask)) return false;
+
         if (!attr->output_scales_.has_default_values()) {
             // Only common and per_oc output scales were tested.
             if (!utils::one_of(attr->output_scales_.mask_, 0, (1 << 1)))
