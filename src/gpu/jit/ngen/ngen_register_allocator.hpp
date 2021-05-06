@@ -96,6 +96,8 @@ class RegisterAllocator {
 public:
     explicit RegisterAllocator(HW hw_) : hw(hw_) { init(); }
 
+    ngen::HW hardware() const { return hw; }
+
     // Allocation functions: sub-GRFs, full GRFs, and GRF ranges.
     GRFRange alloc_range(int nregs, Bundle base_bundle = Bundle(),
                          BundleGroup bundle_mask = BundleGroup::AllBundles());

@@ -20,14 +20,12 @@
 #include "gpu/jit/conv/ir.hpp"
 #include "gpu/jit/conv/tensor.hpp"
 #include "gpu/jit/conv/utils.hpp"
+#include "gpu/jit/ngen/ngen.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace gpu {
 namespace jit {
-
-// TODO: Make a send_t parameter.
-const int reg_bytes = 32;
 
 enum class message_type_t {
     invalid,
@@ -47,11 +45,12 @@ class send_t : public func_impl_t {
 public:
     IR_DECL_DERIVED_TYPE_ID(send_t, func_impl_t)
 
-    static func_t make(ngen_proxy::Access access_type, message_type_t type,
-            const type_t &data_type, int data_elems, int slots,
-            const type_t &alignment, ngen_proxy::AddressModel address_model,
+    static func_t make(ngen::HW hw, ngen_proxy::Access access_type,
+            message_type_t type, const type_t &data_type, int data_elems,
+            int slots, const type_t &alignment,
+            ngen_proxy::AddressModel address_model,
             ngen_proxy::AtomicOp atomic_op, int eff_mask_count = -1) {
-        return func_t(new send_t(access_type, type, data_type, data_elems,
+        return func_t(new send_t(hw, access_type, type, data_type, data_elems,
                 slots, alignment, address_model, atomic_op, eff_mask_count));
     }
 
@@ -59,8 +58,8 @@ public:
         if (!obj->is<self_type>()) return false;
         auto &other = obj->as<self_type>();
 
-        return (access_type == other.access_type) && (type == other.type)
-                && (data_type == other.data_type)
+        return (hw == other.hw) && (access_type == other.access_type)
+                && (type == other.type) && (data_type == other.data_type)
                 && (data_elems == other.data_elems) && (slots == other.slots)
                 && (alignment == other.alignment)
                 && (address_model == other.address_model)
@@ -69,7 +68,7 @@ public:
     }
 
     size_t get_hash() const override {
-        return ir_utils::get_hash(access_type, type, data_type, data_elems,
+        return ir_utils::get_hash(hw, access_type, type, data_type, data_elems,
                 slots, alignment, address_model, atomic_op, eff_mask_count);
     }
 
@@ -130,6 +129,8 @@ public:
     bool is_slm() const {
         return address_model == ngen_proxy::AddressModel::ModelSLM;
     }
+
+    int grf_size() const { return ngen::GRF::bytes(hw); }
 
     // Size of elements to read/write in bytes.
     int size() const { return block_size() * slots; }
@@ -211,7 +212,7 @@ public:
         }
         sz *= data_type.size();
         // Round up to the full register length.
-        return utils::rnd_up(sz, reg_bytes);
+        return utils::rnd_up(sz, grf_size());
     }
 
     // Size of address elements.
@@ -226,8 +227,8 @@ public:
 
     // Size of header in bytes.
     int header_size() const {
-        if (type == message_type_t::block) return reg_bytes;
-        return utils::rnd_up(address_size() * slots, reg_bytes);
+        if (type == message_type_t::block) return grf_size();
+        return utils::rnd_up(address_size() * slots, grf_size());
     }
 
     bool is_transposing() const { return data_elems_stride() > slots_stride(); }
@@ -261,7 +262,7 @@ public:
                 break;
             default: ir_error_not_expected(); return func_t();
         }
-        return send_t::make(access_type, type, data_type, data_elems, slots,
+        return send_t::make(hw, access_type, type, data_type, data_elems, slots,
                 alignment, address_model, atomic_op, new_mask_count);
     }
 
@@ -297,93 +298,93 @@ public:
         return store_t::make(header_sub_buf, 0, off);
     }
 
-    static func_t scattered_byte_read(int elems, int slots) {
-        return send_t::make(ngen_proxy::Access::Read, message_type_t::scattered,
-                type_t::byte(), elems, slots, type_t::undef(),
-                ngen_proxy::AddressModel::ModelA64,
-                ngen_proxy::AtomicOp::undef);
-    }
-
-    static func_t scattered_byte_write(int elems, int slots) {
-        return send_t::make(ngen_proxy::Access::Write,
+    static func_t scattered_byte_read(ngen::HW hw, int elems, int slots) {
+        return send_t::make(hw, ngen_proxy::Access::Read,
                 message_type_t::scattered, type_t::byte(), elems, slots,
                 type_t::undef(), ngen_proxy::AddressModel::ModelA64,
                 ngen_proxy::AtomicOp::undef);
     }
 
-    static func_t scattered_dword_read(int elems, int slots) {
-        return send_t::make(ngen_proxy::Access::Read, message_type_t::scattered,
-                type_t::dword(), elems, slots, type_t::undef(),
-                ngen_proxy::AddressModel::ModelA64,
+    static func_t scattered_byte_write(ngen::HW hw, int elems, int slots) {
+        return send_t::make(hw, ngen_proxy::Access::Write,
+                message_type_t::scattered, type_t::byte(), elems, slots,
+                type_t::undef(), ngen_proxy::AddressModel::ModelA64,
                 ngen_proxy::AtomicOp::undef);
     }
 
-    static func_t scattered_dword_write(int elems, int slots) {
-        return send_t::make(ngen_proxy::Access::Write,
+    static func_t scattered_dword_read(ngen::HW hw, int elems, int slots) {
+        return send_t::make(hw, ngen_proxy::Access::Read,
                 message_type_t::scattered, type_t::dword(), elems, slots,
                 type_t::undef(), ngen_proxy::AddressModel::ModelA64,
                 ngen_proxy::AtomicOp::undef);
     }
 
-    static func_t scattered_qword_read(int elems, int slots) {
-        return send_t::make(ngen_proxy::Access::Read, message_type_t::scattered,
-                type_t::qword(), elems, slots, type_t::undef(),
-                ngen_proxy::AddressModel::ModelA64,
+    static func_t scattered_dword_write(ngen::HW hw, int elems, int slots) {
+        return send_t::make(hw, ngen_proxy::Access::Write,
+                message_type_t::scattered, type_t::dword(), elems, slots,
+                type_t::undef(), ngen_proxy::AddressModel::ModelA64,
                 ngen_proxy::AtomicOp::undef);
     }
 
-    static func_t scattered_qword_write(int elems, int slots) {
-        return send_t::make(ngen_proxy::Access::Write,
+    static func_t scattered_qword_read(ngen::HW hw, int elems, int slots) {
+        return send_t::make(hw, ngen_proxy::Access::Read,
                 message_type_t::scattered, type_t::qword(), elems, slots,
                 type_t::undef(), ngen_proxy::AddressModel::ModelA64,
                 ngen_proxy::AtomicOp::undef);
     }
 
-    static func_t block_oword_read(int elems) {
-        return send_t::make(ngen_proxy::Access::Read, message_type_t::block,
+    static func_t scattered_qword_write(ngen::HW hw, int elems, int slots) {
+        return send_t::make(hw, ngen_proxy::Access::Write,
+                message_type_t::scattered, type_t::qword(), elems, slots,
+                type_t::undef(), ngen_proxy::AddressModel::ModelA64,
+                ngen_proxy::AtomicOp::undef);
+    }
+
+    static func_t block_oword_read(ngen::HW hw, int elems) {
+        return send_t::make(hw, ngen_proxy::Access::Read, message_type_t::block,
                 type_t::oword(), elems, 1, type_t::undef(),
                 ngen_proxy::AddressModel::ModelA64,
                 ngen_proxy::AtomicOp::undef);
     }
 
-    static func_t block_oword_write(int elems) {
-        return send_t::make(ngen_proxy::Access::Write, message_type_t::block,
-                type_t::oword(), elems, 1, type_t::undef(),
-                ngen_proxy::AddressModel::ModelA64,
+    static func_t block_oword_write(ngen::HW hw, int elems) {
+        return send_t::make(hw, ngen_proxy::Access::Write,
+                message_type_t::block, type_t::oword(), elems, 1,
+                type_t::undef(), ngen_proxy::AddressModel::ModelA64,
                 ngen_proxy::AtomicOp::undef);
     }
 
-    static func_t block_oword_read_slm(int elems) {
-        return send_t::make(ngen_proxy::Access::Read, message_type_t::block,
-                type_t::oword(), elems, 1, type_t::undef(),
-                ngen_proxy::AddressModel::ModelSLM,
-                ngen_proxy::AtomicOp::undef);
-    }
-
-    static func_t block_oword_write_slm(int elems) {
-        return send_t::make(ngen_proxy::Access::Write, message_type_t::block,
+    static func_t block_oword_read_slm(ngen::HW hw, int elems) {
+        return send_t::make(hw, ngen_proxy::Access::Read, message_type_t::block,
                 type_t::oword(), elems, 1, type_t::undef(),
                 ngen_proxy::AddressModel::ModelSLM,
                 ngen_proxy::AtomicOp::undef);
     }
 
-    static func_t block_hword_read(int elems) {
-        return send_t::make(ngen_proxy::Access::Read, message_type_t::block,
+    static func_t block_oword_write_slm(ngen::HW hw, int elems) {
+        return send_t::make(hw, ngen_proxy::Access::Write,
+                message_type_t::block, type_t::oword(), elems, 1,
+                type_t::undef(), ngen_proxy::AddressModel::ModelSLM,
+                ngen_proxy::AtomicOp::undef);
+    }
+
+    static func_t block_hword_read(ngen::HW hw, int elems) {
+        return send_t::make(hw, ngen_proxy::Access::Read, message_type_t::block,
                 type_t::hword(), elems, 1, type_t::undef(),
                 ngen_proxy::AddressModel::ModelA64,
                 ngen_proxy::AtomicOp::undef);
     }
 
-    static std::vector<func_t> get_all(const type_t &mem_data_type,
+    static std::vector<func_t> get_all(ngen::HW hw, const type_t &mem_data_type,
             ngen_proxy::Access access_type,
             ngen_proxy::AddressModel address_model,
             ngen_proxy::AtomicOp atomic_op) {
-        return get_all(mem_data_type, access_type, address_model, atomic_op,
+        return get_all(hw, mem_data_type, access_type, address_model, atomic_op,
                 [](const func_t &) { return true; });
     }
 
     template <typename FilterFunc>
-    static std::vector<func_t> get_all(const type_t &mem_data_type,
+    static std::vector<func_t> get_all(ngen::HW hw, const type_t &mem_data_type,
             ngen_proxy::Access access_type,
             ngen_proxy::AddressModel address_model,
             ngen_proxy::AtomicOp atomic_op, const FilterFunc &filter) {
@@ -404,7 +405,7 @@ public:
                     if (is_atomic && data_type.size() != mem_data_type.size())
                         continue;
                     for (auto &message_type : message_types) {
-                        auto f = send_t::make(access_type, message_type,
+                        auto f = send_t::make(hw, access_type, message_type,
                                 data_type, elems, slots, type_t::undef(),
                                 address_model, atomic_op, -1);
                         if (!f.template as<send_t>().is_supported()) continue;
@@ -429,6 +430,7 @@ public:
         return ret;
     }
 
+    ngen::HW hw;
     ngen_proxy::Access access_type;
     message_type_t type;
     type_t data_type;
@@ -440,11 +442,12 @@ public:
     int eff_mask_count;
 
 private:
-    send_t(ngen_proxy::Access access_type, message_type_t type,
+    send_t(ngen::HW hw, ngen_proxy::Access access_type, message_type_t type,
             const type_t &data_type, int data_elems, int slots,
             const type_t &alignment, ngen_proxy::AddressModel address_model,
             ngen_proxy::AtomicOp atomic_op, int eff_mask_count)
-        : access_type(access_type)
+        : hw(hw)
+        , access_type(access_type)
         , type(type)
         , data_type(data_type)
         , data_elems(data_elems)
@@ -457,7 +460,8 @@ private:
     }
 
     send_t(const send_t &other)
-        : access_type(other.access_type)
+        : hw(other.hw)
+        , access_type(other.access_type)
         , type(other.type)
         , data_type(other.data_type)
         , data_elems(other.data_elems)

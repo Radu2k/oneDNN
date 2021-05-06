@@ -28,7 +28,7 @@
 #include "gpu/jit/conv/reorder_support.hpp"
 #include "gpu/jit/jit_eltwise_injector.hpp"
 #include "gpu/jit/jit_generator.hpp"
-#include "gpu/jit/ngen/ngen_core.hpp"
+#include "gpu/jit/ngen/ngen.hpp"
 #include "gpu/jit/ngen/ngen_register_allocator.hpp"
 
 #include "gpu/jit/gemm/emulation.hpp"
@@ -148,12 +148,13 @@ ngen::ConditionModifier cmp_op_to_ngen(op_kind_t op_kind) {
     return ngen::ConditionModifier::none;
 }
 
-ngen::RegData ngen_reg_data(const ngen::RegData &base, int off_bytes,
-        ngen::DataType type, int width, int hstride = 1) {
+ngen::RegData ngen_reg_data(ngen::HW hw, const ngen::RegData &base,
+        int off_bytes, ngen::DataType type, int width, int hstride = 1) {
+    auto grf_size = ngen::GRF::bytes(hw);
     auto new_off = base.getByteOffset() + off_bytes;
-    auto new_grf_off = (new_off % reg_bytes);
+    auto new_grf_off = (new_off % grf_size);
     auto type_size = ngen::getBytes(type);
-    auto grf = ngen::GRF(base.getBase() + new_off / reg_bytes).retype(type);
+    auto grf = ngen::GRF(base.getBase() + new_off / grf_size).retype(type);
 
     ir_assert(new_grf_off % type_size == 0);
 
@@ -170,10 +171,10 @@ ngen::RegData ngen_reg_data(const ngen::RegData &base, int off_bytes,
     return grf[new_grf_off / type_size](vstride, width, hstride);
 }
 
-ngen::Subregister ngen_subregister(const ngen::RegData &base, int off_bytes,
-        ngen::DataType type = ngen::DataType::invalid) {
+ngen::Subregister ngen_subregister(ngen::HW hw, const ngen::RegData &base,
+        int off_bytes, ngen::DataType type = ngen::DataType::invalid) {
     if (type == ngen::DataType::invalid) type = base.getType();
-    auto rd = ngen_reg_data(base, off_bytes, type, 1, 0);
+    auto rd = ngen_reg_data(hw, base, off_bytes, type, 1, 0);
     return ngen::Subregister(rd, rd.getOffset(), rd.getType());
 }
 
@@ -293,21 +294,22 @@ public:
         return ngen_operand_t();
     }
 
-    ngen_operand_t reinterpret(const type_t &new_type) const {
+    ngen_operand_t reinterpret(ngen::HW hw, const type_t &new_type) const {
         ir_assert(is_reg_data());
         ir_assert(new_type.is_scalar());
-        return ngen_reg_data(reg_data(), 0, to_ngen(new_type), 1);
+        return ngen_reg_data(hw, reg_data(), 0, to_ngen(new_type), 1);
     }
 
     // Creates an operand with the requested register region based on the
     // existing region. off - offset in elements of the region data type.
-    ngen_operand_t sub_reg_data(int off, int exec_size) const {
+    ngen_operand_t sub_reg_data(ngen::HW hw, int off, int exec_size) const {
         ir_assert(is_reg_data());
         auto rd = reg_data();
         int new_base = rd.getBase();
         int new_off = rd.getByteOffset() + off * rd.getBytes() * rd.getHS();
-        new_base += (new_off / reg_bytes);
-        new_off = (new_off % reg_bytes);
+        int grf_size = ngen::GRF::bytes(hw);
+        new_base += (new_off / grf_size);
+        new_off = (new_off % grf_size);
 
         rd.setBase(new_base);
         rd.setOffset(new_off / rd.getBytes());
@@ -346,7 +348,7 @@ private:
 };
 
 template <typename T>
-T to_cpp(const ngen_operand_t &op) {
+T to_cpp(ngen::HW hw, const ngen_operand_t &op) {
     ir_assert(op.is_immediate());
     return to_cpp<T>(op.immediate());
 }
@@ -403,7 +405,8 @@ public:
         ir_assert(stride_bytes > 0);
         ir_assert(stride_bytes % type.scalar().size() == 0);
 
-        int regs = utils::div_up(type.elems() * stride_bytes, reg_bytes);
+        int grf_size = ngen::GRF::bytes(ra_->hardware());
+        int regs = utils::div_up(type.elems() * stride_bytes, grf_size);
         auto sub = alloc_range(regs, bundle)[0].retype(
                 to_ngen(type.scalar()))[0];
         auto ret = sub(stride_bytes / type.scalar().size());
@@ -518,12 +521,14 @@ public:
     }
 
     void epilogue() {
+        const int dwords = ngen::GRF::bytes(hw) / sizeof(uint32_t);
+
         auto tmp = ra_.alloc();
         memfence(tmp);
-        mov<uint32_t>(8, null, tmp);
+        mov<uint32_t>(dwords, null, tmp);
 
         slmfence(tmp, r0);
-        mov<int32_t>(8, null, tmp);
+        mov<int32_t>(dwords, null, tmp);
 
         mov<uint32_t>(8, r255, r0);
         threadend(r255);
@@ -894,7 +899,7 @@ public:
         // Handle integer down-conversion preserving signedness.
         if (from_type.is_signed(1) && to_type.is_signed(1)
                 && (from_type.size() > to_type.size())) {
-            bind(obj, expr_op.reinterpret(to_type));
+            bind(obj, expr_op.reinterpret(hw, to_type));
             return;
         }
 
@@ -919,7 +924,7 @@ public:
             ir_assert(obj->stride % type.scalar().size() == 0);
             stride = obj->stride / type.scalar().size();
         }
-        auto load_reg_data = ngen_reg_data(buf_op.reg_data(),
+        auto load_reg_data = ngen_reg_data(hw, buf_op.reg_data(),
                 to_cpp<int>(off_op.immediate()), to_ngen(type.scalar()),
                 type.elems(), stride);
         bind(obj, load_reg_data);
@@ -937,11 +942,12 @@ public:
 
         int off = to_cpp<int>(obj->off);
         int base = base_op.reg_data().getBase();
-        auto grf = ngen::GRF(base + off / reg_bytes).retype(ngen::DataType::ub);
-        if (off % reg_bytes == 0)
+        int grf_size = ngen::GRF::bytes(hw);
+        auto grf = ngen::GRF(base + off / grf_size).retype(ngen::DataType::ub);
+        if (off % grf_size == 0)
             bind(obj, grf);
         else
-            bind(obj, grf[off % reg_bytes]);
+            bind(obj, grf[off % grf_size]);
     }
 
     void _visit(const shuffle_t *obj) override {
@@ -995,7 +1001,7 @@ public:
             int off = std::get<0>(chunk);
             int exec_size = std::get<1>(chunk);
             int idx = std::get<2>(chunk);
-            auto chunk_op = dst_op.sub_reg_data(off, exec_size);
+            auto chunk_op = dst_op.sub_reg_data(hw, off, exec_size);
             eval(obj->vec[idx], chunk_op);
         }
         expr_binding_.mark_as_evaluated(obj);
@@ -1254,8 +1260,9 @@ static bool try_reinterpret_to_wider_type(layout_t &src, layout_t &dst,
 // allocated. For example: A -> T -> B or A -> B -> T -> B
 class reorder_2d_impl_t {
 public:
-    reorder_2d_impl_t(const layout_t &src_layout, const layout_t &dst_layout)
-        : src_(src_layout), dst_(dst_layout) {
+    reorder_2d_impl_t(
+            ngen::HW hw, const layout_t &src_layout, const layout_t &dst_layout)
+        : hw_(hw), src_(src_layout), dst_(dst_layout) {
         ir_assert(src_.type() == dst_.type());
         tile_ = find_2d_tile(src_, dst_);
     }
@@ -1278,12 +1285,13 @@ public:
         auto dst_ab = to_ab.map(dst_).normalize();
 
         // Find minimal cost reorder path between layouts.
-        auto path = find_min_cost_path(src_ab, dst_ab, tile_a, tile_b);
+        auto path = find_min_cost_path(hw_, src_ab, dst_ab, tile_a, tile_b);
 
         // Allocate a temporary GRF buffer if needed.
         ngen::GRFRange tmp;
         if (path.size() > 1) {
-            tmp = scope.alloc_range(utils::div_up(dst_ab.size(), reg_bytes));
+            const int grf_size = ngen::GRF::bytes(hw_);
+            tmp = scope.alloc_range(utils::div_up(dst_ab.size(), grf_size));
         }
 
         // Iterate through found reorders.
@@ -1317,10 +1325,10 @@ public:
                         int prev_off = int(prev_layout->offset_in_bytes(start));
                         int next_off = int(next_layout->offset_in_bytes(start));
                         auto x_sub = ngen_subregister(
-                                prev_rd, prev_off, to_ngen(type));
+                                hw_, prev_rd, prev_off, to_ngen(type));
                         auto y_sub = ngen_subregister(
-                                next_rd, next_off, to_ngen(type));
-                        emit_1d_tile(host, scope, grf_perm, width, x_sub,
+                                hw_, next_rd, next_off, to_ngen(type));
+                        emit_1d_tile(hw_, host, scope, grf_perm, width, x_sub,
                                 x_stride, y_sub, y_stride);
                     });
             prev_layout = next_layout;
@@ -1402,7 +1410,8 @@ private:
 
     // Represents GRF layout between edges-reorders.
     struct vertex_t {
-        vertex_t(int idx, const layout_t &layout) : idx(idx), layout(layout) {}
+        vertex_t(ngen::HW hw, int idx, const layout_t &layout)
+            : hw(hw), idx(idx), layout(layout) {}
 
         std::string str() const {
             std::ostringstream oss;
@@ -1451,7 +1460,8 @@ private:
             int max_stride = int(last.stride * last.block);
             if (last.stride > 4) return false;
             int max_stride_bytes = max_stride * type.size();
-            if (max_stride_bytes > 2 * reg_bytes) return false;
+            int grf_size = ngen::GRF::bytes(hw);
+            if (max_stride_bytes > 2 * grf_size) return false;
             return true;
         }
 
@@ -1495,6 +1505,7 @@ private:
             return min_cost;
         }
 
+        ngen::HW hw;
         int idx; // Identifier of the vertex.
         layout_t layout; // Layout of the vertex.
         // Specifies a bitmask for every edge: if adj_edge_type_masks[E_idx]
@@ -1593,7 +1604,7 @@ private:
     }
 
     // Finds the optimal sequence of reorders between src and dst layouts.
-    static std::vector<reorder_step_t> find_min_cost_path(
+    static std::vector<reorder_step_t> find_min_cost_path(ngen::HW hw,
             const layout_t &src, const layout_t &dst, int tile_a, int tile_b) {
         // Create all possible edges - 2D reorders.
         std::vector<edge_t> edges;
@@ -1615,7 +1626,7 @@ private:
             // Skip if too many blocks.
             if (l.blocks().size() > 4) continue;
             int v_idx = int(vertices.size());
-            vertices.emplace_back(v_idx, l);
+            vertices.emplace_back(hw, v_idx, l);
             auto &v = vertices.back();
             // Pass all known reorders, the vertex/layout will filter out
             // incompatible reorders.
@@ -1769,18 +1780,20 @@ private:
         }
     }
 
+    ngen::HW hw_;
+
     layout_t src_;
     layout_t dst_;
 
     tensor_t tile_;
 };
 
-ngen::Subregister get_subregister(const grf_permutator_t &grf_perm,
+ngen::Subregister get_subregister(ngen::HW hw, const grf_permutator_t &grf_perm,
         const ngen::Subregister &base_sub, int off, int width, int stride_bytes,
         ngen::DataType type = ngen::DataType::invalid) {
     if (type == ngen::DataType::invalid) type = base_sub.getType();
     int off_bytes = off * stride_bytes;
-    auto rd = ngen_reg_data(base_sub, off_bytes, type, 1, 0);
+    auto rd = ngen_reg_data(hw, base_sub, off_bytes, type, 1, 0);
     auto ret = ngen::Subregister(rd, rd.getOffset(), rd.getType());
     if (grf_perm.is_empty()) return ret;
 
@@ -1788,8 +1801,10 @@ ngen::Subregister get_subregister(const grf_permutator_t &grf_perm,
     int off0 = ret.getByteOffset();
     int off1 = off0 + stride_bytes * (width - 1);
 
+    int grf_size = ngen::GRF::bytes(hw);
+
     int base0 = ret.getBase();
-    int base1 = base0 + off1 / reg_bytes;
+    int base1 = base0 + off1 / grf_size;
 
     int new_base = grf_perm.map(base0);
 
@@ -1804,7 +1819,7 @@ ngen::Subregister get_subregister(const grf_permutator_t &grf_perm,
 
 // Performs 1D reorder, possibly with strides and type conversion.
 template <typename GeneratorT>
-void emit_1d_tile(GeneratorT *host, ngen_register_scope_t &scope,
+void emit_1d_tile(ngen::HW hw, GeneratorT *host, ngen_register_scope_t &scope,
         const grf_permutator_t &grf_perm, int width,
         const ngen::Subregister &src, int src_stride,
         const ngen::Subregister &dst, int dst_stride) {
@@ -1827,7 +1842,10 @@ void emit_1d_tile(GeneratorT *host, ngen_register_scope_t &scope,
         int step = (width < 16 ? 8 : 16);
 
         // f32 -> bf16 or f32 -> f16: SIMD16 does not support mixed mode move.
-        if (f_to_xf) step = std::min(step, 8);
+#if DNNL_WITH_XE_HPC
+        if (hw < ngen::HW::Xe_HPC)
+#endif
+            if (f_to_xf) step = std::min(step, 8);
 
         // Max supported stride is 4.
         if (src_stride > 4 || dst_stride > 4) step = 1;
@@ -1842,10 +1860,10 @@ void emit_1d_tile(GeneratorT *host, ngen_register_scope_t &scope,
         for (int i = 0; i < width; i += step) {
             int esize = std::min(step, width - i);
             ir_assert(math::is_pow2(esize));
-            auto s = get_subregister(grf_perm, src, i, esize, src_stride_bytes,
-                    ngen::DataType::uw);
-            auto d = get_subregister(grf_perm, dst, i, esize, dst_stride_bytes,
-                    ngen::DataType::ud);
+            auto s = get_subregister(hw, grf_perm, src, i, esize,
+                    src_stride_bytes, ngen::DataType::uw);
+            auto d = get_subregister(hw, grf_perm, dst, i, esize,
+                    dst_stride_bytes, ngen::DataType::ud);
             host->eshl(
                     esize, d(dst_stride), s(src_stride), ngen::Immediate(16));
         }
@@ -1861,14 +1879,17 @@ void emit_1d_tile(GeneratorT *host, ngen_register_scope_t &scope,
         if (dst_b) ir_assert(utils::one_of(dst_stride_bytes, 1, 4));
         if (src_b) ir_assert(utils::one_of(src_stride_bytes, 1, 4));
         int step = get_step();
+        const int grf_size = ngen::GRF::bytes(hw);
         auto tmp = scope.alloc_range(
-                utils::div_up(int(step * sizeof(uint32_t)), reg_bytes));
+                utils::div_up(int(step * sizeof(uint32_t)), grf_size));
         for (int i = 0; i < width; i += step) {
             int esize = std::min(step, width - i);
             ir_assert(math::is_pow2(esize));
 
-            auto s = get_subregister(grf_perm, src, i, esize, src_stride_bytes);
-            auto d = get_subregister(grf_perm, dst, i, esize, dst_stride_bytes);
+            auto s = get_subregister(
+                    hw, grf_perm, src, i, esize, src_stride_bytes);
+            auto d = get_subregister(
+                    hw, grf_perm, dst, i, esize, dst_stride_bytes);
             if (src_d) {
                 // d -> b.
                 if (dst_stride_bytes == 1) {
@@ -1905,16 +1926,17 @@ void emit_1d_tile(GeneratorT *host, ngen_register_scope_t &scope,
         ir_assert(math::is_pow2(esize));
         ir_assert(!f_to_xf || utils::one_of(i % 16, 0, 8))
                 << "Not always supported in HW.";
-        auto s = get_subregister(grf_perm, src, i, esize, src_stride_bytes);
-        auto d = get_subregister(grf_perm, dst, i, esize, dst_stride_bytes);
+        auto s = get_subregister(hw, grf_perm, src, i, esize, src_stride_bytes);
+        auto d = get_subregister(hw, grf_perm, dst, i, esize, dst_stride_bytes);
         host->emov(esize, d(dst_stride), s(src_stride));
     }
 }
 
 class reorder_impl_t {
 public:
-    reorder_impl_t(const reorder_t &reorder, const grf_permutator_t &grf_perm)
-        : grf_perm_(grf_perm) {
+    reorder_impl_t(ngen::HW hw, const reorder_t &reorder,
+            const grf_permutator_t &grf_perm)
+        : hw_(hw), grf_perm_(grf_perm) {
         src_layout_ = reorder.src_layout.normalize();
         dst_layout_ = reorder.dst_layout.normalize();
         try_reinterpret_to_wider_type(src_layout_, dst_layout_);
@@ -1942,8 +1964,8 @@ public:
 
         auto &src_type = src_layout_.type();
         auto &dst_type = dst_layout_.type();
-        auto src = ngen_reg_data(_src, 0, to_ngen(src_type), 1);
-        auto dst = ngen_reg_data(_dst, 0, to_ngen(dst_type), 1);
+        auto src = ngen_reg_data(hw_, _src, 0, to_ngen(src_type), 1);
+        auto dst = ngen_reg_data(hw_, _dst, 0, to_ngen(dst_type), 1);
 
         if (try_emit_2d(host, scope, src, dst)) return;
         emit_1d(host, scope, src, dst);
@@ -1964,10 +1986,10 @@ private:
         dst_layout_.for_each_tile(tile, [&](const std::vector<dim_t> &start) {
             int src_off = int(src_layout_(start) * src_type.size());
             int dst_off = int(dst_layout_(start) * dst_type.size());
-            auto sub_src = ngen_subregister(src_rd, src_off);
-            auto sub_dst = ngen_subregister(dst_rd, dst_off);
+            auto sub_src = ngen_subregister(hw_, src_rd, src_off);
+            auto sub_dst = ngen_subregister(hw_, dst_rd, dst_off);
 
-            emit_1d_tile(host, scope, grf_perm_, tile_elems, sub_src,
+            emit_1d_tile(hw_, host, scope, grf_perm_, tile_elems, sub_src,
                     src_stride, sub_dst, dst_stride);
         });
     }
@@ -1979,7 +2001,7 @@ private:
         if (!src_layout_.is_dense()) return false;
         if (!dst_layout_.is_dense()) return false;
 
-        reorder_2d_impl_t r(src_layout_, dst_layout_);
+        reorder_2d_impl_t r(hw_, src_layout_, dst_layout_);
         int tile_elems = int(r.tile().elems());
         if (tile_elems < 16 || tile_elems > 512) return false;
 
@@ -2021,6 +2043,7 @@ private:
         return tensor_t(tile_dims);
     }
 
+    ngen::HW hw_;
     layout_t src_layout_;
     layout_t dst_layout_;
     grf_permutator_t grf_perm_;
@@ -2040,7 +2063,8 @@ public:
         auto scope = register_scope();
         bool do_alloc = (obj->kind == alloc_kind_t::grf);
         if (do_alloc) {
-            int regs = utils::div_up(obj->size, reg_bytes);
+            int grf_size = ngen::GRF::bytes(hw);
+            int regs = utils::div_up(obj->size, grf_size);
             ngen::Bundle bundle;
             auto *grf_attr = obj->attr.as_ptr<grf_alloc_attr_t>();
             if (grf_attr) bundle = to_ngen(grf_attr->bundle);
@@ -2169,7 +2193,7 @@ public:
 
         ngen::InstructionModifier mod = type.elems();
         if (!mask_op.is_invalid()) mod |= mask_op.flag_register_mod();
-        auto dst_rd = ngen_reg_data(buf_op.reg_data(), off,
+        auto dst_rd = ngen_reg_data(hw, buf_op.reg_data(), off,
                 to_ngen(type.scalar()), type.elems(), stride);
         ngen_operand_t dst(dst_rd, mod);
         eval(obj->value, scope, dst);
@@ -2195,8 +2219,10 @@ private:
         ngen::InstructionModifier mod;
         if (!attr.is_empty())
             mod = mod | to_ngen(attr.as<instruction_modifier_attr_t>().mod);
+
+        const int dwords = ngen::GRF::bytes(hw) / sizeof(int32_t);
         host_->slmfence(mod, tmp, host_->r0);
-        host_->template mov<int32_t>(mod | 8, host_->null, tmp);
+        host_->template mov<int32_t>(dwords, host_->null, tmp);
     }
 
     void barrier(const func_call_attr_t &attr) {
@@ -2205,8 +2231,10 @@ private:
         ngen::InstructionModifier mod;
         if (!attr.is_empty())
             mod = mod | to_ngen(attr.as<instruction_modifier_attr_t>().mod);
+
+        const int dwords = ngen::GRF::bytes(hw) / sizeof(int32_t);
         host_->slmfence(mod, tmp, host_->r0);
-        host_->template mov<int32_t>(mod | 8, host_->null, tmp);
+        host_->template mov<int32_t>(dwords, host_->null, tmp);
         host_->barriermsg(mod, host_->signal_header_);
         host_->barrierwait();
     }
@@ -2252,7 +2280,7 @@ private:
         ngen::RegData src0;
         auto &src0_op = mad_t::arg_src0(args);
         if (src0_op.is_reg_data()) {
-            src0 = ngen_reg_data(src0_op.reg_data(), 0,
+            src0 = ngen_reg_data(hw, src0_op.reg_data(), 0,
                     to_ngen(mad_func.dst_type), mad_func.dst_simd_size);
         } else {
             ir_assert(src0_op.is_immediate());
@@ -2262,11 +2290,11 @@ private:
         }
 
         dst = ngen_reg_data(
-                dst, 0, to_ngen(mad_func.dst_type), mad_func.dst_simd_size);
-        src1 = ngen_reg_data(
-                src1, 0, to_ngen(mad_func.src1_type), mad_func.src1_simd_size);
-        src2 = ngen_reg_data(
-                src2, 0, to_ngen(mad_func.src2_type), mad_func.src2_simd_size);
+                hw, dst, 0, to_ngen(mad_func.dst_type), mad_func.dst_simd_size);
+        src1 = ngen_reg_data(hw, src1, 0, to_ngen(mad_func.src1_type),
+                mad_func.src1_simd_size);
+        src2 = ngen_reg_data(hw, src2, 0, to_ngen(mad_func.src2_type),
+                mad_func.src2_simd_size);
 
         ngen::InstructionModifier mod = simd_size_;
         if (!attr.is_empty())
@@ -2289,7 +2317,7 @@ private:
 
         auto &src_buf_base
                 = (src_buf.is<ptr_t>() ? src_buf.as<ptr_t>().base : src_buf);
-        grf_permutator_t grf_perm;
+        grf_permutator_t grf_perm(hw);
         if (reorder_func.grf_perm) {
             auto &perm_base = reorder_func.grf_perm->grf_buf_base();
             if (perm_base.is_equal(src_buf_base)) {
@@ -2297,7 +2325,7 @@ private:
             }
         }
 
-        reorder_impl_t reorder_impl(reorder_func, grf_perm);
+        reorder_impl_t reorder_impl(hw, reorder_func, grf_perm);
         reorder_impl.emit(host_, scope, src_op.reg_data(), dst_op.reg_data());
     }
 
@@ -2340,8 +2368,8 @@ private:
             mod_mov.setSWSB({});
             int step = send_func.mask_count() * sizeof(uint32_t);
             for (int i = 0; i < send_func.register_size(); i += step) {
-                auto sub_rd_mov = ngen_reg_data(
-                        rd_mov, i, ngen::DataType::f, send_func.eff_mask_count);
+                auto sub_rd_mov = ngen_reg_data(hw, rd_mov, i,
+                        ngen::DataType::f, send_func.eff_mask_count);
                 host_->emov(mod_mov, sub_rd_mov, ngen::Immediate(0.0f));
             }
         }
@@ -2353,11 +2381,12 @@ private:
 
     void eltwise(ngen_register_scope_t &scope, const eltwise_t &func,
             const std::vector<ngen_operand_t> &args) {
-        int elems = to_cpp<int>(eltwise_t::arg_elems(args));
+        int elems = to_cpp<int>(hw, eltwise_t::arg_elems(args));
         auto &data_op = eltwise_t::arg_data(args);
         auto &data_rd = data_op.reg_data();
 
-        ir_assert(elems * sizeof(float) % reg_bytes == 0)
+        int grf_size = ngen::GRF::bytes(hw);
+        ir_assert(elems * sizeof(float) % grf_size == 0)
                 << "Partial GRF updates are not supported.";
         ir_assert(data_rd.getOffset() == 0)
                 << "Data must be aligned to GRF boundary.";
@@ -2368,7 +2397,7 @@ private:
         inj.set_scratch(scratch);
         inj.prepare();
         inj.compute(ngen::GRFRange(
-                data_rd.getBase(), elems * sizeof(float) / reg_bytes));
+                data_rd.getBase(), elems * sizeof(float) / grf_size));
     }
 
     ngen_operand_t eval(const expr_t &e, ngen_register_scope_t &scope,

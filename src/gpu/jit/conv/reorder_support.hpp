@@ -23,6 +23,7 @@
 
 #include "gpu/jit/conv/ir.hpp"
 #include "gpu/jit/conv/tensor.hpp"
+#include "gpu/jit/ngen/ngen.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -33,8 +34,8 @@ namespace jit {
 // DPAS -> DPASW transformation.
 class grf_permutator_t {
 public:
-    grf_permutator_t(const expr_t &grf_buf_base = expr_t())
-        : grf_buf_base_(grf_buf_base) {
+    grf_permutator_t(ngen::HW hw, const expr_t &grf_buf_base = expr_t())
+        : hw_(hw), grf_buf_base_(grf_buf_base) {
         permutation_.fill(-1);
     }
 
@@ -64,13 +65,15 @@ public:
         int old_off = to_cpp<int>(old_grf.as<ptr_t>().off);
         int new_off = to_cpp<int>(new_grf.as<ptr_t>().off);
 
-        ir_assert(old_off % reg_bytes == 0)
+        const int grf_size = ngen::GRF::bytes(hw_);
+
+        ir_assert(old_off % grf_size == 0)
                 << "Must be aligned to GRF boundary.";
-        ir_assert(new_off % reg_bytes == 0)
+        ir_assert(new_off % grf_size == 0)
                 << "Must be aligned to GRF boundary.";
 
-        old_off /= reg_bytes;
-        new_off /= reg_bytes;
+        old_off /= grf_size;
+        new_off /= grf_size;
 
         ir_assert(permutation_[old_off] == -1) << "Already assigned.";
         permutation_[old_off] = new_off;
@@ -93,6 +96,7 @@ public:
 private:
     static const int max_regs = 256;
 
+    ngen::HW hw_;
     int grf_base_ = -1;
     expr_t grf_buf_base_;
     std::array<int, max_regs> permutation_;

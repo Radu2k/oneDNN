@@ -37,7 +37,14 @@ public:
         auto *compute_engine
                 = utils::downcast<compute::compute_engine_t *>(engine);
 
-        if (!compute_engine->is_xe_hp() && !compute_engine->is_xe_hpg())
+        if (!compute_engine->is_xe_hp()
+#if DNNL_WITH_XE_HPG
+                && !compute_engine->is_xe_hpg()
+#endif
+#if DNNL_WITH_XE_HPC
+                && !compute_engine->is_xe_hpc()
+#endif
+        )
             return status::unimplemented;
         if (!compute_engine->mayiuse_ngen_kernels())
             return status::unimplemented;
@@ -71,10 +78,18 @@ public:
                 jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hp>(
                         cfg(primitive), primitive->pd(), kernel_arg_info_));
                 break;
+#if DNNL_WITH_XE_HPG
             case gpu_arch_t::xe_hpg:
                 jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hpg>(
                         cfg(primitive), primitive->pd(), kernel_arg_info_));
                 break;
+#endif
+#if DNNL_WITH_XE_HPC
+            case gpu_arch_t::xe_hpc:
+                jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hpc>(
+                        cfg(primitive), primitive->pd(), kernel_arg_info_));
+                break;
+#endif
             default: return status::unimplemented;
         }
         CHECK(primitive->create_kernel(engine, &kernel_, *jit_gen_convolution));

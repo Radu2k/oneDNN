@@ -21,6 +21,7 @@
 #include <string>
 
 #include "gpu/jit/conv/tensor.hpp"
+#include "gpu/jit/ngen/ngen.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -43,8 +44,8 @@ fma_kind_t from_string(std::string enum_string);
 fma_kind_t get_supported_kind(
         const type_t &a, const type_t &b, const type_t &c);
 
-int get_simd_size(
-        fma_kind_t kind, const type_t &a, const type_t &b, const type_t &c);
+int get_simd_size(ngen::HW hw, fma_kind_t kind, const type_t &a,
+        const type_t &b, const type_t &c);
 
 } // namespace fma_kind
 
@@ -87,16 +88,16 @@ class dpas_t : public func_impl_t {
 public:
     IR_DECL_DERIVED_TYPE_ID(dpas_t, func_impl_t)
 
-    static func_t make(bool is_dpasw, int sdepth, int rcount,
+    static func_t make(bool is_dpasw, int simd_size, int sdepth, int rcount,
             const type_t &dst_type, const type_t &src1_type,
             const type_t &src2_type) {
-        return func_t(new dpas_t(
-                is_dpasw, sdepth, rcount, dst_type, src1_type, src2_type));
+        return func_t(new dpas_t(is_dpasw, simd_size, sdepth, rcount, dst_type,
+                src1_type, src2_type));
     }
 
     static func_t make_dpasw(const dpas_t &dpas) {
-        return func_t(new dpas_t(true, dpas.sdepth, dpas.rcount, dpas.dst_type,
-                dpas.src1_type, dpas.src2_type));
+        return func_t(new dpas_t(true, dpas.simd_size, dpas.sdepth, dpas.rcount,
+                dpas.dst_type, dpas.src1_type, dpas.src2_type));
     }
 
     bool is_equal(const object_impl_t *obj) const override {
@@ -135,7 +136,7 @@ public:
     int src0_size() const { return dst_size(); }
     int src1_size() const { return simd_size * sdepth * sizeof(uint32_t); }
     int src2_size() const {
-        int dpas_size = sdepth * rcount * sizeof(uint32_t);
+        const int dpas_size = sdepth * rcount * sizeof(uint32_t);
         return is_dpasw ? dpas_size / 2 : dpas_size;
     }
 
@@ -147,15 +148,10 @@ public:
 
     static bool matches_types(
             const type_t &a, const type_t &b, const type_t &c);
-    static int get_simd_size(
-            const type_t &a, const type_t &b, const type_t &c) {
-        return simd_size;
-    }
-
-    static const int simd_size = 8;
 
     bool is_dpasw;
 
+    int simd_size;
     int sdepth;
     int rcount;
 
@@ -164,9 +160,11 @@ public:
     type_t src2_type;
 
 private:
-    dpas_t(bool is_dpasw, int sdepth, int rcount, const type_t &dst_type,
-            const type_t &src1_type, const type_t &src2_type)
+    dpas_t(bool is_dpasw, int simd_size, int sdepth, int rcount,
+            const type_t &dst_type, const type_t &src1_type,
+            const type_t &src2_type)
         : is_dpasw(is_dpasw)
+        , simd_size(simd_size)
         , sdepth(sdepth)
         , rcount(rcount)
         , dst_type(dst_type)

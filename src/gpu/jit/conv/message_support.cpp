@@ -226,7 +226,7 @@ view_t create_register_view_for_message(
         const send_t &send, const view_t &mem_view, int &reg_buf_size) {
     auto mem_layout = mem_view.create_dense_vlayout();
     auto reg_layout = create_register_layout_for_message(send, mem_layout);
-    reg_buf_size = utils::rnd_up(reg_layout.size(), reg_bytes);
+    reg_buf_size = utils::rnd_up(reg_layout.size(), send.grf_size());
     return view_t(mem_view, reg_layout);
 }
 

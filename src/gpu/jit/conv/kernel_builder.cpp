@@ -58,10 +58,11 @@ private:
 
 class dpasw_injector_t {
 public:
-    dpasw_injector_t(const stmt_t &load_mul_stmt, const expr_t &c_buf,
-            const stmt_t &c_store_stmt, alloc_updater_t &alloc_updater,
-            const expr_t &tg_idx0)
-        : load_mul_stmt_(load_mul_stmt)
+    dpasw_injector_t(ngen::HW hw, const stmt_t &load_mul_stmt,
+            const expr_t &c_buf, const stmt_t &c_store_stmt,
+            alloc_updater_t &alloc_updater, const expr_t &tg_idx0)
+        : hw_(hw)
+        , load_mul_stmt_(load_mul_stmt)
         , c_buf_(c_buf)
         , c_store_stmt_(c_store_stmt)
         , alloc_updater_(alloc_updater)
@@ -75,7 +76,7 @@ public:
         expr_t src2_base;
         extract_dpas_calls(src2_base);
 
-        grf_permutator_t grf_perm(c_buf_);
+        grf_permutator_t grf_perm(hw_, c_buf_);
 
         int dpas_count = int(dpas_infos_.size());
         for (int i = 0; i < dpas_count;) {
@@ -285,6 +286,10 @@ private:
 
     bool try_convert_to_dpasw(
             dpas_info_t &a, dpas_info_t &b, grf_permutator_t &grf_perm) {
+#if DNNL_WITH_XE_HPC
+        if (hw_ >= ngen::HW::Xe_HPC) return false;
+#endif
+
         // Check if DPAS -> DPASW transformation is possible.
         if (!can_convert_to_dpasw(a, b)) return false;
 
@@ -314,19 +319,20 @@ private:
 
         // Record permutation for registers to apply it for the destination
         // store later.
-        int rcount = a.dpas().rcount;
+        const auto grf_size = ngen::GRF::bytes(hw_);
+        const auto rcount = a.dpas().rcount;
         for (int j = 0; j < rcount; j++) {
             int k = j % (rcount / 2);
-            auto a_old = dpas_t::arg_dst(a_args) + reg_bytes * j;
-            auto b_old = dpas_t::arg_dst(b_args) + reg_bytes * j;
+            auto a_old = dpas_t::arg_dst(a_args) + grf_size * j;
+            auto b_old = dpas_t::arg_dst(b_args) + grf_size * j;
             expr_t grf_new;
             if (j < rcount / 2) {
-                grf_new = dpas_t::arg_dst(a_args)[reg_bytes * k];
+                grf_new = dpas_t::arg_dst(a_args)[grf_size * k];
             } else {
-                grf_new = dpas_t::arg_dst(b_args)[reg_bytes * k];
+                grf_new = dpas_t::arg_dst(b_args)[grf_size * k];
             }
             grf_perm.set_permute(a_old, grf_new);
-            grf_perm.set_permute(b_old, grf_new + reg_bytes * rcount / 2);
+            grf_perm.set_permute(b_old, grf_new + grf_size * rcount / 2);
         }
 
         auto &a_send = find_send_info(a.send_producer);
@@ -367,6 +373,9 @@ private:
     }
 
     bool try_convert_to_dpasw(dpas_info_t &a, grf_permutator_t &grf_perm) {
+#if DNNL_WITH_XE_HPC
+        if (hw_ >= ngen::HW::Xe_HPC) return false;
+#endif
         if (!can_convert_to_dpasw(a)) return false;
 
         // Perform the transformation:
@@ -383,9 +392,10 @@ private:
         a.set_new_call(dpasw.call(a.args()), 0);
 
         // Real permutation is not required but it needs to be set anyway.
-        int rcount = a.dpas().rcount;
+        const auto grf_size = ngen::GRF::bytes(hw_);
+        const auto rcount = a.dpas().rcount;
         for (int j = 0; j < rcount; j++) {
-            auto grf = dpas_t::arg_dst(a.args()) + reg_bytes * j;
+            auto grf = dpas_t::arg_dst(a.args()) + grf_size * j;
             grf_perm.set_permute(grf, grf);
         }
 
@@ -404,6 +414,7 @@ private:
         return permutation_injector_t(grf_perm).mutate(stmt);
     }
 
+    ngen::HW hw_;
     stmt_t load_mul_stmt_;
     expr_t c_buf_;
     stmt_t c_store_stmt_;
@@ -415,11 +426,11 @@ private:
 };
 
 // Transforms DPAS to DPASW.
-void inject_dpasw(stmt_t &load_mul_stmt, const expr_t &c_buf,
+void inject_dpasw(ngen::HW hw, stmt_t &load_mul_stmt, const expr_t &c_buf,
         stmt_t &c_store_stmt, alloc_updater_t &alloc_updater,
         const expr_t &tg_idx0) {
     dpasw_injector_t injector(
-            load_mul_stmt, c_buf, c_store_stmt, alloc_updater, tg_idx0);
+            hw, load_mul_stmt, c_buf, c_store_stmt, alloc_updater, tg_idx0);
     injector.inject();
 
     load_mul_stmt = injector.load_mul_stmt();
@@ -2204,9 +2215,10 @@ private:
 
 class simple_slm_buffering_injector_t {
 public:
-    simple_slm_buffering_injector_t(
-            const stmt_t &root, const conv_config_t &cfg, ir_context_t &ir_ctx)
-        : cfg_(cfg)
+    simple_slm_buffering_injector_t(ngen::HW hw, const stmt_t &root,
+            const conv_config_t &cfg, ir_context_t &ir_ctx)
+        : hw_(hw)
+        , cfg_(cfg)
         , ir_ctx_(ir_ctx)
         , root_(root)
         , alloc_mgr_(root_)
@@ -2327,8 +2339,9 @@ public:
 
         if (cfg_.assign_sbids) loop = sbid_assigner_t().assign(loop);
 
+        const auto grf_size = ngen::GRF::bytes(hw_);
         loop = alloc_t::make(
-                slm_idx_buf, reg_bytes, alloc_kind_t::grf, {}, loop);
+                slm_idx_buf, grf_size, alloc_kind_t::grf, {}, loop);
 
         alloc_updater_t alloc_updater;
 
@@ -2377,6 +2390,7 @@ public:
         return ret;
     }
 
+    ngen::HW hw_;
     const conv_config_t &cfg_;
     ir_context_t &ir_ctx_;
 
@@ -2389,9 +2403,9 @@ public:
 };
 
 // Injects SLM buffering without unrolling based on the config.
-stmt_t inject_simple_slm_buffering(
-        const stmt_t &s, const conv_config_t &cfg, ir_context_t &ir_ctx) {
-    auto ret = simple_slm_buffering_injector_t(s, cfg, ir_ctx).inject();
+stmt_t inject_simple_slm_buffering(ngen::HW hw, const stmt_t &s,
+        const conv_config_t &cfg, ir_context_t &ir_ctx) {
+    auto ret = simple_slm_buffering_injector_t(hw, s, cfg, ir_ctx).inject();
     trace_pass("inject_simple_slm_buffering", ret);
     return ret;
 }
@@ -2732,14 +2746,17 @@ stmt_t inject_unrolled_slm_buffering(
 
 class store_splitter_t : public ir_mutator_t {
 public:
+    store_splitter_t(ngen::HW hw) : hw_(hw) {}
+
     object_t _mutate(const store_t *obj) override {
         int elems = obj->value.type().elems();
         int elem_size = obj->value.type().scalar().size();
         int stride = (obj->has_default_stride() ? 1 : obj->stride / elem_size);
         int store_size = elem_size * stride * elems;
-        if (store_size <= 2 * reg_bytes) return ir_mutator_t::_mutate(obj);
+        const auto grf_size = ngen::GRF::bytes(hw_);
+        if (store_size <= 2 * grf_size) return ir_mutator_t::_mutate(obj);
 
-        int step = 2 * reg_bytes / (stride * elem_size);
+        int step = 2 * grf_size / (stride * elem_size);
         stmt_t new_stmt;
         for (int i = 0; i < elems; i += step) {
             int cur_elems = std::min(step, elems - i);
@@ -2766,11 +2783,13 @@ private:
         ir_error_not_expected();
         return expr_t();
     }
+
+    ngen::HW hw_;
 };
 
 // Splits wide GRF stores otherwise unsupported in HW.
-stmt_t split_wide_stores(const stmt_t &s) {
-    auto ret = store_splitter_t().mutate(s);
+stmt_t split_wide_stores(ngen::HW hw, const stmt_t &s) {
+    auto ret = store_splitter_t(hw).mutate(s);
     trace_pass("split_wide_stores", ret);
     return ret;
 }
@@ -2794,11 +2813,12 @@ class access_builder_t {
 public:
     access_builder_t() = default;
 
-    access_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
-            const view_t &mem_view, const expr_t &mem_buf,
-            const expr_t &reg_buf, bool is_slm, bool is_load,
-            ngen_proxy::AtomicOp atomic_op)
-        : ir_ctx_(&ir_ctx)
+    access_builder_t(ngen::HW hw, ir_context_t &ir_ctx,
+            const constraint_set_t &cset, const view_t &mem_view,
+            const expr_t &mem_buf, const expr_t &reg_buf, bool is_slm,
+            bool is_load, ngen_proxy::AtomicOp atomic_op)
+        : hw_(hw)
+        , ir_ctx_(&ir_ctx)
         , cset_(&cset)
         , mem_view_(mem_view)
         , mem_buf_(mem_buf)
@@ -2818,12 +2838,13 @@ public:
     const stmt_t &stmt() const { return stmt_; }
 
     std::string str() const {
+        const auto grf_size = ngen::GRF::bytes(hw_);
         std::ostringstream oss;
         oss << "Memory view:          " << mem_view_ << std::endl;
         oss << "Register view:        " << reg_view_ << std::endl;
         oss << "Register buffer:      " << reg_buf_ << std::endl;
         oss << "Register buffer size: " << reg_buf_size_ << " ("
-            << reg_buf_size_ / reg_bytes << " regs)" << std::endl;
+            << reg_buf_size_ / grf_size << " regs)" << std::endl;
         oss << "Statement:            " << std::endl << stmt_;
         return oss.str();
     }
@@ -2895,10 +2916,11 @@ private:
                             : is_atomic ? AddressModel::ModelBTS
                                         : AddressModel::ModelA64);
         auto send_list = send_t::get_all(
-                data_type, access_type, address_model, atomic_op_);
+                hw_, data_type, access_type, address_model, atomic_op_);
         return send_list;
     }
 
+    ngen::HW hw_;
     ir_context_t *ir_ctx_;
     const constraint_set_t *cset_;
 
@@ -2917,10 +2939,10 @@ class read_builder_t : public access_builder_t {
 public:
     read_builder_t() = default;
 
-    read_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
-            const view_t &view, const expr_t &mem_buf, const expr_t &reg_buf,
-            bool is_slm)
-        : access_builder_t(ir_ctx, cset, view, mem_buf, reg_buf, is_slm,
+    read_builder_t(ngen::HW hw, ir_context_t &ir_ctx,
+            const constraint_set_t &cset, const view_t &view,
+            const expr_t &mem_buf, const expr_t &reg_buf, bool is_slm)
+        : access_builder_t(hw, ir_ctx, cset, view, mem_buf, reg_buf, is_slm,
                 /*is_load=*/true, ngen_proxy::AtomicOp::undef) {}
 };
 
@@ -2928,11 +2950,11 @@ class write_builder_t : public access_builder_t {
 public:
     write_builder_t() = default;
 
-    write_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
-            const view_t &view, const expr_t &mem_buf, const expr_t &reg_buf,
-            bool is_slm,
+    write_builder_t(ngen::HW hw, ir_context_t &ir_ctx,
+            const constraint_set_t &cset, const view_t &view,
+            const expr_t &mem_buf, const expr_t &reg_buf, bool is_slm,
             ngen_proxy::AtomicOp atomic_op = ngen_proxy::AtomicOp::undef)
-        : access_builder_t(ir_ctx, cset, view, mem_buf, reg_buf, is_slm,
+        : access_builder_t(hw, ir_ctx, cset, view, mem_buf, reg_buf, is_slm,
                 /*is_load=*/false, atomic_op) {}
 };
 
@@ -2947,9 +2969,10 @@ public:
 // across a size one dimension.
 class post_op_builder_t {
 public:
-    post_op_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
-            const post_op_t &post_op, int &available_pre_load_size)
-        : ir_ctx_(ir_ctx), cset_(cset), post_op_(post_op) {
+    post_op_builder_t(ngen::HW hw, ir_context_t &ir_ctx,
+            const constraint_set_t &cset, const post_op_t &post_op,
+            int &available_pre_load_size)
+        : hw_(hw), ir_ctx_(ir_ctx), cset_(cset), post_op_(post_op) {
         if (!post_op_.needs_load()) return;
 
         // Estimate buffer size required to load full rhs, do not do pre-load
@@ -2986,7 +3009,7 @@ public:
     stmt_t build_pre_load() {
         if (!do_preload_) return stmt_t();
 
-        read_builder_t read(ir_ctx_, cset_, post_op_.rhs_view(),
+        read_builder_t read(hw_, ir_ctx_, cset_, post_op_.rhs_view(),
                 post_op_.rhs_buf(), rhs_orig_reg_buf_, /*is_slm=*/false);
         pre_load_rhs_reg_view_ = read.reg_view();
         rhs_reg_buf_ = rhs_orig_reg_buf_;
@@ -3022,8 +3045,8 @@ public:
         if (post_op_.needs_load() && !do_preload_) {
             // Load and convert now.
             auto po = post_op_.create_sub_post_op(rhs_tile);
-            read_builder_t read(ir_ctx_, cset_, po.rhs_view(), po.rhs_buf(),
-                    rhs_orig_reg_buf_,
+            read_builder_t read(hw_, ir_ctx_, cset_, po.rhs_view(),
+                    po.rhs_buf(), rhs_orig_reg_buf_,
                     /*is_slm=*/false);
             stmt = stmt.append(read.stmt());
 
@@ -3171,6 +3194,7 @@ private:
         return post_op_.rhs_view().type() != type_t::f32();
     }
 
+    ngen::HW hw_;
     ir_context_t &ir_ctx_;
     const constraint_set_t &cset_;
     post_op_t post_op_;
@@ -3262,11 +3286,12 @@ private:
 // - Store to the destination
 class epilogue_builder_t {
 public:
-    epilogue_builder_t(ir_context_t &ir_ctx, const constraint_set_t &cset,
-            const post_op_context_t &post_op_ctx, const view_t &mem_view,
-            const view_t &reg_view, const expr_t &mem_buf,
-            const expr_t &reg_buf)
-        : ir_ctx_(ir_ctx)
+    epilogue_builder_t(ngen::HW hw, ir_context_t &ir_ctx,
+            const constraint_set_t &cset, const post_op_context_t &post_op_ctx,
+            const view_t &mem_view, const view_t &reg_view,
+            const expr_t &mem_buf, const expr_t &reg_buf)
+        : hw_(hw)
+        , ir_ctx_(ir_ctx)
         , cset_(cset)
         , post_op_ctx_(post_op_ctx)
         , mem_view_(mem_view)
@@ -3278,7 +3303,7 @@ public:
         for (auto &po : post_op_ctx_.post_ops()) {
             auto sub_po = po.create_sub_post_op(mem_view.vtensor());
             post_op_builders_.emplace_back(
-                    ir_ctx, cset_, sub_po, pre_load_size);
+                    hw_, ir_ctx, cset_, sub_po, pre_load_size);
         }
         build();
     }
@@ -3312,7 +3337,7 @@ private:
             ir_assert(view.is_direct()) << "Expected direct view.";
         }
 
-        void set_next(ir_context_t &ir_ctx, stage_t *next) {
+        void set_next(ngen::HW hw, ir_context_t &ir_ctx, stage_t *next) {
             if (!next) return;
             if (!view.has_same_vlayout(next->view, /*compare_offset=*/false)) {
                 ir_assert(stmt.is_empty());
@@ -3400,7 +3425,8 @@ private:
         bool restore_zero_padding = post_op_ctx_.need_to_restore_zero_padding();
 
         // S_y -> GMEM.
-        write_builder_t r2g(ir_ctx_, cset_, mem_sub_view, mem_buf_, tmp_reg_buf,
+        write_builder_t r2g(hw_, ir_ctx_, cset_, mem_sub_view, mem_buf_,
+                tmp_reg_buf,
                 /*is_slm=*/false, /*atomic_op=*/ngen_proxy::AtomicOp::undef);
 
         // Initialize stages.
@@ -3423,7 +3449,7 @@ private:
         int nstages = int(stages.size());
         for (int i = 0; i < nstages; i++) {
             auto *next_stage = (i + 1 < nstages ? &stages[i + 1] : nullptr);
-            stages[i].set_next(ir_ctx_, next_stage);
+            stages[i].set_next(hw_, ir_ctx_, next_stage);
         }
 
         stmt_t tile_stmt;
@@ -3465,6 +3491,7 @@ private:
         stmt_ = stmt_.append(tile_stmt);
     }
 
+    ngen::HW hw_;
     ir_context_t &ir_ctx_;
     const constraint_set_t &cset_;
     const post_op_context_t &post_op_ctx_;
@@ -3546,10 +3573,7 @@ private:
         if (!dpas_t::matches_types(desc.a_type(), desc.b_type(), desc.c_type()))
             return false;
 
-        // Only one size is supported
-        if (simd_size != dpas_t::simd_size) return false;
-
-        auto _dpas = dpas_t::make(/*is_dpasw=*/false, /*sdepth=*/8,
+        auto _dpas = dpas_t::make(/*is_dpasw=*/false, simd_size, /*sdepth=*/8,
                 /*rcount=*/8, desc.c_type(), desc.a_type(), desc.b_type());
         if (_dpas.as<dpas_t>().matches(desc)) {
             build_dpas(_dpas.as<dpas_t>(), desc);
@@ -3557,8 +3581,9 @@ private:
         }
 
         // Try to transpose and flip.
-        _dpas = dpas_t::make(/*is_dpasw=*/false, /*sdepth=*/8, /*rcount=*/8,
-                desc.c_type(), desc.b_type(), desc.a_type());
+        _dpas = dpas_t::make(/*is_dpasw=*/false, /*exec_size=*/simd_size,
+                /*sdepth=*/8,
+                /*rcount=*/8, desc.c_type(), desc.b_type(), desc.a_type());
 
         desc = multiply_desc_t(
                 b_layout_.transpose(), a_layout_.transpose(), true);
@@ -3574,7 +3599,7 @@ private:
     }
 
     void build_dpas(const dpas_t &dpas, const multiply_desc_t &desc) {
-        int m_blk = 8;
+        int m_blk = dpas.simd_size;
         int n_blk = dpas.rcount;
 
         c_layout_ = compute_dpas_c_layout(m_blk, n_blk, dpas.c_layout(), desc);
@@ -3663,9 +3688,10 @@ private:
     stmt_t stmt_;
 };
 
-layout_t get_fma_friendly_layout(const layout_t &mnk_layout, bool is_a,
-        const type_t &a_type, const type_t &b_type, const type_t &c_type) {
-    auto _dpas = dpas_t::make(/*is_dpasw=*/false, /*sdepth=*/8,
+layout_t get_fma_friendly_layout(int simd_size, const layout_t &mnk_layout,
+        bool is_a, const type_t &a_type, const type_t &b_type,
+        const type_t &c_type) {
+    auto _dpas = dpas_t::make(/*is_dpasw=*/false, simd_size, /*sdepth=*/8,
             /*rcount=*/8, c_type, b_type, a_type);
     auto &dpas = _dpas.as<dpas_t>();
 
@@ -3704,8 +3730,8 @@ layout_t convert_to_fma_friendly_layout(const conv_config_t &cfg,
                 layout, view, {mnk_kind_t::k, mnk_kind_t::n});
     }
 
-    auto dpas_layout
-            = get_fma_friendly_layout(mnk_layout, is_a, a_type, b_type, c_type);
+    auto dpas_layout = get_fma_friendly_layout(
+            cfg.simd_size, mnk_layout, is_a, a_type, b_type, c_type);
     if (dpas_layout == mnk_layout) return layout;
 
     if (changed) *changed = true;
@@ -3909,7 +3935,7 @@ private:
         if (info.is_loaded) return;
 
         auto view = a_i_view_.substitute(a_idx_, i);
-        read_builder_t read(ir_ctx_, cset_, a_i_view_,
+        read_builder_t read(cfg_.hw, ir_ctx_, cset_, a_i_view_,
                 cfg_.use_a_slm ? a_slm_buf_ : ap_buf_, a_buf_,
                 /*is_slm=*/cfg_.use_a_slm);
         ir_trace() << "A GMEM/SLM to GRF load #" << i << ":\n"
@@ -3949,7 +3975,7 @@ private:
         if (info.is_loaded) return;
 
         auto view = b_j_view_.substitute(b_idx_, j);
-        read_builder_t read(ir_ctx_, cset_, view,
+        read_builder_t read(cfg_.hw, ir_ctx_, cset_, view,
                 cfg_.use_b_slm ? b_slm_buf_ : bp_buf_, b_buf_,
                 /*is_slm=*/cfg_.use_b_slm);
         ir_trace() << "B GMEM/SLM to GRF load #" << j << ":\n"
@@ -4088,9 +4114,9 @@ private:
 
 class compute_builder_t {
 public:
-    compute_builder_t(const conv_config_t &cfg, ir_context_t &ir_ctx,
-            const constraint_set_t &cset)
-        : cfg_(cfg), ir_ctx_(ir_ctx), cset_(cset), g2s_ctx_(ir_ctx) {}
+    compute_builder_t(ngen::HW hw, const conv_config_t &cfg,
+            ir_context_t &ir_ctx, const constraint_set_t &cset)
+        : hw_(hw), cfg_(cfg), ir_ctx_(ir_ctx), cset_(cset), g2s_ctx_(ir_ctx) {}
 
     const std::vector<stmt_t> &allocs() const { return allocs_; }
 
@@ -4165,15 +4191,16 @@ public:
         auto cp_thr_mem_view = load_mul_builder.cp_thr_mem_view();
         auto cp_thr_reg_view = load_mul_builder.cp_thr_reg_view();
 
-        epilogue_builder_t c_m2g(ir_ctx_, cset_, post_op_ctx_, cp_thr_mem_view,
-                cp_thr_reg_view, cp_buf_, c_buf);
+        epilogue_builder_t c_m2g(hw_, ir_ctx_, cset_, post_op_ctx_,
+                cp_thr_mem_view, cp_thr_reg_view, cp_buf_, c_buf);
         ir_trace() << "C GRF to GMEM store:\n" << c_m2g.stmt() << std::endl;
 
         auto c_attr = load_mul_builder.c_attr();
         int c_size = cp_thr_reg_view.vlayout_size();
         register_buffer(c_buf, c_size, alloc_kind_t::grf, c_attr);
 
-        int step_bytes = 2 * reg_bytes;
+        const int grf_size = ngen::GRF::bytes(hw_);
+        int step_bytes = 2 * grf_size;
         for (int i = 0; i < c_size; i += step_bytes) {
             c_zero_out_stmt_ = c_zero_out_stmt_.append(store_t::make(c_buf, i,
                     shuffle_t::make_broadcast(
@@ -4186,8 +4213,8 @@ public:
         // Replace DPAS by DPASW when applicable.
         if (cfg_.fma_kind == fma_kind_t::dpasw) {
             alloc_updater_t alloc_updater;
-            inject_dpasw(load_mul_stmt_, c_buf, c_store_stmt_, alloc_updater,
-                    tg_grid_.idx(0));
+            inject_dpasw(hw_, load_mul_stmt_, c_buf, c_store_stmt_,
+                    alloc_updater, tg_grid_.idx(0));
             for (auto &a : allocs_) {
                 a = alloc_updater.update(a);
             }
@@ -4357,7 +4384,8 @@ private:
         expr_t x_g2s_reg_buf = g2s_ctx.create_buf("g2s");
 
         // GMEM -> GRF load.
-        read_builder_t x_read(ir_ctx_, cset_, x_g2s_view, xp_buf, x_g2s_reg_buf,
+        read_builder_t x_read(hw_, ir_ctx_, cset_, x_g2s_view, xp_buf,
+                x_g2s_reg_buf,
                 /*is_slm=*/false);
         ir_trace() << tag << " GMEM to GRF load:\n"
                    << x_read.str() << std::endl;
@@ -4369,7 +4397,7 @@ private:
         g2s_load_stmt_ = g2s_load_stmt_.append(load_stmt);
 
         // GRF -> SLM store.
-        write_builder_t x_write(ir_ctx_, cset_, xp_slm_thr_view, x_slm_buf,
+        write_builder_t x_write(hw_, ir_ctx_, cset_, xp_slm_thr_view, x_slm_buf,
                 x_g2s_reg_buf, /*is_slm=*/true);
         ir_trace() << tag << " GRF to SLM store:\n"
                    << x_write.str() << std::endl;
@@ -4491,6 +4519,7 @@ private:
         return dense_stride_bytes;
     }
 
+    ngen::HW hw_;
     const conv_config_t &cfg_;
     ir_context_t &ir_ctx_;
     const constraint_set_t &cset_;
@@ -4576,7 +4605,7 @@ void kernel_builder_t::build() {
         ir_error_not_expected(); // not implemented yet
 
     post_op_context_t post_op_ctx(pd_, cfg_, cp_view, kernel_arg_info_);
-    compute_builder_t cb(cfg_, ir_ctx, init_cset);
+    compute_builder_t cb(cfg_.hw, cfg_, ir_ctx, init_cset);
 
     cb.set_thread_group(tg_grid_);
     if (cfg_.is_fwd) {
@@ -4636,12 +4665,12 @@ void kernel_builder_t::build() {
     stmt_ = inject_external_var_let(stmt_);
     stmt_ = merge_slm_buffers(stmt_);
     if (!cfg_.do_loop_unroll) {
-        stmt_ = inject_simple_slm_buffering(stmt_, cfg_, ir_ctx);
+        stmt_ = inject_simple_slm_buffering(cfg_.hw, stmt_, cfg_, ir_ctx);
     }
     stmt_ = lift_buffer_offsets_in_send(stmt_);
     stmt_ = simplify(stmt_, init_cset);
     stmt_ = inject_send(stmt_, ir_ctx, init_cset);
-    stmt_ = split_wide_stores(stmt_);
+    stmt_ = split_wide_stores(cfg_.hw, stmt_);
     stmt_ = lift_alloc(stmt_);
     stmt_ = eliminate_common_subexprs(stmt_, ir_ctx);
     stmt_ = hoist_exprs(stmt_, ir_ctx);

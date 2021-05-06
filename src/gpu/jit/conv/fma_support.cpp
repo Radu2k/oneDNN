@@ -49,11 +49,16 @@ fma_kind_t fma_kind::get_supported_kind(
     return fma_kind_t::unknown;
 }
 
-int fma_kind::get_simd_size(const fma_kind_t kind, const type_t &a,
+int fma_kind::get_simd_size(ngen::HW hw, const fma_kind_t kind, const type_t &a,
         const type_t &b, const type_t &c) {
     switch (kind) {
         case fma_kind_t::dpasw:
-        case fma_kind_t::dpas: return dpas_t::get_simd_size(a, b, c);
+        case fma_kind_t::dpas:
+#if DNNL_WITH_XE_HPC
+            return hw >= ngen::HW::Xe_HPC ? 16 : 8;
+#else
+            return 8;
+#endif
         case fma_kind_t::mad: return mad_t::get_simd_size(a, b, c);
         default: assert(!"unknown fma kind"); return 0;
     }
@@ -78,8 +83,14 @@ type_t multiply_desc_t::_c_type(
 }
 
 layout_t dpas_t::a_layout() const {
-    if (src1_type.size() == 1) return layout_t(src1_type, 0, "8b8a4b");
-    if (src1_type.size() == 2) return layout_t(src1_type, 0, "8b8a2b");
+    if (simd_size == 8) {
+        if (src1_type.size() == 1) return layout_t(src1_type, 0, "8b8a4b");
+        if (src1_type.size() == 2) return layout_t(src1_type, 0, "8b8a2b");
+    }
+    if (simd_size == 16) {
+        if (src1_type.size() == 1) return layout_t(src1_type, 0, "8b16a4b");
+        if (src1_type.size() == 2) return layout_t(src1_type, 0, "8b16a2b");
+    }
     ir_error_not_expected();
     return layout_t();
 }
@@ -92,11 +103,14 @@ layout_t dpas_t::b_layout() const {
 }
 
 layout_t dpas_t::c_layout() const {
-    return layout_t(dst_type, 0, "8b8a");
+    if (simd_size == 16) return layout_t(dst_type, 0, "8b16a");
+    if (simd_size == 8) return layout_t(dst_type, 0, "8b8a");
+    ir_error_not_expected();
+    return layout_t();
 }
 
 bool dpas_t::matches(const multiply_desc_t &desc) const {
-    int m_blk = 8;
+    int m_blk = simd_size;
     int n_blk = rcount;
     int k_blk = sdepth * 4 / src1_type.size();
 

@@ -26,6 +26,7 @@
 #include "common/memory_desc_wrapper.hpp"
 #include "common/type_helpers.hpp"
 #include "gpu/compute/compute.hpp"
+#include "gpu/compute/compute_engine.hpp"
 #include "gpu/jit/conv/fma_support.hpp"
 #include "gpu/jit/conv/tensor.hpp"
 #include "gpu/jit/conv/utils.hpp"
@@ -283,7 +284,7 @@ public:
         kernel_grid_dim[1] = od * oh * ow_tg_dim;
         kernel_grid_dim[2] = mb_tg_dim;
 
-        init_common_config();
+        CHECK(init_common_config(engine));
 
         // Do not perform full unrolling when there are too many inner
         // iterations.
@@ -291,6 +292,13 @@ public:
 
         fixup_inference_consistency();
         try_reduce_grf_usage();
+
+#if DNNL_WITH_XE_HPC
+        const bool is_wei16aXb = hw >= ngen::HW::Xe_HPC;
+        assert(hw != ngen::HW::Unknown);
+#else
+        const bool is_wei16aXb = false;
+#endif
 
         std::string src_tag;
         std::string wei_tag;
@@ -307,11 +315,11 @@ public:
             if (simd_size > max_simd_size) simd_size = max_simd_size;
         } else if (is_s32_accumulator()) {
             src_tag = (mb_thr_blk == 1 ? "aBx32b" : "ABx32a32b");
-            wei_tag = "ABx4a8b8a4b";
+            wei_tag = is_wei16aXb ? "ABx2a8b16a4b" : "ABx4a8b8a4b";
             dst_tag = (mb_thr_blk == 1 ? "aBx32b" : "ABx32a32b");
         } else {
             src_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
-            wei_tag = "ABx4a8b8a2b";
+            wei_tag = is_wei16aXb ? "ABx2a8b16a2b" : "ABx4a8b8a2b";
             dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
         }
 
@@ -352,8 +360,18 @@ public:
         if (is_src_nhwc && (ic_bytes % 32 != 0 || oc_bytes % 32 != 0))
             return status::unimplemented;
 
-        // Blocked large batch performance is slightly behind.
-        if (!is_src_nhwc && mb >= 16) return status::unimplemented;
+#if DNNL_WITH_XE_HPC
+        if (hw >= ngen::HW::Xe_HPC) {
+            // small minibatch and NHWC layout requires new messages support
+            // which is currently not yet implemented
+            if (is_src_nhwc || is_dst_nhwc) return status::unimplemented;
+            if (mb_thr_blk == 1) return status::unimplemented;
+        }
+
+        if (hw < ngen::HW::Xe_HPC)
+#endif
+            // Blocked large batch performance is slightly behind.
+            if (!is_src_nhwc && mb >= 16) return status::unimplemented;
 
         return status::success;
     }
@@ -430,7 +448,7 @@ public:
         kernel_grid_dim[1] = id * ih * iw_tg_dim;
         kernel_grid_dim[2] = mb_tg_dim;
 
-        init_common_config();
+        CHECK(init_common_config(engine));
 
         // Do not perform full unrolling when there are too many inner
         // iterations.
@@ -439,12 +457,19 @@ public:
         fixup_inference_consistency();
         try_reduce_grf_usage();
 
+#if DNNL_WITH_XE_HPC
+        assert(hw != ngen::HW::Unknown);
+        const bool is_wei16bXa = hw >= ngen::HW::Xe_HPC;
+#else
+        const bool is_wei16bXa = false;
+#endif
+
         std::string src_tag;
         std::string wei_tag;
         std::string dst_tag;
         if (!is_s32_accumulator()) {
             src_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
-            wei_tag = "BAx4b8a8b2a";
+            wei_tag = is_wei16bXa ? "BAx2b8a16b2a" : "BAx4b8a8b2a";
             dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
         } else
             return status::unimplemented;
@@ -486,14 +511,42 @@ public:
         if (is_dst_nhwc && (ic_bytes % 32 != 0 || oc_bytes % 32 != 0))
             return status::unimplemented;
 
-        // Blocked large batch performance is slightly behind.
-        if (!is_src_nhwc && mb >= 16) return status::unimplemented;
+#if DNNL_WITH_XE_HPC
+        if (hw >= ngen::HW::Xe_HPC) {
+            // small minibatch and NHWC layout requires new messages support
+            // which is currently not yet implemented
+            if (is_src_nhwc || is_dst_nhwc) return status::unimplemented;
+            if (mb_thr_blk == 1) return status::unimplemented;
+        }
+
+        if (hw < ngen::HW::Xe_HPC)
+#endif
+            // Blocked large batch performance is slightly behind.
+            if (!is_src_nhwc && mb >= 16) return status::unimplemented;
 
         return status::success;
     }
 
-    void init_common_config() {
+    status_t init_common_config(engine_t *engine) {
         using namespace ir_utils;
+        using namespace compute;
+
+        auto compute_engine
+                = utils::downcast<compute::compute_engine_t *>(engine);
+        auto device_info = compute_engine->device_info();
+
+        switch (device_info->gpu_arch()) {
+#if DNNL_WITH_XE_HP
+            case gpu_arch_t::xe_hp: hw = ngen::HW::Xe_HP; break;
+#endif
+#if DNNL_WITH_XE_HPG
+            case gpu_arch_t::xe_hpg: hw = ngen::HW::Xe_HPG; break;
+#endif
+#if DNNL_WITH_XE_HPC
+            case gpu_arch_t::xe_hpc: hw = ngen::HW::Xe_HPC; break;
+#endif
+            default: return status::unimplemented;
+        }
 
         use_a_slm = true;
         use_b_slm = true;
@@ -525,7 +578,9 @@ public:
 #endif
 
         simd_size = fma_kind::get_simd_size(
-                fma_kind, dst_data_type, wei_data_type, acc_data_type);
+                hw, fma_kind, dst_data_type, wei_data_type, acc_data_type);
+
+        return status::success;
     }
 
     bool post_ops_ok(const convolution_pd_t *pd) const {
@@ -610,6 +665,7 @@ public:
 
     data_type_t acc_data_type;
 
+    ngen::HW hw = ngen::HW::Unknown;
     int simd_size; // SIMD width.
     int regs; // Number of registers.
 
