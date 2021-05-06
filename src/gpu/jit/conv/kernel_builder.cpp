@@ -2345,21 +2345,22 @@ public:
 
         s2r_mul = sub_slm_bufs(s2r_mul, slm_idx_load(1, 1));
         g2s_store = sub_slm_bufs(g2s_store, slm_idx_load(0, 1));
+        g2s_store = g2s_store.append(slm_idx_update);
 
         auto s2r_mul_body = s2r_mul;
         auto s2r_mul_tail = s2r_mul;
         auto slm_counter = slm_idx_load(2, 1);
         auto cond = shuffle_t::make_broadcast(
                 slm_counter >= cfg_.slm_bufs - 1, cfg_.simd_size);
-        s2r_mul_body = if_t::make(cond, s2r_mul_body);
-
-        g2s_store = g2s_store.append(slm_idx_update);
 
         if (cfg_.slm_bufs == 2) {
+            s2r_mul_body = if_t::make(cond, s2r_mul_body);
             g2s_store = g2s_store.append(funcs::barrier());
         } else {
-            s2r_mul_body = funcs::barrier_wait().append(s2r_mul_body);
+            auto fence_signal = funcs::slm_fence().append(funcs::signal());
             s2r_mul_body = s2r_mul_body.append(funcs::signal());
+            s2r_mul_body = if_t::make(cond, s2r_mul_body, fence_signal);
+            s2r_mul_body = funcs::barrier_wait().append(s2r_mul_body);
         }
 
         loop = substitute(
