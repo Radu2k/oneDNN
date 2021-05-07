@@ -221,19 +221,56 @@ public:
         if (ic < 16) return status::unimplemented;
 
         // Set dispatch and kernel parameters.
-        int mb_thr_blk = (mb < 16 ? 1 : 32);
-        oc_thr_blk = 32;
-        int ow_thr_blk = (mb < 16 ? 16 : 1);
-        if (ow < ow_thr_blk) ow_thr_blk = 8;
+        int mb_thr_blk, ow_thr_blk;
+        int mb_thr_dim, oc_thr_dim, ow_thr_dim;
+        if (fma_kind == fma_kind_t::mad && src_data_type == data_type::f32) {
+            const int max_tg_size = 16;
+            mb_thr_blk = (mb < 16 ? 1 : 8);
+            mb_thr_dim = std::min((mb_thr_blk != 1) ? (32 / mb_thr_blk) : 1,
+                    utils::div_up(mb, mb_thr_blk));
+#ifdef GEN_CONV_DEBUG
+            mb_thr_blk = getenv_int("mb_thr_blk", mb_thr_blk);
+#endif
+            oc_thr_blk = 16;
+            oc_thr_dim = std::min(4, utils::div_up(oc, oc_thr_blk));
+            oc_thr_dim = (1 << math::ilog2q(oc_thr_dim));
+
+            if (mb_thr_dim > 1) {
+                ow_thr_blk = 1;
+                ow_thr_dim = 1;
+            } else {
+                const int pref_ow_thr_dim
+                        = max_tg_size / (oc_thr_dim * mb_thr_dim);
+                const int pref_ow_block
+                        = (mb_thr_blk == 1) ? 8 : kw > 1 ? 4 : 1;
+                ow_thr_blk = ow < pref_ow_block * pref_ow_thr_dim
+                        ? (1 << math::ilog2q(
+                                   utils::div_up(ow, pref_ow_thr_dim)))
+                        : pref_ow_block;
+                ow_thr_dim = pref_ow_thr_dim;
+            }
+        } else {
+            mb_thr_blk = (mb < 16 ? 1 : 32);
+            mb_thr_dim = 1;
+            oc_thr_blk = 32;
+            oc_thr_dim = std::min(4, utils::div_up(oc, oc_thr_blk));
+            oc_thr_dim = (1 << math::ilog2q(oc_thr_dim));
+            ow_thr_blk = (mb < 16 ? 16 : 1);
+            if (ow < ow_thr_blk) ow_thr_blk = 8;
+            ow_thr_dim = std::min(4, utils::div_up(ow, ow_thr_blk));
+        }
 
 #ifdef GEN_CONV_DEBUG
         mb_thr_blk = getenv_int("mb_thr_blk", mb_thr_blk);
+        mb_thr_dim = getenv_int("mb_thr_dim", mb_thr_dim);
         oc_thr_blk = getenv_int("oc_thr_blk", oc_thr_blk);
+        oc_thr_dim = getenv_int("oc_thr_dim", oc_thr_dim);
         ow_thr_blk = getenv_int("ow_thr_blk", ow_thr_blk);
+        ow_thr_dim = getenv_int("ow_thr_dim", ow_thr_dim);
 #endif
 
-        tg_grid_dim[0] = std::min(4, utils::div_up(oc, oc_thr_blk));
-        tg_grid_dim[1] = std::min(4, utils::div_up(ow, ow_thr_blk));
+        tg_grid_dim[0] = oc_thr_dim;
+        tg_grid_dim[1] = mb_thr_dim * ow_thr_dim;
         tg_grid_dim[2] = 1;
 
         // Round down to a power of 2.
@@ -246,9 +283,9 @@ public:
         tg_grid_dim[1] = getenv_int("tg1", tg_grid_dim[1]);
 #endif
 
-        mb_tg_blk = mb_thr_blk;
-        oc_tg_blk = tg_grid_dim[0] * oc_thr_blk;
-        ow_tg_blk = tg_grid_dim[1] * ow_thr_blk;
+        mb_tg_blk = mb_thr_dim * mb_thr_blk;
+        oc_tg_blk = oc_thr_dim * oc_thr_blk;
+        ow_tg_blk = ow_thr_dim * ow_thr_blk;
         ic_blk = (is_s32_accumulator() ? 32 : 16);
 
 #ifdef GEN_CONV_DEBUG
