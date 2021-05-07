@@ -298,11 +298,8 @@ public:
             src_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
             wei_tag = "BAx16b16a";
             dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
-            // This initial restriction is due to a bug encountered in
-            // OpenCL compilation. It can be removed once this issue is
-            // resolved and replaced with max_simd_size=16.
-            int max_simd_size = 32 / type_t(acc_data_type).size();
-            if (max_simd_size > 16) max_simd_size = 16;
+
+            int max_simd_size = 16;
             if (simd_size > max_simd_size) simd_size = max_simd_size;
         } else if (is_s32_accumulator()) {
             src_tag = (mb_thr_blk == 1 ? "aBx32b" : "ABx32a32b");
