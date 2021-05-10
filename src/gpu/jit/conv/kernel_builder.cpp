@@ -2630,7 +2630,7 @@ private:
             s = sub_slm_bufs(s, it, /*is_read=*/true);
         }
 
-        if (it.is_first_mul() && cfg_.hw >= ngen::HW::Xe_HP) {
+        if (it.is_first_mul()) {
             for (auto &m : mul) {
                 m = sub_fma_acc_with_zero(m);
             }
@@ -3967,7 +3967,7 @@ private:
         int n_blk = mad.get_simd_size();
         int k_blk = 1;
 
-        c_layout_ = compute_mad_c_layout(desc);
+        c_layout_ = compute_mad_c_layout(mad.c_layout(), desc);
 
         for (int i_k = 0; i_k < desc.k(); i_k += k_blk) {
             for (int i_m = 0; i_m < desc.m(); i_m += m_blk) {
@@ -3986,13 +3986,13 @@ private:
         }
     }
 
-    static layout_t compute_mad_c_layout(const multiply_desc_t &desc) {
-        auto c_layout = desc.a_layout();
+    static layout_t compute_mad_c_layout(
+            const layout_t &blk_layout, const multiply_desc_t &desc) {
+        auto c_layout = blk_layout;
         int n_blk = c_layout.dim(1);
         int m_blk = c_layout.dim(0);
         c_layout = c_layout.add_outer_block(1, desc.n() / n_blk);
         c_layout = c_layout.add_outer_block(0, desc.m() / m_blk);
-        c_layout = c_layout.retype(desc.c_type());
         return c_layout;
     }
 

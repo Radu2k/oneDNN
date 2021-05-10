@@ -66,11 +66,13 @@ public:
         switch (device_info->gpu_arch()) {
             case gpu_arch_t::gen9:
                 jit_gen_convolution.reset(new conv_kernel_t<gpu_gen9>(
-                        cfg(primitive), primitive->pd(), kernel_arg_info_));
+                        get_cfg(primitive), primitive->pd(),
+                        *primitive->pd()->kernel_arg_info));
                 break;
             case gpu_arch_t::xe_lp:
                 jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_lp>(
-                        cfg(primitive), primitive->pd(), kernel_arg_info_));
+                        get_cfg(primitive), primitive->pd(),
+                        *primitive->pd()->kernel_arg_info));
                 break;
             case gpu_arch_t::xe_hp:
                 jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hp>(

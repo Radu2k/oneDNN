@@ -220,9 +220,11 @@ public:
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
 
+        CHECK(init_common_config(engine));
+        const bool pre_xe_arch = hw < ngen::HW::Xe_LP;
         // Set dispatch and kernel parameters.
-        int mb_thr_blk = (mb < 16 ? 1 : 32);
-        oc_thr_blk = 32;
+        int mb_thr_blk = (mb < 16 ? 1 : pre_xe_arch ? 16 : 32);
+        oc_thr_blk = pre_xe_arch ? 16 : 32;
         int ow_thr_blk = (mb < 16 ? 16 : 1);
         if (ow < ow_thr_blk) ow_thr_blk = 8;
 
@@ -232,7 +234,6 @@ public:
         ow_thr_blk = getenv_int("ow_thr_blk", ow_thr_blk);
 #endif
 
-        regs = hw < ngen::HW::Xe_LP ? 128 : 256;
         tg_grid_dim[0] = std::min(4, utils::div_up(oc, oc_thr_blk));
         tg_grid_dim[1] = std::min(4, utils::div_up(ow, ow_thr_blk));
         tg_grid_dim[2] = 1;
@@ -250,7 +251,7 @@ public:
         mb_tg_blk = mb_thr_blk;
         oc_tg_blk = tg_grid_dim[0] * oc_thr_blk;
         ow_tg_blk = tg_grid_dim[1] * ow_thr_blk;
-        ic_blk = (is_s32_accumulator() ? 32 : 16);
+        ic_blk = (is_s32_accumulator() && !pre_xe_arch ? 32 : 16);
 
 #ifdef GEN_CONV_DEBUG
         mb_tg_blk = getenv_int("mb_tg_blk", mb_tg_blk);
@@ -275,13 +276,13 @@ public:
         kernel_grid_dim[1] = od * oh * ow_tg_dim;
         kernel_grid_dim[2] = mb_tg_dim;
 
-
         // Do not perform full unrolling when there are too many inner
         // iterations.
         if (kd * kh * kw > 9) do_loop_unroll = false;
 
+        regs = pre_xe_arch ? 128 : 256;
         fixup_inference_consistency();
-        try_reduce_grf_usage();
+        if (!try_reduce_grf_usage()) return status::unimplemented;
 
 #if DNNL_WITH_XE_HPC
         const bool is_wei16aXb = hw >= ngen::HW::Xe_HPC;
@@ -439,7 +440,7 @@ public:
         if (kd * kh * kw > 9) do_loop_unroll = false;
 
         fixup_inference_consistency();
-        try_reduce_grf_usage();
+        if (!try_reduce_grf_usage()) return status::unimplemented;
 
 #if DNNL_WITH_XE_HPC
         assert(hw != ngen::HW::Unknown);
@@ -708,7 +709,9 @@ public:
         pad_slm = true;
         assign_sbids
                 = utils::one_of(fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw);
-        slm_bufs = (tg_grid_dim[0] * tg_grid_dim[1] <= 8 ? 2 : 3);
+        slm_bufs = hw < ngen::HW::Xe_LP
+                ? 0
+                : (tg_grid_dim[0] * tg_grid_dim[1] <= 8 ? 2 : 3);
         gmem_bufs = 2;
         do_loop_unroll = true;
         reduce_grf_usage = true;
@@ -789,6 +792,8 @@ public:
     }
 
     bool data_types_ok() const {
+        if (!mad_t::matches_types(src_data_type, wei_data_type, dst_data_type))
+            return false;
         if (is_fwd) {
             if (utils::one_of(data_type::f32, src_data_type, wei_data_type))
                 return false;
@@ -971,17 +976,8 @@ private:
             acc_data_type = data_type::s32;
             return status::success;
         }
-        if (is_fwd && (utils::everyone_is(data_type::f16, sdt, wdt))) {
-            acc_data_type = sdt;
-            return status::success;
-        }
-        if (is_fwd && utils::everyone_is(data_type::bf16, sdt, wdt)) {
-            acc_data_type = data_type::f32;
-            return status::success;
-        }
-        if (is_bwd_d
-                && (utils::everyone_is(data_type::f16, ddt, wdt)
-                        || utils::everyone_is(data_type::bf16, ddt, wdt))) {
+        if (utils::everyone_is(data_type::f16, a, b)
+                || utils::everyone_is(data_type::bf16, a, b)) {
             acc_data_type = data_type::f32;
             return status::success;
         }
@@ -994,7 +990,7 @@ private:
 
     status_t init_fma_kind() {
         fma_kind = fma_kind::get_supported_kind(
-                a_data_type, b_data_type, acc_data_type);
+                a_data_type, b_data_type, acc_data_type, hw);
         if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
 
         // Disable using mad instruction backend until performance parity is
@@ -1037,18 +1033,18 @@ private:
         }
     }
 
-    void try_reduce_grf_usage() {
-        if (!reduce_grf_usage) return;
+    bool try_reduce_grf_usage() {
+        if (!reduce_grf_usage) return true;
 
         int max_regs = int(regs * 0.95);
         int regs = estimate_register_count();
-        if (regs <= max_regs) return;
+        if (regs <= max_regs) return true;
 
         // Try to reduce disable GRF buffering.
         if (gmem_bufs != 1) {
             gmem_bufs = 1;
             int regs = estimate_register_count();
-            if (regs <= max_regs) return;
+            if (regs <= max_regs) return true;
         }
 
         // Try to use sub-tiles for B.
@@ -1060,26 +1056,27 @@ private:
         while (b_sub_tiles < max_b_sub_tiles) {
             b_sub_tiles *= 2;
             int regs = estimate_register_count();
-            if (regs <= max_regs) return;
+            if (regs <= max_regs) return true;
         }
-
         // Try to use double SLM buffering.
         if (slm_bufs == 3) {
             slm_bufs = 2;
             int regs = estimate_register_count();
-            if (regs <= max_regs) return;
+            if (regs <= max_regs) return true;
         }
 
         // Try to use single SLM buffering.
         if (slm_bufs == 2) {
             slm_bufs = 1;
             int regs = estimate_register_count();
-            if (regs <= max_regs) return;
+            if (regs <= max_regs) return true;
         }
 
         // Last resort settings to reduce GRF usage.
         reuse_headers = true;
         do_loop_unroll = false;
+
+        return estimate_register_count() <= max_regs;
     }
 
     int estimate_register_count() const {
@@ -1124,6 +1121,12 @@ private:
             }
         }
 
+        //account for extra headers for scattered sends with pre Xe Arch
+        if (hw < ngen::HW::Xe_LP) {
+            a_headers *= 4;
+            b_headers *= 8;
+        }
+
         // Temporary registers for GMEM -> SLM load.
         int a_g2s_bytes
                 = (use_a_slm ? utils::div_up(m_tg_blk * k_tg_blk * a_size, nthr)
@@ -1153,6 +1156,7 @@ private:
         int g2s_headers = a_g2s_headers + b_g2s_headers;
 
         int data_regs = a_regs + b_regs + acc_regs + g2s_regs;
+
         int header_regs = a_headers + b_headers + g2s_headers;
 
         return data_regs + header_regs;

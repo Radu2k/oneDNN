@@ -768,7 +768,7 @@ public:
             // rem = x - qot * y
             bool y_is_16_bit = (y <= static_cast<uint32_t>(
                                         std::numeric_limits<int16_t>::max()));
-            if (y_is_16_bit) {
+            if (hw > ngen::HW::Gen9 && y_is_16_bit) {
                 mad(1, rem, x, _qot, -int16_t(y));
             } else {
                 auto tmp = ra_.alloc_sub<uint64_t>();
@@ -2567,7 +2567,7 @@ private:
             auto rd_mov = rd;
             rd_mov.setType(ngen::DataType::f);
             auto mod_mov = ~mod;
-            if (hw != ngen::HW::Gen9) mod_mov.setSWSB({});
+            if (hw <= ngen::HW::Xe_LP) mod_mov.setSWSB({});
             int step = send_func.mask_count() * sizeof(uint32_t);
             for (int i = 0; i < send_func.register_size(); i += step) {
                 auto sub_rd_mov = ngen_reg_data(hw, rd_mov, i,
@@ -2638,7 +2638,7 @@ conv_kernel_t<hw>::conv_kernel_t(const conv_config_t &cfg,
     setup_interface(body, kernel_arg_info);
 
     setDefaultNoMask();
-    if (hw != ngen::HW::Gen9) setDefaultAutoSWSB(true);
+    setDefaultAutoSWSB(true);
 
     prologue();
 
