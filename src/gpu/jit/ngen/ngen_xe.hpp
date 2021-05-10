@@ -18,7 +18,7 @@
  * Do not #include this file directly; ngen uses it internally.
  */
 
-// Gen12 binary encoding.
+// Xe Architecture binary encoding.
 
 struct EncodingTag12 {};
 #if NGEN_XE_HPC
@@ -823,7 +823,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
     RegData rd;
 
     switch (op) {
-        case Opcode::nop_gen12:
+        case Opcode::nop_xe:
         case Opcode::illegal:
             return false;
         case Opcode::wrdep:
@@ -896,9 +896,9 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
         case Opcode::dp4a:
         case Opcode::add3:
         case Opcode::bfn:
-        case Opcode::bfe_gen12:
-        case Opcode::bfi2_gen12:
-        case Opcode::csel_gen12:
+        case Opcode::bfe_xe:
+        case Opcode::bfi2_xe:
+        case Opcode::csel_xe:
         case Opcode::mad:
         case Opcode::madm: {  // ternary
             TernaryOperand12 o;
@@ -1001,7 +1001,7 @@ unsigned Instruction12::srcTypecode(int opNum) const
     auto op = opcode();
 
     switch (op) {
-        case Opcode::nop_gen12:
+        case Opcode::nop_xe:
         case Opcode::illegal:
         case Opcode::send:
         case Opcode::sendc:
@@ -1013,9 +1013,9 @@ unsigned Instruction12::srcTypecode(int opNum) const
             return 0;
         case Opcode::add3:
         case Opcode::bfn:
-        case Opcode::bfe_gen12:
-        case Opcode::bfi2_gen12:
-        case Opcode::csel_gen12:
+        case Opcode::bfe_xe:
+        case Opcode::bfi2_xe:
+        case Opcode::csel_xe:
         case Opcode::mad:
         case Opcode::madm: // ternary
             switch (opNum) {

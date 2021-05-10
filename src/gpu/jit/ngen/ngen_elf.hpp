@@ -245,7 +245,7 @@ std::vector<uint8_t> ELFCodeGenerator<hw>::getBinary()
     // Get raw kernel, also fixing up labels.
     auto kernel = super::getCode();
 
-    // Locate entrypoints for ATS+.
+    // Locate entrypoints for XE_HP+.
     if (hw >= HW::Xe_HP) {
         auto idPerThread = super::_labelLocalIDsLoaded.getID(labelManager);
         auto idCrossThread = super::_labelArgsLoaded.getID(labelManager);

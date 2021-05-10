@@ -269,7 +269,7 @@ inline GeneralizedPipe getPipe(HW hw, const Instruction &insn, bool checkOOO = t
 {
     // Check jumps and no-ops
     auto op = insn.opcode();
-    if (isBranch(op) || op == Opcode::nop_gen12 || op == Opcode::sync || op == Opcode::illegal)
+    if (isBranch(op) || op == Opcode::nop_xe || op == Opcode::sync || op == Opcode::illegal)
         return GeneralizedPipe();
 
     // Check OOO instructions.
@@ -1007,7 +1007,7 @@ inline BasicBlockList getBasicBlocks(HW hw, const Program &program)
 template <typename Instruction>
 inline bool canDefaultPipe(HW hw, const Instruction &insn)
 {
-    if (hw >= HW::Xe_HP && insn.opcode() == Opcode::mov_gen12 && (insn.dstTypecode() ^ insn.src0Typecode()) & 0x8)
+    if (hw >= HW::Xe_HP && insn.opcode() == Opcode::mov_xe && (insn.dstTypecode() ^ insn.src0Typecode()) & 0x8)
         return false;
     return true;
 }

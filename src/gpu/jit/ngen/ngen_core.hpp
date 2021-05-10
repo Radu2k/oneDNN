@@ -195,7 +195,7 @@ public:
 };
 class sfid_needed_exception : public std::runtime_error {
 public:
-    sfid_needed_exception() : std::runtime_error("SFID must be specified on Gen12+") {}
+    sfid_needed_exception() : std::runtime_error("SFID must be specified on Xe+ Architecture") {}
 };
 class invalid_execution_size_exception : public std::runtime_error {
 public:
@@ -1415,28 +1415,28 @@ enum class Opcode {
     mad = 0x5B,
     lrp = 0x5C,
     madm = 0x5D,
-    nop_gen12 = 0x60,
-    mov_gen12 = 0x61,
-    sel_gen12 = 0x62,
-    movi_gen12 = 0x63,
-    not_gen12 = 0x64,
-    and_gen12 = 0x65,
-    or_gen12 = 0x66,
-    xor_gen12 = 0x67,
-    shr_gen12 = 0x68,
-    shl_gen12 = 0x69,
-    smov_gen12 = 0x6A,
+    nop_xe = 0x60,
+    mov_xe = 0x61,
+    sel_xe = 0x62,
+    movi_xe = 0x63,
+    not_xe = 0x64,
+    and_xe = 0x65,
+    or_xe = 0x66,
+    xor_xe = 0x67,
+    shr_xe = 0x68,
+    shl_xe = 0x69,
+    smov_xe = 0x6A,
     bfn = 0x6B,
-    asr_gen12 = 0x6C,
-    ror_gen12 = 0x6E,
-    rol_gen12 = 0x6F,
-    cmp_gen12 = 0x70,
-    cmpn_gen12 = 0x71,
-    csel_gen12 = 0x72,
-    bfrev_gen12 = 0x77,
-    bfe_gen12 = 0x78,
-    bfi1_gen12 = 0x79,
-    bfi2_gen12 = 0x7A,
+    asr_xe = 0x6C,
+    ror_xe = 0x6E,
+    rol_xe = 0x6F,
+    cmp_xe = 0x70,
+    cmpn_xe = 0x71,
+    csel_xe = 0x72,
+    bfrev_xe = 0x77,
+    bfe_xe = 0x78,
+    bfi1_xe = 0x79,
+    bfi2_xe = 0x7A,
     nop = 0x7E,
     wrdep = 0x7F,   /* not a valid opcode; used internally by nGEN */
 };
@@ -1627,7 +1627,7 @@ protected:
             unsigned _zeros_: 10;
 #endif
             unsigned autoSWSB : 1;
-            unsigned fusionCtrl : 1;        // Gen12
+            unsigned fusionCtrl : 1;        // Xe
             unsigned eot : 1;
             unsigned swsb : 16;
         } parts;
@@ -2134,7 +2134,7 @@ union ExtendedMessageDescriptor {
     struct {
         unsigned sfid : 5;
         unsigned eot : 1;
-        unsigned extMessageLen : 5;    /* # of GRFs sent in src1: valid range 0-15 (pre-Gen12) */
+        unsigned extMessageLen : 5;    /* # of GRFs sent in src1: valid range 0-15 (pre-Xe) */
         unsigned : 1;
         unsigned : 4;                  /* Part of exFuncCtrl for non-immediate sends */
         unsigned exFuncCtrl : 16;
@@ -2909,7 +2909,7 @@ static inline void encodeLoadDescriptors(HW hw, MessageDescriptor &desc, Extende
         desc.parts.responseLen = 0;
 }
 
-// Generate descriptors for a store operation. Requires split send for pre-Gen12.
+// Generate descriptors for a store operation. Requires split send for pre-Xe.
 template <typename DataSpec, typename Addr>
 static inline void encodeStoreDescriptors(HW hw, MessageDescriptor &desc, ExtendedMessageDescriptor &exdesc,
     const InstructionModifier &mod, const DataSpec &spec, AddressBase base, const Addr &addr)
@@ -2923,7 +2923,7 @@ static inline void encodeStoreDescriptors(HW hw, MessageDescriptor &desc, Extend
     desc.parts.responseLen = 0;
 }
 
-// Generate descriptors for an atomic operation. Requires split send for binary and ternary atomics pre-Gen12.
+// Generate descriptors for an atomic operation. Requires split send for binary and ternary atomics pre-Xe.
 template <typename DataSpec, typename Addr>
 static inline void encodeAtomicDescriptors(HW hw, MessageDescriptor &desc, ExtendedMessageDescriptor &exdesc,
     AtomicOp op, const InstructionModifier &mod, const RegData &dst, const DataSpec &spec, AddressBase base, const Addr &addr)

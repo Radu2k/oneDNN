@@ -283,7 +283,7 @@ struct MatrixAddressingStrategy {
     uint8_t tileR = 0, tileC = 0; // Desired tiling (0 if none) in registers.
     unsigned atomic : 1; // Atomic access? (only relevant for C)
     unsigned address2D : 1; // Use 2D addressing? (media block-style loads)
-    unsigned newDP : 1; // Use new dataport messages? (Gen12.7+)
+    unsigned newDP : 1; // Use new dataport messages? (Xe_HPG+)
 
     MatrixAddressingStrategy()
         : atomic(false), address2D(false), newDP(false) {}

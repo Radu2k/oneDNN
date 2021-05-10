@@ -27,7 +27,7 @@ namespace jit {
 struct EmulationStrategy {
     // Emulate 64-bit arithmetic (required for GenXLP)
     bool emulate64 = false;
-    // Emulate DW x DW -> DW multiplication (required for Gen12)
+    // Emulate DW x DW -> DW multiplication (required for Xe Architecture)
     bool emulateDWxDW = false;
     // Use 32-bit adds for 64-bit arithmetic, assuming no 2^32 boundaries crossed.
     bool emulate64_add32 = false;

@@ -327,12 +327,12 @@ void gemm_kernel_generator_t<hw>::allocVFlagStorage(
 /* Pseudo-instructions. */
 /************************/
 
-// goto instruction with Gen12 semantics.
+// goto instruction with Xe Architecture semantics.
 template <HW hw>
 void gemm_kernel_generator_t<hw>::goto12(const InstructionModifier &mod,
         ngen::Label &jip, ngen::Label &uip, bool branchCtrl) {
     InstructionModifier mmod = mod;
-    if (!isGen12 && !branchCtrl) {
+    if (!isXe && !branchCtrl) {
         if (mmod.getPredCtrl() == PredCtrl::None) stub();
         mmod.setPredInv(!mmod.isPredInv());
     }
@@ -1462,7 +1462,7 @@ bool gemm_kernel_generator_t<hw>::getBlockInfo(Type T,
 
             // Allowed accesses:
             //   A64             Essentially max 256 bytes.
-            //                    8 slots x (1,2,4,8) dwords [Gen12/surface: 1,2,4]
+            //                    8 slots x (1,2,4,8) dwords [Xe/surface: 1,2,4]
             //                    8 slots x (1,2,4) qwords
             //                   16 slots x (1,2,4) dwords
             //                   16 slots x (1,2) qwords
@@ -1520,7 +1520,7 @@ bool gemm_kernel_generator_t<hw>::getBlockInfo(Type T,
             block.simdSize
                     = std::min<int>(block.simdSize, rounddown_pow2(slots));
 
-            bool no8x8 = isGen12;
+            bool no8x8 = isXe;
             bool simd1 = !a64 && !channelScattered;
 
             int hwMaxXBlock;
@@ -4067,7 +4067,7 @@ void gemm_kernel_generator_t<hw>::outerProduct(int h, int ha, int hb,
                      : mac(mod, C(1), bcastSrc, B(1));
 #endif
         } else {
-            // On Gen12, always put broadcast in src2 for better bank conflict avoidance.
+            // On Xe Architecture, always put broadcast in src2 for better bank conflict avoidance.
             colMajor ? mad(mod, C(1), C(1), A(1), bcastSrc)
                      : (hw < HW::Xe_LP) ? mad(mod, C(1), C(1), bcastSrc, B(1))
                                         : mad(mod, C(1), C(1), B(1), bcastSrc);
@@ -4150,7 +4150,7 @@ void gemm_kernel_generator_t<hw>::outerProduct(int h, int ha, int hb,
                             // Check for and avoid bundle conflicts.
                             if (strategy.registerScheme
                                     == GEMMStrategy::CSeparate) {
-                                // Pre-Gen12 standard layout: C never conflicts with A and B.
+                                // Pre-Xe standard layout: C never conflicts with A and B.
                                 // Just check for conflicts between A and B.
                                 if (strategy.duplicateA || strategy.duplicateB)
                                     doFMA = !Bundle::conflicts(hw, A, B);
@@ -5109,7 +5109,7 @@ bool gemm_kernel_generator_t<hw>::doStdCRemainder(
                 // Generate jump table.
                 shl(1, temp, remainder,
                         uint16_t(4)); // Multiply by instruction length.
-                if (isGen12) // Gen12+ jmpi is relative to current IP.
+                if (isXe) // Xe+ Architecture jmpi is relative to current IP.
                     add(1, temp, temp, uint16_t(16));
                 jmpi(1, temp.d()); // Indexed jump into jump table.
                 for (int r = 0; r < unroll; r++)
@@ -5289,8 +5289,7 @@ bool gemm_kernel_generator_t<hw>::doStdCRemainder(
                     Subregister t2 = state.ra.alloc_sub<uint32_t>();
 
                     add(1 | sat, t2, remainder, int16_t(-unroll + 1));
-                    add(1, t1, remainder,
-                            int16_t(-1 + (isGen12 ? fragSize : 0)));
+                    add(1, t1, remainder, int16_t(-1 + (isXe ? fragSize : 0)));
                     add(1, t1, t1,
                             t2); // Increment index if remainder == unroll.
                     if (fragSize < 16) // Precondition: fragSize <= 16.
@@ -6056,7 +6055,7 @@ void gemm_kernel_generator_t<hw>::gemmAllocRegs(
 #else
             bool hp = false;
 #endif
-            // Gen12+. Assign non-broadcast input matrix (V), then broadcast input matrix (N), then C.
+            // Xe+ Architecture. Assign non-broadcast input matrix (V), then broadcast input matrix (N), then C.
             auto unrollVBytes = strategy.unroll[globalCM ? LoopM : LoopN]
                     * (globalCM ? Ta.size() : Tb.size());
             auto unrollNBytes = strategy.unroll[globalCM ? LoopN : LoopM]
@@ -6104,7 +6103,7 @@ void gemm_kernel_generator_t<hw>::gemmAllocRegs(
             break;
         }
         case GEMMStrategy::ABInterleave: {
-            // Gen12+. Interleave A and B, place C afterward.
+            // Xe+ Architecture. Interleave A and B, place C afterward.
             if (hw < HW::Xe_LP) stub();
             auto chunk = Bundle(0, 0).stride(hw) >> 1;
 
@@ -9032,7 +9031,7 @@ bool gemm_kernel_generator_t<hw>::gemmUpdateC(
     if (problem.cOffset == COffset::Pre)
         if (!gemmApplyCOffsetDispatch(problem, strategy, state)) return false;
 
-            // Claim a flag register for complex swizzles for ATS+.
+            // Claim a flag register for complex swizzles for XE_HP+.
             //
 #if DNNL_WITH_XE_HP
     if (hw >= HW::Xe_HP) {
@@ -10199,7 +10198,7 @@ void gemm_kernel_generator_t<hw>::gemmOffsetABC(bool initial, Subregister i0,
             }
             emul(1, tempQ0, y, state.inputs.ldc[q], strategy, state);
             eadd(1, offsetC, offsetC, tempQ0.reinterpret(0, offsetC.getType()),
-                    strategy, state); // Gen12: Use add3.
+                    strategy, state); // Xe Architecture: Use add3.
         }
     }
     if (doCO) {
@@ -11024,8 +11023,8 @@ void GEMMStrategy::sanityCheck(HW hw, const GEMMProblem &problem) {
 
     // Mixed mode restrictions:
     //   mixed hf/f is max SIMD 8 on Gen9
-    //   mixed hf/f is not allowed on Gen12
-    //   mixed bf/f is max SIMD 8 on ATS+
+    //   mixed hf/f is not allowed on Xe
+    //   mixed bf/f is max SIMD 8 on XE_HP+
     if ((Tc_real == Type::f32)
             && (Ta_real != Type::f32 || Tb_real != Type::f32))
         fmaSIMD = std::min(fmaSIMD, GRF::bytes(hw) >> 2);
@@ -11706,7 +11705,7 @@ bool gemm_kernel_generator_t<hw>::copyBodyInternal(
     // Release w0 -- no longer needed.
     state.ra.safeRelease(state.w0);
 
-    // Get flag register for complex swizzles for ATS+.
+    // Get flag register for complex swizzles for XE_HP+.
 #if DNNL_WITH_XE_HP
     if (hw >= HW::Xe_HP && Ts.isComplex()) {
         state.flagSwizzle = state.raVFlag.alloc();

@@ -170,7 +170,7 @@ inline HW decodeGfxCoreFamily(GfxCoreFamily family)
         case GfxCoreFamily::Gen10LP:  return HW::Gen10;
         case GfxCoreFamily::Gen11:    return HW::Gen11;
         case GfxCoreFamily::Gen11LP:  return HW::Gen11;
-        case GfxCoreFamily::Gen12:
+        case GfxCoreFamily::Xe:
         case GfxCoreFamily::XeHP:     return HW::Xe_HP;
         case GfxCoreFamily::Xe_LP:  return HW::Xe_LP;
 #if NGEN_XE_HPG
@@ -189,7 +189,7 @@ inline GfxCoreFamily encodeGfxCoreFamily(HW hw)
         case HW::Gen9:    return GfxCoreFamily::Gen9;
         case HW::Gen10:   return GfxCoreFamily::Gen10;
         case HW::Gen11:   return GfxCoreFamily::Gen11LP;
-        case HW::Xe_HP: return GfxCoreFamily::Gen12;
+        case HW::Xe_HP: return GfxCoreFamily::Xe;
         case HW::Xe_LP: return GfxCoreFamily::Xe_LP;
 #if NGEN_XE_HPG
         case HW::Xe_HPG: return GfxCoreFamily::Xe_HPG;
@@ -225,7 +225,7 @@ inline HW getBinaryArch(const std::vector<uint8_t> &binary)
     auto hw = decodeGfxCoreFamily(pheader->Device);
 
 #if NGEN_XE_HPG
-    // DG2 identifies as Xe_HP. Check whether EOT goes to TS (Xe_HP) or gateway (DG2+).
+    // XE_HPG identifies as Xe_HP. Check whether EOT goes to TS (Xe_HP) or gateway (XE_HPG+).
     using b14 = std::array<uint8_t, 14>;
     b14 gtwyEOT{{3, 0x80, 4, 0, 0, 0, 0xC, 0x7F, 0x20, 0x30, 0, 0, 0, 0}};
     if (hw == HW::Xe_HP) for (size_t i = 0; i < binary.size() - 0x10; i++) {

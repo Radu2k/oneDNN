@@ -69,10 +69,10 @@ inline unsigned getRegFile(const ExtendedReg &reg)     { return getRegFile(reg.g
 inline unsigned getRegFile(const Immediate &imm)       { return RegFileIMM; }
 
 // -----------------------------------------------------------------------
-// Binary formats, split between pre-Gen12 and post-Gen12.
+// Binary formats, split between pre-Xe and post-Xe.
 
 #include "ngen_gen8.hpp"
-#include "ngen_gen12.hpp"
+#include "ngen_xe.hpp"
 
 // -----------------------------------------------------------------------
 
@@ -191,7 +191,7 @@ protected:
         const Instruction &operator[](size_t index) const { return *reinterpret_cast<Instruction *>(&code[index * 2]); }
     };
 
-    static constexpr bool isGen12 = (hw >= HW::Xe_LP);
+    static constexpr bool isXe = (hw >= HW::Xe_LP);
 
     Label _labelLocalIDsLoaded;
     Label _labelArgsLoaded;
@@ -381,11 +381,11 @@ protected:
     }
     template <typename DT = void>
     void and_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::and_gen12 : Opcode::and_, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::and_xe : Opcode::and_, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void and_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::and_gen12 : Opcode::and_, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::and_xe : Opcode::and_, getDataType<DT>(), mod, dst, src0, src1);
     }
 #ifndef NGEN_NO_OP_NAMES
     template <typename DT = void>
@@ -399,11 +399,11 @@ protected:
 #endif
     template <typename DT = void>
     void asr(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::asr_gen12 : Opcode::asr, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::asr_xe : Opcode::asr, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void asr(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::asr_gen12 : Opcode::asr, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::asr_xe : Opcode::asr, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void avg(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
@@ -415,43 +415,43 @@ protected:
     }
     template <typename DT = void>
     void bfe(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
-        opX(isGen12 ? Opcode::bfe_gen12 : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::bfe_xe : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfe(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const RegData &src2) {
-        opX(isGen12 ? Opcode::bfe_gen12 : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::bfe_xe : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfe(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const Immediate &src2) {
-        opX(isGen12 ? Opcode::bfe_gen12 : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::bfe_xe : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfe(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
-        opX(isGen12 ? Opcode::bfe_gen12 : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::bfe_xe : Opcode::bfe, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfi1(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::bfi1_gen12 : Opcode::bfi1, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::bfi1_xe : Opcode::bfi1, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void bfi1(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::bfi1_gen12 : Opcode::bfi1, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::bfi1_xe : Opcode::bfi1, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void bfi2(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
-        opX(isGen12 ? Opcode::bfi2_gen12 : Opcode::bfi2, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::bfi2_xe : Opcode::bfi2, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfi2(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const RegData &src2) {
-        opX(isGen12 ? Opcode::bfi2_gen12 : Opcode::bfi2, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::bfi2_xe : Opcode::bfi2, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfi2(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const Immediate &src2) {
-        opX(isGen12 ? Opcode::bfi2_gen12 : Opcode::bfi2, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::bfi2_xe : Opcode::bfi2, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfi2(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
-        opX(isGen12 ? Opcode::bfi2_gen12 : Opcode::bfi2, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::bfi2_xe : Opcode::bfi2, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void bfn(const InstructionModifier &mod, uint8_t ctrl, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
@@ -475,25 +475,25 @@ protected:
     }
     template <typename DT = void>
     void bfrev(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
-        opX(isGen12 ? Opcode::bfrev_gen12 : Opcode::bfrev, getDataType<DT>(), mod, dst, src0);
+        opX(isXe ? Opcode::bfrev_xe : Opcode::bfrev, getDataType<DT>(), mod, dst, src0);
     }
     template <typename DT = void>
     void bfrev(const InstructionModifier &mod, const RegData &dst, const Immediate &src0) {
-        opX(isGen12 ? Opcode::bfrev_gen12 : Opcode::bfrev, getDataType<DT>(), mod, dst, src0);
+        opX(isXe ? Opcode::bfrev_xe : Opcode::bfrev, getDataType<DT>(), mod, dst, src0);
     }
     void brc(const InstructionModifier &mod, Label &jip, Label &uip) {
-        opBranch(Opcode::brc, mod, isGen12 ? null.ud() : ip.d(), jip, uip);
+        opBranch(Opcode::brc, mod, isXe ? null.ud() : ip.d(), jip, uip);
     }
     void brc(const InstructionModifier &mod, RegData src0) {
         src0.setRegion(2, 2, 1);
-        opBranch<true, true>(Opcode::brc, mod, isGen12 ? null.ud() : ip.d(), src0);
+        opBranch<true, true>(Opcode::brc, mod, isXe ? null.ud() : ip.d(), src0);
     }
     void brd(const InstructionModifier &mod, Label &jip) {
-        opBranch(Opcode::brd, mod, isGen12 ? null.ud() : ip.d(), jip);
+        opBranch(Opcode::brd, mod, isXe ? null.ud() : ip.d(), jip);
     }
     void brd(const InstructionModifier &mod, RegData src0) {
         src0.setRegion(2, 2, 1);
-        opBranch<true, true>(Opcode::brd, mod, isGen12 ? null.ud() : ip.d(), src0);
+        opBranch<true, true>(Opcode::brd, mod, isXe ? null.ud() : ip.d(), src0);
     }
     void break_(const InstructionModifier &mod, Label &jip, Label &uip) {
         opBranch(Opcode::break_, mod, null, jip, uip);
@@ -502,7 +502,7 @@ protected:
         opCall(Opcode::call, mod, dst, jip);
     }
     void call(const InstructionModifier &mod, const RegData &dst, RegData jip) {
-        if (isGen12)
+        if (isXe)
             opBranch<true, true>(Opcode::call, mod, dst, jip);
         else {
             jip.setRegion(0, 1, 0);
@@ -510,13 +510,13 @@ protected:
         }
     }
     void calla(const InstructionModifier &mod, const RegData &dst, int32_t jip) {
-        if (isGen12)
+        if (isXe)
             opBranch<true>(Opcode::calla, mod, dst, jip);
         else
             opX<true>(Opcode::calla, DataType::d, mod, dst, (hw <= HW::Gen9) ? null.ud(0)(2,2,1) : null.ud(0)(0,1,0), Immediate::d(jip));
     }
     void calla(const InstructionModifier &mod, const RegData &dst, RegData jip) {
-        if (isGen12)
+        if (isXe)
             opBranch<true, true>(Opcode::calla, mod, dst, jip);
         else {
             jip.setRegion(0, 1, 0);
@@ -533,31 +533,31 @@ protected:
     }
     template <typename DT = void>
     void cmp(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::cmp_gen12 : Opcode::cmp, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::cmp_xe : Opcode::cmp, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void cmp(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::cmp_gen12 : Opcode::cmp, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::cmp_xe : Opcode::cmp, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void cmpn(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::cmpn_gen12 : Opcode::cmpn, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::cmpn_xe : Opcode::cmpn, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void csel(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &src2) {
-        opX(isGen12 ? Opcode::csel_gen12 : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::csel_xe : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void csel(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const RegData &src2) {
-        opX(isGen12 ? Opcode::csel_gen12 : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::csel_xe : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void csel(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, const Immediate &src2) {
-        opX(isGen12 ? Opcode::csel_gen12 : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::csel_xe : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     template <typename DT = void>
     void csel(const InstructionModifier &mod, const RegData &dst, const Immediate &src0, const RegData &src1, const Immediate &src2) {
-        opX(isGen12 ? Opcode::csel_gen12 : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
+        opX(isXe ? Opcode::csel_xe : Opcode::csel, getDataType<DT>(), mod, dst, src0, src1, src2);
     }
     void cont(const InstructionModifier &mod, Label &jip, Label &uip) {
         opBranch(Opcode::cont, mod, null, jip, uip);
@@ -685,15 +685,15 @@ protected:
         opBranch(Opcode::join, mod, null, sizeof(Instruction8));
     }
     void jmpi(const InstructionModifier &mod, Label &jip) {
-        auto dst = isGen12 ? ARF(null) : ARF(ip);
+        auto dst = isXe ? ARF(null) : ARF(ip);
         opJmpi(Opcode::jmpi, mod, dst, dst, jip);
     }
     void jmpi(const InstructionModifier &mod, const RegData &jip) {
 #ifdef NGEN_SAFE
-        if (!isGen12 && jip.getType() != DataType::d && jip.getType() != DataType::invalid)
+        if (!isXe && jip.getType() != DataType::d && jip.getType() != DataType::invalid)
             throw invalid_type_exception();
 #endif
-        if (isGen12)
+        if (isXe)
             opBranch<true, false>(Opcode::jmpi, mod, null, jip);
         else
             opX(Opcode::jmpi, DataType::d, mod, ip, ip, jip);
@@ -860,15 +860,15 @@ protected:
     }
     template <typename DT = void>
     void mov(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
-        opX(isGen12 ? Opcode::mov_gen12 : Opcode::mov, getDataType<DT>(), mod, dst, src0);
+        opX(isXe ? Opcode::mov_xe : Opcode::mov, getDataType<DT>(), mod, dst, src0);
     }
     template <typename DT = void>
     void mov(const InstructionModifier &mod, const RegData &dst, const Immediate &src0) {
-        opX(isGen12 ? Opcode::mov_gen12 : Opcode::mov, getDataType<DT>(), mod, dst, src0);
+        opX(isXe ? Opcode::mov_xe : Opcode::mov, getDataType<DT>(), mod, dst, src0);
     }
     template <typename DT = void>
     void movi(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
-        opX(isGen12 ? Opcode::movi_gen12 : Opcode::movi, getDataType<DT>(), mod, dst, src0);
+        opX(isXe ? Opcode::movi_xe : Opcode::movi, getDataType<DT>(), mod, dst, src0);
     }
     template <typename DT = void>
     void mul(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
@@ -881,18 +881,18 @@ protected:
         opX(Opcode::mul, getDataType<DT>(), mod, dst, src0, src1);
     }
     void nop() {
-        opNop(isGen12 ? Opcode::nop_gen12 : Opcode::nop);
+        opNop(isXe ? Opcode::nop_xe : Opcode::nop);
     }
     void nop(const InstructionModifier &mod) {
-        opX(isGen12 ? Opcode::nop_gen12 : Opcode::nop, DataType::invalid, mod, null, null, null);
+        opX(isXe ? Opcode::nop_xe : Opcode::nop, DataType::invalid, mod, null, null, null);
     }
     template <typename DT = void>
     void not_(const InstructionModifier &mod, const RegData &dst, const RegData &src0) {
-        opX(isGen12 ? Opcode::not_gen12 : Opcode::not_, getDataType<DT>(), mod, dst, src0);
+        opX(isXe ? Opcode::not_xe : Opcode::not_, getDataType<DT>(), mod, dst, src0);
     }
     template <typename DT = void>
     void not_(const InstructionModifier &mod, const RegData &dst, const Immediate &src0) {
-        opX(isGen12 ? Opcode::not_gen12 : Opcode::not_, getDataType<DT>(), mod, dst, src0);
+        opX(isXe ? Opcode::not_xe : Opcode::not_, getDataType<DT>(), mod, dst, src0);
     }
 #ifndef NGEN_NO_OP_NAMES
     template <typename DT = void>
@@ -906,11 +906,11 @@ protected:
 #endif
     template <typename DT = void>
     void or_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::or_gen12 : Opcode::or_, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::or_xe : Opcode::or_, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void or_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::or_gen12 : Opcode::or_, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::or_xe : Opcode::or_, getDataType<DT>(), mod, dst, src0, src1);
     }
 #ifndef NGEN_NO_OP_NAMES
     template <typename DT = void>
@@ -929,7 +929,7 @@ protected:
     }
     void ret(const InstructionModifier &mod, RegData src0) {
         src0.setRegion(2,2,1);
-        if (isGen12)
+        if (isXe)
             opBranch<true, true>(Opcode::ret, mod, null, src0);
         else
             opX<true>(Opcode::ret, DataType::ud, mod, null, src0);
@@ -968,19 +968,19 @@ protected:
     }
     template <typename DT = void>
     void rol(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::rol_gen12 : Opcode::rol, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::rol_xe : Opcode::rol, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void rol(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::rol_gen12 : Opcode::rol, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::rol_xe : Opcode::rol, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void ror(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::ror_gen12 : Opcode::ror, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::ror_xe : Opcode::ror, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void ror(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::ror_gen12 : Opcode::ror, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::ror_xe : Opcode::ror, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void sad2(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
@@ -1004,14 +1004,14 @@ protected:
     }
     template <typename DT = void>
     void sel(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::sel_gen12 : Opcode::sel, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::sel_xe : Opcode::sel, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void sel(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::sel_gen12 : Opcode::sel, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::sel_xe : Opcode::sel, getDataType<DT>(), mod, dst, src0, src1);
     }
 
-    /* Gen12-style sends */
+    /* Xe-Architecture-style sends */
     void send(const InstructionModifier &mod, SharedFunction sf, const RegData &dst, const RegData &src0, const RegData &src1, uint32_t exdesc, uint32_t desc) {
         opSend(Opcode::send, mod, sf, dst, src0, src1, exdesc, desc);
     }
@@ -1036,7 +1036,7 @@ protected:
     void sendc(const InstructionModifier &mod, SharedFunction sf, const RegData &dst, const RegData &src0, const RegData &src1, const RegData &exdesc, const RegData &desc) {
         opSend(Opcode::sendc, mod, sf, dst, src0, src1, exdesc, desc);
     }
-    /* Pre-Gen12-style sends; also supported on Gen12. */
+    /* Pre-Xe-Architecture-style sends; also supported on Xe Architecture. */
     void send(const InstructionModifier &mod, const RegData &dst, const RegData &src0, uint32_t exdesc, uint32_t desc) {
         opSend(Opcode::send, mod, dst, src0, exdesc, desc);
     }
@@ -1076,23 +1076,23 @@ protected:
 
     template <typename DT = void>
     void shl(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::shl_gen12 : Opcode::shl, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::shl_xe : Opcode::shl, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void shl(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::shl_gen12 : Opcode::shl, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::shl_xe : Opcode::shl, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void shr(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::shr_gen12 : Opcode::shr, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::shr_xe : Opcode::shr, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void shr(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::shr_gen12 : Opcode::shr, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::shr_xe : Opcode::shr, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void smov(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::smov_gen12 : Opcode::smov, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::smov_xe : Opcode::smov, getDataType<DT>(), mod, dst, src0, src1);
     }
 #if NGEN_XE_HPC
     template <typename DT = void>
@@ -1123,11 +1123,11 @@ protected:
     }
     template <typename DT = void>
     void xor_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1) {
-        opX(isGen12 ? Opcode::xor_gen12 : Opcode::xor_, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::xor_xe : Opcode::xor_, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void xor_(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1) {
-        opX(isGen12 ? Opcode::xor_gen12 : Opcode::xor_, getDataType<DT>(), mod, dst, src0, src1);
+        opX(isXe ? Opcode::xor_xe : Opcode::xor_, getDataType<DT>(), mod, dst, src0, src1);
     }
 #ifndef NGEN_NO_OP_NAMES
     template <typename DT = void>
@@ -1200,7 +1200,7 @@ private:
         void bar(const InstructionModifier &mod = InstructionModifier()) {
             this->operator()(SyncFunction::bar, mod);
         }
-#if NGEN_GEN12P8
+#if NGEN_XE_HPC
         void bar(const InstructionModifier &mod, uint32_t src0) {
             this->operator()(SyncFunction::bar, mod, src0);
         }
@@ -1441,7 +1441,7 @@ public:
 
 #define NGEN_FORWARD(hw) \
 using InstructionStream = typename ngen::BinaryCodeGenerator<hw>::InstructionStream; \
-using ngen::BinaryCodeGenerator<hw>::isGen12; \
+using ngen::BinaryCodeGenerator<hw>::isXe; \
 template <typename DT = void, typename... Targs> void add(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::template add<DT>(std::forward<Targs>(args)...); } \
 template <typename DT = void, typename... Targs> void addc(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::template addc<DT>(std::forward<Targs>(args)...); } \
 template <typename DT = void, typename... Targs> void and_(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::template and_<DT>(std::forward<Targs>(args)...); } \
@@ -2626,7 +2626,7 @@ template <HW hw>
 void BinaryCodeGenerator<hw>::opCall(Opcode op, const InstructionModifier &mod, const RegData &dst, Label &jip)
 {
     addFixup(LabelFixup(jip.getID(labelManager), LabelFixup::JIPOffset));
-    if (isGen12)
+    if (isXe)
         opBranch<true>(op, mod, dst, 0);
     else
         opX<true>(op, DataType::d, mod, dst, null.ud(0)(0, 1, 0), Immediate::d(0));

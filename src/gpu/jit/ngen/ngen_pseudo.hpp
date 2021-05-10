@@ -425,7 +425,7 @@ void barriersignal(uint32_t barrierID, const GRF &temp, BarrierType barrierType,
 
 void barrierwait()
 {
-    if (isGen12)
+    if (isXe)
         sync.bar(NoMask);
     else
         wait(NoMask, n0[0]);
@@ -472,7 +472,7 @@ void slmfence(const InstructionModifier &mod, const RegData &dst, const RegData 
 
 void slmfence(const RegData &dst, const RegData &header = GRF(0)) { slmfence(InstructionModifier(), dst, header); }
 
-// ATS prologues.
+// XE_HP prologues.
 void loadlid(int argGRFs, int dims = 3, int simd = 8, const GRF &temp = GRF(127), int paddedSize = 0)
 {
     if (hardware >= HW::Xe_HP) {

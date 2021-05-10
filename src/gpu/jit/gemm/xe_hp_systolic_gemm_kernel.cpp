@@ -1570,7 +1570,7 @@ xe_hp_systolic_gemm_kernel_t<hw>::xe_hp_systolic_gemm_kernel_t(config_t cfg_)
     mul_constant(1, global_m0, global_id_x, 4 * cfg.tile_m);
     mul_constant(1, global_n0, global_id_y, 4 * cfg.tile_n);
 
-    // Adjust barrier ID field on DG2.
+    // Adjust barrier ID field on XE_HPG.
 #if DNNL_WITH_XE_HPG
     if (hw == HW::Xe_HPG) mov<uint8_t>(1, r0[10], r0[11]);
 #endif
