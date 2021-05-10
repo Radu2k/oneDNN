@@ -980,10 +980,6 @@ private:
         // reached with OpenCL kernels.
         if (fma_kind == fma_kind_t::mad) return status::unimplemented;
 
-        // Cases below are not supported yet.
-        if (utils::one_of(data_type::f32, a_data_type, b_data_type))
-            return status::unimplemented;
-
         return status::success;
     }
 
