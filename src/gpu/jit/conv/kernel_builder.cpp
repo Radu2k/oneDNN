@@ -4403,7 +4403,7 @@ private:
     const conv_config_t &cfg_;
     ir_context_t ir_ctx_;
     const constraint_set_t &cset_;
-    b_reduce_context_t b_reduce_ctx_;
+    b_reduce_context_t &b_reduce_ctx_;
 
     expr_t ap_buf_;
     expr_t a_slm_buf_;

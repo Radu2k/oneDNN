@@ -151,6 +151,7 @@ ngen::ConditionModifier cmp_op_to_ngen(op_kind_t op_kind) {
 
 ngen::RegData ngen_reg_data(ngen::HW hw, const ngen::RegData &base,
         int off_bytes, ngen::DataType type, int width, int hstride = 1) {
+    if (type == ngen::DataType::invalid) type = base.getType();
     auto grf_size = ngen::GRF::bytes(hw);
     auto new_off = base.getByteOffset() + off_bytes;
     auto new_grf_off = (new_off % grf_size);
@@ -370,6 +371,8 @@ public:
         other.ra_ = nullptr;
     }
 
+    ngen::RegisterAllocator &register_allocator() { return *ra_; }
+
     ~ngen_register_scope_t() {
         for (auto &r : grf_ranges_)
             ra_->safeRelease(r);
@@ -378,6 +381,13 @@ public:
             ra_->safeRelease(s);
         for (auto &f : flags_)
             ra_->safeRelease(f);
+    }
+
+    ngen::GRFRange try_alloc_range(
+            int regs, ngen::Bundle base_bundle = ngen::Bundle()) {
+        auto ret = ra_->try_alloc_range(regs, base_bundle);
+        if (!ret.isInvalid()) grf_ranges_.push_back(ret);
+        return ret;
     }
 
     ngen::GRFRange alloc_range(
@@ -420,6 +430,11 @@ public:
         auto ret = ra_->alloc_flag();
         flags_.push_back(ret);
         return ret;
+    }
+
+    template <typename T>
+    void safeRelease(T &t) {
+        ra_->safeRelease(t);
     }
 
 private:
@@ -2050,7 +2065,53 @@ private:
         if (!src_layout_.is_dense()) return false;
         if (!dst_layout_.is_dense()) return false;
 
-        reorder_2d_impl_t r(hw_, src_layout_, dst_layout_);
+        int max_tile_size = 512;
+        int max_tile_elems = max_tile_size / src_layout_.type().size();
+
+        if (src_layout_.size() <= max_tile_size) {
+            return try_emit_2d_impl(
+                    host, scope, src_layout_, dst_layout_, src_rd, dst_rd);
+        }
+
+        // Try to split layouts.
+        auto tile = src_layout_.split_into_max_tile(
+                max_tile_elems, /*is_dense=*/true);
+
+        auto src_tile_layout = src_layout_.map(tile);
+        auto dst_tile_layout = dst_layout_.map(tile);
+        if (!dst_tile_layout.is_dense()) return false;
+
+        bool ok = true;
+        src_layout_.for_each_tile(tile, [&](const std::vector<dim_t> &start) {
+            auto src_off = src_layout_.offset_in_bytes<dim_t>(start);
+            auto dst_off = dst_layout_.offset_in_bytes<dim_t>(start);
+            auto src_tile_rd = ngen_reg_data(
+                    hw_, src_rd, int(src_off), ngen::DataType::invalid, 1);
+            auto dst_tile_rd = ngen_reg_data(
+                    hw_, dst_rd, int(dst_off), ngen::DataType::invalid, 1);
+
+            ngen_register_scope_t tile_scope(scope.register_allocator());
+            ok &= try_emit_2d_impl(host, tile_scope, src_tile_layout,
+                    dst_tile_layout, src_tile_rd, dst_tile_rd);
+        });
+        return ok;
+    }
+
+    template <typename GeneratorT>
+    bool try_emit_2d_impl(GeneratorT *host, ngen_register_scope_t &scope,
+            const layout_t &src_layout, const layout_t &dst_layout,
+            const ngen::RegData &src_rd, const ngen::RegData &dst_rd) {
+        // Try to allocate/release a temporary buffer to avoid out_of_registers
+        // exception.
+        const int grf_size = ngen::GRF::bytes(hw_);
+        auto dummy = scope.try_alloc_range(
+                utils::div_up(dst_layout.size(), grf_size));
+        if (dummy.isInvalid()) return false;
+
+        // Allocation succeeded, can proceed further.
+        scope.safeRelease(dummy);
+
+        reorder_2d_impl_t r(hw_, src_layout, dst_layout);
         int tile_elems = int(r.tile().elems());
         if (tile_elems < 16 || tile_elems > 512) return false;
 

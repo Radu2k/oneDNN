@@ -556,6 +556,15 @@ public:
         return layout_t(type(), ndims(), offset(), new_blocks);
     }
 
+    tensor_t split_into_dense_tile(dim_t tile_elems, dim_t outer_block) const;
+
+    // Returns a tensor corresponding to the biggest innermost sub-layout so that
+    // 1) It consists of consecutive blocks only.
+    // 2) It contains less or equal than max_tile_elems elements.
+    // 3) It is dense if is_dense_tile is true.
+    tensor_t split_into_max_tile(
+            dim_t max_tile_elems, bool is_dense_tile) const;
+
     // Iterates through tiles of the layout, calling `f` with relative offsets
     // for each tile. The iteration order is defined by the layout blocks -
     // absolute 1D offsets are increasing between callback calls.
@@ -1302,7 +1311,7 @@ public:
         if (vlayout.is_empty()) return tensor_t();
         tile_elems = blocks[0];
         outer_block = blocks[1];
-        return split_into_dense_tile(vlayout, tile_elems, outer_block);
+        return vlayout.split_into_dense_tile(tile_elems, outer_block);
     }
 
     // Returns a tensor corresponding to the biggest innermost sub-layout so that
@@ -1312,7 +1321,7 @@ public:
     tensor_t split_into_max_tile(
             dim_t max_tile_elems, bool is_dense_tile) const {
         auto vlayout = create_pseudo_vlayout();
-        return split_into_max_tile(vlayout, max_tile_elems, is_dense_tile);
+        return vlayout.split_into_max_tile(max_tile_elems, is_dense_tile);
     }
 
     template <typename F>
@@ -1366,12 +1375,6 @@ private:
     view_t split(const layout_t &vlayout, const tensor_t &vtile,
             const grid_info_t &grid,
             std::vector<block_t> *outer_blocks = nullptr) const;
-
-    tensor_t split_into_dense_tile(
-            const layout_t &vlayout, dim_t tile_elems, dim_t outer_block) const;
-
-    tensor_t split_into_max_tile(const layout_t &vlayout, dim_t max_tile_elems,
-            bool is_dense_tile) const;
 
     void create_mask_vector(mask_vector_t &mask_vec, const layout_t &_vlayout,
             int vidx, std::vector<dim_t> &vargs) const;
