@@ -205,7 +205,14 @@ public:
 
     operator bool() const { return true; }
 
-    static bool is_enabled() { return level <= LOG_LEVEL; }
+    static bool is_enabled() {
+#ifdef GEN_CONV_DEBUG
+        static int is_enabled = getenv_int("log_level", LOG_LEVEL);
+        return is_enabled != 0;
+#else
+        return LOG_LEVEL;
+#endif
+    }
 
     template <typename T>
     logger_t &operator<<(const T &obj) {
