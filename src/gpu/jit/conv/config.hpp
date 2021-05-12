@@ -740,7 +740,7 @@ public:
                     | primitive_attr_t::skip_mask_t::sum_dt;
             if (!attr->has_default_values(attr_skip_mask)) return false;
         } else {
-            if (!attr->has_default_values()) return status::unimplemented;
+            if (!attr->has_default_values()) return false;
         }
 
         if (!attr->output_scales_.has_default_values()) {
