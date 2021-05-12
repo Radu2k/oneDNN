@@ -112,7 +112,10 @@ public:
                 // Only byte was tested with load/store.
                 if (!is_atomic() && (data_type != type_t::byte())) return false;
                 if (is_atomic() && data_elems > 1) return false;
-                if (is_atomic() && is_a64() && (slots != 8)) return false;
+#if DNNL_WITH_XE_HPC
+                if (hw < ngen::HW::Xe_HPC)
+#endif
+                    if (is_atomic() && is_a64() && (slots != 8)) return false;
                 return true;
             }
             default: ir_error_not_expected();

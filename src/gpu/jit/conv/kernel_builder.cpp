@@ -3115,10 +3115,16 @@ private:
         using namespace ngen_proxy;
         bool is_atomic = (atomic_op_ != AtomicOp::undef);
         Access access_type = (is_load_ ? Access::Read : Access::Write);
+#if DNNL_WITH_XE_HPC
+        // TODO: use stateless access on XeHPC until driver fix
+        bool use_stateful_msgs = is_atomic && hw_ < ngen::HW::Xe_HPC;
+#else
+        bool use_stateful_msgs = is_atomic;
+#endif
         AddressModel address_model
                 = (is_slm() ? AddressModel::ModelSLM
-                            : is_atomic ? AddressModel::ModelBTS
-                                        : AddressModel::ModelA64);
+                            : use_stateful_msgs ? AddressModel::ModelBTS
+                                                : AddressModel::ModelA64);
         auto send_list = send_t::get_all(
                 hw_, data_type, access_type, address_model, atomic_op_);
         return send_list;

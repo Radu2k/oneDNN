@@ -519,6 +519,7 @@ public:
         requireSIMD(cfg_.simd_size);
         requireBarrier();
         requireDPAS();
+        if (cfg_.do_atomic_update) requireGlobalAtomics();
 
         for (int i = 0; i < kernel_arg_info.nargs(); i++) {
             auto &name = kernel_arg_info.arg_name(i);
