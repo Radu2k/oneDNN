@@ -62,7 +62,7 @@ public:
         dst_data_type = orig_dst_md.data_type;
         bia_data_type = orig_bia_md.data_type;
 
-        if (with_bias) { bia_layout = layout_t(orig_bia_md, "a"); }
+        if (with_bias) bia_layout = layout_t(orig_bia_md, "a");
 
         ndims = conv_pd->ndims();
 
@@ -130,9 +130,6 @@ public:
     memory_desc_wrapper orig_dst_mdw() const {
         return memory_desc_wrapper(orig_dst_md);
     }
-    format_tag_t src_tag() const { return src_layout.to_format_tag(); }
-    format_tag_t wei_tag() const { return wei_layout.to_format_tag(); }
-    format_tag_t dst_tag() const { return dst_layout.to_format_tag(); }
 
     std::string desc_str() const {
         std::ostringstream oss;
@@ -327,11 +324,13 @@ public:
         auto &src_md = *conv_pd->invariant_src_md();
         auto &wei_md = *conv_pd->invariant_wei_md();
         auto &dst_md = *conv_pd->invariant_dst_md();
+        auto &bia_md = *conv_pd->invariant_bia_md();
 
         // Select layouts.
         src_layout = init_layout(src_md, src_tag);
         wei_layout = init_layout(wei_md, wei_tag);
         dst_layout = init_layout(dst_md, dst_tag);
+        if (with_bias) bia_layout = init_layout(bia_md, "a");
 
         // Validate layouts.
         bool is_src_nhwc = (orig_src_mdw().is_plain()
@@ -370,6 +369,7 @@ public:
 
         return status::success;
     }
+
     status_t init_bwd_d(convolution_pd_t *conv_pd, engine_t *engine) {
         using namespace ir_utils;
 
@@ -606,11 +606,13 @@ public:
         auto &src_md = *conv_pd->invariant_src_md();
         auto &wei_md = *conv_pd->invariant_wei_md();
         auto &dst_md = *conv_pd->invariant_dst_md();
+        auto &bia_md = *conv_pd->invariant_bia_md();
 
         // Select layouts.
         src_layout = init_layout(src_md, src_tag);
         wei_layout = init_layout(wei_md, wei_tag);
         dst_layout = init_layout(dst_md, dst_tag);
+        if (with_bias) bia_layout = init_layout(bia_md, "a");
 
         if (src_layout != layout_t(src_md, src_tag))
             return status::unimplemented;
@@ -1132,10 +1134,11 @@ private:
         return data_regs + header_regs;
     }
 
-    static layout_t init_layout(
-            const memory_desc_t &md, const std::string &tag) {
+    static layout_t init_layout(memory_desc_t &md, const std::string &tag) {
         if (md.format_kind != format_kind::any) return layout_t(md);
-        return layout_t(md, tag);
+        auto ret = layout_t(md, tag);
+        md = ret.to_dnnl(md.dims);
+        return ret;
     }
 };
 

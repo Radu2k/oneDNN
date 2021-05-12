@@ -136,60 +136,6 @@ memory_desc_t layout_t::to_dnnl(const dim_t *dims_hint) const {
     return md;
 }
 
-format_tag_t layout_t::to_format_tag() const {
-    auto desc = desc_str(/*dnnl_style=*/true);
-#define CASE(tag) \
-    if (desc == #tag) return format_tag::tag
-
-    CASE(ABc32a16b);
-    CASE(ABc32a32b);
-    CASE(ABc4a8b8a2b);
-    CASE(ABc4a8b8a4b);
-    CASE(ABcd32a16b);
-    CASE(ABcd32a32b);
-    CASE(ABcd4a8b8a2b);
-    CASE(ABcd4a8b8a4b);
-    CASE(ABcde32a16b);
-    CASE(ABcde32a32b);
-    CASE(ABcde4a8b8a2b);
-    CASE(ABcde4a8b8a4b);
-    CASE(BAc16b16a);
-    CASE(BAcd16b16a);
-    CASE(BAcde16b16a);
-    CASE(BAc4b8a8b2a);
-    CASE(BAcd4b8a8b2a);
-    CASE(BAcde4b8a8b2a);
-    CASE(aBc16b);
-    CASE(aBc32b);
-    CASE(aBcd16b);
-    CASE(aBcd32b);
-    CASE(aBcde16b);
-    CASE(aBcde32b);
-    CASE(acb);
-    CASE(acdb);
-    CASE(acdeb);
-    CASE(ABc2a8b16a2b);
-    CASE(ABc2a8b16a4b);
-    CASE(ABcd2a8b16a2b);
-    CASE(ABcd2a8b16a4b);
-    CASE(ABcde2a8b16a4b);
-    CASE(ABcde2a8b16a2b);
-    CASE(BAc2b8a16b2a);
-    CASE(BAc2b8a16b4a);
-    CASE(BAcd2b8a16b2a);
-    CASE(BAcd2b8a16b4a);
-    CASE(BAcde2b8a16b4a);
-    CASE(BAcde2b8a16b2a);
-    CASE(ABc16b16a);
-    CASE(ABcd16b16a);
-    CASE(ABcde16b16a);
-
-#undef CASE
-
-    ir_error_not_expected() << "Unknown tag: " << desc;
-    return format_tag::undef;
-}
-
 layout_t layout_t::map(const tensor_t &tensor) const {
     if (ndims() != tensor.ndims())
         ir_error_not_expected() << "Dimensions do not match.";

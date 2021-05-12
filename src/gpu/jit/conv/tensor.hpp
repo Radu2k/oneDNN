@@ -428,8 +428,6 @@ public:
 
     memory_desc_t to_dnnl(const dim_t *dims_hint) const;
 
-    format_tag_t to_format_tag() const;
-
     // Returns a vector of <block index, block> pairs.
     // The innermost block (first) has index 0.
     std::vector<std::pair<int, block_t>> enumerated_blocks() const {
