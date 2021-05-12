@@ -200,7 +200,7 @@ public:
         if (!post_ops_ok(conv_pd)) return status::unimplemented;
 
         // Groups are not supported yet.
-        if (with_groups) return status::unimplemented;
+        if (with_groups && g > 1) return status::unimplemented;
 
         if (is_fwd)
             CHECK(init_fwd(conv_pd, engine));
@@ -314,6 +314,8 @@ public:
             wei_tag = is_wei16aXb ? "ABx2a8b16a2b" : "ABx4a8b8a2b";
             dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
         }
+
+        if (with_groups) wei_tag = prepend_groups_to_tag(wei_tag);
 
 #ifdef GEN_CONV_DEBUG
         src_tag = getenv_str("stag", src_tag);
@@ -461,6 +463,8 @@ public:
         } else
             return status::unimplemented;
 
+        if (with_groups) wei_tag = prepend_groups_to_tag(wei_tag);
+
 #ifdef GEN_CONV_DEBUG
         src_tag = getenv_str("stag", src_tag);
         wei_tag = getenv_str("wtag", wei_tag);
@@ -596,6 +600,8 @@ public:
         src_tag = "ABx32a16b";
         wei_tag = "ABx16b16a";
         dst_tag = "ABx32a16b";
+
+        if (with_groups) wei_tag = prepend_groups_to_tag(wei_tag);
 
 #ifdef GEN_CONV_DEBUG
         src_tag = getenv_str("stag", src_tag);
@@ -1132,6 +1138,17 @@ private:
         int header_regs = a_headers + b_headers + g2s_headers;
 
         return data_regs + header_regs;
+    }
+
+    static std::string prepend_groups_to_tag(const std::string &tag) {
+        auto ret = tag;
+        for (auto &c : ret) {
+            bool is_lower_dim = ('a' <= c && c < 'a' + DNNL_MAX_NDIMS);
+            bool is_upper_dim = ('A' <= c && c < 'A' + DNNL_MAX_NDIMS);
+            if (!is_lower_dim && !is_upper_dim) continue;
+            c += 1;
+        }
+        return "a" + ret;
     }
 
     static layout_t init_layout(memory_desc_t &md, const std::string &tag) {
