@@ -92,19 +92,19 @@ template <SIMPLE_REORDER_TEMPL_DECL, typename spec = void>
 struct simple_reorder_impl {};
 
 namespace {
-static inline bool simple_fmt_check(bool order_keep, impl::format_tag_t tag_i,
+inline bool simple_fmt_check(bool order_keep, impl::format_tag_t tag_i,
         impl::format_tag_t tag_o, const memory_desc_wrapper &input_d,
         const memory_desc_wrapper &output_d) {
     if (input_d.has_runtime_dims_or_strides()) return false;
     return input_d.matches_tag(order_keep ? tag_i : tag_o)
             && output_d.matches_tag(order_keep ? tag_o : tag_i);
 }
-static inline bool simple_po_check(const primitive_attr_t *attr) {
+inline bool simple_po_check(const primitive_attr_t *attr) {
     const auto &po = attr->post_ops_;
     return po.len() == 0
             || (po.len() == 1 && po.contain(primitive_kind::sum, 0));
 }
-static inline bool simple_attr_check(const primitive_attr_t *attr,
+inline bool simple_attr_check(const primitive_attr_t *attr,
         bool many_scales_support, bool sum_support) {
     using smask_t = primitive_attr_t::skip_mask_t;
     smask_t skip_mask = smask_t::oscale;
@@ -384,15 +384,10 @@ struct simple_reorder_impl<SIMPLE_REORDER_TEMPL_CALL,
                 : 1.f;
         const bool broadcast_scales = (D_mask == 1);
 
-        const auto zero_padding_needed = !output_d.is_dense();
-        if (zero_padding_needed) {
-            // This kernel is used primarily for tensors with multiple inner
-            // blocks for which generic zero padding must be used.
-
-            // TODO: apply zero padding inside parallel_nd()
-            const auto memory = ctx.memory(DNNL_ARG_TO);
-            memory->zero_pad(ctx);
-        }
+        // This kernel is used primarily for tensors with multiple inner
+        // blocks for which generic zero padding must be used.
+        // TODO: apply zero padding inside parallel_nd()
+        ctx.zero_pad_output(DNNL_ARG_TO);
 
         auto ker = [&](const data_t<type_i> *inp, data_t<type_o> *out,
                            int32_t *c, int32_t *zp, const float *s,
@@ -1831,15 +1826,10 @@ struct simple_reorder_impl<SIMPLE_REORDER_TEMPL_CALL,
 
         const size_t nelems = input_d.nelems();
 
-        const auto zero_padding_needed = !output_d.is_dense();
-        if (zero_padding_needed) {
-            // This kernel is used also for tensors with multiple inner
-            // blocks for which generic zero padding must be used.
-
-            // TODO: apply zero padding inside parallel_nd()
-            const auto memory = ctx.memory(DNNL_ARG_TO);
-            memory->zero_pad(ctx);
-        }
+        // This kernel is used also for tensors with multiple inner
+        // blocks for which generic zero padding must be used.
+        // TODO: apply zero padding inside parallel_nd()
+        ctx.zero_pad_output(DNNL_ARG_TO);
 
         int ndims_start = 0, ndims_mask = 0;
         int smask = pd()->attr()->output_scales_.mask_;
