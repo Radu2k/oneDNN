@@ -169,6 +169,8 @@ public:
                     return ctx.input(args_[idx].key)->memory_storage();
                 return ctx.output(args_[idx].key)->memory_storage();
             }
+            // No storage for internal arguments.
+            case arg_kind_t::internal: return memory_storage_wrapper_t();
             default: ir_error_not_expected();
         }
         return memory_storage_wrapper_t();
