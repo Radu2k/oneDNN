@@ -596,8 +596,6 @@ typedef enum {
     dnnl_BA4b8a8b4a,
     dnnl_aBC48b16c,
     dnnl_aBC48b32c,
-    dnnl_ABcd40a16b,
-    dnnl_ABcd40a32b,
     dnnl_abCd32c,
     dnnl_abdCe32c,
     dnnl_abdCE32c2e,
