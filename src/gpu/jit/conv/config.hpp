@@ -722,8 +722,6 @@ public:
         b_sub_tiles = 1;
 
 #ifdef GEN_CONV_DEBUG
-        fma_kind = fma_kind::from_string(
-                getenv_str("fma_kind", fma_kind::to_string(fma_kind)));
         use_a_slm = getenv_bool("use_a_slm", use_a_slm);
         use_b_slm = getenv_bool("use_b_slm", use_b_slm);
         pad_slm = getenv_bool("pad_slm", pad_slm);
@@ -986,6 +984,10 @@ private:
     status_t init_fma_kind() {
         fma_kind = fma_kind::get_supported_kind(
                 hw, a_data_type, b_data_type, acc_data_type);
+#ifdef GEN_CONV_DEBUG
+        fma_kind = fma_kind::from_string(ir_utils::getenv_str(
+                "fma_kind", fma_kind::to_string(fma_kind)));
+#endif
         if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
 
         // Disable using mad instruction backend until performance parity is
