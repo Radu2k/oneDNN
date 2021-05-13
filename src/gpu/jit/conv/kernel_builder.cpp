@@ -4935,9 +4935,14 @@ private:
             const layout_t &layout, const grid_info_t &load_grid) const {
         auto tg_dim0 = load_grid.dim(0);
         auto tg_dim1 = load_grid.dim(1);
-        ir_assert(layout.elems() % tg_dim0 == 0) << layout;
+        int type_size = layout.type().size();
 
-        dim_t inner_block = layout.elems() / load_grid.dim(0);
+        ir_assert(layout.elems() % tg_dim0 == 0) << layout;
+        dim_t inner_block = layout.elems() / tg_dim0;
+
+        ir_assert((inner_block * type_size) % tg_dim1 == 0) << layout;
+        dim_t per_thr_bytes = (inner_block * type_size) / tg_dim1;
+
         std::vector<dim_t> multi_blocks = {inner_block, tg_dim0};
         auto l = layout.split_into_multi_blocks(multi_blocks);
 
@@ -4945,13 +4950,9 @@ private:
         dim_t stride = -1;
         dim_t remaining_elems = inner_block;
         bool past_inner_block = false;
-        int type_size = layout.type().size();
         for (auto &b : padded_blocks) {
             if (past_inner_block) {
                 if (stride == -1) {
-                    dim_t per_thr_bytes = inner_block * type_size;
-                    ir_assert(per_thr_bytes % tg_dim1 == 0);
-                    per_thr_bytes /= tg_dim1;
                     dim_t stride_bytes = find_min_stride_without_conflicts(
                             per_thr_bytes, dim_t(b.stride) * type_size);
                     ir_assert(stride_bytes % type_size == 0);
@@ -5000,7 +5001,10 @@ private:
             }
         }
 
-        ir_error_not_expected();
+        ir_warning()
+                << "Couldn't find stride without conflicts for SLM padding."
+                << std::endl;
+
         return dense_stride_bytes;
     }
 
