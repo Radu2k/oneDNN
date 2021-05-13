@@ -600,8 +600,7 @@ struct EmulationImplementation {
     static void emul32High(Generator &g, const ngen::InstructionModifier &mod,
             const ngen::RegData &dstHi, const ngen::RegData &src0,
             const S1 &src1) {
-        if (dstHi.getOffset() != 0) stub();
-        g.mul(mod, g.acc0.ud(0), src0, lowWord(src1));
+        g.mul(mod, g.acc0.ud(dstHi.getOffset()), src0, lowWord(src1));
         g.mach(mod, dstHi, src0, src1);
     }
 
