@@ -376,6 +376,9 @@ public:
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
 
+        // Bias is not supported.
+        if (with_bias) return status::unimplemented;
+
         // Set dispatch and kernel parameters.
         int mb_thr_blk = (mb < 16 ? 1 : 32);
         ic_thr_blk = 32;
@@ -1028,6 +1031,10 @@ private:
 
         // Try to use sub-tiles for B.
         int max_b_sub_tiles = (use_b_slm ? 4 : 2);
+#if DNNL_WITH_XE_HPC
+        // XXX: avoid layout mismatch for B loads
+        if (hw >= ngen::HW::Xe_HPC && is_bwd_w) max_b_sub_tiles = 2;
+#endif
         while (b_sub_tiles < max_b_sub_tiles) {
             b_sub_tiles *= 2;
             int regs = estimate_register_count();
@@ -1050,7 +1057,7 @@ private:
     }
 
     int estimate_register_count() const {
-        int reg_bytes = 32;
+        int reg_bytes = ngen::GRF::bytes(hw);
         int gmem_msg_bytes = reg_bytes; // Assume 1 register per GMEM load.
         int slm_msg_bytes
                 = 8 * reg_bytes; // Assume 8 registers per SLM load/store.
