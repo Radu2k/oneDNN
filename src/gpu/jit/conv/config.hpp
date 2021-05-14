@@ -1046,7 +1046,9 @@ private:
         }
 
         // Try to use sub-tiles for B.
-        int max_b_sub_tiles = (use_b_slm ? 4 : 2);
+        int n_thr_blk = utils::div_up(n_tg_blk, tg_grid_dim[0]);
+        int max_b_sub_tiles
+                = std::min((use_b_slm ? 4 : 2), n_thr_blk / simd_size);
 #if DNNL_WITH_XE_HPC
         // XXX: avoid layout mismatch for B loads
         if (hw >= ngen::HW::Xe_HPC && is_bwd_w) max_b_sub_tiles = 2;
