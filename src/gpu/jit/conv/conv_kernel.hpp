@@ -1962,7 +1962,7 @@ void emit_1d_tile(ngen::HW hw, GeneratorT *host, ngen_register_scope_t &scope,
                     host->emov(esize | host->sat, t, s(1));
                     host->emov(esize, d(1), t);
                 } else {
-                    host->emov(esize | host->sat, dst(4), src(1));
+                    host->emov(esize | host->sat, d(4), s(1));
                 }
             } else {
                 // b -> d.
@@ -1977,7 +1977,7 @@ void emit_1d_tile(ngen::HW hw, GeneratorT *host, ngen_register_scope_t &scope,
                     host->emov(esize, t, s(1));
                     host->emov(esize, d(1), t);
                 } else {
-                    host->emov(esize | host->sat, dst(1), src(4));
+                    host->emov(esize, d(1), s(4));
                 }
             }
         }
