@@ -986,7 +986,7 @@ private:
                 f_mul = f_mul.as<factored_expr_t>().merge(
                         factored_expr_t::make(a));
             }
-            *this = f_mul.as<factored_expr_t>();
+            factors = f_mul.as<factored_expr_t>().factors;
             return;
         }
 
@@ -1014,7 +1014,7 @@ private:
             auto &f_common = common.as<factored_expr_t>();
             auto rest = factored_expr_t::make(
                     make_nary_op(op_kind_t::_add, rest_factors));
-            *this = f_common.merge(rest).as<factored_expr_t>();
+            factors = f_common.merge(rest).as<factored_expr_t>().factors;
             return;
         }
         ir_error_not_expected();

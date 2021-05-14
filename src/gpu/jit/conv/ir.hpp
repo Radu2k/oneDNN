@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include "gpu/jit/conv/ir_core.hpp"
@@ -152,19 +153,16 @@ protected:
     }
 
 private:
-    // FIXME: This function is not thread-safe.
     static std::unordered_map<int64_t, dispatch_func_type> &dispatch_funcs() {
         static std::unordered_map<int64_t, dispatch_func_type> _dispatch_funcs;
-        static bool is_init = false;
-        if (is_init) return _dispatch_funcs;
-
+        static std::once_flag initialized;
+        std::call_once(initialized, [&]() {
 #define HANDLE_IR_OBJECT(type) \
     _dispatch_funcs[type::_dispatch_type_id()] = &call<type>;
-
-        HANDLE_ALL_IR_OBJECTS()
+            HANDLE_ALL_IR_OBJECTS()
 
 #undef HANDLE_IR_OBJECT
-        is_init = true;
+        });
         return _dispatch_funcs;
     }
 
@@ -391,16 +389,14 @@ public:
 private:
     static std::unordered_map<int64_t, dispatch_func_type> &dispatch_funcs() {
         static std::unordered_map<int64_t, dispatch_func_type> _dispatch_funcs;
-        static bool is_init = false;
-        if (is_init) return _dispatch_funcs;
-
+        std::once_flag initialized;
+        std::call_once(initialized, [&]() {
 #define HANDLE_IR_OBJECT(type) \
     _dispatch_funcs[type::_dispatch_type_id()] = &call<type>;
-
-        HANDLE_ALL_IR_OBJECTS()
+            HANDLE_ALL_IR_OBJECTS()
 
 #undef HANDLE_IR_OBJECT
-        is_init = true;
+        });
         return _dispatch_funcs;
     }
 

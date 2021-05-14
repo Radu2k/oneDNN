@@ -18,6 +18,7 @@
 #define GPU_JIT_CONV_IR_CORE_HPP
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <numeric>
 #include <string>
@@ -351,12 +352,14 @@ data_type_t to_dnnl(const type_t &type);
 // Reference counter for IR objects.
 class ref_count_t {
 public:
+    ref_count_t() : value_(0) {}
+    ref_count_t(const ref_count_t &) = delete;
+
     uint32_t increment() { return ++value_; }
     uint32_t decrement() { return --value_; }
-    uint32_t get() const { return value_; }
 
 private:
-    uint32_t value_ = 0;
+    std::atomic<uint32_t> value_;
 };
 
 // Helper class to generate unique IDs for IR classes.
