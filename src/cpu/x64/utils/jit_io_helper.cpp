@@ -118,17 +118,14 @@ jit_io_helper_t<Vmm>::jit_io_helper_t(jit_generator *host, const cpu_isa_t &isa,
 template <typename Vmm>
 jit_io_helper_t<Vmm>::~jit_io_helper_t() = default;
 
-template <>
-void jit_io_helper_t<Xbyak::Zmm>::init_bf16() {
+template <typename Vmm>
+void jit_io_helper_t<Vmm>::init_bf16() {
     if (bf16_emu_) {
         assert(bf16_conf_.has_value()
                 && "Config for bf16 emulation is not set.");
         bf16_emu_->init_vcvtneps2bf16();
     }
 }
-
-template <typename Vmm>
-void jit_io_helper_t<Vmm>::init_bf16() {}
 
 template <typename Vmm>
 void jit_io_helper_t<Vmm>::prepare_opmask(
@@ -753,11 +750,11 @@ jit_io_multi_dt_helper_t<Vmm>::jit_io_multi_dt_helper_t(jit_generator *host,
             storage_.emplace(dt,
                     std::make_shared<jit_io_helper_t<Vmm>>(host, isa, dt,
                             io_conf, tail_conf,
-                            dt == data_type::bf16 ? bf16_conf : utils::null_opt,
+                            dt == data_type::bf16 ? bf16_conf : utils::nullopt,
                             store_saturation_needed ? utils::optional_t<
                                     io_saturation_conf_t> {saturation_conf
                                                                    ->second}
-                                                    : utils::null_opt,
+                                                    : utils::nullopt,
                             gather_conf));
         }
     }

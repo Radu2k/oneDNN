@@ -65,20 +65,27 @@ typedef enum {
     brgemm_prf_default = 1,
 } brgemm_kernel_prefetching_t;
 
+typedef enum {
+    brgemm_bd_loop_innermost = 0,
+    brgemm_ld_loop_innermost,
+} brgemm_kernel_innermost_loop_t;
+
 struct brgemm_attr_t {
     brgemm_attr_t()
         : max_bs(INT_MAX)
         , max_top_vpad(0)
         , max_bottom_vpad(0)
-        , hint_expected_A_size(LLONG_MAX)
-        , hint_expected_B_size(LLONG_MAX)
-        , hint_expected_C_size(LLONG_MAX)
+        , hint_expected_A_size(platform::get_per_core_cache_size(1))
+        , hint_expected_B_size(platform::get_per_core_cache_size(1))
+        , hint_expected_C_size(platform::get_per_core_cache_size(1))
+        , hint_innermost_loop(brgemm_ld_loop_innermost)
         , hint_loop_order(brgemm_kernel_loop_order_t::brgemm_lo_default)
         , hint_prefetching(brgemm_kernel_prefetching_t::brgemm_prf_default)
         , wary_tail_read(true) {}
     int max_bs;
     int max_top_vpad, max_bottom_vpad;
     dim_t hint_expected_A_size, hint_expected_B_size, hint_expected_C_size;
+    brgemm_kernel_innermost_loop_t hint_innermost_loop;
     brgemm_kernel_loop_order_t hint_loop_order;
     brgemm_kernel_prefetching_t hint_prefetching;
     bool wary_tail_read;
@@ -173,6 +180,23 @@ struct brgemm_t {
 
     brgemm_attr_t brgattr;
     static constexpr int MAX_VPAD = 100;
+
+    int is_M_tail;
+    // Tile register decomposition
+    int get_ld_block2() const noexcept {
+        return (ldb_tail) ? ld_block2 + 1 : ld_block2;
+    }
+    int get_num_C_tiles() const noexcept { return bd_block2 * get_ld_block2(); }
+    int get_num_A_tiles() const noexcept { return bd_block2; }
+    int get_num_B_tiles() const noexcept { return get_ld_block2(); }
+
+    int get_C_tensor(int m, int n) const noexcept {
+        return (m * get_ld_block2() + n);
+    }
+    int get_A_tensor(int m) const noexcept { return (get_num_C_tiles() + m); }
+    int get_B_tensor(int n) const noexcept {
+        return (get_num_C_tiles() + get_num_A_tiles() + n);
+    }
 };
 
 struct brgemm_kernel_params_t {

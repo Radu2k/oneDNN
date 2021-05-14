@@ -198,6 +198,14 @@ bool jit_uni_binary_t::pd_t::is_applicable() {
             && dst_d.is_dense(true);
     if (!ok) return false;
 
+    // TODO: fix implementation for tensor with paddings to work with any block
+    // size. For now return unimplemented if more than single blocking
+    // or `block size > 16`.
+    const auto &blk_d = dst_d.blocking_desc();
+    if (!dst_d.is_dense()
+            && (blk_d.inner_nblks > 1 || blk_d.inner_blks[0] > 16))
+        return false;
+
     if (!conf_.is_i8) {
         const bool has_padding = utils::one_of(true,
                 src0_d.nelems(true) != src0_d.nelems(false),
@@ -478,7 +486,8 @@ void jit_uni_binary_t::execute_bcast_per_c_strategy(const data_t *src0,
                                     : 0);
 
     if (op_type == op_t::c_blocked) {
-        const dim_t C_blocks = std::ceil(src0_d.padded_dims()[1] / simd_w);
+        const dim_t C_blocks = std::ceil(
+                static_cast<float>(src0_d.padded_dims()[1]) / simd_w);
         // Compute strategy:
         // Each block is individual - parallel over MB and C_blocks safely.
 
@@ -583,7 +592,8 @@ void jit_uni_binary_t::execute_bcast_per_w_strategy(const data_t *src0,
             = utils::array_product(src0_d.padded_dims() + 1, ndims - 1);
 
     if (op_type == op_t::c_blocked) {
-        const dim_t C_blocks = std::ceil(src0_d.padded_dims()[1] / simd_w);
+        const dim_t C_blocks = std::ceil(
+                static_cast<float>(src0_d.padded_dims()[1]) / simd_w);
         // Compute strategy:
         // Each line of channels is individual, parallel over MB, C_blocks
         // and spatial (width and other spatial dims separately).
@@ -664,11 +674,9 @@ void jit_uni_binary_t::execute_bcast_per_w_strategy(const data_t *src0,
 }
 
 status_t jit_uni_binary_t::execute(const exec_ctx_t &ctx) const {
-    status_t status = status::success;
     const auto src0 = CTX_IN_MEM(const data_t *, DNNL_ARG_SRC_0);
     const auto src1 = CTX_IN_MEM(const data_t *, DNNL_ARG_SRC_1);
-    auto dst = CTX_OUT_CLEAN_MEM(data_t *, DNNL_ARG_DST, status);
-    CHECK(status);
+    auto dst = CTX_OUT_MEM(data_t *, DNNL_ARG_DST);
     const auto &post_ops = pd()->attr()->post_ops_;
     const auto &post_ops_binary_rhs_arg_vec
             = binary_injector::prepare_binary_args(post_ops, ctx);

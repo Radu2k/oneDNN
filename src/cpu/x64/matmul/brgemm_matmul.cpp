@@ -111,9 +111,10 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
             brgattr.wary_tail_read = false;
 
             // TODO: change expected sizes to local chunks wrt L2 blocking
-            brgattr.hint_expected_A_size = bgmmc_.M * bgmmc_.K;
-            brgattr.hint_expected_B_size = bgmmc_.N * bgmmc_.K;
-            brgattr.hint_expected_C_size = bgmmc_.M * bgmmc_.N;
+            brgattr.hint_expected_A_size = vM * vK * bgmmc_.brgemm_batch_size;
+            brgattr.hint_expected_B_size = vN * vK * bgmmc_.brgemm_batch_size;
+            brgattr.hint_expected_C_size = vM * vN * bgmmc_.brgemm_batch_size;
+            brgattr.hint_innermost_loop = brgemm_ld_loop_innermost;
 
             CHECK(brgemm_desc_set_attr(&brg, brgattr));
         }
@@ -251,8 +252,7 @@ void brgemm_matmul_t<isa>::compute_kernel(
             = brgmm_ctx.get_post_ops_binary_rhs_arg_vec();
 
     if (gemm_batch > 0 && brg_kernel != nullptr) {
-        const bool is_tile_reconf_required = is_amx
-                && (is_M_tail || (is_N_tail && !bgmmc.post_ops_applicable));
+        const bool is_tile_reconf_required = is_amx && (is_M_tail || is_N_tail);
         if (is_tile_reconf_required)
             amx_tile_configure(&brg_kernel_palettes_[brg_ker_idx][0]);
 

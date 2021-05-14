@@ -596,6 +596,9 @@ typedef enum {
     dnnl_BA4b8a8b4a,
     dnnl_aBC48b16c,
     dnnl_aBC48b32c,
+    dnnl_abCd32c,
+    dnnl_abdCe32c,
+    dnnl_abdCE32c2e,
     dnnl_aCB4c8b8c2b,
     dnnl_aCB4c8b8c4b,
     dnnl_ABcd4a2b,
@@ -757,10 +760,13 @@ typedef enum {
     /// 5D LSTM projection tensor
     dnnl_ldOi32o = dnnl_abDc32d,
     dnnl_ldOI32o4i = dnnl_abDC32d4c,
+    dnnl_ldIo32i = dnnl_abCd32c,
     /// 6D RNN weights tensor
     dnnl_ldgOi32o = dnnl_abdEc32e,
     dnnl_ldgOI32o2i = dnnl_abdEC32e2c,
     dnnl_ldgOI32o4i = dnnl_abdEC32e4c,
+    dnnl_ldgIo32i = dnnl_abdCe32c,
+    dnnl_ldgIO32i2o = dnnl_abdCE32c2e,
 
     // Opaque data types, are not to be used explicitly
 
