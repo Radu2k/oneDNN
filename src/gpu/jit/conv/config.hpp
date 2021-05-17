@@ -220,11 +220,9 @@ public:
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
 
-        CHECK(init_common_config(engine));
-        const bool pre_xe_arch = hw < ngen::HW::Xe_LP;
         // Set dispatch and kernel parameters.
-        int mb_thr_blk = (mb < 16 ? 1 : pre_xe_arch ? 16 : 32);
-        oc_thr_blk = pre_xe_arch ? 16 : 32;
+        int mb_thr_blk = (mb < 16 ? 1 : 32);
+        oc_thr_blk = 32;
         int ow_thr_blk = (mb < 16 ? 16 : 1);
         if (ow < ow_thr_blk) ow_thr_blk = 8;
 
@@ -251,7 +249,7 @@ public:
         mb_tg_blk = mb_thr_blk;
         oc_tg_blk = tg_grid_dim[0] * oc_thr_blk;
         ow_tg_blk = tg_grid_dim[1] * ow_thr_blk;
-        ic_blk = (is_s32_accumulator() && !pre_xe_arch ? 32 : 16);
+        ic_blk = (is_s32_accumulator() ? 32 : 16);
 
 #ifdef GEN_CONV_DEBUG
         mb_tg_blk = getenv_int("mb_tg_blk", mb_tg_blk);
@@ -276,11 +274,13 @@ public:
         kernel_grid_dim[1] = od * oh * ow_tg_dim;
         kernel_grid_dim[2] = mb_tg_dim;
 
+        CHECK(init_common_config(engine));
+
         // Do not perform full unrolling when there are too many inner
         // iterations.
         if (kd * kh * kw > 9) do_loop_unroll = false;
 
-        regs = pre_xe_arch ? 128 : 256;
+        regs = hw <= ngen::HW::Xe_LP ? 128 : 256;
         fixup_inference_consistency();
         if (!try_reduce_grf_usage()) return status::unimplemented;
 
@@ -709,16 +709,16 @@ public:
         pad_slm = true;
         assign_sbids
                 = utils::one_of(fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw);
-        slm_bufs = hw < ngen::HW::Xe_LP
+        slm_bufs = hw <= ngen::HW::Xe_LP
                 ? 0
                 : (tg_grid_dim[0] * tg_grid_dim[1] <= 8 ? 2 : 3);
         gmem_bufs = 2;
-        do_loop_unroll = true;
+        do_loop_unroll = hw > ngen::HW::Xe_LP;
         reduce_grf_usage = true;
         allow_grf_reorder = false;
         zero_out_output = false;
         do_atomic_update = false;
-        reuse_headers = false;
+        reuse_headers = hw <= ngen::HW::Xe_LP;
         do_post_wei_reorder = false;
         do_post_bia_reorder = false;
         a_sub_tiles = 1;
@@ -792,8 +792,6 @@ public:
     }
 
     bool data_types_ok() const {
-        if (!mad_t::matches_types(src_data_type, wei_data_type, dst_data_type))
-            return false;
         if (is_fwd) {
             if (utils::one_of(data_type::f32, src_data_type, wei_data_type))
                 return false;
@@ -990,7 +988,7 @@ private:
 
     status_t init_fma_kind() {
         fma_kind = fma_kind::get_supported_kind(
-                a_data_type, b_data_type, acc_data_type, hw);
+                hw, a_data_type, b_data_type, acc_data_type);
         if (fma_kind == fma_kind_t::unknown) return status::unimplemented;
 
         // Disable using mad instruction backend until performance parity is
@@ -1058,6 +1056,7 @@ private:
             int regs = estimate_register_count();
             if (regs <= max_regs) return true;
         }
+
         // Try to use double SLM buffering.
         if (slm_bufs == 3) {
             slm_bufs = 2;
@@ -1121,12 +1120,6 @@ private:
             }
         }
 
-        //account for extra headers for scattered sends with pre Xe Arch
-        if (hw < ngen::HW::Xe_LP) {
-            a_headers *= 4;
-            b_headers *= 8;
-        }
-
         // Temporary registers for GMEM -> SLM load.
         int a_g2s_bytes
                 = (use_a_slm ? utils::div_up(m_tg_blk * k_tg_blk * a_size, nthr)
@@ -1156,7 +1149,6 @@ private:
         int g2s_headers = a_g2s_headers + b_g2s_headers;
 
         int data_regs = a_regs + b_regs + acc_regs + g2s_regs;
-
         int header_regs = a_headers + b_headers + g2s_headers;
 
         return data_regs + header_regs;

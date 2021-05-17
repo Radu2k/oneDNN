@@ -3835,10 +3835,11 @@ class multiply_builder_t {
 public:
     multiply_builder_t() = default;
 
-    multiply_builder_t(fma_kind_t kind, int simd_size, const layout_t &a_layout,
-            const layout_t &b_layout, const expr_t &a_buf, const expr_t &b_buf,
-            const expr_t &c_buf)
-        : a_layout_(a_layout)
+    multiply_builder_t(ngen::HW hw, fma_kind_t kind, int simd_size,
+            const layout_t &a_layout, const layout_t &b_layout,
+            const expr_t &a_buf, const expr_t &b_buf, const expr_t &c_buf)
+        : hw_(hw)
+        , a_layout_(a_layout)
         , b_layout_(b_layout)
         , a_buf_(a_buf)
         , b_buf_(b_buf)
@@ -3890,7 +3891,8 @@ public:
 private:
     bool try_build_dpas(int simd_size) {
         multiply_desc_t desc(a_layout_, b_layout_, true);
-        if (!dpas_t::matches_types(desc.a_type(), desc.b_type(), desc.c_type()))
+        if (!dpas_t::matches_types(
+                    hw_, desc.a_type(), desc.b_type(), desc.c_type()))
             return false;
 
         auto _dpas = dpas_t::make(/*is_dpasw=*/false, simd_size, /*sdepth=*/8,
@@ -3950,7 +3952,8 @@ private:
 
     bool try_build_mad(int simd_size) {
         multiply_desc_t desc(a_layout_, b_layout_, false);
-        if (!mad_t::matches_types(desc.a_type(), desc.b_type(), desc.c_type()))
+        if (!mad_t::matches_types(
+                    hw_, desc.a_type(), desc.b_type(), desc.c_type()))
             return false;
 
         auto _mad = mad_t::make(desc.c_type(), simd_size, desc.a_type(), 1,
@@ -3997,6 +4000,7 @@ private:
     }
 
     bool do_transpose_ = false;
+    ngen::HW hw_;
 
     layout_t a_layout_;
     layout_t b_layout_;
@@ -4334,8 +4338,8 @@ private:
         auto &b_layout = b_sub_tiles_[j].mnk_layout;
 
         // Multiply C_i_j += A_i x B_j in GEMM notation.
-        multiply_builder_t mul_builder(cfg_.fma_kind, cfg_.simd_size, a_layout,
-                b_layout, a_buf_, b_buf_, c_buf_[c_buf_off_]);
+        multiply_builder_t mul_builder(cfg_.hw, cfg_.fma_kind, cfg_.simd_size,
+                a_layout, b_layout, a_buf_, b_buf_, c_buf_[c_buf_off_]);
         c_sub_tile_layout_ = mul_builder.c_layout();
         c_buf_off_ += c_sub_tile_layout_.size();
         ir_trace() << "Multiply (" << i << ", " << j << "):\n"

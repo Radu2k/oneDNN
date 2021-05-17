@@ -554,13 +554,10 @@ public:
         slmfence(tmp, r0);
         mov<int32_t>(dwords, null, tmp);
 
-        if (cfg_.regs == 256) {
-            mov<uint32_t>(8, r255, r0);
-            threadend(r255);
-        } else {
-            mov<uint32_t>(8, r127, r0);
-            threadend(r127);
-        }
+        ngen::GRF last_reg(cfg_.regs - 1);
+        mov<uint32_t>(8, last_reg, r0);
+        threadend(last_reg);
+
         ra_.safeRelease(tmp);
     }
 
@@ -652,6 +649,9 @@ public:
         if (src2.is_reg_data()) {
             mad(mod, dst.reg_data(), src0.reg_data(), src1.reg_data(),
                     src2.reg_data());
+        } else if (hw < ngen::HW::Xe_LP) {
+            mul(mod, dst.reg_data(), src1.reg_data(), src2.immediate());
+            add(mod, dst.reg_data(), dst.reg_data(), src0.reg_data());
         } else {
             mad(mod, dst.reg_data(), src0.reg_data(), src1.reg_data(),
                     src2.immediate());
@@ -768,7 +768,7 @@ public:
             // rem = x - qot * y
             bool y_is_16_bit = (y <= static_cast<uint32_t>(
                                         std::numeric_limits<int16_t>::max()));
-            if (hw > ngen::HW::Gen9 && y_is_16_bit) {
+            if (hw >= ngen::HW::Xe_LP && y_is_16_bit) {
                 mad(1, rem, x, _qot, -int16_t(y));
             } else {
                 auto tmp = ra_.alloc_sub<uint64_t>();
@@ -2567,7 +2567,7 @@ private:
             auto rd_mov = rd;
             rd_mov.setType(ngen::DataType::f);
             auto mod_mov = ~mod;
-            if (hw <= ngen::HW::Xe_LP) mod_mov.setSWSB({});
+            mod_mov.setSWSB({});
             int step = send_func.mask_count() * sizeof(uint32_t);
             for (int i = 0; i < send_func.register_size(); i += step) {
                 auto sub_rd_mov = ngen_reg_data(hw, rd_mov, i,

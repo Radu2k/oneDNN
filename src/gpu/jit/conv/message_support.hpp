@@ -88,6 +88,19 @@ public:
         return call({mem_buf, mem_off, reg_buf, mask});
     }
 
+    type_t mask_type() const {
+        return (mask_granularity() == mask_granularity_t::per_dword
+                        ? type_t::dword()
+                        : data_type.with_elems(data_elems));
+    }
+
+    type_t mask_test_type() const {
+        return (type == message_type_t::block && is_read()
+                                && hw < ngen::HW::Xe_LP
+                        ? type_t::oword()
+                        : mask_type());
+    }
+
     bool is_supported() const {
         int size = slots * data_elems * data_type.size();
         if (size > 256) return false;

@@ -31,10 +31,15 @@ expr_t create_mask_expr(
     ir_assert(mask_vec.elems() * mask_vec.type().size() == send.eff_size())
             << "Unexpected mask.";
 
-    type_t mask_type = (send.mask_granularity() == mask_granularity_t::per_dword
-                    ? type_t::dword()
-                    : send.data_type.with_elems(send.data_elems));
-    auto mask_vec_retyped = mask_vec.reinterpret(mask_type);
+    //check mask for match with arch limitations
+    if (send.mask_type() != send.mask_test_type()) {
+        auto test_mask_vec_retyped
+                = mask_vec.reinterpret(send.mask_test_type());
+        // Couldn't reinterpret to test type - invalid mask.
+        if (test_mask_vec_retyped.is_empty()) return expr_t();
+    }
+
+    auto mask_vec_retyped = mask_vec.reinterpret(send.mask_type());
 
     // Couldn't reinterpret.
     if (mask_vec_retyped.is_empty()) return expr_t();

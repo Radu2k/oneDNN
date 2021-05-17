@@ -43,10 +43,10 @@ fma_kind_t fma_kind::from_string(std::string enum_string) {
 }
 
 fma_kind_t fma_kind::get_supported_kind(
-        const type_t &a, const type_t &b, const type_t &c, ngen::HW hw) {
-    if (hw >= ngen::HW::Xe_HP && dpas_t::matches_types(a, b, c))
+        ngen::HW hw, const type_t &a, const type_t &b, const type_t &c) {
+    if (hw >= ngen::HW::Xe_HP && dpas_t::matches_types(hw, a, b, c))
         return fma_kind_t::dpasw;
-    if (mad_t::matches_types(a, b, c)) return fma_kind_t::mad;
+    if (mad_t::matches_types(hw, a, b, c)) return fma_kind_t::mad;
     return fma_kind_t::unknown;
 }
 
@@ -115,8 +115,6 @@ bool dpas_t::matches(const multiply_desc_t &desc) const {
     int n_blk = rcount;
     int k_blk = sdepth * 4 / src1_type.size();
 
-    if (!dpas_t::matches_types(desc.a_type(), desc.b_type(), desc.c_type()))
-        return false;
     if (desc.k() != k_blk) return false;
     if (desc.m() % m_blk != 0 || desc.n() % n_blk != 0) return false;
 
@@ -129,7 +127,8 @@ bool dpas_t::matches(const multiply_desc_t &desc) const {
     return true;
 }
 
-bool dpas_t::matches_types(const type_t &a, const type_t &b, const type_t &c) {
+bool dpas_t::matches_types(
+        ngen::HW hw, const type_t &a, const type_t &b, const type_t &c) {
     if (a.is_x8() && b.is_x8() && c.is_s32()) return true;
     if (a.is_f16() && b.is_f16() && c.is_f32()) return true;
     if (a.is_bf16() && b.is_bf16() && c.is_f32()) return true;
@@ -176,9 +175,6 @@ bool mad_t::matches(const multiply_desc_t &desc) const {
     int n_blk = get_simd_size();
     int k_blk = 1;
 
-    if (!mad_t::matches_types(desc.a_type(), desc.b_type(), desc.c_type()))
-        return false;
-
     if (desc.m() % m_blk != 0 || desc.n() % n_blk != 0 || desc.k() % k_blk != 0)
         return false;
 
@@ -194,15 +190,17 @@ bool mad_t::matches(const multiply_desc_t &desc) const {
     return true;
 }
 
-bool mad_t::matches_types(const type_t &a, const type_t &b, const type_t &c) {
+bool mad_t::matches_types(
+        ngen::HW hw, const type_t &a, const type_t &b, const type_t &c) {
     if (a != b) return false;
 
     if (a.is_f32() && c.is_f32()) return true;
     if (a.is_f16() && c.is_f16()) return true;
     if (a.is_f16() && c.is_f32()) return true;
-    if (a.is_bf16() && c.is_f32()) return true;
-    if (a.is_f32() && c.is_bf16()) return true;
-
+    if (hw >= ngen::HW::Xe_HP) {
+        if (a.is_bf16() && c.is_f32()) return true;
+        if (a.is_f32() && c.is_bf16()) return true;
+    }
     if (a.is_x8() && c.is_x16()) return true;
     if ((a.is_x16() || a.is_x32()) && (c.is_x16() || c.is_x32())) return true;
 

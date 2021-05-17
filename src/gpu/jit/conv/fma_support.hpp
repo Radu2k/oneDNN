@@ -42,7 +42,7 @@ std::string to_string(fma_kind_t val);
 fma_kind_t from_string(std::string enum_string);
 
 fma_kind_t get_supported_kind(
-        const type_t &a, const type_t &b, const type_t &c, ngen::HW hw);
+        ngen::HW hw, const type_t &a, const type_t &b, const type_t &c);
 
 int get_simd_size(ngen::HW hw, fma_kind_t kind, const type_t &a,
         const type_t &b, const type_t &c);
@@ -147,7 +147,7 @@ public:
     bool matches(const multiply_desc_t &desc) const;
 
     static bool matches_types(
-            const type_t &a, const type_t &b, const type_t &c);
+            ngen::HW hw, const type_t &a, const type_t &b, const type_t &c);
 
     bool is_dpasw;
 
@@ -228,7 +228,7 @@ public:
     bool matches(const multiply_desc_t &desc) const;
 
     static bool matches_types(
-            const type_t &a, const type_t &b, const type_t &c);
+            ngen::HW hw, const type_t &a, const type_t &b, const type_t &c);
 
     static const int max_exec_size = 32;
     static const int max_exec_size_bytes = 64;
