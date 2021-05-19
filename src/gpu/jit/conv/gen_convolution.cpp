@@ -36,8 +36,7 @@ using namespace compute;
 class gen_convolution_t {
 public:
     template <typename T>
-    static status_t init_pd(T *pd, engine_t *engine, format_tag_t &src_tag,
-            format_tag_t &wei_tag, format_tag_t &dst_tag) {
+    static status_t init_pd(T *pd, engine_t *engine) {
         auto *compute_engine = utils::downcast<compute_engine_t *>(engine);
 
         if (!compute_engine->is_xe_hp()
@@ -56,10 +55,6 @@ public:
         pd->cfg = std::make_shared<conv_config_t>();
         pd->kernel_arg_info = std::make_shared<kernel_arg_info_t>();
         CHECK(pd->cfg->init(pd, engine));
-
-        src_tag = pd->cfg->src_tag();
-        wei_tag = pd->cfg->wei_tag();
-        dst_tag = pd->cfg->dst_tag();
 
         CHECK(init_kernel_arg_info(pd, *pd->kernel_arg_info));
 
@@ -232,10 +227,8 @@ private:
 
 status_t gen_convolution_fwd_t::pd_t::init(engine_t *engine) {
     if (!is_fwd()) return status::unimplemented;
-    format_tag_t src_tag, dst_tag, wei_tag;
-    CHECK(gen_convolution_t::init_pd(this, engine, src_tag, wei_tag, dst_tag));
-    bool ok = set_default_formats_common(src_tag, wei_tag, dst_tag);
-    return ok ? status::success : status::unimplemented;
+    CHECK(gen_convolution_t::init_pd(this, engine));
+    return status::success;
 }
 
 status_t gen_convolution_fwd_t::init(engine_t *engine) {
@@ -266,19 +259,13 @@ status_t gen_convolution_fwd_t::init_res_storage(
 
 status_t gen_convolution_bwd_data_t::pd_t::init(engine_t *engine) {
     if (!is_bwd_d()) return status::unimplemented;
-    format_tag_t src_tag, dst_tag, wei_tag;
-    CHECK(gen_convolution_t::init_pd(this, engine, src_tag, wei_tag, dst_tag));
-    bool ok = set_default_formats_common(src_tag, wei_tag, dst_tag);
-    return ok ? status::success : status::unimplemented;
+    CHECK(gen_convolution_t::init_pd(this, engine));
+    return status::success;
 }
 
 status_t gen_convolution_bwd_weights_t::pd_t::init(engine_t *engine) {
     if (!is_bwd_w()) return status::unimplemented;
-    format_tag_t src_tag, dst_tag, wei_tag;
-    CHECK(gen_convolution_t::init_pd(this, engine, src_tag, wei_tag, dst_tag));
-
-    bool ok = set_default_formats_common(src_tag, wei_tag, dst_tag);
-    if (!ok) return status::unimplemented;
+    CHECK(gen_convolution_t::init_pd(this, engine));
 
     if (cfg->do_post_wei_reorder) {
         tmp_wei_md = *diff_weights_md();

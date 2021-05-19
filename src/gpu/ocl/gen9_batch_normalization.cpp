@@ -129,7 +129,7 @@ static status_t init_conf_common(bnorm_conf_t &conf, offsets_t &off,
     }
 
     const int max_sp_block_size = get_block_size(conf.is_backward,
-            compute_engine->device_info()->hw_threads(), conf.nn, conf.ic,
+            compute_engine->device_info()->eu_count(), conf.nn, conf.ic,
             conf.sp);
 
     if (conf.nn == 1)

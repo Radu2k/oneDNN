@@ -5090,6 +5090,14 @@ bool need_src_or_dst_check(
     int os_max = (o - 1) + p;
     return (os_min < 0) || (os_max >= i * s);
 }
+
+layout_t remove_groups(const layout_t &layout) {
+    ir_assert(layout.dim(0) == 1);
+    dim_assignment_t a(layout.ndims(), layout.ndims() - 1);
+    for (int i = 1; i < layout.ndims(); i++)
+        a.assign(i, i - 1);
+    return a.map(layout);
+}
 } // namespace
 
 void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
@@ -5141,6 +5149,8 @@ void kernel_builder_t::init_fwd(constraint_set_t &init_cset,
             cfg_.wei_layout, old_spatial_ndims, cfg_.reduced_to_1d);
     auto dst_layout = normalize_spatial(
             cfg_.dst_layout, old_spatial_ndims, cfg_.reduced_to_1d);
+
+    if (cfg_.with_groups) wei_layout = remove_groups(wei_layout);
 
     // Initialize thread group views.
     auto mb = var_t::make(type_t::s32(), "mb");
@@ -5308,6 +5318,8 @@ void kernel_builder_t::init_bwd_d(constraint_set_t &init_cset,
             cfg_.wei_layout, old_spatial_ndims, cfg_.reduced_to_1d);
     auto dst_layout = normalize_spatial(
             cfg_.dst_layout, old_spatial_ndims, cfg_.reduced_to_1d);
+
+    if (cfg_.with_groups) wei_layout = remove_groups(wei_layout);
 
     // Initialize thread group views.
     auto mb = var_t::make(type_t::s32(), "mb");
@@ -5481,6 +5493,8 @@ void kernel_builder_t::init_bwd_w(constraint_set_t &init_cset,
             cfg_.wei_layout, old_spatial_ndims, cfg_.reduced_to_1d);
     auto dst_layout = normalize_spatial(
             cfg_.dst_layout, old_spatial_ndims, cfg_.reduced_to_1d);
+
+    if (cfg_.with_groups) wei_layout = remove_groups(wei_layout);
 
     // Initialize thread group views.
     auto mb = var_t::make(type_t::s32(), "mb");
