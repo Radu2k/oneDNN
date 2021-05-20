@@ -378,9 +378,6 @@ public:
         // First convolution is not supported.
         if (ic < 16) return status::unimplemented;
 
-        // Bias is not supported.
-        if (with_bias) return status::unimplemented;
-
         // Set dispatch and kernel parameters.
         int mb_thr_blk = (mb < 16 ? 1 : 32);
         ic_thr_blk = 32;
@@ -460,8 +457,11 @@ public:
             src_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
             wei_tag = is_wei16bXa ? "BAx2b8a16b2a" : "BAx4b8a8b2a";
             dst_tag = (mb_thr_blk == 1 ? "aBx16b" : "ABx32a16b");
-        } else
-            return status::unimplemented;
+        } else {
+            src_tag = (mb_thr_blk == 1 ? "aBx32b" : "ABx32a32b");
+            wei_tag = is_wei16bXa ? "BAx2b8a16b4a" : "BAx4b8a8b4a";
+            dst_tag = (mb_thr_blk == 1 ? "aBx32b" : "ABx32a32b");
+        }
 
         if (with_groups) wei_tag = prepend_groups_to_tag(wei_tag);
 
@@ -745,7 +745,7 @@ public:
     bool post_ops_ok(const convolution_pd_t *pd) const {
         auto *attr = pd->attr();
 
-        if (is_fwd) {
+        if (is_fwd || is_bwd_d) {
             auto attr_skip_mask = primitive_attr_t::skip_mask_t::post_ops
                     | primitive_attr_t::skip_mask_t::oscale_runtime
                     | primitive_attr_t::skip_mask_t::sum_dt;
@@ -793,12 +793,9 @@ public:
             return true;
         }
         if (is_bwd_d) {
-            bool ok = true;
-            ok &= (dst_data_type == wei_data_type);
-            ok &= utils::one_of(dst_data_type, data_type::f16, data_type::bf16);
-            ok &= utils::one_of(src_data_type, data_type::f16, data_type::bf16,
-                    data_type::f32);
-            return ok;
+            if (utils::one_of(data_type::f32, dst_data_type, wei_data_type))
+                return false;
+            return true;
         }
         if (is_bwd_w) {
             bool ok = true;

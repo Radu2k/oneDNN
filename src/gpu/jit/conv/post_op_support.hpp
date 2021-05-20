@@ -189,7 +189,7 @@ public:
         : pd_(pd), cfg_(&cfg), lhs_view_(lhs_view) {
 
         // Handle bias.
-        if (pd->is_fwd() && pd->with_bias()) {
+        if ((pd->is_fwd() || pd->is_bwd_d()) && pd->with_bias()) {
             auto rhs_view = create_rhs_view(
                     pd->invariant_bia_md()->data_type, (1 << 1));
             uint32_t rhs_mask = (1 << 1); // Channel-wise.
@@ -219,7 +219,8 @@ public:
             } else if (po.is_sum(/*require_scale_one=*/false)) {
                 float scale = po.sum.scale;
                 uint32_t rhs_mask = 0xFFFFFFFF;
-                auto rhs_buf = kernel_arg_info.find_arg("dst");
+                auto rhs_buf = kernel_arg_info.find_arg(
+                        pd->is_fwd() ? "dst" : "src");
                 auto rhs_view = lhs_view_;
                 if (po.sum.dt != data_type::undef)
                     rhs_view = rhs_view.retype(po.sum.dt);

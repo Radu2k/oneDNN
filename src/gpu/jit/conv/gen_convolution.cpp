@@ -188,7 +188,7 @@ private:
         }
 
         // Initialize post-op arguments.
-        if (cfg.is_fwd && cfg.with_bias) {
+        if ((cfg.is_fwd || cfg.is_bwd_d) && cfg.with_bias) {
             kernel_arg_info.register_user_arg(
                     make_buffer("bia"), DNNL_ARG_BIAS, /*is_input=*/true);
         }
