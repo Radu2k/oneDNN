@@ -35,7 +35,8 @@ namespace jit {
 namespace ir_utils {
 
 const int LOG_OFF = 0;
-const int LOG_TRACE = 100;
+const int LOG_WARNING = 100;
+const int LOG_TRACE = 200;
 const int LOG_LEVEL = LOG_OFF;
 
 template <typename T>
@@ -216,18 +217,35 @@ public:
 
     template <typename T>
     logger_t &operator<<(const T &obj) {
+        maybe_print_header();
         out_ << obj;
         return *this;
     }
 
     logger_t &operator<<(std::ostream &(*os)(std::ostream &)) {
+        maybe_print_header();
         out_ << os;
         return *this;
     }
 
 private:
+    void maybe_print_header() {
+        if (!is_first_print_) return;
+
+        switch (level) {
+            case LOG_WARNING: out_ << "[WARNING] "; break;
+            default: break;
+        }
+        is_first_print_ = false;
+    }
+
     std::ostream &out_;
+    bool is_first_print_ = true;
 };
+
+#define ir_warning() \
+    ir_utils::logger_t<ir_utils::LOG_WARNING>::is_enabled() \
+            && ir_utils::logger_t<ir_utils::LOG_WARNING>()
 
 #define ir_trace() \
     ir_utils::logger_t<ir_utils::LOG_TRACE>::is_enabled() \
