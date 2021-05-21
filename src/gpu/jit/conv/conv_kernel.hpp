@@ -461,9 +461,14 @@ public:
 
     void unbind(const expr_t &expr) {
         ir_assert(!expr.is_empty());
-        auto it = expr2operand_.find(expr);
-        ir_assert(it != expr2operand_.end());
-        expr2operand_.erase(it);
+
+        auto op_it = expr2operand_.find(expr);
+        ir_assert(op_it != expr2operand_.end());
+        expr2operand_.erase(op_it);
+
+        auto eval_it = evaluated_.find(expr);
+        ir_assert(eval_it != evaluated_.end());
+        evaluated_.erase(eval_it);
     }
 
     void mark_as_evaluated(const expr_t &expr) {
