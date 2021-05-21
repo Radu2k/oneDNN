@@ -584,6 +584,12 @@ stmt_t lift_buffer_offsets_in_send(const stmt_t &s) {
     return ret;
 }
 
+stmt_t simplify_pass(const stmt_t &s, const constraint_set_t &cset) {
+    auto ret = simplify(s, cset);
+    trace_pass("simplify_pass", ret);
+    return ret;
+}
+
 class send_injector_t : public ir_mutator_t {
 public:
     send_injector_t(ir_context_t &ir_ctx, const constraint_set_t &cset)
@@ -5125,7 +5131,7 @@ void kernel_builder_t::build() {
         stmt_ = inject_simple_slm_buffering(cfg_.hw, stmt_, cfg_, ir_ctx);
     }
     stmt_ = lift_buffer_offsets_in_send(stmt_);
-    stmt_ = simplify(stmt_, init_cset);
+    stmt_ = simplify_pass(stmt_, init_cset);
     stmt_ = inject_send(stmt_, ir_ctx, init_cset);
     stmt_ = split_wide_stores(cfg_.hw, stmt_);
     stmt_ = lift_alloc(stmt_);
@@ -5139,7 +5145,7 @@ void kernel_builder_t::build() {
     }
     stmt_ = fixup_if_conditions(stmt_, cfg_);
     stmt_ = unroll_loops(stmt_, ir_ctx);
-    stmt_ = simplify(stmt_, init_cset);
+    stmt_ = simplify_pass(stmt_, init_cset);
     stmt_ = optimize_let(stmt_);
     stmt_ = optimize_peephole(stmt_);
     stmt_ = stmt_group_t::make(stmt_label_t::kernel(), stmt_);
