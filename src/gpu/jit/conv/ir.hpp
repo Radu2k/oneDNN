@@ -258,7 +258,7 @@ public:
                 && bound.is_same(obj->bound) && body.is_same(obj->body))
             return obj;
 
-        return for_t::make(var, init, bound, body);
+        return for_t::make(var, init, bound, body, obj->unroll);
     }
 
     virtual object_t _mutate(const func_call_t *obj) {

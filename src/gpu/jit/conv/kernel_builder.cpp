@@ -2908,6 +2908,12 @@ private:
     }
 };
 
+stmt_t optimize_peephole(const stmt_t &s) {
+    auto ret = peephole_optimizer_t().mutate(s);
+    trace_pass("optimize_peephole", ret);
+    return ret;
+}
+
 class if_condition_fixer_t : public ir_mutator_t {
 public:
     if_condition_fixer_t(int simd_size) : simd_size_(simd_size) {}
@@ -2934,9 +2940,71 @@ stmt_t fixup_if_conditions(const stmt_t &s, const conv_config_t &cfg) {
     return ret;
 }
 
-stmt_t optimize_peephole(const stmt_t &s) {
-    auto ret = peephole_optimizer_t().mutate(s);
-    trace_pass("optimize_peephole", ret);
+class loop_unroller_t : public ir_mutator_t {
+public:
+    loop_unroller_t(ir_context_t &ir_ctx) : ir_ctx_(ir_ctx) {}
+
+    object_t _mutate(const for_t *obj) override {
+        auto new_obj = ir_mutator_t::_mutate(obj);
+        auto &_for = new_obj.as<for_t>();
+        // No unrolling.
+        if (_for.unroll == 1) return new_obj;
+
+        ir_assert(is_const(obj->init))
+                << "Can't unroll loop with non-const bound: " << obj->init;
+        ir_assert(is_const(obj->bound))
+                << "Can't unroll loop with non-const bound: " << obj->bound;
+
+        auto init = to_cpp<int>(obj->init);
+        auto bound = to_cpp<int>(obj->bound);
+
+        ir_assert(_for.unroll == (bound - init))
+                << "Only full loop unroll is supported.";
+
+        stmt_t ret;
+        for (int i = init; i < bound; i++) {
+            auto iter_stmt = substitute(
+                    obj->body, obj->var, to_expr(i, obj->var.type()));
+            iter_stmt = rename_let_alloc(iter_stmt, i - init);
+            ret = ret.append(iter_stmt);
+        }
+        return std::move(ret);
+    }
+
+private:
+    stmt_t rename_let_alloc(const stmt_t &s, int idx) {
+        auto lets = find_objects<let_t>(s);
+        auto ret = s;
+        for (auto &_let : lets) {
+            auto &let = _let.as<let_t>();
+            auto &var = let.var.as<var_t>();
+            auto new_var = ir_ctx_.create_tmp_var(var.type, var.name);
+            ret = substitute(ret, let.var, new_var);
+        }
+        auto allocs = find_objects<alloc_t>(s);
+        for (auto &_alloc : allocs) {
+            auto &alloc = _alloc.as<alloc_t>();
+            auto &buf = alloc.buf.as<var_t>();
+            auto new_buf = ir_ctx_.create_tmp_var(buf.type, buf.name);
+            ret = substitute(ret, alloc.buf, new_buf);
+        }
+        return ret;
+    }
+
+    ir_context_t &ir_ctx_;
+};
+
+// Unrolls loops according to their unroll attribute.
+// Before:
+//     for (int i = 0; i < 2; i++) [unroll: 2] {
+//         body(i);
+//     }
+// After:
+//     body(0);
+//     body(1);
+stmt_t unroll_loops(const stmt_t &s, ir_context_t &ir_ctx) {
+    auto ret = loop_unroller_t(ir_ctx).mutate(s);
+    trace_pass("unroll_loops", ret);
     return ret;
 }
 
@@ -5033,7 +5101,8 @@ void kernel_builder_t::build() {
 
     for (auto &l : reduction_loops) {
         auto &_for = l.as<for_t>();
-        loop_stmt = for_t::make(_for.var, _for.init, _for.bound, loop_stmt);
+        loop_stmt = for_t::make(
+                _for.var, _for.init, _for.bound, loop_stmt, _for.unroll);
     }
     loop_stmt = stmt_group_t::make(stmt_label_t::compute_loop(), loop_stmt);
 
@@ -5069,6 +5138,7 @@ void kernel_builder_t::build() {
         stmt_ = inject_unrolled_slm_buffering(stmt_, cfg_, ir_ctx);
     }
     stmt_ = fixup_if_conditions(stmt_, cfg_);
+    stmt_ = unroll_loops(stmt_, ir_ctx);
     stmt_ = simplify(stmt_, init_cset);
     stmt_ = optimize_let(stmt_);
     stmt_ = optimize_peephole(stmt_);
@@ -5475,7 +5545,8 @@ void kernel_builder_t::init_bwd_w(constraint_set_t &init_cset,
     auto ow_idx = var_t::make(type_t::s32(), "ow_idx");
 
     // Loops are ordered from innermost to outermost.
-    reduction_loops.emplace_back(for_t::make(mb_blk_idx, 0, mb_blks_per_tg));
+    reduction_loops.emplace_back(for_t::make(
+            mb_blk_idx, 0, mb_blks_per_tg, stmt_t(), mb_blks_per_tg));
     reduction_loops.emplace_back(
             for_t::make(ow_idx, ow_tg_idx, ow_tg_idx + cfg_.ow_tg_blk));
     reduction_loops.emplace_back(

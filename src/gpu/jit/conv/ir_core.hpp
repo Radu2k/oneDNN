@@ -1554,13 +1554,14 @@ private:
 //    for (var = init; var < bound; var++) {
 //        body;
 //    }
+// unroll specifies the unroll factor, unroll = 1 means no unrolling.
 class for_t : public stmt_impl_t {
 public:
     IR_DECL_STMT_TYPE_ID(for_t)
 
     static stmt_t make(const expr_t &var, const expr_t &init,
-            const expr_t &bound, const stmt_t &body = {}) {
-        return stmt_t(new for_t(var, init, bound, body));
+            const expr_t &bound, const stmt_t &body = {}, int unroll = 1) {
+        return stmt_t(new for_t(var, init, bound, body, unroll));
     }
 
     bool is_equal(const object_impl_t *obj) const override {
@@ -1568,22 +1569,24 @@ public:
         auto &other = obj->as<self_type>();
 
         return var.is_equal(other.var) && init.is_equal(other.init)
-                && bound.is_equal(other.bound) && body.is_equal(other.body);
+                && bound.is_equal(other.bound) && body.is_equal(other.body)
+                && (unroll == other.unroll);
     }
 
     size_t get_hash() const override {
-        return ir_utils::get_hash(var, init, bound, body);
+        return ir_utils::get_hash(var, init, bound, body, unroll);
     }
 
     expr_t var;
     expr_t init;
     expr_t bound;
     stmt_t body;
+    int unroll;
 
 private:
     for_t(const expr_t &var, const expr_t &init, const expr_t &bound,
-            const stmt_t &body)
-        : var(var), init(init), bound(bound), body(body) {}
+            const stmt_t &body, int unroll)
+        : var(var), init(init), bound(bound), body(body), unroll(unroll) {}
 };
 
 // If-else statement.

@@ -77,7 +77,9 @@ public:
     void _visit(const for_t *obj) override {
         print_indent();
         out_ << "for (" << obj->var << " = " << obj->init << "; " << obj->var
-             << " < " << obj->bound << "; " << obj->var << "++) {\n";
+             << " < " << obj->bound << "; " << obj->var << "++) ";
+        if (obj->unroll != 1) out_ << "[unroll: " << obj->unroll << "] ";
+        out_ << "{\n";
         add_indent();
         visit(obj->body);
         remove_indent();
@@ -417,7 +419,8 @@ stmt_t replace_stmt_body(const stmt_t &stmt, const stmt_t &new_body) {
 
     auto *_for = stmt.as_ptr<for_t>();
     if (_for) {
-        return for_t::make(_for->var, _for->init, _for->bound, new_body);
+        return for_t::make(
+                _for->var, _for->init, _for->bound, new_body, _for->unroll);
     }
 
     auto *let = stmt.as_ptr<let_t>();
