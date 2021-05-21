@@ -2340,7 +2340,8 @@ public:
         }
 
         auto scope = register_scope();
-        if (is_const(obj->value) || obj->var.type() != obj->value.type()) {
+        if (is_const(obj->value) || is_shuffle_const(obj->value)
+                || obj->var.type() != obj->value.type()) {
             auto &var_type = obj->var.type();
             auto var_op = scope.alloc_reg_data(var_type);
             eval(obj->value, scope, ngen_operand_t(var_op, var_type.elems()));

@@ -1444,7 +1444,7 @@ public:
 
         // Substitute constants.
         auto value = simplify(obj->value);
-        if (is_const(value) || is_shuffle_const(value)) {
+        if (is_const(value)) {
             auto body = substitute(obj->body, obj->var, value);
             return mutate(body);
         }

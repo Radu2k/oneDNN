@@ -77,17 +77,16 @@ stmt_t create_send_stmt(ir_context_t &ir_ctx, const constraint_set_t &cset,
             // overhead on simplify() calls.
             if (view.can_convert_to_vlayout()) {
                 auto layout = view.create_vlayout();
-                expr_t off0_value = simplify(layout.offset_in_bytes());
-                auto off0 = ir_ctx.create_tmp_var(off0_value.type());
+                expr_t off0 = simplify(layout.offset_in_bytes());
                 layout.for_each_tile(
                         slot_tile, [&](const std::vector<dim_t> &start) {
                             dim_t tile_off = layout.offset_in_bytes(
                                     start, /*ignore_offset=*/true);
-                            off_vec.push_back(off0 + tile_off);
+                            off_vec.push_back(tile_off);
                         });
-                auto body = send(
-                        mem_buf, shuffle_t::make(off_vec), reg_buf, mask_expr);
-                ret = let_t::make(off0, off0_value, body);
+                off0 = shuffle_t::make_broadcast(off0, int(off_vec.size()));
+                ret = send(mem_buf, off0 + shuffle_t::make(off_vec), reg_buf,
+                        mask_expr);
             } else {
                 view.for_each_tile(
                         slot_tile, [&](const std::vector<dim_t> &start) {
