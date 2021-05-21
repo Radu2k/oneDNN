@@ -422,7 +422,7 @@ public:
         int id_max = 1024;
         for (int id = 0; id < id_max; id++) {
             bool ok = true;
-            auto try_name = prefix + std::to_string(id);
+            auto try_name = prefix + "_" + std::to_string(id);
             for (auto &v : all_vars_) {
                 if (v.as<var_t>().name == try_name) {
                     ok = false;

@@ -647,8 +647,20 @@ stmt_t inject_send(
 
 class alloc_lifter_t : public ir_mutator_t {
 public:
+    alloc_lifter_t(const stmt_t &root, bool reuse_headers)
+        : reuse_headers_(reuse_headers) {
+        if (!reuse_headers_) return;
+        auto calls = find_objects<func_call_t>(root);
+        for (auto &c : calls) {
+            if (!is_func_call<send_t>(c)) continue;
+            auto header_buf = send_t::arg_mem_off(c);
+            ir_assert(is_var(header_buf)) << header_buf;
+            header_bufs_.insert(header_buf);
+        }
+    }
+
     object_t _mutate(const alloc_t *obj) override {
-        if (!in_compute_loop_) return ir_mutator_t::_mutate(obj);
+        if (!do_lift(obj)) return ir_mutator_t::_mutate(obj);
         // Remove alloc and insert it before the compute loop.
         allocs_.push_back(obj);
         return obj->body;
@@ -671,13 +683,25 @@ public:
     }
 
 private:
+    bool do_lift(const alloc_t *obj) const {
+        if (!in_compute_loop_) return false;
+        if (reuse_headers_) {
+            bool is_header_alloc = (header_bufs_.count(obj->buf) != 0);
+            return !is_header_alloc;
+        }
+        return true;
+    }
+
+    bool reuse_headers_;
+    object_set_t<expr_t> header_bufs_;
+
     bool in_compute_loop_ = false;
     std::vector<stmt_t> allocs_;
 };
 
 // Lifts alloc statements out of loops.
-stmt_t lift_alloc(const stmt_t &s) {
-    auto ret = alloc_lifter_t().mutate(s);
+stmt_t lift_alloc(const stmt_t &s, const conv_config_t &cfg) {
+    auto ret = alloc_lifter_t(s, cfg.reuse_headers).mutate(s);
     trace_pass("lift_alloc", ret);
     return ret;
 }
@@ -5134,7 +5158,7 @@ void kernel_builder_t::build() {
     stmt_ = simplify_pass(stmt_, init_cset);
     stmt_ = inject_send(stmt_, ir_ctx, init_cset);
     stmt_ = split_wide_stores(cfg_.hw, stmt_);
-    stmt_ = lift_alloc(stmt_);
+    stmt_ = lift_alloc(stmt_, cfg_);
     stmt_ = eliminate_common_subexprs(stmt_, ir_ctx);
     stmt_ = hoist_exprs(stmt_, ir_ctx);
     if (cfg_.do_loop_unroll) stmt_ = loop_strength_reduce(stmt_);

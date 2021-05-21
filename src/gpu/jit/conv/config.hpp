@@ -715,6 +715,7 @@ public:
         allow_grf_reorder = false;
         zero_out_output = false;
         do_atomic_update = false;
+        reuse_headers = false;
         do_post_wei_reorder = false;
         do_post_bia_reorder = false;
         a_sub_tiles = 1;
@@ -732,6 +733,7 @@ public:
         do_loop_unroll = getenv_bool("do_loop_unroll", do_loop_unroll);
         reduce_grf_usage = getenv_bool("reduce_grf_usage", reduce_grf_usage);
         allow_grf_reorder = getenv_bool("allow_grf_reorder", allow_grf_reorder);
+        reuse_headers = getenv_bool("reuse_headers", reuse_headers);
         a_sub_tiles = getenv_int("a_sub_tiles", a_sub_tiles);
         b_sub_tiles = getenv_int("b_sub_tiles", b_sub_tiles);
 #endif
@@ -848,6 +850,7 @@ public:
         oss << "  SLM buffers:                " << slm_bufs << std::endl;
         oss << "  GMEM to SLM, GRF buffers:   " << gmem_bufs << std::endl;
         oss << "  Reduce GRF usage:           " << to_string(reduce_grf_usage) << std::endl;
+        oss << "  Reuse headers:              " << to_string(reuse_headers) << std::endl;
         oss << "  Allow GRF reorder:          " << to_string(allow_grf_reorder) << std::endl;
         oss << "  A sub-tiles:                " << a_sub_tiles << std::endl;
         oss << "  B sub-tiles:                " << b_sub_tiles << std::endl;
@@ -915,6 +918,7 @@ public:
     bool allow_grf_reorder; // Whether to allow GRF reorders to FMA-friendly layouts.
     bool zero_out_output; // Whether to zero out outputs before the main kernel.
     bool do_atomic_update; // Whether to use atomics during C update.
+    bool reuse_headers; // Whether to reuse header messages to reduce GRF usage.
 
     // Specific to BWD_W.
     bool do_post_bia_reorder; // Whether to perform extra reorder for weights.
@@ -1012,6 +1016,10 @@ private:
             if (is_bwd_w && allow_grf_reorder && (!use_a_slm || !use_b_slm))
                 fma_kind = fma_kind_t::dpas;
         }
+
+        // Can't reuse headers with loop unroll and post-increment offset updates.
+        if (reuse_headers) do_loop_unroll = false;
+
         if (!do_loop_unroll) {
             gmem_bufs = 1;
             // Double/triple SLM buffering is not supported when only one
@@ -1059,6 +1067,10 @@ private:
             int regs = estimate_register_count();
             if (regs <= max_regs) return;
         }
+
+        // Last resort settings to reduce GRF usage.
+        reuse_headers = true;
+        do_loop_unroll = false;
     }
 
     int estimate_register_count() const {
