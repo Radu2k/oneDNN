@@ -1423,7 +1423,7 @@ public:
         if (!body.is_empty()) {
             auto cset_old = cset_;
             cset_.add_constraint(cond);
-            auto body = ir_mutator_t::mutate(obj->body);
+            body = ir_mutator_t::mutate(body);
             cset_ = cset_old;
         }
 
