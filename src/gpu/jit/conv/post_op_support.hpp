@@ -315,18 +315,22 @@ private:
             const memory_desc_t &rhs_md, uint32_t &rhs_mask) const {
         layout_t rhs_layout(rhs_md);
         std::vector<dim_t> rhs_dims(rhs_md.dims, rhs_md.dims + rhs_md.ndims);
-        maybe_reshape_rhs_dims(cfg_->ndims, rhs_layout, rhs_dims);
+        std::vector<dim_t> rhs_padded_dims(
+                rhs_md.padded_dims, rhs_md.padded_dims + rhs_md.ndims);
+        maybe_reshape_rhs_dims(
+                cfg_->ndims, rhs_layout, rhs_dims, rhs_padded_dims);
         rhs_layout = normalize_spatial(
                 rhs_layout, cfg_->ndims - 2, cfg_->reduced_to_1d);
         rhs_dims = normalize_spatial(
                 rhs_dims, cfg_->ndims - 2, cfg_->reduced_to_1d);
+        rhs_padded_dims = normalize_spatial(
+                rhs_padded_dims, cfg_->ndims - 2, cfg_->reduced_to_1d);
         ir_assert(rhs_layout.ndims() == lhs_ndims())
                 << "Incompatible dimensions.";
         uint32_t bound_check_mask = 0;
         for (int i = 0; i < lhs_ndims(); i++) {
-            if (rhs_md.dims[i] == 1)
-                continue; // Broadcast, no bound check needed.
-            if (rhs_md.padded_dims[i] != lhs_padded_dim(i)) {
+            if (rhs_dims[i] == 1) continue; // Broadcast, no bound check needed.
+            if (rhs_padded_dims[i] != lhs_padded_dim(i)) {
                 bound_check_mask |= (1 << i);
             } else if (has_lhs_mask(i)) {
                 bound_check_mask |= (1 << i);
@@ -337,13 +341,14 @@ private:
         return view_t(rhs_layout, lhs_view_.vvars(), bound_check_mask);
     }
 
-    static void maybe_reshape_rhs_dims(
-            int ndims, layout_t &rhs_layout, std::vector<dim_t> &rhs_dims) {
+    static void maybe_reshape_rhs_dims(int ndims, layout_t &rhs_layout,
+            std::vector<dim_t> &rhs_dims, std::vector<dim_t> &rhs_padded_dims) {
         ir_assert(rhs_layout.ndims() == int(rhs_dims.size()));
         if (rhs_layout.ndims() < ndims) {
             rhs_layout = layout_t(rhs_layout.type(), ndims, rhs_layout.offset(),
                     rhs_layout.blocks());
             rhs_dims.resize(ndims, 1);
+            rhs_padded_dims.resize(ndims, 1);
         }
     }
 
