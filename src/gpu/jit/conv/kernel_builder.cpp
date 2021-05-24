@@ -914,7 +914,7 @@ class cse_verifier_t : public scope_visitor_t {
 public:
     cse_verifier_t(cse_context_t &ctx) : ctx_(ctx) {}
 
-    ~cse_verifier_t() { ir_assert(to_check_.empty()); }
+    ~cse_verifier_t() override { ir_assert(to_check_.empty()); }
 
     void _visit(const binary_op_t *obj) override { visit_expr(obj); }
     void _visit(const shuffle_t *obj) override { return visit_expr(obj); }
@@ -1119,7 +1119,7 @@ class hoist_exprs_mutator_t : public ir_mutator_t {
 public:
     hoist_exprs_mutator_t(ir_context_t &ir_ctx) : ir_ctx_(ir_ctx) {}
 
-    ~hoist_exprs_mutator_t() { ir_assert(let_vars_.empty()); }
+    ~hoist_exprs_mutator_t() override { ir_assert(let_vars_.empty()); }
 
     object_t _mutate(const func_call_t *obj) override {
         if (!obj->func.is<send_t>()) return ir_mutator_t::_mutate(obj);
@@ -1318,7 +1318,7 @@ public:
         loops_.emplace_back();
     }
 
-    ~loop_strength_reducer_t() {
+    ~loop_strength_reducer_t() override {
         // Sanity check, all stores must be applied.
         ir_assert(post_inc_stores.empty());
     }

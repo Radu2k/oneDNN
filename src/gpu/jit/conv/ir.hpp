@@ -34,6 +34,8 @@ class ir_visitor_t {
 public:
     using dispatch_func_type = void (*)(ir_visitor_t *, const object_impl_t *);
 
+    virtual ~ir_visitor_t() = default;
+
     virtual void visit(const object_t &obj) { dispatch(obj.impl()); }
 
     template <typename T>
@@ -191,7 +193,7 @@ public:
     using dispatch_func_type
             = object_t (*)(ir_mutator_t *, const object_impl_t *);
 
-    ir_mutator_t() = default;
+    virtual ~ir_mutator_t() = default;
 
     virtual object_t mutate(const object_t &obj) {
         return dispatch(obj.impl());
