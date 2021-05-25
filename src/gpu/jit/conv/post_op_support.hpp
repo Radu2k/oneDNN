@@ -227,7 +227,7 @@ public:
                 post_ops_.emplace_back(
                         rhs_view, rhs_buf, rhs_mask, scale, op_kind_t::_add);
             } else if (po.is_binary()) {
-                uint32_t rhs_mask;
+                uint32_t rhs_mask = 0;
                 auto rhs_view = create_rhs_view(po.binary.src1_desc, rhs_mask);
                 auto buf_name = "binary_rhs_" + std::to_string(i);
                 auto rhs_buf = kernel_arg_info.find_arg(buf_name);
