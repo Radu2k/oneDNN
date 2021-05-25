@@ -1887,6 +1887,8 @@ bool gemm_kernel_generator_t<hw>::getSubblock(Type T, RegisterBlock &blockDst,
     (column ? blockDst.offsetC : blockDst.offsetR) += x1;
     ns = x2 - x1;
 
+    if (ns == oldNS) return true;
+
     if (blockSrc.colMajor == column) {
         if (x1 % blockSrc.crosspack) return false;
         switch (effAccessType) {
