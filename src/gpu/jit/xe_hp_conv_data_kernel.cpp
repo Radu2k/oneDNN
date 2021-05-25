@@ -2006,7 +2006,7 @@ public:
             }
 
             // No padding case.
-            no_w_pad->read_and_reorder();
+            if (no_w_pad) no_w_pad->read_and_reorder();
 
             jmpi(1, end);
 
