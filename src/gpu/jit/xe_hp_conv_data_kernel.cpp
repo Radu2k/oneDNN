@@ -217,19 +217,19 @@ public:
 
     int b_off() const { return a_nbuf * a_buf_size; }
 
-    int a_nbuf;
-    int b_nbuf;
+    int a_nbuf = 0;
+    int b_nbuf = 0;
 
-    int size;
+    int size = 0;
 
-    int a_block_size;
-    int b_block_size;
+    int a_block_size = 0;
+    int b_block_size = 0;
 
-    int a_buf_size;
-    int b_buf_size;
+    int a_buf_size = 0;
+    int b_buf_size = 0;
 
-    int a_blocks;
-    int b_blocks;
+    int a_blocks = 0;
+    int b_blocks = 0;
 };
 
 // Helper class to implement reduction across (IC * KD * KH * KW) and SLM
