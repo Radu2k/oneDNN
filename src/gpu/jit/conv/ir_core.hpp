@@ -336,8 +336,8 @@ public:
     IR_DEFINE_DUMP()
 
 private:
-    type_kind_t kind_;
-    int elems_;
+    type_kind_t kind_ = type_kind_t::undef;
+    int elems_ = 0;
     bool is_ptr_ = false;
 };
 
