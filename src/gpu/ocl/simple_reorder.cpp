@@ -711,6 +711,7 @@ status_t simple_reorder_t::pd_t::init_kernel_ctx(
         kernel_ctx.define_int("GROUP", conf.aux_data.vg.group_size);
         auto r = conf.dispatch.nd_range();
         auto *lr = r.local_range();
+        if (!lr) return status::runtime_error;
         kernel_ctx.define_int(
                 "SG_PER_WG", (lr[0] * lr[1] * lr[2]) / conf.sub_group_size);
         kernel_ctx.define_int(
@@ -741,6 +742,7 @@ status_t simple_reorder_t::pd_t::init_kernel_ctx(
         kernel_ctx.define_int("LOCAL_NXN", 1);
         auto r = conf.dispatch.nd_range();
         auto *lr = r.local_range();
+        if (!lr) return status::runtime_error;
         kernel_ctx.define_int("SG_PER_WG", lr[0] * lr[1] * lr[2]);
         kernel_ctx.define_int(
                 "DST_BLOCK_DIM", get_Nth_last_dim_or_block(src_mdw).idx);
