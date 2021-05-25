@@ -5003,9 +5003,9 @@ private:
 
     grid_info_t tg_grid_;
 
-    int m_tg_blk_;
-    int n_tg_blk_;
-    int k_tg_blk_;
+    int m_tg_blk_ = 0;
+    int n_tg_blk_ = 0;
+    int k_tg_blk_ = 0;
 
     expr_t b_reduced_buf_;
 
