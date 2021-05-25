@@ -139,14 +139,14 @@ private:
     compute::kernel_t kernel_[2][2]; // [first_k_block][last_k_block]
     compute::kernel_t copy_kernel_[2][2]; // [trans][clear_sum]
 
-    compute::gpu_arch_t arch_;
-    int eu_count_;
+    compute::gpu_arch_t arch_ = compute::gpu_arch_t::unknown;
+    int eu_count_ = 0;
 
     int unroll_m_ = 0;
     int unroll_n_ = 0;
 
-    char co_kind_;
-    bool walk_n_first_;
+    char co_kind_ = 'N';
+    bool walk_n_first_ = false;
 
     const pd_t *pd() const { return (const pd_t *)gpu_primitive_t::pd().get(); }
 };
