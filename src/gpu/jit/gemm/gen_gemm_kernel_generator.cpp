@@ -7323,10 +7323,10 @@ bool gemm_kernel_generator_t<hw>::gemmKLoop(int ka_repack_in, int kb_repack_in,
 
         slmIncStoreStorage = state.ra.alloc_sub<uint32_t>();
         slmIncLoadStorage = state.ra.alloc_sub<uint32_t>();
-        slmAIncStore.set(Ao_addrShift, slmIncStoreStorage.uw(0));
-        slmBIncStore.set(Bo_addrShift, slmIncStoreStorage.uw(1));
-        slmAIncLoad.set(A_addrShift, slmIncLoadStorage.uw(0));
-        slmBIncLoad.set(B_addrShift, slmIncLoadStorage.uw(1));
+        slmAIncStore.set(Ao_addrShift, slmIncStoreStorage.w(0));
+        slmBIncStore.set(Bo_addrShift, slmIncStoreStorage.w(1));
+        slmAIncLoad.set(A_addrShift, slmIncLoadStorage.w(0));
+        slmBIncLoad.set(B_addrShift, slmIncLoadStorage.w(1));
 
         uint16_t kaByteInc = (strategy.ka_load * strategy.unroll[LoopM] * Ta)
                 >> A_addrShift;
