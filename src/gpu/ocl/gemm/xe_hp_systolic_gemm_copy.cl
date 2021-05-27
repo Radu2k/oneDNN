@@ -103,6 +103,20 @@ __attribute__((overloadable)) inline int sum(int4 v) {
             + sub_group_reduce_add(v.s2) + sub_group_reduce_add(v.s3);
 }
 
+void dummy_dpas() {
+    if (get_sub_group_local_id() >= 16) {
+        int __builtin_IB_sub_group_idpas_s8_s8_8_1(int, int, int8)
+                __attribute__((const));
+        global volatile int *_;
+
+        int z = __builtin_IB_sub_group_idpas_s8_s8_8_1(0, _[0], 1);
+        for (int i = 0; i < z; i++)
+            (void)_[0];
+    }
+}
+
+#define DUMMY_DPAS dummy_dpas()
+
 #if ELEMENT_SIZE == 2
 #define PARTIAL_LOAD(regs, rrem, crem, cc, p) \
     if ((2 * cc + 1) < crem) { \
@@ -232,6 +246,8 @@ xe_hp_systolic_gemm_copy(long m, long k, global ELEMENT *a, long offseta,
     atomic_add(a_sum + lid + 16, sum.s2);
     atomic_add(a_sum + lid + 24, sum.s3);
 #endif
+
+    DUMMY_DPAS;
 }
 
 #else /* COPY_TRANS */
@@ -301,6 +317,8 @@ xe_hp_systolic_gemm_copy(long m, long k, global ELEMENT *a, long offseta,
     atomic_add(a_sum + lid + 16, sum[2]);
     atomic_add(a_sum + lid + 24, sum[3]);
 #endif
+
+    DUMMY_DPAS;
 }
 
 #endif /* !COPY_TRANS */
@@ -426,6 +444,8 @@ xe_hp_systolic_gemm_copy(long k, long n, global ELEMENT *b, long offsetb,
     for (int c0 = 0; c0 < UNROLL_N; c0 += get_sub_group_size())
         atomic_add(b_sum + c0 + lid, sums[c0 + lid]);
 #endif
+
+    DUMMY_DPAS;
 }
 
 #else /* COPY_TRANS */
@@ -513,6 +533,8 @@ xe_hp_systolic_gemm_copy(long k, long n, global ELEMENT *b, long offsetb,
     for (int c0 = 0; c0 < UNROLL_N; c0 += get_sub_group_size())
         atomic_add(b_sum + c0 + lid, sums[c0 + lid]);
 #endif
+
+    /* DUMMY_DPAS; */ // Cannot use with subgroup size = 16
 }
 
 #endif /* !COPY_TRANS */
