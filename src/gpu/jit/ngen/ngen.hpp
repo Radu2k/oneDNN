@@ -2750,11 +2750,3 @@ void BinaryCodeGenerator<hw>::opNop(Opcode op)
 } /* namespace ngen */
 
 #endif /* header guard */
-d[1] = 0;
-
-    db(i);
-}
-
-} /* namespace ngen */
-
-#endif /* header guard */
