@@ -343,6 +343,12 @@ inline const engine_t &get_test_engine() {
 
 // Engine used to run reference implementations (fast-ref-gpu option).
 inline const engine_t &get_cpu_engine() {
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_NONE
+    fprintf(stderr,
+            "CPU engine is not available for GPU only configurations\n");
+    SAFE_V(FAIL);
+    assert(!"unexpected");
+#endif
     static const engine_t instance(dnnl_cpu);
     return instance;
 }
@@ -445,7 +451,8 @@ inline bool is_nvidia_eltwise_ok(
 }
 
 int init_md(dnnl_memory_desc_t *md, int ndims, const dnnl_dims_t dims,
-        dnnl_data_type_t data_type, const std::string &tag);
+        dnnl_data_type_t data_type, const std::string &tag,
+        const dims_t &strides_ = {});
 int check_mem_size(const dnnl_memory_desc_t &md);
 int check_mem_size(const_dnnl_primitive_desc_t const_pd);
 

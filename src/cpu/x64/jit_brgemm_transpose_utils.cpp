@@ -1744,11 +1744,11 @@ void jit_brgemm_trans_wei_bf16_t::generate() {
     postamble();
 }
 
-struct jit_amx_ip_trans_diff_wei_to_vnni : public jit_amx_ip_trans_diff_wei,
-                                           public jit_generator {
+struct jit_amx_ip_trans_diff_wei_to_vnni_t : public jit_amx_ip_trans_diff_wei,
+                                             public jit_generator {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_amx_ip_trans_diff_wei_to_vnni)
 
-    jit_amx_ip_trans_diff_wei_to_vnni(const jit_brgemm_primitive_conf_t *jbgp,
+    jit_amx_ip_trans_diff_wei_to_vnni_t(const jit_brgemm_primitive_conf_t *jbgp,
             const int ext_ic_block, const int ext_oc_block)
         : jit_amx_ip_trans_diff_wei(jbgp, ext_ic_block, ext_oc_block) {}
 
@@ -1759,7 +1759,7 @@ private:
     void generate() override;
 };
 
-void jit_amx_ip_trans_diff_wei_to_vnni::generate() {
+void jit_amx_ip_trans_diff_wei_to_vnni_t::generate() {
     const int typesize_out = 2;
     const int typesize_acc = 4;
     const int simd_w = 16;
@@ -1791,20 +1791,32 @@ void jit_amx_ip_trans_diff_wei_to_vnni::generate() {
     };
 
     auto reorder_oc_block = [&](int icb, int ic_block, bool is_oc_tail) {
-        // INP:      [64i][No]    : FP32
-        // OUT: [ICB][16i][No][2i]: BF16
+        // INP:      [64i][No]         : FP32
+        // OUT: [OCB][ICB][16i][No][2i]: BF16
         if (ic_block <= 0) return;
 
         dim_t inp_icb_offset = typesize_acc
                 * (icb * ext_ic_block_ * jbgp_->oc_block); // Internal
         dim_t out_icb_offset = typesize_out
-                * (icb * div_up(ext_ic_block_, 2) * jbgp_->oc_block
+                * (icb * div_up(ext_ic_block_, 2) * ext_oc_block_
                         * 2); // External
+
+        const int oc_padded = rnd_up(jbgp_->oc, jbgp_->oc_block);
+        const int oc_padded_ext = rnd_up(jbgp_->oc, ext_oc_block_);
+
         bool tailing_done = false;
         for (int oc = 0; oc < jbgp_->oc_block; oc += simd_w) {
+            int ext_oc = oc % ext_oc_block_;
+            int ext_ocb = oc / ext_oc_block_;
+            dim_t ext_ocb_offset = typesize_out
+                    * (ext_ocb * div_up(jbgp_->ic, ext_ic_block_)
+                            * div_up(ext_ic_block_, 2) * ext_oc_block_ * 2);
+            if (is_oc_tail && oc_padded != oc_padded_ext
+                    && oc + simd_w > ext_oc_block_)
+                break;
             dim_t inp_offset = inp_icb_offset + typesize_acc * (oc); // Internal
-            dim_t out_offset
-                    = out_icb_offset + typesize_out * (oc * 2); // External
+            dim_t out_offset = out_icb_offset + typesize_out * (ext_oc * 2)
+                    + ext_ocb_offset; // External
             kmovw(load_mask, 0xffff);
             if (is_oc_tail) {
                 if (jbgp_->N_tail && (oc + simd_w) >= jbgp_->N_tail) {
@@ -1817,8 +1829,7 @@ void jit_amx_ip_trans_diff_wei_to_vnni::generate() {
                         for (int ic = 0; ic < ext_ic_block_ / 2; ic++) {
                             vmovups(ptr[reg_output + out_offset
                                             + typesize_out
-                                                    * (ic * jbgp_->oc_block
-                                                            * 2)],
+                                                    * (ic * ext_oc_block_ * 2)],
                                     zmm_src_0);
                         }
                         continue;
@@ -1845,7 +1856,7 @@ void jit_amx_ip_trans_diff_wei_to_vnni::generate() {
                 vpermw(zmm_src_0, zmm_idx, zmm_src_0);
 
                 vmovups(ptr[reg_output + out_offset
-                                + typesize_out * (ic * jbgp_->oc_block * 2)],
+                                + typesize_out * (ic * ext_oc_block_ * 2)],
                         zmm_src_0);
             }
             if (ic_block % 2) {
@@ -1864,7 +1875,7 @@ void jit_amx_ip_trans_diff_wei_to_vnni::generate() {
                 vpermw(zmm_src_0, zmm_idx, zmm_src_0);
 
                 vmovups(ptr[reg_output + out_offset
-                                + typesize_out * (ic * jbgp_->oc_block * 2)],
+                                + typesize_out * (ic * ext_oc_block_ * 2)],
                         zmm_src_0);
                 ic++;
             }
@@ -1873,8 +1884,7 @@ void jit_amx_ip_trans_diff_wei_to_vnni::generate() {
                 vpxord(zmm_src_0, zmm_src_0, zmm_src_0);
                 for (; ic < ext_ic_block_ / 2; ic++) {
                     vmovups(ptr[reg_output + out_offset
-                                    + typesize_out
-                                            * (ic * jbgp_->oc_block * 2)],
+                                    + typesize_out * (ic * ext_oc_block_ * 2)],
                             zmm_src_0);
                 }
             }
@@ -2019,7 +2029,7 @@ status_t create_brgemm_amx_ip_trans_wei(
     if (conf->prop_kind == dnnl_backward_weights
             && conf->wei_dt == data_type::bf16) {
         CHECK(safe_ptr_assign(trans_ker,
-                new jit_amx_ip_trans_diff_wei_to_vnni(
+                new jit_amx_ip_trans_diff_wei_to_vnni_t(
                         conf, ext_ic_block, ext_oc_block)));
     } else
         return status::invalid_arguments;

@@ -51,10 +51,18 @@ struct prb_t {
     ptrdiff_t ooff;
     scale_type_t scale_type;
     float beta;
+    int full_ndims;
+    int ip_tail;
+    int op_tail;
+    int iblock;
+    int oblock;
+    int blk_chunk_idx;
 };
 
 status_t prb_init(prb_t &prb, const memory_desc_t &imd,
         const memory_desc_t &omd, const primitive_attr_t *attr);
+
+status_t prb_check_blk(prb_t &prb, const memory_desc_t &imd);
 
 /** sorts the problem nodes so that output strides come in ascending order */
 void prb_normalize(prb_t &p);
@@ -81,6 +89,7 @@ struct call_param_t {
     const void *in;
     void *out;
     const float *scale;
+    size_t blk_chunks;
 };
 
 struct kernel_t {
