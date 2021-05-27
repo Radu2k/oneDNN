@@ -160,6 +160,18 @@ bool parse_skip_nonlinear(std::vector<bool> &skip,
     return parse_vector_option(skip, def_skip, str2bool, str, option_name);
 }
 
+bool parse_strides(std::vector<strides_t> &strides,
+        const std::vector<strides_t> &def_strides, const char *str,
+        const std::string &option_name /* = "strides"*/) {
+    auto str2strides = [&](const char *str) -> strides_t {
+        strides_t strides(STRIDES_SIZE);
+        parse_multi_dims(strides, str);
+        return strides;
+    };
+    return parse_vector_option(
+            strides, def_strides, str2strides, str, option_name);
+}
+
 bool parse_trivial_strides(std::vector<bool> &ts,
         const std::vector<bool> &def_ts, const char *str,
         const std::string &option_name /* = "trivial-strides"*/) {
@@ -329,8 +341,18 @@ static bool parse_engine(
 
 static bool parse_fast_ref_gpu(
         const char *str, const std::string &option_name = "fast-ref-gpu") {
-    return parse_single_value_option(
+    bool parsed = parse_single_value_option(
             fast_ref_gpu, true, str2bool, str, option_name);
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_NONE
+    if (parsed && fast_ref_gpu) {
+        fast_ref_gpu = false;
+        fprintf(stderr,
+                "%s driver: WARNING: option `fast_ref_gpu` is not supported "
+                "for GPU only configurations.\n",
+                driver_name);
+    }
+#endif
+    return parsed;
 }
 
 static bool parse_canonical(

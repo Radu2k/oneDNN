@@ -60,24 +60,9 @@ endif()
 append(CMAKE_C_FLAGS "${CMAKE_TEST_CCXX_NOWARN_FLAGS}")
 append(CMAKE_CXX_FLAGS "${CMAKE_TEST_CCXX_NOWARN_FLAGS}")
 
-# Default fp-model in icx may be precise or fast=1 depending on the version.
-# Also, make sure more precise division is used.
-if(CMAKE_BASE_NAME STREQUAL "icx" OR CMAKE_BASE_NAME STREQUAL "icpx")
-    append_if(WIN32 CMAKE_CXX_FLAGS "/fp:precise")
-    append_if(UNIX  CMAKE_CXX_FLAGS "-fp-model precise -fno-reciprocal-math")
+if(NOT DNNL_CPU_RUNTIME STREQUAL "NONE")
+    register_exe(api-c api.c "test")
 endif()
-
-# dpcpp driver (unlike clang) may apply fp-model fast. Apply the supported flag
-# to the corresponding driver by checking for MSVC support.
-if(DNNL_WITH_SYCL)
-    if(MSVC)
-        append(CMAKE_CXX_FLAGS "/fp:precise")
-    else()
-        append(CMAKE_CXX_FLAGS "-ffp-model=precise -fno-reciprocal-math")
-    endif()
-endif()
-
-register_exe(api-c api.c "test")
 
 if(NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND (UNIX OR MINGW))
     get_directory_property(include_dirs INCLUDE_DIRECTORIES)
@@ -102,6 +87,16 @@ if ("${DNNL_CPU_THREADING_RUNTIME}" STREQUAL "THREADPOOL")
     # Only enable this for threadpool runtime to avoid complaints about empty
     # object files.
     set(TEST_THREAD ${CMAKE_CURRENT_SOURCE_DIR}/test_thread.cpp)
+endif()
+
+# Switch on threading layer for GPU only configurations to speed up testing.
+# For non-dppcp compilers OpenMP threading will be used which is handled in
+# OpenMP.cmake.
+if(DNNL_WITH_SYCL AND DNNL_CPU_RUNTIME STREQUAL "NONE")
+    list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/cmake)
+    find_package_tbb(REQUIRED)
+    list(REMOVE_AT CMAKE_MODULE_PATH 0)
+    handle_tbb_target()
 endif()
 
 add_subdirectory(gtests)
