@@ -152,19 +152,17 @@ xe_hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
     __local WEI_DATA_T *wei_loc_base = wei_loc + KW * WEI_BLOCK * oc;
 #endif // SLM_WEI
 
-    __attribute__((opencl_unroll_hint(1))) for (int ic_chunk = 0;
-                                                ic_chunk < IC_NCHUNK;
-                                                ic_chunk++) {
-        SRC_DATA_BLOCK_T S0, S1, S2, S3;
-        int8 W0, W1, W2, W3;
-        __attribute__((opencl_unroll_hint(1))) for (int kd = 0; kd < KD; kd++) {
+    __attribute__((opencl_unroll_hint(1))) // attr:no-format
+    for (int ic_chunk = 0; ic_chunk < IC_NCHUNK; ic_chunk++) {
+        __attribute__((opencl_unroll_hint(1))) // attr:no-format
+        for (int kd = 0; kd < KD; kd++) {
             if (kd * (1 + DD) + id < 0 || kd * (1 + DD) + id >= ID) {
                 src += IC_BLOCK * MB_BLOCK * IH * IW * (1 + DD);
                 wei += WEI_BLOCK * KH * KW;
                 continue;
             }
-            __attribute__((opencl_unroll_hint)) for (int kh = 0; kh < KH;
-                                                     kh++) {
+            __attribute__((opencl_unroll_hint)) // attr:no-format
+            for (int kh = 0; kh < KH; kh++) {
                 if (kh * (1 + DH) + ih < 0 || kh * (1 + DH) + ih >= IH) {
                     src += IC_BLOCK * MB_BLOCK * IW * (1 + DH);
                     wei += WEI_BLOCK * KW;
@@ -188,8 +186,10 @@ xe_hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
                 barrier(CLK_LOCAL_MEM_FENCE);
 #endif // SLM_WEI
 
-                __attribute__((opencl_unroll_hint)) for (int kw = 0; kw < KW;
-                                                         kw++) {
+                __attribute__((opencl_unroll_hint)) // attr:no-format
+                for (int kw = 0; kw < KW; kw++) {
+                    SRC_DATA_BLOCK_T S0 = 0, S1 = 0, S2 = 0, S3 = 0;
+                    int8 W0 = 0, W1 = 0, W2 = 0, W3 = 0;
                     if (kw * (1 + DW) + iw >= 0 && kw * (1 + DW) + iw < IW) {
                         BLOCK_READ_SRC(S0, 0);
 #if MB > 8
@@ -201,33 +201,34 @@ xe_hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
 #endif // MB > 24
 #endif // MB > 16
 #endif // MB > 8
+
                         BLOCK_READ_WEI(W0, 0);
                         BLOCK_READ_WEI(W1, 8 * IC_BLOCK);
                         BLOCK_READ_WEI(W2, 16 * IC_BLOCK);
                         BLOCK_READ_WEI(W3, 24 * IC_BLOCK);
-                        C00 = MMAD8X8(S0, W0, C00);
-                        C01 = MMAD8X8(S0, W1, C01);
-                        C02 = MMAD8X8(S0, W2, C02);
-                        C03 = MMAD8X8(S0, W3, C03);
+                    }
+                    C00 = MMAD8X8(S0, W0, C00);
+                    C01 = MMAD8X8(S0, W1, C01);
+                    C02 = MMAD8X8(S0, W2, C02);
+                    C03 = MMAD8X8(S0, W3, C03);
 #if MB > 8
-                        C10 = MMAD8X8(S1, W0, C10);
-                        C11 = MMAD8X8(S1, W1, C11);
-                        C12 = MMAD8X8(S1, W2, C12);
-                        C13 = MMAD8X8(S1, W3, C13);
+                    C10 = MMAD8X8(S1, W0, C10);
+                    C11 = MMAD8X8(S1, W1, C11);
+                    C12 = MMAD8X8(S1, W2, C12);
+                    C13 = MMAD8X8(S1, W3, C13);
 #if MB > 16
-                        C20 = MMAD8X8(S2, W0, C20);
-                        C21 = MMAD8X8(S2, W1, C21);
-                        C22 = MMAD8X8(S2, W2, C22);
-                        C23 = MMAD8X8(S2, W3, C23);
+                    C20 = MMAD8X8(S2, W0, C20);
+                    C21 = MMAD8X8(S2, W1, C21);
+                    C22 = MMAD8X8(S2, W2, C22);
+                    C23 = MMAD8X8(S2, W3, C23);
 #if MB > 24
-                        C30 = MMAD8X8(S3, W0, C30);
-                        C31 = MMAD8X8(S3, W1, C31);
-                        C32 = MMAD8X8(S3, W2, C32);
-                        C33 = MMAD8X8(S3, W3, C33);
+                    C30 = MMAD8X8(S3, W0, C30);
+                    C31 = MMAD8X8(S3, W1, C31);
+                    C32 = MMAD8X8(S3, W2, C32);
+                    C33 = MMAD8X8(S3, W3, C33);
 #endif // MB > 24
 #endif // MB > 16
 #endif // MB > 8
-                    }
                     src += IC_BLOCK * MB_BLOCK * (1 + DW);
                     WEI += WEI_BLOCK;
                 }

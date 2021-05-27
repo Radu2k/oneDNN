@@ -146,115 +146,135 @@ xe_hp_conv_bwd_data(__global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
     const __global WEI_DATA_T *wei_last
             = wei + WEI_BLOCK * KD * KH * KW * OC_NCHUNK;
 #endif // SLM_WEI
-    bool run = true;
+
 #if KD == 1
     const int od = (id + PD) / SD;
-#if SD != 1
-    run = (((id + PD) % SD == 0) && (od >= 0) && (od < OD)) && run;
-#endif
-#endif
+#if SD == 1
+    const bool run_d = (od >= 0 && od < OD);
+#else
+    const int od_rem = (id + PD) % SD;
+    const bool run_d = (od_rem == 0 && od >= 0 && od < OD);
+#endif // SD == 1
+#endif // KD == 1
+
 #if KH == 1
     const int oh = (ih + PH) / SH;
-#if SH != 1
-    run = (((ih + PH) % SH == 0) && (oh >= 0) && (oh < OH)) && run;
-#endif
-#endif
+#if SH == 1
+    const bool run_h = (oh >= 0 && oh < OH);
+#else
+    const int oh_rem = (ih + PH) % SH;
+    const bool run_h = (oh_rem == 0 && oh >= 0 && oh < OH);
+#endif // SH == 1
+#endif // KH == 1
+
 #if KW == 1
     const int ow = (iw + PW) / SW;
-#if SW != 1
-    run = (((iw + PW) % SW == 0) && (ow >= 0) && (ow < OW)) && run;
-#endif
-#endif
+#if SW == 1
+    const bool run_w = (ow >= 0 && ow < OW);
+#else
+    const int ow_rem = (iw + PW) % SW;
+    const bool run_w = (ow_rem == 0 && ow >= 0 && ow < OW);
+#endif // SW == 1
+#endif // KW == 1
+
     int read_ind = 0;
     int calc_ind = 1;
 
 #if SLM_WEI && KW == 1 && KH == 1 && KD == 1
     READ_SLM()
 #endif
+
     for (int oc_chunk = 0; oc_chunk < OC_NCHUNK; oc_chunk++) {
-        DST_DATA_BLOCK_T D0, D1, D2, D3;
-        int8 W0, W1, W2, W3;
 #if KD != 1
         for (int kd = 0; kd < KD; kd++) {
-            if ((id + PD - kd * (1 + DD)) % SD != 0) {
-                wei += WEI_BLOCK * KH * KW;
-                continue;
-            }
             const int od = (id + PD - kd * (1 + DD)) / SD;
-            if (od < 0 || od >= OD) {
+#if SD == 1
+            const bool run_d = (od >= 0 && od < OD);
+#else
+            const int od_rem = (id + PD - kd * (1 + DD)) % SD;
+            const bool run_d = (od_rem == 0 && od >= 0 && od < OD);
+#endif // SD == 1
+#endif // KD != 1
+            if (!run_d) {
                 wei += WEI_BLOCK * KH * KW;
                 continue;
             }
-#endif // KD != 1
+
 #if KH != 1
             for (int kh = 0; kh < KH; kh++) {
-                if ((ih + PH - kh * (1 + DH)) % SH != 0) {
-                    wei += WEI_BLOCK * KW;
-                    continue;
-                }
                 const int oh = (ih + PH - kh * (1 + DH)) / SH;
-                if (oh < 0 || oh >= OH) {
+#if SH == 1
+                const bool run_h = (oh >= 0 && oh < OH);
+#else
+                const int oh_rem = (ih + PH - kh * (1 + DH)) % SH;
+                const bool run_h = (oh_rem == 0 && oh >= 0 && oh < OH);
+#endif // SH == 1
+#endif // KH != 1
+                if (!run_h) {
                     wei += WEI_BLOCK * KW;
                     continue;
                 }
-#endif // KH != 1
 
 #if SLM_WEI
                 READ_SLM()
 #endif // SLM_WEI
-#if KW != 1
-                __attribute__((opencl_unroll_hint)) for (int kw = 0; kw < KW;
-                                                         kw++) {
-                    if ((iw + PW - kw * (1 + DW)) % SW == 0) {
-                        const int ow = (iw + PW - kw * (1 + DW)) / SW;
-                        if (run && ow >= 0 && ow < OW) {
-#else
-        if (run) {
-#endif // KW != 1
-                            __global DST_DATA_T *current_dst = dst
-                                    + OC_BLOCK * MB_BLOCK
-                                            * (OW * OH * od + OW * oh + ow);
-                            BLOCK_READ_DST(D0, 0);
-#if MB > 8
-                            BLOCK_READ_DST(D1, 8 * OC_BLOCK);
-#if MB > 16
-                            BLOCK_READ_DST(D2, 16 * OC_BLOCK);
-#if MB > 24
-                            BLOCK_READ_DST(D3, 24 * OC_BLOCK);
-#endif // MB > 24
-#endif // MB > 16
-#endif // MB > 8
-                            BLOCK_READ_WEI(W0, 0);
-                            BLOCK_READ_WEI(W1, 8 * IC_BLOCK);
-                            BLOCK_READ_WEI(W2, 16 * IC_BLOCK);
-                            BLOCK_READ_WEI(W3, 24 * IC_BLOCK);
-                            C00 = MMAD8X8(D0, W0, C00);
-                            C01 = MMAD8X8(D0, W1, C01);
-                            C02 = MMAD8X8(D0, W2, C02);
-                            C03 = MMAD8X8(D0, W3, C03);
-#if MB > 8
-                            C10 = MMAD8X8(D1, W0, C10);
-                            C11 = MMAD8X8(D1, W1, C11);
-                            C12 = MMAD8X8(D1, W2, C12);
-                            C13 = MMAD8X8(D1, W3, C13);
-#if MB > 16
-                            C20 = MMAD8X8(D2, W0, C20);
-                            C21 = MMAD8X8(D2, W1, C21);
-                            C22 = MMAD8X8(D2, W2, C22);
-                            C23 = MMAD8X8(D2, W3, C23);
-#if MB > 24
-                            C30 = MMAD8X8(D3, W0, C30);
-                            C31 = MMAD8X8(D3, W1, C31);
-                            C32 = MMAD8X8(D3, W2, C32);
-                            C33 = MMAD8X8(D3, W3, C33);
-#endif // MB > 24
-#endif // MB > 16
-#endif // MB > 8
-                        }
 
 #if KW != 1
+                __attribute__((opencl_unroll_hint)) // attr:no-format
+                for (int kw = 0; kw < KW; kw++) {
+                    const int ow = (iw + PW - kw * (1 + DW)) / SW;
+#if SW == 1
+                    const bool run_w = (ow >= 0 && ow < OW);
+#else
+                    const int ow_rem = (iw + PW - kw * (1 + DW)) % SW;
+                    const bool run_w = (ow_rem == 0 && ow >= 0 && ow < OW);
+#endif // SW == 1
+#endif // KW != 1
+                    DST_DATA_BLOCK_T D0 = 0, D1 = 0, D2 = 0, D3 = 0;
+                    int8 W0 = 0, W1 = 0, W2 = 0, W3 = 0;
+                    if (run_w) {
+                        __global DST_DATA_T *current_dst = dst
+                                + OC_BLOCK * MB_BLOCK
+                                        * (OW * OH * od + OW * oh + ow);
+                        BLOCK_READ_DST(D0, 0);
+#if MB > 8
+                        BLOCK_READ_DST(D1, 8 * OC_BLOCK);
+#if MB > 16
+                        BLOCK_READ_DST(D2, 16 * OC_BLOCK);
+#if MB > 24
+                        BLOCK_READ_DST(D3, 24 * OC_BLOCK);
+#endif // MB > 24
+#endif // MB > 16
+#endif // MB > 8
+                        BLOCK_READ_WEI(W0, 0);
+                        BLOCK_READ_WEI(W1, 8 * IC_BLOCK);
+                        BLOCK_READ_WEI(W2, 16 * IC_BLOCK);
+                        BLOCK_READ_WEI(W3, 24 * IC_BLOCK);
                     }
-#endif
+
+                    C00 = MMAD8X8(D0, W0, C00);
+                    C01 = MMAD8X8(D0, W1, C01);
+                    C02 = MMAD8X8(D0, W2, C02);
+                    C03 = MMAD8X8(D0, W3, C03);
+#if MB > 8
+                    C10 = MMAD8X8(D1, W0, C10);
+                    C11 = MMAD8X8(D1, W1, C11);
+                    C12 = MMAD8X8(D1, W2, C12);
+                    C13 = MMAD8X8(D1, W3, C13);
+#if MB > 16
+                    C20 = MMAD8X8(D2, W0, C20);
+                    C21 = MMAD8X8(D2, W1, C21);
+                    C22 = MMAD8X8(D2, W2, C22);
+                    C23 = MMAD8X8(D2, W3, C23);
+#if MB > 24
+                    C30 = MMAD8X8(D3, W0, C30);
+                    C31 = MMAD8X8(D3, W1, C31);
+                    C32 = MMAD8X8(D3, W2, C32);
+                    C33 = MMAD8X8(D3, W3, C33);
+#endif // MB > 24
+#endif // MB > 16
+#endif // MB > 8
+
                     WEI += WEI_BLOCK;
 #if KW != 1
                 }
