@@ -124,6 +124,7 @@ include("cmake/version.cmake")
 include("cmake/coverage.cmake")
 include("cmake/build_types.cmake")
 include("cmake/testing.cmake")
+include("cmake/host_compiler.cmake")
 
 if(UNIX OR MINGW)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99")
@@ -142,13 +143,13 @@ endif()
 
 enable_testing()
 
-include_directories(include)
+include_directories_with_host_compiler(${PROJECT_SOURCE_DIR}/include)
 
 configure_file(
     "${PROJECT_SOURCE_DIR}/include/oneapi/dnnl/dnnl_config.h.in"
     "${PROJECT_BINARY_DIR}/include/oneapi/dnnl/dnnl_config.h"
 )
-include_directories(${PROJECT_BINARY_DIR}/include)
+include_directories_with_host_compiler(${PROJECT_BINARY_DIR}/include)
 
 configure_file(
     "${PROJECT_SOURCE_DIR}/README.binary.in"

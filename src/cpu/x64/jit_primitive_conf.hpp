@@ -737,6 +737,8 @@ struct jit_resampling_conf_t {
     size_t output_data_size = 0;
     size_t el_size_of_indices = 0;
 
+    bool is_blocked_8_format = false;
+    format_tag_t src_tag = format_tag::undef;
     jit_memory_tag_kind_t tag_kind = jit_memory_tag_kind_t::undef;
     alg_kind_t alg = alg_kind::undef;
 
@@ -883,6 +885,7 @@ struct jit_shuffle_call_s {
 
     dim_t cb_loop_size
             = 0; // number of loop iterations over corresponding C batches
+    bool is_padded_block = false;
 };
 
 enum class binary_op_t : unsigned { none, c_blocked, n_spatial_c, n_c_spatial };
@@ -926,6 +929,29 @@ struct jit_binary_call_s {
     const void *post_ops_binary_rhs_arg_vec;
     size_t oc_l_off;
     size_t src1_stride_range;
+};
+
+struct jit_reduction_conf_t {
+    data_type_t src_type = data_type::undef;
+    data_type_t dst_type = data_type::undef;
+    data_type_t acc_type = data_type::undef;
+
+    std::size_t src_dt_size = 0;
+    std::size_t dst_dt_size = 0;
+    std::size_t acc_dt_size = 0;
+
+    alg_kind_t alg = alg_kind::undef;
+    cpu_isa_t isa = isa_any;
+
+    dim_t idle_size = 0;
+    dim_t reduce_size = 0;
+
+    bool is_saturation_needed = false;
+};
+
+struct jit_reduction_call_s {
+    const void *src = nullptr;
+    void *dst = nullptr;
 };
 
 } // namespace x64

@@ -54,7 +54,13 @@ int get_os_block(const jit_brgemm_primitive_conf_t &jbgp, bool try_to_adjust,
     if (try_to_adjust
             || one_of(jbgp.prop_kind, forward_training, forward_inference)) {
         min_os_block = (is_amx_int8 || is_amx_bf16) ? 16 : 6;
-        max_os_block = 64;
+        // Currently gigantic flag is used to separate out transformer_lt and
+        // alexnet shapes for which larger os_block gives better performance.
+        // TODO: Figure out how much the constraints for `gigantic-ness` can
+        // be further loosened.
+        const bool is_gigantic_shape
+                = jbgp.ic >= 9216 && jbgp.oc >= 4096 && jbgp.os >= 512;
+        max_os_block = is_gigantic_shape ? 128 : 64;
         // Work done by each thread is given by:
         //     (nb_oc / nb_oc_blocking) * (nb_os / nb_os_blocking)
         // As a first approximation we take nb_oc_blocking = nb_os_blocking = 1
@@ -294,16 +300,9 @@ status_t init_ip_conf_fwd(jit_brgemm_primitive_conf_t &jbgp,
 
     jbgp.nb_ic_blocking = 1;
     const int max_nb_ic_blocking = nstl::min(64, jbgp.nb_ic);
-    if (jbgp.use_buffer_a) {
-        // With buffer_a each thread makes copy of the src chunk with
-        // jbgp.os_block * jbgp.nb_os_blocking * jbgp.K * jbgp.gemm_batch_size
-        // many elements.
-        jbgp.K = jbgp.ic_block;
-        jbgp.nb_ic_blocking = jbgp.gemm_batch_size
-                = max_div(jbgp.nb_ic, max_nb_ic_blocking);
-    } else if (IMPLICATION(
-                       !is_int8, jbgp.ic <= max_nb_ic_blocking * jbgp.ic_block)
-            && everyone_is(1, jbgp.kw, jbgp.kh, jbgp.kd)) {
+    if (IMPLICATION(!is_int8, jbgp.ic <= max_nb_ic_blocking * jbgp.ic_block)
+            && everyone_is(1, jbgp.kw, jbgp.kh, jbgp.kd)
+            && !jbgp.use_buffer_a) {
         // Optimization: data & weights layouts allow to generate
         // brgemm kernel with K = ic & batch = 1
         // (K = rnd_dn(ic, ic_block), K_tail = ic % ic_block & batch = 1)
@@ -314,9 +313,18 @@ status_t init_ip_conf_fwd(jit_brgemm_primitive_conf_t &jbgp,
         jbgp.gemm_batch_size = 1;
     } else {
         jbgp.nb_ic_blocking = max_div(jbgp.nb_ic, max_nb_ic_blocking);
-        if (jbgp.nb_ic_blocking == 1) jbgp.nb_ic_blocking = max_nb_ic_blocking;
-        jbgp.gemm_batch_size = jbgp.nb_ic_blocking;
+        const bool small_nb_ic = jbgp.nb_ic <= max_nb_ic_blocking;
+        if (small_nb_ic && jbgp.nb_ic_blocking == 1)
+            jbgp.nb_ic_blocking = max_nb_ic_blocking;
 
+        // For non small_nb_ic [i.e. that has nb_ic > 64] shape that has
+        // gcd(nb_ic, 64) < 16, we manually set nb_ic_blocking = 64
+        // the coefficients 64 [used in max_nb_ic_blocking] and 16 are empirical
+        const int min_nb_ic_blocking = small_nb_ic ? 1 : 16;
+        if (jbgp.nb_ic_blocking < min_nb_ic_blocking)
+            jbgp.nb_ic_blocking = max_nb_ic_blocking;
+
+        jbgp.gemm_batch_size = jbgp.nb_ic_blocking;
         jbgp.K = jbgp.ic_block;
     }
 
@@ -634,7 +642,7 @@ status_t init_ip_conf_bwd_w(jit_brgemm_primitive_conf_t &jbgp) {
 
     jbgp.nb_os_blocking = 1;
     int os_blocking_max = (is_amx_bf16)
-            ? ((size_t)jbgp.src_dt * jbgp.mb * jbgp.ic
+            ? (types::data_type_size(jbgp.src_dt) * jbgp.mb * jbgp.ic
                       < platform::get_per_core_cache_size(2))
                     ? 8
                     : 4

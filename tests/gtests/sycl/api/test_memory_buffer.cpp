@@ -49,8 +49,17 @@ TEST_P(sycl_memory_buffer_test, BasicInteropCtor) {
     buffer<float, 1> buf {range<1>(sz)};
 
     memory::desc mem_d(tz, memory::data_type::f32, memory::format_tag::nchw);
-    auto mem = sycl_interop::make_memory(mem_d, eng, buf);
 
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_SYCL
+    if (eng_kind == engine::kind::cpu) {
+        auto mem = test::make_memory(mem_d, eng);
+        EXPECT_ANY_THROW(sycl_interop::make_memory(mem_d, eng, buf));
+        EXPECT_ANY_THROW(sycl_interop::get_buffer<float>(mem));
+        return;
+    }
+#endif
+
+    auto mem = sycl_interop::make_memory(mem_d, eng, buf);
     auto buf_from_mem = sycl_interop::get_buffer<float>(mem);
 
     {
@@ -73,6 +82,16 @@ TEST_P(sycl_memory_buffer_test, ConstructorNone) {
     engine eng(eng_kind, 0);
     memory::desc mem_d({0}, memory::data_type::f32, memory::format_tag::x);
 
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_SYCL
+    if (eng_kind == engine::kind::cpu) {
+        auto mem = test::make_memory(mem_d, eng);
+        EXPECT_ANY_THROW(
+                mem = sycl_interop::make_memory(mem_d, eng,
+                        sycl_interop::memory_kind::buffer, DNNL_MEMORY_NONE));
+        EXPECT_ANY_THROW(sycl_interop::get_buffer<float>(mem));
+        return;
+    }
+#endif
     auto mem = sycl_interop::make_memory(
             mem_d, eng, sycl_interop::memory_kind::buffer, DNNL_MEMORY_NONE);
 
@@ -88,6 +107,16 @@ TEST_P(sycl_memory_buffer_test, ConstructorAllocate) {
     memory::dim n = 100;
     memory::desc mem_d({n}, memory::data_type::f32, memory::format_tag::x);
 
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_SYCL
+    if (eng_kind == engine::kind::cpu) {
+        auto mem = test::make_memory(mem_d, eng);
+        EXPECT_ANY_THROW(mem = sycl_interop::make_memory(mem_d, eng,
+                                 sycl_interop::memory_kind::buffer,
+                                 DNNL_MEMORY_ALLOCATE));
+        EXPECT_ANY_THROW(sycl_interop::get_buffer<float>(mem));
+        return;
+    }
+#endif
     auto mem = sycl_interop::make_memory(mem_d, eng,
             sycl_interop::memory_kind::buffer, DNNL_MEMORY_ALLOCATE);
 
@@ -116,8 +145,17 @@ TEST_P(sycl_memory_buffer_test, BasicInteropGetSet) {
     memory::dims tz = {4, 4, 4, 4};
 
     size_t sz = size_t(tz[0]) * tz[1] * tz[2] * tz[3];
-
     memory::desc mem_d(tz, memory::data_type::f32, memory::format_tag::nchw);
+
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_SYCL
+    if (eng_kind == engine::kind::cpu) {
+        auto mem = test::make_memory(mem_d, eng);
+        EXPECT_ANY_THROW(mem = sycl_interop::make_memory(mem_d, eng,
+                                 sycl_interop::memory_kind::buffer));
+        EXPECT_ANY_THROW(sycl_interop::get_buffer<float>(mem));
+        return;
+    }
+#endif
     auto mem = sycl_interop::make_memory(
             mem_d, eng, sycl_interop::memory_kind::buffer);
 
@@ -142,6 +180,11 @@ TEST_P(sycl_memory_buffer_test, BasicInteropGetSet) {
 TEST_P(sycl_memory_buffer_test, InteropReorder) {
     engine::kind eng_kind = GetParam();
     SKIP_IF(engine::get_count(eng_kind) == 0, "Engine not found.");
+
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_SYCL
+    SKIP_IF(eng_kind == engine::kind::cpu,
+            "Skip this test for classic CPU runtime");
+#endif
 
     const size_t N = 2;
     const size_t C = 3;
@@ -204,6 +247,11 @@ TEST_P(sycl_memory_buffer_test, InteropReorderAndUserKernel) {
 #ifdef DNNL_SYCL_CUDA
     SKIP_IF(eng_kind == engine::kind::gpu,
             "OpenCL features are not supported on CUDA backend");
+#endif
+
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_SYCL
+    SKIP_IF(eng_kind == engine::kind::cpu,
+            "Skip this test for classic CPU runtime");
 #endif
 
     const size_t N = 2;
@@ -277,8 +325,13 @@ TEST_P(sycl_memory_buffer_test, EltwiseWithUserKernel) {
             "OpenCL features are not supported on CUDA backend");
 #endif
 
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_SYCL
+    SKIP_IF(eng_kind == engine::kind::cpu,
+            "Skip this test for classic CPU runtime");
+#endif
+
     memory::dims tz = {2, 3, 4, 5};
-    const size_t N = tz.size();
+    const int N = tz.size();
 
     memory::desc mem_d(tz, memory::data_type::f32, memory::format_tag::nchw);
 
@@ -298,7 +351,7 @@ TEST_P(sycl_memory_buffer_test, EltwiseWithUserKernel) {
     q->submit([&](handler &cgh) {
         auto a = sycl_buf.get_access<access::mode::write>(cgh);
         cgh.parallel_for<init_kernel>(
-                range<1>(N), [=](id<1> i) { a[i] = i.get(0) - N / 2; });
+                range<1>(N), [=](id<1> i) { a[i] = (int)i.get(0) - N / 2; });
     });
 
     auto eltwise_d = eltwise_forward::desc(

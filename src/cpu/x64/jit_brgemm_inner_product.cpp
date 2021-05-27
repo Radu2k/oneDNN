@@ -136,10 +136,12 @@ void brgemm_inner_product_fwd_t<isa>::execute_forward(
         bool is_oc_tail = (jbgp.oc - oc < jbgp.oc_block);
         bool is_last_ic_chunk = icc == ic_chunks - 1;
         bool is_ic_tail = is_last_ic_chunk && jbgp.K_tail > 0;
-        const int gemm_batch = jbgp.use_buffer_a
-                ? jbgp.gemm_batch_size
-                : nstl::min(
-                        jbgp.gemm_batch_size, (jbgp.ic - ic) / jbgp.ic_block);
+        const int remaining_ic_blks
+                = (jbgp.use_buffer_a ? utils::rnd_up(jbgp.ic, jbgp.ic_block)
+                                     : jbgp.ic)
+                - ic;
+        const int gemm_batch = nstl::min(
+                jbgp.gemm_batch_size, remaining_ic_blks / jbgp.ic_block);
 
         int brg_ker_idx = brgemm_inner_product_utils::get_brg_kernel_index(
                 jbgp, kernel_init, is_os_tail, is_oc_tail, false);
@@ -655,8 +657,8 @@ void brgemm_inner_product_bwd_data_t<isa>::execute_backward_data(
             float *out_buffer = (is_f32 || is_bf16_f32_out)
                     ? (float *)dsrc_reduced
                     : (float *)c_buffer_start;
-            int oc_buf_idx = (is_bf16_bf16_out) ? 1 : 0;
-            int oc_buf_end = (is_bf16_bf16_out) ? 0 : 1;
+            int oc_buf_idx = is_bf16_bf16_out;
+            int oc_buf_end = !is_bf16_bf16_out;
             for (int oc_buf = oc_buf_idx; oc_buf < nthr_oc - oc_buf_end;
                     oc_buf++) {
                 const dim_t c_buf_offt = acc_dt_sz
