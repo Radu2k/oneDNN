@@ -108,15 +108,6 @@ status_t func_zeModuleCreate(ze_context_handle_t hContext,
     return status::success;
 }
 
-status_t func_zeModuleDestroy(ze_module_handle_t hModule) {
-    static auto f
-            = find_ze_symbol<decltype(&zeModuleDestroy)>("zeModuleDestroy");
-
-    if (!f) return status::runtime_error;
-    ZE_CHECK(f(hModule));
-    return status::success;
-}
-
 status_t func_zeDeviceGetProperties(
         ze_device_handle_t hDevice, ze_device_properties_t *pDeviceProperties) {
     static auto f = find_ze_symbol<decltype(&zeDeviceGetProperties)>(
@@ -140,6 +131,7 @@ device_uuid_t get_device_uuid(const cl::sycl::device &dev) {
     ze_device_properties_t ze_device_properties;
     auto ze_device = dev.get_native<cl::sycl::backend::level_zero>();
     auto status = func_zeDeviceGetProperties(ze_device, &ze_device_properties);
+    MAYBE_UNUSED(status);
     assert(status == status::success);
 
     const auto &ze_device_id = ze_device_properties.uuid.id;

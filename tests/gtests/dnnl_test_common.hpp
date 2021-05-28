@@ -107,7 +107,8 @@ inline int get_vendor_id(const std::string &vendor) {
 
 inline bool is_nvidia_gpu(const dnnl::engine &eng) {
 #ifdef DNNL_WITH_SYCL
-    const int nvidia_vendor_id = get_vendor_id("nvidia");
+    if (eng.get_kind() != dnnl::engine::kind::gpu) return false;
+    const uint32_t nvidia_vendor_id = get_vendor_id("nvidia");
     const auto device = dnnl::sycl_interop::get_device(eng);
     const auto eng_vendor_id
             = device.get_info<cl::sycl::info::device::vendor_id>();
@@ -613,6 +614,13 @@ bool catch_expected_failures(const F &f, bool expect_to_fail,
 namespace test {
 inline dnnl::memory make_memory(
         const dnnl::memory::desc &md, const dnnl::engine &eng) {
+
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_SYCL
+    if (eng.get_kind() == dnnl::engine::kind::cpu) {
+        return dnnl::memory(md, eng);
+    }
+#endif
+
 #if defined(TEST_DNNL_DPCPP_BUFFER)
     return dnnl::sycl_interop::make_memory(
             md, eng, dnnl::sycl_interop::memory_kind::buffer);
@@ -622,6 +630,12 @@ inline dnnl::memory make_memory(
 }
 inline dnnl::memory make_memory(
         const dnnl::memory::desc &md, const dnnl::engine &eng, void *handle) {
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_SYCL
+    if (eng.get_kind() == dnnl::engine::kind::cpu) {
+        return dnnl::memory(md, eng);
+    }
+#endif
+
 #if defined(TEST_DNNL_DPCPP_BUFFER)
     return dnnl::sycl_interop::make_memory(
             md, eng, dnnl::sycl_interop::memory_kind::buffer, handle);
