@@ -1174,8 +1174,14 @@ public:
         }
 
         if (op_kind == op_kind_t::_div) {
-            if (rhs_args.empty()) return false;
             if (!rhs_ge_0) return false;
+            if (rhs_args.empty()) {
+                expr = mutate(lhs_args[0] / b);
+                for (int i = 1; i < int(lhs_args.size()); i++) {
+                    expr += mutate(lhs_args[i] / b);
+                }
+                return true;
+            }
             auto lhs_div = make_nary_op(op_kind_t::_add, lhs_args) / b;
             auto rhs_div = rhs_nary / b;
             expr = mutate(lhs_div) + mutate(rhs_div);
