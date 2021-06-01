@@ -853,6 +853,7 @@ public:
         oss << "  OH TG block:                " << oh_tg_blk << std::endl;
         oss << "  OW TG block:                " << ow_tg_blk << std::endl;
         oss << "  OC TG block:                " << oc_tg_blk << std::endl;
+        oss << "  Kernel grid:                " << make_seq_print_helper(kernel_grid_dim, " x ") << std::endl;
         oss << "  Thread group:               " << make_seq_print_helper(tg_grid_dim, " x ") << std::endl;
         oss << "  FMA kind:                   " << fma_kind::to_string(fma_kind) << std::endl;
         oss << "  Use SLM for A:              " << to_string(use_a_slm) << std::endl;
