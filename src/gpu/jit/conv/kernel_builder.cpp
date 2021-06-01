@@ -4301,6 +4301,10 @@ private:
             }
         }
 
+        if (tmp_buf_size_ > 0) {
+            register_buffer(ab_tmp_buf_, tmp_buf_size_, alloc_kind_t::grf);
+        }
+
         mnk_mapper_.push_blocks(a_i_outer_blocks_, ap_thr_view_, cp_tg_view_);
         mnk_mapper_.push_blocks(b_j_outer_blocks_, bp_thr_view_, cp_tg_view_);
 
@@ -4365,10 +4369,6 @@ private:
         auto b_attr = grf_alloc_attr_t::make(mul_builder.b_grf_bundle());
         register_buffer(b_buf_, b_sub_tiles_[j].reg_buf_size, alloc_kind_t::grf,
                 b_attr);
-
-        if (tmp_buf_size_ > 0) {
-            register_buffer(ab_tmp_buf_, tmp_buf_size_, alloc_kind_t::grf);
-        }
     }
 
     // Loads A_i sub-tile.
@@ -4395,8 +4395,8 @@ private:
             stmt = substitute(stmt, a_buf_, ab_tmp_buf_);
             stmt = stmt.append(create_reorder_stmt(
                     read.reg_view(), reg_view, ab_tmp_buf_, a_buf_));
-            tmp_buf_size_
-                    = std::max(tmp_buf_size_, int(reg_view.vlayout_size()));
+            tmp_buf_size_ = std::max(
+                    tmp_buf_size_, int(read.reg_view().vlayout_size()));
         }
 
         if (read.is_slm()) {
@@ -4441,8 +4441,8 @@ private:
             stmt = substitute(stmt, b_buf_, ab_tmp_buf_);
             stmt = stmt.append(create_reorder_stmt(
                     read.reg_view(), reg_view, ab_tmp_buf_, b_buf_));
-            tmp_buf_size_
-                    = std::max(tmp_buf_size_, int(reg_view.vlayout_size()));
+            tmp_buf_size_ = std::max(
+                    tmp_buf_size_, int(read.reg_view().vlayout_size()));
         }
 
         if (read.is_slm()) {
