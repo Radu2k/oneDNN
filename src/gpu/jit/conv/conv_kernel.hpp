@@ -321,6 +321,25 @@ public:
         return ngen_operand_t(rd, exec_size);
     }
 
+    bool operator==(const ngen_operand_t &other) const {
+        if (kind_ != other.kind_) return false;
+        if (mod_.getAll() != other.mod_.getAll()) return false;
+        switch (kind_) {
+            case ngen_operand_kind_t::immediate: {
+                auto &this_imm = immediate();
+                auto &other_imm = other.immediate();
+                return (this_imm.getType() == other_imm.getType())
+                        && (uint64_t(this_imm) == uint64_t(other_imm));
+            }
+            case ngen_operand_kind_t::reg_data:
+                return reg_data() == other.reg_data();
+            case ngen_operand_kind_t::flag_register:
+                return flag_register() == other.flag_register();
+            default: ir_error_not_expected();
+        }
+        return false;
+    }
+
 private:
     template <ngen_operand_kind_t kind>
     static void destroy(void *ptr) {
@@ -447,54 +466,84 @@ private:
 
 class expr_binding_t {
 public:
-    void bind(const expr_t &expr, const ngen_operand_t &operand) {
-        bind_unevaluated(expr, operand);
-        mark_as_evaluated(expr);
+    expr_binding_t(ngen::HW hw) : hw_(hw) {}
+
+    ~expr_binding_t() {
+        ir_assert(expr2dst_.empty()) << "Detected missing unbind_dst().";
     }
 
-    void bind_unevaluated(const expr_t &expr, const ngen_operand_t &operand) {
+    bool is_dst_bound(const expr_t &expr) const {
+        return expr2dst_.count(expr) == 1;
+    }
+
+    ngen_operand_t get_dst(const expr_t &expr) const {
+        ir_assert(is_dst_bound(expr)) << "Destination is not bound: " << expr;
+        return expr2dst_.at(expr);
+    }
+
+    void bind_dst(const expr_t &expr, const ngen_operand_t &operand) {
         ir_assert(!expr.is_empty());
-        auto ret = expr2operand_.insert({expr, operand});
-        ir_assert(ret.second);
-        MAYBE_UNUSED(ret);
+        auto ret = expr2dst_.insert({expr, operand});
+        ir_assert(ret.second) << "Already bound: " << expr;
     }
 
-    void unbind(const expr_t &expr) {
+    void unbind_dst(const expr_t &expr) {
         ir_assert(!expr.is_empty());
-
-        auto op_it = expr2operand_.find(expr);
-        ir_assert(op_it != expr2operand_.end());
-        expr2operand_.erase(op_it);
-
-        auto eval_it = evaluated_.find(expr);
-        ir_assert(eval_it != evaluated_.end());
-        evaluated_.erase(eval_it);
-    }
-
-    void mark_as_evaluated(const expr_t &expr) {
-        ir_assert(!expr.is_empty());
-        auto ret = evaluated_.insert(expr);
-        ir_assert(ret.second);
-        MAYBE_UNUSED(ret);
-    }
-
-    ngen_operand_t get(const expr_t &expr) const {
-        if (expr.is_empty()) return ngen_operand_t();
-        return expr2operand_.at(expr);
+        auto it = expr2dst_.find(expr);
+        ir_assert(it != expr2dst_.end());
+        expr2dst_.erase(it);
     }
 
     bool is_bound(const expr_t &expr) const {
         return expr2operand_.count(expr) == 1;
     }
 
-    bool is_evaluated(const expr_t &expr) const {
-        if (!is_bound(expr)) return false;
-        return evaluated_.count(expr) == 1;
+    ngen_operand_t get(const expr_t &expr, bool allow_empty = false) const {
+        if (expr.is_empty()) return ngen_operand_t();
+        if (!is_bound(expr)) {
+            if (!allow_empty)
+                ir_assert(false) << "Operand is not bound: " << expr;
+            return ngen_operand_t();
+        }
+        return expr2operand_.at(expr);
+    }
+
+    void bind(const expr_t &expr, const ngen_operand_t &operand) {
+        if (is_dst_bound(expr)) unbind_dst(expr);
+
+        auto op_to_bind = operand;
+
+        // Operand is with predicate - can't bind.
+        if (operand.mod().getPredCtrl() != ngen::PredCtrl::None) return;
+
+        int esize = operand.mod().getExecSize();
+        if (esize == 0) esize = 1;
+        if (esize != expr.type().elems()) {
+            ir_assert(expr.type().is_scalar() || esize == 1)
+                    << "Expected broadcast.";
+            // Can't bind scalar to vector, extract scalar and bind.
+            if (operand.is_reg_data() && esize != 1) {
+                op_to_bind = ngen_reg_data(
+                        hw_, operand.reg_data(), 0, ngen::DataType::invalid, 1);
+            }
+        }
+
+        auto ret = expr2operand_.insert({expr, op_to_bind});
+        ir_assert(ret.second) << "Already bound: " << expr;
+    }
+
+    void unbind(const expr_t &expr) {
+        ir_assert(!expr.is_empty());
+
+        auto it = expr2operand_.find(expr);
+        ir_assert(it != expr2operand_.end());
+        expr2operand_.erase(it);
     }
 
 private:
+    ngen::HW hw_;
+    object_map_t<expr_t, ngen_operand_t> expr2dst_;
     object_map_t<expr_t, ngen_operand_t> expr2operand_;
-    object_set_t<expr_t> evaluated_;
 };
 
 template <ngen::HW hw>
@@ -855,46 +904,46 @@ public:
             const expr_binding_t &expr_binding, ngen_register_scope_t &scope)
         : host_(host), expr_binding_(expr_binding), scope_(scope) {}
 
-    // If `out_operand` is not empty, use its pre-allocated location for the
+    // If `dst_operand` is not empty, use its pre-allocated location for the
     // result.
     ngen_operand_t eval(const expr_t &e,
-            const ngen_operand_t &out_operand = ngen_operand_t()) {
-        if (!out_operand.is_invalid()) {
-            ir_assert(out_operand.mod().getExecSize() != 0);
+            const ngen_operand_t &dst_operand = ngen_operand_t()) {
+        if (!dst_operand.is_invalid()) {
+            ir_assert(dst_operand.mod().getExecSize() != 0);
         }
-        if (expr_binding_.is_evaluated(e)) {
-            if (!out_operand.is_invalid()) {
+        if (expr_binding_.is_bound(e)) {
+            if (!dst_operand.is_invalid()) {
                 host_->emov(
-                        out_operand.mod(), out_operand, expr_binding_.get(e));
+                        dst_operand.mod(), dst_operand, expr_binding_.get(e));
             }
         } else {
-            if (!out_operand.is_invalid())
-                expr_binding_.bind_unevaluated(e, out_operand);
+            if (!dst_operand.is_invalid())
+                expr_binding_.bind_dst(e, dst_operand);
             visit(e);
         }
 
-        return expr_binding_.get(e);
+        return expr_binding_.get(e, /*allow_empty=*/true);
     }
 
     std::vector<ngen_operand_t> eval(const std::vector<expr_t> &exprs) {
         std::vector<ngen_operand_t> ret;
         for (auto &e : exprs) {
-            if (!expr_binding_.is_evaluated(e)) visit(e);
+            if (!expr_binding_.is_bound(e)) visit(e);
             ret.push_back(expr_binding_.get(e));
         }
         return ret;
     }
 
     void _visit(const binary_op_t *obj) override {
-        auto dst_op = alloc_op(obj);
+        auto dst_op = alloc_dst_op(obj);
         auto mod = dst_op.mod();
 
         switch (obj->op_kind) {
             case op_kind_t::_and: {
-                auto src0_op = eval(obj->a, dst_op);
+                eval(obj->a, dst_op);
                 eval(obj->b,
                         ngen_operand_t(
-                                dst_op, mod | src0_op.flag_register_mod()));
+                                dst_op, mod | dst_op.flag_register_mod()));
                 break;
             }
             default: {
@@ -909,7 +958,7 @@ public:
             }
         }
 
-        expr_binding_.mark_as_evaluated(obj);
+        bind(obj, dst_op);
     }
 
     void _visit(const bool_imm_t *obj) override {
@@ -933,14 +982,14 @@ public:
             return;
         }
 
-        auto dst_op = alloc_op(obj);
+        auto dst_op = alloc_dst_op(obj);
 
         // Handle ptr -> u64 and u64 -> ptr casts.
         if (utils::one_of(obj->type, type_t::u64(), type_t::byte_ptr())
                 && utils::one_of(
                         obj->expr.type(), type_t::u64(), type_t::byte_ptr())) {
             eval(obj->expr, dst_op);
-            expr_binding_.mark_as_evaluated(obj);
+            bind(obj, dst_op);
             return;
         }
 
@@ -951,7 +1000,7 @@ public:
                 && from_type.size() >= to_type.size());
         if (is_int_convert) {
             eval(obj->expr, dst_op.reinterpret(hw, from_type));
-            expr_binding_.mark_as_evaluated(obj);
+            bind(obj, dst_op);
             return;
         }
 
@@ -959,7 +1008,7 @@ public:
         auto mod = dst_op.mod();
         if (obj->saturate) mod |= host_->sat;
         host_->emov(mod, dst_op, expr_op);
-        expr_binding_.mark_as_evaluated(obj);
+        bind(obj, dst_op);
     }
 
     void _visit(const float_imm_t *obj) override { bind(obj, to_ngen(obj)); }
@@ -1006,7 +1055,7 @@ public:
     void _visit(const shuffle_t *obj) override {
         int elems = obj->elems();
         if (obj->type.is_bool() && is_shuffle_const(obj)) {
-            auto dst_op = alloc_op(obj);
+            auto dst_op = alloc_dst_op(obj);
             auto e_shuffle = expr_t(obj);
             ir_assert(dst_op.is_flag_register()) << e_shuffle;
             ir_assert(!dst_op.is_negated()) << e_shuffle;
@@ -1022,15 +1071,15 @@ public:
                 host_->and_(1, dst_op.flag_register(), dst_op.flag_register(),
                         ngen::Immediate(flag_mask));
             }
-            expr_binding_.mark_as_evaluated(obj);
+            bind(obj, dst_op);
             return;
         }
 
         if (obj->is_broadcast()) {
             if (obj->type.is_bool()) {
-                auto dst_op = alloc_op(obj);
+                auto dst_op = alloc_dst_op(obj);
                 eval(obj->vec[0], dst_op);
-                expr_binding_.mark_as_evaluated(obj);
+                bind(obj, dst_op);
             } else {
                 auto scalar_op = eval(obj->vec[0]);
                 bind(obj, scalar_op);
@@ -1049,22 +1098,28 @@ public:
             }
         }
 
-        auto dst_op = alloc_op(obj);
+        auto dst_op = alloc_dst_op(obj);
         for (auto &chunk : chunks) {
             int off = std::get<0>(chunk);
-            int exec_size = std::get<1>(chunk);
+            int length = std::get<1>(chunk);
             int idx = std::get<2>(chunk);
-            auto chunk_op = dst_op.sub_reg_data(hw, off, exec_size);
-            eval(obj->vec[idx], ngen_operand_t(chunk_op, exec_size));
+            // Split length into powers of two.
+            while (length > 0) {
+                int exec_size = (1 << math::ilog2q(length));
+                auto chunk_op = dst_op.sub_reg_data(hw, off, exec_size);
+                eval(obj->vec[idx], ngen_operand_t(chunk_op, exec_size));
+                length -= exec_size;
+                off += exec_size;
+            }
         }
-        expr_binding_.mark_as_evaluated(obj);
+        bind(obj, dst_op);
     }
 
     void _visit(const ternary_op_t *obj) override {
         switch (obj->op_kind) {
             case op_kind_t::_add3:
             case op_kind_t::_mad: {
-                auto dst_op = alloc_op(obj);
+                auto dst_op = alloc_dst_op(obj);
                 auto mod = dst_op.mod();
                 auto src0_op = eval(obj->a);
                 auto src1_op = eval(obj->b);
@@ -1074,6 +1129,7 @@ public:
                 } else {
                     host_->emad(mod, dst_op, src0_op, src1_op, src2_op);
                 }
+                bind(obj, dst_op);
                 break;
             }
             default: ir_error_not_expected();
@@ -1087,15 +1143,14 @@ public:
     }
 
     void _visit(const var_t *obj) override {
-        ir_assert(expr_binding_.is_evaluated(obj)) << expr_t(obj);
+        ir_assert(expr_binding_.is_bound(obj))
+                << "Variable is not defined: " << expr_t(obj);
     }
 
 private:
-    ngen_operand_t alloc_op(const expr_t &e) {
-        if (expr_binding_.is_bound(e)) {
-            ir_assert(!expr_binding_.is_evaluated(e)) << "Already evaluated.";
-            return expr_binding_.get(e);
-        }
+    ngen_operand_t alloc_dst_op(const expr_t &e) {
+        ir_assert(!expr_binding_.is_bound(e)) << "Already evaluated.";
+        if (expr_binding_.is_dst_bound(e)) return expr_binding_.get_dst(e);
 
         // Expression is not bound yet, allocate new storage and bind.
         ngen_operand_t op;
@@ -1105,7 +1160,7 @@ private:
             op = ngen_operand_t(
                     scope_.alloc_reg_data(e.type()), e.type().elems());
         }
-        expr_binding_.bind_unevaluated(e, op);
+        expr_binding_.bind_dst(e, op);
         return op;
     }
 
@@ -1129,15 +1184,20 @@ private:
     }
 
     void bind(const expr_t &e, const ngen_operand_t &op) {
-        if (!expr_binding_.is_bound(e)) {
+        if (!expr_binding_.is_dst_bound(e)) {
             expr_binding_.bind(e, op);
             return;
         }
-
+        auto dst_op = expr_binding_.get_dst(e);
+        if (dst_op == op) {
+            expr_binding_.bind(e, op);
+            return;
+        }
         // Expression is already bound, move to the location it was bound to.
-        auto bound_op = expr_binding_.get(e);
-        host_->emov(bound_op.mod(), bound_op, op);
-        expr_binding_.mark_as_evaluated(e);
+        // This is required for immediate values - they are bound as is but
+        // sometimes we need them to be moved to registers.
+        host_->emov(dst_op.mod(), dst_op, op);
+        expr_binding_.bind(e, dst_op);
     }
 
     void ebinary(const binary_op_t *obj, const ngen::InstructionModifier &mod,
@@ -2342,10 +2402,10 @@ public:
     }
 
     void _visit(const let_t *obj) override {
-        // External variable.
         if (obj->value.is_empty()) {
+            // External variable, must be already bound.
             ir_assert(expr_binding_.is_bound(obj->var))
-                    << "Unknown external variable: " << obj->var;
+                    << "Variable is not defined: " << obj->var;
             visit(obj->body);
             return;
         }
@@ -2603,9 +2663,9 @@ private:
     }
 
     ngen_operand_t eval(const expr_t &e, ngen_register_scope_t &scope,
-            const ngen_operand_t &out_operand = ngen_operand_t()) {
+            const ngen_operand_t &dst_operand = ngen_operand_t()) {
         expr_evaluator_t<hw> expr_evaluator(host_, expr_binding_, scope);
-        return expr_evaluator.eval(e, out_operand);
+        return expr_evaluator.eval(e, dst_operand);
     }
 
     std::vector<ngen_operand_t> eval(
@@ -2663,7 +2723,7 @@ conv_kernel_t<hw>::conv_kernel_t(const conv_config_t &cfg,
     barrierheader(signal_header_);
 
     // Bind "external" variables.
-    expr_binding_t expr_binding;
+    expr_binding_t expr_binding(hw);
 
     // Bind grid indices.
     expr_binding.bind(builder.kernel_grid_idx(0), r0.ud(1));
