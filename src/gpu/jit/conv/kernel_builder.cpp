@@ -4564,7 +4564,7 @@ private:
 class compute_builder_t {
 public:
     compute_builder_t(const conv_config_t &cfg, ir_context_t &ir_ctx,
-            const constraint_set_t &cset)
+            constraint_set_t &cset)
         : cfg_(cfg)
         , ir_ctx_(ir_ctx)
         , cset_(cset)
@@ -4811,16 +4811,22 @@ private:
 
             // Reduce grid and try again.
             auto grid_idx = g2s_ctx.create_tmp_grid_idx();
+            int dim_idx;
             expr_t grid_idx_value;
-            auto new_load_grid = load_grid.halven(grid_idx, grid_idx_value);
+            auto new_load_grid
+                    = load_grid.halven(grid_idx, dim_idx, grid_idx_value);
             if (new_load_grid.is_empty()) break;
 
             if (new_load_grid == g2s_ctx.prev_load_grid) {
                 new_load_grid = load_grid.halven(
-                        grid_idx, grid_idx_value, /*first=*/false);
+                        grid_idx, dim_idx, grid_idx_value, /*first=*/false);
                 g2s_ctx.reuse_buffers = true;
             }
             g2s_ctx.set_grid_idx_value(grid_idx, grid_idx_value);
+
+            cset_.add_constraint(grid_idx >= 0);
+            cset_.add_constraint(grid_idx < new_load_grid.dim(dim_idx));
+
             load_grid = new_load_grid;
         }
         ir_error_not_expected() << "Can't create GMEM -> SLM loads/stores.";
@@ -5000,7 +5006,7 @@ private:
 
     const conv_config_t &cfg_;
     ir_context_t &ir_ctx_;
-    const constraint_set_t &cset_;
+    constraint_set_t &cset_;
     post_op_context_t post_op_ctx_;
     b_reduce_context_t b_reduce_ctx_;
 

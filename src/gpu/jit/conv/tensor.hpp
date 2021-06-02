@@ -787,10 +787,11 @@ public:
         return ret;
     }
 
-    grid_info_t halven(const expr_t &new_idx, expr_t &new_idx_value,
-            bool first = true) const {
+    grid_info_t halven(const expr_t &new_idx, int &dim_idx,
+            expr_t &new_idx_value, bool first = true) const {
         for (int i = ndims() - 1; i >= 0; i--) {
             if (dim(i) == 1 || dim(i) % 2 != 0) continue;
+            dim_idx = i;
             if (first) return slice(i, 0, dim(i) / 2, new_idx, new_idx_value);
             return slice(i, dim(i) / 2, dim(i) / 2, new_idx, new_idx_value);
         }
