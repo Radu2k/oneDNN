@@ -192,6 +192,7 @@ public:
 
     status_t init(convolution_pd_t *conv_pd, engine_t *engine) {
         CHECK(conv_problem_t::init(conv_pd));
+        CHECK(init_hw(engine));
         CHECK(init_abc_data_types());
         CHECK(init_acc_data_type());
         CHECK(init_fma_kind());
@@ -203,18 +204,18 @@ public:
         if (with_groups && g > 1) return status::unimplemented;
 
         if (is_fwd)
-            CHECK(init_fwd(conv_pd, engine));
+            CHECK(init_fwd(conv_pd));
         else if (is_bwd_d)
-            CHECK(init_bwd_d(conv_pd, engine));
+            CHECK(init_bwd_d(conv_pd));
         else if (is_bwd_w)
-            CHECK(init_bwd_w(conv_pd, engine));
+            CHECK(init_bwd_w(conv_pd));
         else
             ir_error_not_expected();
 
         return status::success;
     }
 
-    status_t init_fwd(convolution_pd_t *conv_pd, engine_t *engine) {
+    status_t init_fwd(convolution_pd_t *conv_pd) {
         using namespace ir_utils;
 
         // First convolution is not supported.
@@ -311,7 +312,7 @@ public:
         kernel_grid_dim[1] = od * oh * ow_tg_dim;
         kernel_grid_dim[2] = mb_tg_dim;
 
-        CHECK(init_common_config(engine));
+        CHECK(init_common_config());
 
         // Do not perform full unrolling when there are too many inner
         // iterations.
@@ -405,7 +406,7 @@ public:
         return status::success;
     }
 
-    status_t init_bwd_d(convolution_pd_t *conv_pd, engine_t *engine) {
+    status_t init_bwd_d(convolution_pd_t *conv_pd) {
         using namespace ir_utils;
 
         // First convolution is not supported.
@@ -467,7 +468,7 @@ public:
         kernel_grid_dim[1] = id * ih * iw_tg_dim;
         kernel_grid_dim[2] = mb_tg_dim;
 
-        CHECK(init_common_config(engine));
+        CHECK(init_common_config());
 
         // Do not perform full unrolling when there are too many inner
         // iterations.
@@ -551,7 +552,7 @@ public:
         return status::success;
     }
 
-    status_t init_bwd_w(convolution_pd_t *conv_pd, engine_t *engine) {
+    status_t init_bwd_w(convolution_pd_t *conv_pd) {
         using namespace ir_utils;
 
         // First convolution is not supported.
@@ -613,7 +614,7 @@ public:
                 = ic_tg_dim * kd * kh * kw * od_tg_dim * oh_tg_dim * ow_tg_dim;
         kernel_grid_dim[2] = mb_tg_dim;
 
-        CHECK(init_common_config(engine));
+        CHECK(init_common_config());
 
         // Set BWD_W-specific settings.
         do_b_reduction = with_bias;
@@ -714,28 +715,8 @@ public:
 #endif
     }
 
-    status_t init_common_config(engine_t *engine) {
+    status_t init_common_config() {
         using namespace ir_utils;
-        using namespace compute;
-
-        auto compute_engine
-                = utils::downcast<compute::compute_engine_t *>(engine);
-        auto device_info = compute_engine->device_info();
-
-        switch (device_info->gpu_arch()) {
-            case gpu_arch_t::gen9: hw = ngen::HW::Gen9; break;
-            case gpu_arch_t::xe_lp: hw = ngen::HW::Xe_LP; break;
-#if DNNL_WITH_XE_HP
-            case gpu_arch_t::xe_hp: hw = ngen::HW::Xe_HP; break;
-#endif
-#if DNNL_WITH_XE_HPG
-            case gpu_arch_t::xe_hpg: hw = ngen::HW::Xe_HPG; break;
-#endif
-#if DNNL_WITH_XE_HPC
-            case gpu_arch_t::xe_hpc: hw = ngen::HW::Xe_HPC; break;
-#endif
-            default: return status::unimplemented;
-        }
 
         do_b_reduction = false;
         use_a_slm = true;
@@ -968,6 +949,30 @@ public:
     int b_sub_tiles;
 
 private:
+    status_t init_hw(engine_t *engine) {
+        using namespace compute;
+
+        auto compute_engine
+                = utils::downcast<compute::compute_engine_t *>(engine);
+        auto device_info = compute_engine->device_info();
+
+        switch (device_info->gpu_arch()) {
+            case gpu_arch_t::gen9: hw = ngen::HW::Gen9; break;
+            case gpu_arch_t::xe_lp: hw = ngen::HW::Xe_LP; break;
+#if DNNL_WITH_XE_HP
+            case gpu_arch_t::xe_hp: hw = ngen::HW::Xe_HP; break;
+#endif
+#if DNNL_WITH_XE_HPG
+            case gpu_arch_t::xe_hpg: hw = ngen::HW::Xe_HPG; break;
+#endif
+#if DNNL_WITH_XE_HPC
+            case gpu_arch_t::xe_hpc: hw = ngen::HW::Xe_HPC; break;
+#endif
+            default: return status::unimplemented;
+        }
+        return status::success;
+    }
+
     // Initializes A/B/C data types (GEMM notation: C += A * B) according to
     // the following convention:
     // FWD:        src -> A,      wei -> B,      dst -> C
