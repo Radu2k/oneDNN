@@ -896,6 +896,234 @@ private:
     EmulationState emu_state;
 };
 
+inline ngen::Subregister get_subregister(
+        ngen::HW hw, ngen::DataType type, const ngen::GRFRange &r, int idx) {
+    int grf_size = ngen::GRF::bytes(hw);
+    int type_size = ngen::getBytes(type);
+    int off = idx * type_size;
+    return r[off / grf_size].sub((off % grf_size) / type_size, type);
+}
+
+template <ngen::HW hw = ngen::HW::Unknown>
+class zero_out_kernel_t : public jit_generator<hw> {
+public:
+    NGEN_FORWARD_OPENCL(hw);
+
+    zero_out_kernel_t(int regs, bool with_dpas) : ra_(hw) {
+        externalName("zero_out");
+        requireLocalID(1);
+        requireLocalSize();
+        requireGRF(regs);
+        requireSIMD(simd);
+        if (with_dpas) requireDPAS();
+
+        newArgument("ptr", ngen::ExternalArgumentType::GlobalPtr);
+        newArgument("size", ngen::DataType::ud);
+
+        finalizeInterface();
+
+        // Claim registers.
+        ra_.claim(r0);
+        ra_.claim(getLocalID(0));
+        ra_.claim(getLocalSize(0));
+        ra_.claim(getArgument("size"));
+
+        setDefaultNoMask();
+        setDefaultAutoSWSB(true);
+
+        prologue();
+
+        auto surf = Surface(getArgumentSurface("ptr"));
+        auto size = getArgument("size");
+        auto global_id = ra_.alloc_sub<uint32_t>();
+        auto off0 = ra_.alloc_sub<uint32_t>();
+
+        mul(1, global_id, r0.ud(1), getLocalSize(0).uw());
+        add(1, global_id, global_id, getLocalID(0));
+        shl(1, off0, global_id, math::ilog2q(bytes_per_thr / simd));
+
+        int grf_size = ngen::GRF::bytes(hw);
+        int bytes_per_store = 16;
+        int ud_size = sizeof(uint32_t);
+
+        auto zero = ra_.alloc_range(bytes_per_store * ud_size / grf_size);
+        auto header = ra_.alloc_range(bytes_per_thr * ud_size / grf_size);
+
+        for (int i = 0; i < bytes_per_store * ud_size; i += 64) {
+            auto z = get_subregister(hw, ngen::DataType::ud, zero, i);
+            mov(16, z, 0);
+        }
+
+        auto idx_vec = ra_.alloc().uw();
+        mov(8, idx_vec, ngen::Immediate::uv(0, 1, 2, 3, 4, 5, 6, 7));
+
+        for (int i = 0; i < bytes_per_thr; i += 8) {
+            auto h = get_subregister(hw, ngen::DataType::ud, header, i);
+            add3(8, h, off0, idx_vec, i);
+        }
+
+        for (int i = 0; i < bytes_per_thr; i += bytes_per_store) {
+            auto h = get_subregister(hw, ngen::DataType::ud, header, i);
+            cmp(16 | lt | f0[0], h(1), size);
+            store(16 | f0[0], ngen::scattered_byte(), surf, h, zero[0]);
+        }
+
+        epilogue();
+    }
+
+    void epilogue() {
+        const int dwords = ngen::GRF::bytes(hw) / sizeof(uint32_t);
+
+        auto tmp = ra_.alloc();
+        memfence(tmp);
+        mov<uint32_t>(dwords, null, tmp);
+
+        slmfence(tmp, r0);
+        mov<int32_t>(dwords, null, tmp);
+
+        mov<uint32_t>(8, r255, r0);
+        threadend(r255);
+        ra_.safeRelease(tmp);
+    }
+
+    static const int bytes_per_thr;
+    static const int simd;
+
+private:
+    ngen::RegisterAllocator ra_;
+};
+
+template <ngen::HW hw>
+const int zero_out_kernel_t<hw>::bytes_per_thr = 128;
+
+template <ngen::HW hw>
+const int zero_out_kernel_t<hw>::simd = 8;
+
+template <ngen::HW hw = ngen::HW::Unknown>
+class reorder_kernel_t : public jit_generator<hw> {
+public:
+    NGEN_FORWARD_OPENCL(hw);
+
+    reorder_kernel_t(int regs, bool with_dpas) : ra_(hw) {
+        externalName("reorder");
+        requireLocalID(1);
+        requireLocalSize();
+        requireGRF(regs);
+        requireSIMD(simd);
+        if (with_dpas) requireDPAS();
+
+        newArgument("src", ngen::ExternalArgumentType::GlobalPtr);
+        newArgument("dst", ngen::ExternalArgumentType::GlobalPtr);
+        newArgument("elems", ngen::DataType::ud);
+
+        finalizeInterface();
+
+        // Claim registers.
+        ra_.claim(r0);
+        ra_.claim(getLocalID(0));
+        ra_.claim(getLocalSize(0));
+        ra_.claim(getArgument("elems"));
+
+        setDefaultNoMask();
+        setDefaultAutoSWSB(true);
+
+        prologue();
+
+        int grf_size = ngen::GRF::bytes(hw);
+        int ud_size = sizeof(uint32_t);
+        int f_size = sizeof(float);
+        int bf_size = sizeof(uint16_t);
+
+        auto src_surf = Surface(getArgumentSurface("src"));
+        auto dst_surf = Surface(getArgumentSurface("dst"));
+        auto elems = getArgument("elems");
+        auto global_id = ra_.alloc_sub<uint32_t>();
+        auto elem_vec = ra_.alloc_range(elems_per_thr * ud_size / grf_size);
+
+        auto get_elem = [&](int i) {
+            return get_subregister(hw, ngen::DataType::ud, elem_vec, i);
+        };
+
+        auto S = ra_.alloc_range(elems_per_thr * f_size / grf_size);
+        // D is for bf16 but allocated as dword-strided to use with
+        // scattered_byte(2) messages.
+        auto D = ra_.alloc_range(elems_per_thr * f_size / grf_size);
+
+        auto get_src_reg = [&](int i) {
+            return get_subregister(hw, ngen::DataType::f, S, i);
+        };
+
+        auto get_dst_reg = [&](int i) {
+            return get_subregister(hw, ngen::DataType::bf, D, i);
+        };
+
+        mul(1, global_id, r0.ud(1), getLocalSize(0).uw());
+        add(1, global_id, global_id, getLocalID(0));
+
+        auto idx_vec = ra_.alloc().uw();
+        mov(8, idx_vec, ngen::Immediate::uv(0, 1, 2, 3, 4, 5, 6, 7));
+        for (int i = 0; i < elems_per_thr; i += 8)
+            shl(8, get_elem(i), global_id, math::ilog2q(elems_per_thr / simd));
+        for (int i = 0; i < elems_per_thr; i += 8)
+            add3(8, get_elem(i), get_elem(i), idx_vec, i);
+
+        int elems_per_load = 16;
+        for (int i = 0; i < elems_per_thr; i += elems_per_load) {
+            cmp(16 | lt | f0[0], get_elem(i), elems);
+            load(16 | f0[0], get_src_reg(i), ngen::scattered_dword(), src_surf,
+                    get_elem(i));
+        }
+
+        for (int i = 0; i < elems_per_thr; i += 8) {
+            // dst is dword-strided.
+            mov(8, get_dst_reg(i * 2)(2), get_src_reg(i)(1));
+        }
+
+        auto dst_header = ra_.alloc_range(elems_per_load * ud_size / grf_size);
+        for (int i = 0; i < elems_per_thr; i += elems_per_load) {
+            for (int j = 0; j < elems_per_load; j += 8) {
+                int off = j * ud_size;
+                auto h = dst_header[off / grf_size].ud(
+                        (off % grf_size) / ud_size);
+                shl(8, h, get_elem(i + j)(1), math::ilog2q(bf_size));
+            }
+
+            cmp(16 | lt | f0[0], get_elem(i), elems);
+            store(16 | f0[0], ngen::scattered_byte(2), dst_surf, dst_header[0],
+                    get_dst_reg(i * 2));
+        }
+
+        epilogue();
+    }
+
+    void epilogue() {
+        const int dwords = ngen::GRF::bytes(hw) / sizeof(uint32_t);
+
+        auto tmp = ra_.alloc();
+        memfence(tmp);
+        mov<uint32_t>(dwords, null, tmp);
+
+        slmfence(tmp, r0);
+        mov<int32_t>(dwords, null, tmp);
+
+        mov<uint32_t>(8, r255, r0);
+        threadend(r255);
+        ra_.safeRelease(tmp);
+    }
+
+    static const int elems_per_thr;
+    static const int simd;
+
+private:
+    ngen::RegisterAllocator ra_;
+};
+
+template <ngen::HW hw>
+const int reorder_kernel_t<hw>::elems_per_thr = 32;
+
+template <ngen::HW hw>
+const int reorder_kernel_t<hw>::simd = 8;
+
 // Evaluates expression by emitting instructions with nGEN.
 template <ngen::HW hw>
 class expr_evaluator_t : public ir_visitor_t {

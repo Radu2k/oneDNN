@@ -109,11 +109,6 @@ public:
 
         std::shared_ptr<conv_config_t> cfg;
         std::shared_ptr<kernel_arg_info_t> kernel_arg_info;
-
-        memory_desc_t tmp_wei_md;
-        memory_desc_t tmp_bia_md;
-        std::shared_ptr<primitive_desc_t> wei_reorder_pd;
-        std::shared_ptr<primitive_desc_t> bia_reorder_pd;
     };
 
     using gpu_primitive_t::gpu_primitive_t;
@@ -121,20 +116,11 @@ public:
     status_t init(engine_t *engine) override;
     status_t execute(const exec_ctx_t &ctx) const override;
 
-protected:
-    primitive_list_t nested_primitives() const override {
-        primitive_list_t ret;
-        if (wei_reorder_) ret.push_back(wei_reorder_.get());
-        if (bia_reorder_) ret.push_back(bia_reorder_.get());
-        return ret;
-    }
-
 private:
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
 
     std::shared_ptr<gen_convolution_t> impl_;
-    std::shared_ptr<primitive_t> wei_reorder_;
-    std::shared_ptr<primitive_t> bia_reorder_;
+    compute::kernel_t reorder_kernel_;
 };
 
 } // namespace jit

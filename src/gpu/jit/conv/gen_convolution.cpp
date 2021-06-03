@@ -19,7 +19,6 @@
 #include <iostream>
 #include <utility>
 
-#include "common/reorder.hpp"
 #include "common/utils.hpp"
 #include "gpu/jit/conv/config.hpp"
 #include "gpu/jit/conv/conv_kernel.hpp"
@@ -100,46 +99,23 @@ public:
 
     template <typename T>
     status_t init(T *primitive, engine_t *engine) {
+        auto &cfg = get_cfg(primitive);
+
         ir_trace() << "Configuration:" << std::endl;
-        ir_trace() << get_cfg(primitive);
+        ir_trace() << cfg;
 
-        auto compute_engine = utils::downcast<compute_engine_t *>(engine);
-        auto device_info = compute_engine->device_info();
+        kernel_ = make_kernel<conv_kernel_t>(primitive, engine, cfg,
+                primitive->pd(), *primitive->pd()->kernel_arg_info);
+        if (!kernel_) return status::runtime_error;
 
-        std::unique_ptr<jit::jit_generator_base> jit_gen_convolution;
-        switch (device_info->gpu_arch()) {
-            case gpu_arch_t::gen9:
-                jit_gen_convolution.reset(new conv_kernel_t<gpu_gen9>(
-                        get_cfg(primitive), primitive->pd(),
-                        *primitive->pd()->kernel_arg_info));
-                break;
-            case gpu_arch_t::xe_lp:
-                jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_lp>(
-                        get_cfg(primitive), primitive->pd(),
-                        *primitive->pd()->kernel_arg_info));
-                break;
-            case gpu_arch_t::xe_hp:
-                jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hp>(
-                        get_cfg(primitive), primitive->pd(),
-                        *primitive->pd()->kernel_arg_info));
-                break;
-#if DNNL_WITH_XE_HPG
-            case gpu_arch_t::xe_hpg:
-                jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hpg>(
-                        get_cfg(primitive), primitive->pd(),
-                        *primitive->pd()->kernel_arg_info));
-                break;
-#endif
-#if DNNL_WITH_XE_HPC
-            case gpu_arch_t::xe_hpc:
-                jit_gen_convolution.reset(new conv_kernel_t<gpu_xe_hpc>(
-                        get_cfg(primitive), primitive->pd(),
-                        *primitive->pd()->kernel_arg_info));
-                break;
-#endif
-            default: return status::unimplemented;
+        if (cfg.zero_out_output) {
+            bool with_dpas = utils::one_of(
+                    cfg.fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw);
+
+            zero_out_kernel_ = make_kernel<zero_out_kernel_t>(
+                    primitive, engine, cfg.regs, with_dpas);
+            if (!zero_out_kernel_) return status::runtime_error;
         }
-        CHECK(primitive->create_kernel(engine, &kernel_, *jit_gen_convolution));
 
         return status::success;
     }
@@ -155,8 +131,6 @@ public:
         kernel_arg_info.set_args(arg_list, storage_list);
 
         auto &cfg = get_cfg(primitive);
-        auto *compute_stream
-                = utils::downcast<compute_stream_t *>(ctx.stream());
 
         if (cfg.zero_out_output) {
             for (int i = 0; i < kernel_arg_info.nargs(); i++) {
@@ -169,16 +143,20 @@ public:
                                 memory_tracking::names::key_conv_bia_reduction))
                         continue;
                 }
-                if (kernel_arg_info.is_user(i)) {
-                    if (!utils::one_of(
-                                key, DNNL_ARG_DIFF_WEIGHTS, DNNL_ARG_DIFF_BIAS))
-                        continue;
-                }
-
                 const auto &storage
                         = kernel_arg_info.arg_storage(i, ctx, primitive);
                 size_t size = kernel_arg_info.arg_size(i, primitive);
-                CHECK(compute_stream->fill(*storage.get(), 0, size));
+
+                kernel_arg_list_t arg_list;
+                arg_list.set(0, *storage.get());
+                arg_list.set(1, uint32_t(size));
+
+                int bytes_per_thr = zero_out_kernel_t<>::bytes_per_thr;
+                int simd = zero_out_kernel_t<>::simd;
+                compute::nd_range_t nd_range(
+                        {utils::div_up(size, bytes_per_thr) * simd});
+                CHECK(primitive->parallel_for(
+                        ctx, nd_range, zero_out_kernel_, arg_list));
             }
         }
 
@@ -268,6 +246,7 @@ private:
     }
 
     kernel_t kernel_;
+    kernel_t zero_out_kernel_;
 };
 
 status_t gen_convolution_fwd_t::pd_t::init(engine_t *engine) {
@@ -312,20 +291,6 @@ status_t gen_convolution_bwd_weights_t::pd_t::init(engine_t *engine) {
     if (!is_bwd_w()) return status::unimplemented;
     CHECK(gen_convolution_t::init_pd(this, engine));
 
-    if (cfg->do_post_wei_reorder) {
-        tmp_wei_md = *diff_weights_md();
-        tmp_wei_md.data_type = data_type::f32;
-        CHECK(reorder_primitive_desc_create(wei_reorder_pd, engine, &tmp_wei_md,
-                diff_weights_md(), nullptr));
-    }
-
-    if (cfg->do_post_bia_reorder) {
-        tmp_bia_md = *diff_weights_md(1);
-        tmp_bia_md.data_type = data_type::f32;
-        CHECK(reorder_primitive_desc_create(bia_reorder_pd, engine, &tmp_bia_md,
-                diff_weights_md(1), nullptr));
-    }
-
     CHECK(init_scratchpad(*kernel_arg_info));
     return status::success;
 }
@@ -333,33 +298,25 @@ status_t gen_convolution_bwd_weights_t::pd_t::init(engine_t *engine) {
 status_t gen_convolution_bwd_weights_t::pd_t::init_scratchpad(
         kernel_arg_info_t &kernel_arg_info) {
     auto scratchpad = scratchpad_registry().registrar();
-    if (wei_reorder_pd) {
-        size_t tmp_wei_size
-                = memory_desc_wrapper(tmp_wei_md).nelems(/*with_padding=*/true)
+    if (cfg->do_post_wei_reorder) {
+        size_t tmp_wei_size = memory_desc_wrapper(diff_weights_md())
+                                      .nelems(/*with_padding=*/true)
                 * types::data_type_size(data_type::f32);
         scratchpad.book(memory_tracking::names::key_conv_wei_reduction,
                 tmp_wei_size, 1, ocl::OCL_BUFFER_ALIGNMENT);
         kernel_arg_info.register_scratchpad_arg(make_buffer("wei"),
                 memory_tracking::names::key_conv_wei_reduction,
                 /*is_input=*/false, tmp_wei_size);
-
-        scratchpad.book(memory_tracking::names::key_nested,
-                wei_reorder_pd->scratchpad_registry().size(), 1,
-                ocl::OCL_BUFFER_ALIGNMENT);
     }
-    if (bia_reorder_pd) {
-        size_t tmp_bia_size
-                = memory_desc_wrapper(tmp_bia_md).nelems(/*with_padding=*/true)
+    if (cfg->do_post_bia_reorder) {
+        size_t tmp_bia_size = memory_desc_wrapper(diff_weights_md(1))
+                                      .nelems(/*with_padding=*/true)
                 * types::data_type_size(data_type::f32);
         scratchpad.book(memory_tracking::names::key_conv_bia_reduction,
                 tmp_bia_size, 1, ocl::OCL_BUFFER_ALIGNMENT);
         kernel_arg_info.register_scratchpad_arg(make_buffer("bia"),
                 memory_tracking::names::key_conv_bia_reduction,
                 /*is_input=*/false, tmp_bia_size);
-
-        scratchpad.book(memory_tracking::names::key_nested + 1,
-                bia_reorder_pd->scratchpad_registry().size(), 1,
-                ocl::OCL_BUFFER_ALIGNMENT);
     }
     return status::success;
 }
@@ -374,57 +331,47 @@ status_t gen_convolution_bwd_data_t::execute(const exec_ctx_t &ctx) const {
 }
 
 status_t gen_convolution_bwd_weights_t::init(engine_t *engine) {
-    if (pd()->wei_reorder_pd) {
-        CHECK(pd()->wei_reorder_pd->create_primitive(wei_reorder_, engine));
-    }
-    if (pd()->bia_reorder_pd) {
-        CHECK(pd()->bia_reorder_pd->create_primitive(bia_reorder_, engine));
-    }
+    auto &cfg = *pd()->cfg;
     impl_.reset(new gen_convolution_t());
+    bool with_dpas
+            = utils::one_of(cfg.fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw);
+    if (cfg.do_post_wei_reorder || cfg.do_post_bia_reorder) {
+        reorder_kernel_ = make_kernel<reorder_kernel_t>(
+                this, engine, cfg.regs, with_dpas);
+        if (!reorder_kernel_) return status::runtime_error;
+    }
     return impl_->init(this, engine);
 }
 
 status_t gen_convolution_bwd_weights_t::execute(const exec_ctx_t &ctx) const {
     CHECK(impl_->execute(this, ctx));
-    if (wei_reorder_) {
+    if (pd()->cfg->do_post_wei_reorder) {
         auto scratchpad = ctx.get_scratchpad_grantor().get_memory_storage(
                 memory_tracking::names::key_conv_wei_reduction);
-        std::unique_ptr<memory_t> tmp_wei_mem;
-        CHECK(safe_ptr_assign(tmp_wei_mem,
-                new memory_t(ctx.stream()->engine(), &pd()->tmp_wei_md,
-                        std::move(scratchpad))));
-
-        exec_args_t args;
-        args[DNNL_ARG_SRC] = memory_arg_t {tmp_wei_mem.get(), true};
-        args[DNNL_ARG_DST]
-                = memory_arg_t {ctx.output(DNNL_ARG_DIFF_WEIGHTS), false};
-
-        nested_scratchpad_t ns(
-                ctx, memory_tracking::names::key_nested, wei_reorder_);
-        exec_ctx_t reorder_ctx(ctx, std::move(args));
-        reorder_ctx.set_scratchpad_grantor(ns.grantor());
-
-        CHECK(wei_reorder_->execute(reorder_ctx));
+        int elems = memory_desc_wrapper(pd()->diff_weights_md()).nelems(true);
+        kernel_arg_list_t arg_list;
+        arg_list.set(0, *scratchpad);
+        arg_list.set(1, CTX_OUT_STORAGE(DNNL_ARG_DIFF_WEIGHTS));
+        arg_list.set(2, elems);
+        int elems_per_thr = reorder_kernel_t<>::elems_per_thr;
+        int simd = reorder_kernel_t<>::simd;
+        compute::nd_range_t nd_range(
+                {utils::div_up(elems, elems_per_thr) * simd, 1, 1});
+        CHECK(parallel_for(ctx, nd_range, reorder_kernel_, arg_list));
     }
-    if (bia_reorder_) {
+    if (pd()->cfg->do_post_bia_reorder) {
         auto scratchpad = ctx.get_scratchpad_grantor().get_memory_storage(
                 memory_tracking::names::key_conv_bia_reduction);
-        std::unique_ptr<memory_t> tmp_bia_mem;
-        CHECK(safe_ptr_assign(tmp_bia_mem,
-                new memory_t(ctx.stream()->engine(), &pd()->tmp_bia_md,
-                        std::move(scratchpad))));
-
-        exec_args_t args;
-        args[DNNL_ARG_SRC] = memory_arg_t {tmp_bia_mem.get(), true};
-        args[DNNL_ARG_DST]
-                = memory_arg_t {ctx.output(DNNL_ARG_DIFF_BIAS), false};
-
-        nested_scratchpad_t ns(
-                ctx, memory_tracking::names::key_nested + 1, bia_reorder_);
-        exec_ctx_t reorder_ctx(ctx, std::move(args));
-        reorder_ctx.set_scratchpad_grantor(ns.grantor());
-
-        CHECK(bia_reorder_->execute(reorder_ctx));
+        int elems = memory_desc_wrapper(pd()->diff_weights_md(1)).nelems(true);
+        kernel_arg_list_t arg_list;
+        arg_list.set(0, *scratchpad);
+        arg_list.set(1, CTX_OUT_STORAGE(DNNL_ARG_DIFF_BIAS));
+        arg_list.set(2, elems);
+        int elems_per_thr = reorder_kernel_t<>::elems_per_thr;
+        int simd = reorder_kernel_t<>::simd;
+        compute::nd_range_t nd_range(
+                {utils::div_up(elems, elems_per_thr) * simd, 1, 1});
+        CHECK(parallel_for(ctx, nd_range, reorder_kernel_, arg_list));
     }
     return status::success;
 }
