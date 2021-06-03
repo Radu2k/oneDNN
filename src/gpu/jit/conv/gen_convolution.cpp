@@ -17,6 +17,7 @@
 #include "gpu/jit/conv/gen_convolution.hpp"
 
 #include <iostream>
+#include <utility>
 
 #include "common/reorder.hpp"
 #include "common/utils.hpp"
@@ -32,6 +33,49 @@ namespace gpu {
 namespace jit {
 
 using namespace compute;
+
+template <template <ngen::HW> class KernelT, typename... ArgsT>
+compute::kernel_t make_kernel(
+        gpu_primitive_t *primitive, engine_t *engine, ArgsT &&... args) {
+    auto compute_engine = utils::downcast<compute_engine_t *>(engine);
+    auto device_info = compute_engine->device_info();
+
+    std::unique_ptr<jit::jit_generator_base> jit_kernel;
+    switch (device_info->gpu_arch()) {
+        case gpu_arch_t::gen9:
+            jit_kernel = utils::make_unique<KernelT<gpu_gen9>>(
+                    std::forward<ArgsT>(args)...);
+            break;
+        case gpu_arch_t::xe_lp:
+            jit_kernel = utils::make_unique<KernelT<gpu_xe_lp>>(
+                    std::forward<ArgsT>(args)...);
+            break;
+        case gpu_arch_t::xe_hp:
+            jit_kernel = utils::make_unique<KernelT<gpu_xe_hp>>(
+                    std::forward<ArgsT>(args)...);
+            break;
+#if DNNL_WITH_XE_HPG
+        case gpu_arch_t::xe_hpg:
+            jit_kernel = utils::make_unique<KernelT<gpu_xe_hp>>(
+                    std::forward<ArgsT>(args)...);
+            break;
+#endif
+#if DNNL_WITH_XE_HPC
+        case gpu_arch_t::xe_hpc:
+            jit_kernel = utils::make_unique<KernelT<gpu_xe_hp>>(
+                    std::forward<ArgsT>(args)...);
+            break;
+#endif
+        default: break;
+    }
+
+    if (!jit_kernel) return compute::kernel_t();
+
+    compute::kernel_t kernel;
+    status_t status = primitive->create_kernel(engine, &kernel, *jit_kernel);
+    if (status != status::success) return compute::kernel_t();
+    return kernel;
+}
 
 class gen_convolution_t {
 public:
