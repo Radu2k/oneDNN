@@ -346,8 +346,6 @@ private:
 
     void body();
 
-    void epilogue();
-
 public:
     xe_hp_systolic_gemm_kernel_t(config_t cfg_);
 };

@@ -593,23 +593,6 @@ public:
         finalizeInterface();
     }
 
-    void epilogue() {
-        const int dwords = ngen::GRF::bytes(hw) / sizeof(uint32_t);
-
-        auto tmp = ra_.alloc();
-        memfence(tmp);
-        mov<uint32_t>(dwords, null, tmp);
-
-        slmfence(tmp, r0);
-        mov<int32_t>(dwords, null, tmp);
-
-        ngen::GRF last_reg(cfg_.regs - 1);
-        mov<uint32_t>(8, last_reg, r0);
-        threadend(last_reg);
-
-        ra_.safeRelease(tmp);
-    }
-
     // Kernel padding for instruction prefetch.
     void pad_kernel() {
         for (int rep = 0; rep < 8; rep++)
@@ -971,21 +954,6 @@ public:
         epilogue();
     }
 
-    void epilogue() {
-        const int dwords = ngen::GRF::bytes(hw) / sizeof(uint32_t);
-
-        auto tmp = ra_.alloc();
-        memfence(tmp);
-        mov<uint32_t>(dwords, null, tmp);
-
-        slmfence(tmp, r0);
-        mov<int32_t>(dwords, null, tmp);
-
-        mov<uint32_t>(8, r255, r0);
-        threadend(r255);
-        ra_.safeRelease(tmp);
-    }
-
     static const int bytes_per_thr;
     static const int simd;
 
@@ -1094,21 +1062,6 @@ public:
         }
 
         epilogue();
-    }
-
-    void epilogue() {
-        const int dwords = ngen::GRF::bytes(hw) / sizeof(uint32_t);
-
-        auto tmp = ra_.alloc();
-        memfence(tmp);
-        mov<uint32_t>(dwords, null, tmp);
-
-        slmfence(tmp, r0);
-        mov<int32_t>(dwords, null, tmp);
-
-        mov<uint32_t>(8, r255, r0);
-        threadend(r255);
-        ra_.safeRelease(tmp);
     }
 
     static const int elems_per_thr;

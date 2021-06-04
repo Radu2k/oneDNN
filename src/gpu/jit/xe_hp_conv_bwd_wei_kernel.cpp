@@ -136,18 +136,6 @@ public:
 
         epilogue();
     };
-
-    void epilogue() {
-        mov(8, r127.f(), r0.f());
-
-        memfence(r1);
-        mov(8, null.ud(), r1.ud());
-
-        mov(16, acc0.f(), 0.f);
-
-        sync(SyncFunction::nop, SWSB<AllPipes>(1));
-        threadend(r127);
-    }
 };
 
 template <gpu_gen_t hw>
@@ -312,18 +300,6 @@ public:
 
         epilogue();
     };
-
-    void epilogue() {
-        mov(8, r127.f(), r0.f());
-
-        memfence(r1);
-        mov(8, null.ud(), r1.ud());
-
-        mov(16, acc0.f(), 0.f);
-
-        sync(SyncFunction::nop, SWSB<AllPipes>(1));
-        threadend(r127);
-    }
 };
 
 template <gpu_gen_t hw>
@@ -691,20 +667,6 @@ public:
         dst_blk_size = conf.mb_block * conf.oc_block * 2; // 32x16 bf16
         wei_blk_size = conf.ic_block * conf.oc_block * 4; // 16x16 f32
         bia_blk_size = conf.oc_block * 4; // 16 f32
-    }
-
-    void epilogue() {
-        mov(8, r255.f(), r0.f());
-
-        slmfence(sb0, r_sfence);
-        memfence(sb1, r_mfence);
-        mov(8 | sb0.dst, null.ud(), r_sfence.ud());
-        mov(8 | sb1.dst, null.ud(), r_mfence.ud());
-
-        mov(16, acc0.f(), 0.f);
-
-        sync(SyncFunction::nop, SWSB<AllPipes>(1));
-        threadend(sb7, r255);
     }
 
     void kernel_pad() {

@@ -1424,14 +1424,6 @@ void xe_hp_systolic_gemm_kernel_t<hw>::body() {
 }
 
 template <HW hw>
-void xe_hp_systolic_gemm_kernel_t<hw>::epilogue() {
-    // Global memory fence and end of thread.
-    memfence(SWSB(sb14), r16);
-    mov<uint32_t>(8, r255, r0_save);
-    threadend(SWSB(sb14, 1), r255);
-}
-
-template <HW hw>
 xe_hp_systolic_gemm_kernel_t<hw>::xe_hp_systolic_gemm_kernel_t(config_t cfg_)
     : cfg(cfg_) {
     if (!cfg.valid()) assert(!"Invalid configuration");
@@ -1716,7 +1708,7 @@ xe_hp_systolic_gemm_kernel_t<hw>::xe_hp_systolic_gemm_kernel_t(config_t cfg_)
     body();
 
     // Epilogue.
-    epilogue();
+    epilogue(r0_save);
 
     // Kernel padding for instruction prefetch.
     for (int rep = 0; rep < 8; rep++)

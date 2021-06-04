@@ -842,17 +842,6 @@ public:
             nop();
     }
 
-    void epilogue() {
-        memfence(tmp0);
-        mov<uint32_t>(8, null, tmp0);
-
-        slmfence(tmp0, r0);
-        mov<int32_t>(8, null, tmp0);
-
-        mov<uint32_t>(8, r255, r0);
-        threadend(r255);
-    }
-
     void allocate_registers() {
         tmp0 = ra.alloc();
         signal_header = ra.alloc();
