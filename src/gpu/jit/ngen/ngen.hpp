@@ -1546,6 +1546,7 @@ using ngen::BinaryCodeGenerator<hw>::store; \
 using ngen::BinaryCodeGenerator<hw>::atomic; \
 template <typename... Targs> void memfence(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::memfence(std::forward<Targs>(args)...); } \
 template <typename... Targs> void slmfence(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::slmfence(std::forward<Targs>(args)...); } \
+template <typename... Targs> void epilogue(int GRFCount, bool hasSLM, const ngen::RegData &r0_info) { ngen::BinaryCodeGenerator<hw>::epilogue(GRFCount, hasSLM, r0_info); } \
 template <typename... Targs> void pushStream(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::pushStream(std::forward<Targs>(args)...); } \
 template <typename... Targs> InstructionStream *popStream(Targs&&... args) { return ngen::BinaryCodeGenerator<hw>::popStream(std::forward<Targs>(args)...); } \
 template <typename... Targs> void appendStream(Targs&&... args) { ngen::BinaryCodeGenerator<hw>::appendStream(std::forward<Targs>(args)...); } \

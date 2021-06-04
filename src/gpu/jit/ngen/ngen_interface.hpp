@@ -70,6 +70,8 @@ public:
 
     const std::string &getExternalName() const           { return kernelName; }
     int getSIMD() const                                  { return simd; }
+    int getGRFCount() const                              { return needGRF; }
+    size_t getSLMSize() const                            { return slmSize; }
 
     void require32BitBuffers()                           { allow64BitBuffers = false; }
     void requireBarrier()                                { barrierCount = 1; }

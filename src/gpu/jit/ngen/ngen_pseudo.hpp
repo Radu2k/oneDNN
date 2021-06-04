@@ -544,3 +544,45 @@ void loadargs(const GRF &base, int argGRFs, const GRF &temp = GRF(127))
         mark(_labelArgsLoaded);
     }
 }
+
+void epilogue(int GRFCount, bool hasSLM, const RegData &r0_info)
+{
+    GRF tmp0(GRFCount - 3);
+    GRF tmp1(GRFCount - 2);
+    GRF lastReg(GRFCount - 1);
+
+    bool doMemFence = false;
+    bool doSLMFence = false;
+    bool setAccToZero = false;
+
+    switch (hw) {
+        case HW::Xe_LP:
+        case HW::Xe_HP:
+#if NGEN_XE_HPG
+        case HW::Xe_HPG:
+#endif
+            doMemFence = true;
+            doSLMFence = true;
+            setAccToZero = true;
+            break;
+        default: break;
+    }
+
+    if (!hasSLM) doSLMFence = false;
+
+    int dwordsPerReg = GRF::bytes(hw) / sizeof(uint32_t);
+    mov<uint32_t>(dwordsPerReg, lastReg, r0_info);
+
+    if (doMemFence) memfence(tmp0, r0_info);
+    if (doSLMFence) slmfence(tmp1, r0_info);
+
+    if (setAccToZero) {
+        mov(16, acc0.f(), 0.f);
+        if (hw == HW::Xe_HP) mov(16, acc2.f(), 0.f);
+    }
+
+    if (doMemFence) wrdep(tmp0);
+    if (doSLMFence) wrdep(tmp1);
+
+    threadend(lastReg);
+}

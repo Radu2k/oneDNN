@@ -73,6 +73,13 @@ protected:
     Subregister getLocalSize(int dim) const                              { return interface_.getLocalSize(dim); }
 
     void prologue()                                                      { interface_.generatePrologue(*this); }
+    void epilogue(RegData r0_info)
+    {
+        if (r0_info.isInvalid()) r0_info = this->r0;
+        int GRFCount = interface_.getGRFCount();
+        bool hasSLM = (interface_.getSLMSize() > 0);
+        BinaryCodeGenerator<hw>::epilogue(GRFCount, hasSLM, r0_info);
+    }
 
 private:
     using BinaryCodeGenerator<hw>::labelManager;
@@ -233,7 +240,8 @@ NGEN_FORWARD_ELF_EXTRA
 
 #define NGEN_FORWARD_ELF_EXTRA \
 template <typename... Targs> void requireDPAS(Targs&&... args) { ngen::ELFCodeGenerator<hw>::requireDPAS(std::forward<Targs>(args)...); } \
-void prologue() { ngen::ELFCodeGenerator<hw>::prologue(); }
+void prologue() { ngen::ELFCodeGenerator<hw>::prologue(); } \
+void epilogue(const ngen::RegData &r0_info = ngen::RegData()) { ngen::ELFCodeGenerator<hw>::epilogue(r0_info); }
 
 template <HW hw>
 std::vector<uint8_t> ELFCodeGenerator<hw>::getBinary()
