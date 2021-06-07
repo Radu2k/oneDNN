@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -32,22 +32,7 @@ status_t gen9_simple_sum_t::init(engine_t *engine) {
     if (!gpu_engine) return status::runtime_error;
 
     auto jitter = gen9_simple_sum_kernel_f32_t();
-    auto binary
-            = jitter.get_binary(gpu_engine->context(), gpu_engine->device());
-    auto kernel_name = jitter.kernel_name();
-
-    gpu::ocl::ocl_wrapper_t<cl_kernel> ocl_kernel
-            = jitter.get_kernel(gpu_engine->context(), gpu_engine->device());
-
-    std::vector<gpu::compute::scalar_type_t> arg_types;
-    CHECK(get_kernel_arg_types(ocl_kernel, &arg_types));
-
-    auto shared_binary = std::make_shared<gpu::compute::binary_t>(binary);
-
-    kernel_ = compute::kernel_t(
-            new ocl::ocl_gpu_kernel_t(shared_binary, kernel_name, arg_types));
-    register_kernels({kernel_});
-    ocl::dump_kernel_binary(engine, kernel_);
+    CHECK(create_kernel(engine, &kernel_, jitter));
 
     return status::success;
 }
