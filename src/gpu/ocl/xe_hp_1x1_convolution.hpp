@@ -79,6 +79,8 @@ struct xe_hp_1x1_convolution_fwd_t : public gpu_primitive_t {
                             expect_data_types(s8, s8, f32, f32, s32))
                     && attr()->has_default_values(
                             attr_skip_mask, desc()->dst_desc.data_type)
+                    && post_ops_with_binary_ok(
+                            attr(), desc()->dst_desc.data_type)
                     && IMPLICATION(!attr()->output_scales_.has_default_values(),
                             utils::one_of(src_md_.data_type, s8, u8)
                                     && utils::one_of(
