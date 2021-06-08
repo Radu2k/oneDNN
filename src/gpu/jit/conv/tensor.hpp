@@ -690,8 +690,12 @@ public:
 
 private:
     // Returns vector of <dimension index, block size> pairs.
-    std::vector<std::pair<int, dim_t>> parse_format(
+    static std::vector<std::pair<int, dim_t>> parse_format(
             const std::string &format, int ndims_hint);
+
+    // Returns vector of <dimension letter, block size> pairs.
+    static std::vector<std::pair<char, dim_t>> parse_letter_blocks(
+            const std::string &format);
 
     void sanity_check() const;
 

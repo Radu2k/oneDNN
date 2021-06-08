@@ -15,7 +15,7 @@
 *******************************************************************************/
 
 #include <cctype>
-#include <regex>
+#include <sstream>
 
 #include "gpu/jit/conv/tensor.hpp"
 
@@ -43,7 +43,7 @@ layout_t::layout_t(const type_t &type, const expr_t &offset,
     }
 
     dim_t stride = 1;
-    // Iterate from left to right (innermost to outermost).
+    // Iterate from right to left (innermost to outermost).
     for (auto it = parts.rbegin(); it != parts.rend(); ++it) {
         int dim_idx = it->first;
         dim_t block = it->second;
@@ -348,6 +348,28 @@ void layout_t::align_layouts(layout_t &a, layout_t &b) {
     }
 }
 
+std::vector<std::pair<char, dim_t>> layout_t::parse_letter_blocks(
+        const std::string &format) {
+    std::vector<std::pair<char, dim_t>> ret;
+
+    std::stringstream ss(format);
+    while (!ss.eof()) {
+        int next = ss.peek();
+        if (ss.eof()) break;
+        dim_t block = 0;
+        while (std::isdigit(next)) {
+            block = 10 * block + (next - '0');
+            ss.ignore(1);
+            next = ss.peek();
+        }
+        char letter = char(ss.peek());
+        ir_assert(!ss.eof()) << "EOF is unexpected.";
+        ss.ignore(1);
+        ret.emplace_back(letter, block);
+    }
+    return ret;
+}
+
 std::vector<std::pair<int, dim_t>> layout_t::parse_format(
         const std::string &format, int ndims_hint) {
     bool seen_letters[DNNL_MAX_NDIMS] = {};
@@ -364,16 +386,14 @@ std::vector<std::pair<int, dim_t>> layout_t::parse_format(
         ir_assert(seen_letters[i] == (i < letter_ndims));
     }
 
-    std::string s = format;
-    std::regex r(R"((\d*)([a-zA-Z]))");
-    std::smatch sm;
+    auto letter_blocks = parse_letter_blocks(format);
 
     std::vector<std::pair<int, dim_t>> parts;
-    while (regex_search(s, sm, r)) {
-        auto c = sm.str(2)[0];
-        int dim_idx = (c == 'x') ? -1 : (std::tolower(c) - 'a');
-        dim_t block = sm.str(1).empty() ? 0 : std::stol(sm.str(1));
-        if (dim_idx != -1) {
+    for (auto &p : letter_blocks) {
+        char letter = p.first;
+        dim_t block = p.second;
+        if (letter != 'x') {
+            int dim_idx = std::tolower(letter) - 'a';
             parts.emplace_back(dim_idx, block);
         } else {
             ir_assert(ndims_hint >= letter_ndims);
@@ -381,7 +401,6 @@ std::vector<std::pair<int, dim_t>> layout_t::parse_format(
                 parts.emplace_back(i, 0);
             }
         }
-        s = sm.suffix();
     }
 
     return parts;
