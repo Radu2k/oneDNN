@@ -789,7 +789,7 @@ public:
                         po.binary.src1_desc.dims, ndims);
                 // per_oc broadcast is always supported.
                 if ((mask & (1 << 1)) == 0) continue;
-                auto rhs_layout = layout_t(po.binary.src1_desc).normalize();
+                auto rhs_layout = layout_t(po.binary.src1_desc);
                 auto rhs0 = rhs_layout.blocks()[0];
                 int block_bytes = rhs0.block * rhs_layout.type().size();
                 // Innermost block must:
@@ -1208,7 +1208,7 @@ private:
 
     static layout_t init_layout(memory_desc_t &md, const std::string &tag) {
         if (md.format_kind != format_kind::any) return layout_t(md);
-        auto ret = layout_t(md, tag);
+        auto ret = layout_t(md, tag, /*do_normalize=*/false);
         md = ret.to_dnnl(md.dims);
         return ret;
     }

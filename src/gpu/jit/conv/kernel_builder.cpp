@@ -3090,9 +3090,6 @@ stmt_t create_reduce_stmt(const view_t &src, const view_t &dst_base,
     }
     dst_layout = dst_layout.map(tensor_t(dst_tile_dims, dst_tile_start));
 
-    src_layout = src_layout.normalize();
-    dst_layout = dst_layout.normalize();
-
     auto func = reduce_t::make(src_layout, dst_layout);
     return func.call({dst_buf, src_buf});
 }
@@ -4090,7 +4087,7 @@ layout_t convert_to_fma_friendly_layout(const conv_config_t &cfg,
     }
 
     auto ret = layout_t(layout.type(), layout.ndims(), 0, new_blocks);
-    ret = ret.make_dense().normalize();
+    ret = ret.make_dense();
     return ret;
 }
 
@@ -4318,7 +4315,6 @@ private:
         // C layout in the problem notation.
         auto cp_thr_reg_layout
                 = mnk_mapper_.map_from_mnk(c_layout, cp_thr_mem_view_.nvdims());
-        cp_thr_reg_layout = cp_thr_reg_layout.normalize();
 
         cp_thr_reg_view_ = view_t(cp_thr_mem_view_, cp_thr_reg_layout);
     }
@@ -4851,7 +4847,7 @@ private:
         // Ensure that each thread writes a dense region to SLM.
         auto xp_slm_thr_view = tmp_xp_slm_view.create_sub_view(
                 x_g2s_view.vtensor(), /*relative_vstart=*/false);
-        auto write_layout = xp_slm_thr_view.create_vlayout().normalize();
+        auto write_layout = xp_slm_thr_view.create_vlayout();
         // If the layout is not dense, return and try with smaller grid.
         if (!write_layout.is_dense()) return false;
 

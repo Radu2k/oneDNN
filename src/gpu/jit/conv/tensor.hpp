@@ -259,34 +259,44 @@ public:
     }
 
     layout_t(const type_t &type, const expr_t &offset,
-            const std::string &format, const std::vector<dim_t> &dims = {});
+            const std::string &format, const std::vector<dim_t> &dims = {},
+            bool do_normalize = true);
 
-    layout_t(const memory_desc_wrapper &mdw, const std::string &format)
+    layout_t(const memory_desc_wrapper &mdw, const std::string &format,
+            bool do_normalize = true)
         : layout_t(mdw.data_type(), mdw.offset0(), format,
                 std::vector<dim_t>(
-                        mdw.padded_dims(), mdw.padded_dims() + mdw.ndims())) {}
+                        mdw.padded_dims(), mdw.padded_dims() + mdw.ndims()),
+                do_normalize) {}
 
-    layout_t(const memory_desc_wrapper &mdw);
+    layout_t(const memory_desc_wrapper &mdw, const char *format,
+            bool do_normalize = true)
+        : layout_t(mdw, std::string(format), do_normalize) {}
+
+    layout_t(const memory_desc_wrapper &mdw, bool do_normalize = true);
 
     layout_t(const type_t &type, const expr_t &offset,
-            const std::vector<dim_t> &dims)
+            const std::vector<dim_t> &dims, bool do_normalize = true)
         : type_(type), ndims_(int(dims.size())), offset_(offset) {
         dim_t stride = 1;
         for (int i = ndims_ - 1; i >= 0; i--) {
             blocks_.emplace_back(i, dims[i], stride);
             stride *= dims[i];
         }
+        if (do_normalize) blocks_ = normalize_blocks(ndims_, blocks_);
         sanity_check();
     }
 
     layout_t(const type_t &type, int ndims, const expr_t &offset,
-            const std::vector<block_t> &blocks)
+            const std::vector<block_t> &blocks, bool do_normalize = true)
         : type_(type), ndims_(ndims), offset_(offset), blocks_(blocks) {
+        if (do_normalize) blocks_ = normalize_blocks(ndims_, blocks_);
         sanity_check();
     }
 
-    layout_t(const type_t &type, const expr_t &offset, const layout_t &other)
-        : layout_t(type, other.ndims(), offset, other.blocks()) {}
+    layout_t(const type_t &type, const expr_t &offset, const layout_t &other,
+            bool do_normalize)
+        : layout_t(type, other.ndims(), offset, other.blocks(), do_normalize) {}
 
     bool is_empty() const { return ndims_ == 0; }
 
@@ -497,7 +507,8 @@ public:
     // possible to tile it into 3x2 sub-tensors.
     layout_t map(const tensor_t &tensor) const;
 
-    layout_t reinterpret(const type_t &new_type) const;
+    layout_t reinterpret(
+            const type_t &new_type, bool do_normalize = true) const;
 
     layout_t retype(const type_t &new_type) const {
         auto ret = *this;

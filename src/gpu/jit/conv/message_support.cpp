@@ -121,7 +121,7 @@ layout_t create_raw_register_layout(const send_t &send) {
 
     // TODO: Use extra outer block to force stride when writeback buffer size
     // is rounded up.
-    return layout_t(send.data_type, 2, 0, spec_blocks);
+    return layout_t(send.data_type, 2, 0, spec_blocks, /*do_normalize=*/false);
 }
 
 // Returns dense memory layout corresponding to the message.
@@ -129,18 +129,18 @@ layout_t create_raw_memory_layout(const send_t &send) {
     if (send.type == message_type_t::block
             && send.eff_mask_count != send.mask_count()) {
         std::vector<dim_t> dims = {1, send.eff_mask_count};
-        return layout_t(type_t::dword(), 0, dims);
+        return layout_t(type_t::dword(), 0, dims, /*do_normalize=*/false);
     }
     std::vector<dim_t> dims = {send.eff_slots(), send.data_elems};
-    return layout_t(send.data_type, 0, dims);
+    return layout_t(send.data_type, 0, dims, /*do_normalize=*/false);
 }
 
 // Converts memory layout to register layout according to the message.
 layout_t create_register_layout_for_message(
         const send_t &send, const layout_t &_mem_layout) {
     // Message tensor: (slots x data_elems) XaYb.
-    auto msg_mem_layout
-            = create_raw_memory_layout(send).reinterpret(_mem_layout.type());
+    auto msg_mem_layout = create_raw_memory_layout(send).reinterpret(
+            _mem_layout.type(), /*do_normalize=*/false);
     ir_assert(msg_mem_layout.is_plain());
     int slots = int(msg_mem_layout.dims()[0]);
     int data_elems = int(msg_mem_layout.dims()[1]);
@@ -177,7 +177,8 @@ layout_t create_register_layout_for_message(
 
     int ndims = mem_layout.ndims();
     layout_t msg_reg_layout
-            = create_raw_register_layout(send).reinterpret(_mem_layout.type());
+            = create_raw_register_layout(send).reinterpret(_mem_layout.type(),
+                    /*do_normalize=*/false);
 
     // Dummy block for stride between slots.
     block_t dummy_slots_block(ndims, 1, msg_reg_layout.strides(0)[0]);

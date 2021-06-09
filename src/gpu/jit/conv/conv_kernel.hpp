@@ -1598,8 +1598,8 @@ public:
         dim_assignment_t to_ab(src_.ndims(), 2);
         to_ab.assign(a_idx, 0);
         to_ab.assign(b_idx, 1);
-        auto src_ab = to_ab.map(src_).normalize();
-        auto dst_ab = to_ab.map(dst_).normalize();
+        auto src_ab = to_ab.map(src_);
+        auto dst_ab = to_ab.map(dst_);
 
         // Find minimal cost reorder path between layouts.
         auto path = find_min_cost_path(hw_, src_ab, dst_ab, tile_a, tile_b);
@@ -1623,10 +1623,8 @@ public:
             auto *next_layout = &step.layout;
 
             // x -> y reorder.
-            auto x = prev_layout->map(tile).normalize().reinterpret(type);
-            auto y = next_layout->map(tile).normalize().reinterpret(type);
-            x = x.normalize();
-            y = y.normalize();
+            auto x = prev_layout->map(tile).reinterpret(type);
+            auto y = next_layout->map(tile).reinterpret(type);
 
             bool use_dst = ((path_len - i) % 2 == 1);
             auto next_rd = (use_dst ? dst_rd : tmp[0].retype(to_ngen(type)));
@@ -1769,7 +1767,7 @@ private:
         // - Horizontal stride must be <= 4 for GRF region
         // - GRF region can't span more than 2 registers
         bool can_reorder(const tensor_t &tile, const type_t &type) const {
-            auto ab_layout = layout.map(tile).reinterpret(type).normalize();
+            auto ab_layout = layout.map(tile).reinterpret(type);
             int nblocks = int(ab_layout.blocks().size());
             if (nblocks == 0) return true;
             if (nblocks > 1) return false;
@@ -2253,9 +2251,10 @@ class reorder_impl_t {
 public:
     reorder_impl_t(ngen::HW hw, const reorder_t &reorder,
             const grf_permutator_t &grf_perm)
-        : hw_(hw), grf_perm_(grf_perm) {
-        src_layout_ = reorder.src_layout.normalize();
-        dst_layout_ = reorder.dst_layout.normalize();
+        : hw_(hw)
+        , src_layout_(reorder.src_layout)
+        , dst_layout_(reorder.dst_layout)
+        , grf_perm_(grf_perm) {
         try_reinterpret_to_wider_type(src_layout_, dst_layout_);
 
         // Pure bf moves are not supported.
@@ -2415,10 +2414,10 @@ private:
 
 class reduce_impl_t {
 public:
-    reduce_impl_t(ngen::HW hw, const reduce_t &reduce) : hw_(hw) {
-        src_layout_ = reduce.src_layout.normalize();
-        dst_layout_ = reduce.dst_layout.normalize();
-    }
+    reduce_impl_t(ngen::HW hw, const reduce_t &reduce)
+        : hw_(hw)
+        , src_layout_(reduce.src_layout)
+        , dst_layout_(reduce.dst_layout) {}
 
     template <typename GeneratorT>
     void emit(GeneratorT *host, ngen_register_scope_t &scope,

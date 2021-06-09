@@ -25,7 +25,8 @@ namespace gpu {
 namespace jit {
 
 layout_t::layout_t(const type_t &type, const expr_t &offset,
-        const std::string &format, const std::vector<dim_t> &dims)
+        const std::string &format, const std::vector<dim_t> &dims,
+        bool do_normalize)
     : type_(type), offset_(offset) {
     auto parts = parse_format(format, int(dims.size()));
     ndims_ = 0;
@@ -59,10 +60,11 @@ layout_t::layout_t(const type_t &type, const expr_t &offset,
         stride = block * stride;
     }
 
+    if (do_normalize) blocks_ = normalize_blocks(ndims_, blocks_);
     sanity_check();
 }
 
-layout_t::layout_t(const memory_desc_wrapper &mdw)
+layout_t::layout_t(const memory_desc_wrapper &mdw, bool do_normalize)
     : type_(mdw.data_type()), offset_(mdw.offset0()) {
     ir_assert(mdw.is_blocking_desc()) << "Expected blocking memory descriptor.";
 
@@ -92,6 +94,7 @@ layout_t::layout_t(const memory_desc_wrapper &mdw)
                 return a.stride < b.stride;
             });
 
+    if (do_normalize) blocks_ = normalize_blocks(ndims_, blocks_);
     sanity_check();
 }
 
@@ -179,7 +182,8 @@ layout_t layout_t::map(const tensor_t &tensor) const {
     return layout_t(type(), ndims(), operator()(tensor.start()), mapped_blocks);
 }
 
-layout_t layout_t::reinterpret(const type_t &new_type) const {
+layout_t layout_t::reinterpret(
+        const type_t &new_type, bool do_normalize) const {
     int old_size = type().size();
     int new_size = new_type.size();
     if (new_size == old_size) return *this;
@@ -192,10 +196,17 @@ layout_t layout_t::reinterpret(const type_t &new_type) const {
         new_offset = off / new_size;
     }
 
-    if (old_size % new_size != 0 && new_size % old_size != 0)
+    if (old_size % new_size != 0 && new_size % old_size != 0) {
         ir_error_not_expected();
+        return layout_t();
+    }
 
     auto new_blocks = blocks_;
+    if (new_blocks.empty()) {
+        ir_error_not_expected() << "Can't reinterpret.";
+        return layout_t();
+    }
+
     if (new_size < old_size) {
         int factor = (old_size / new_size);
         auto &b0 = new_blocks.front();
@@ -208,17 +219,23 @@ layout_t layout_t::reinterpret(const type_t &new_type) const {
     } else {
         int factor = (new_size / old_size);
         auto &b0 = new_blocks.front();
-        if (b0.block % factor != 0) ir_error_not_expected();
+        if (b0.block % factor != 0) {
+            ir_error_not_expected();
+            return layout_t();
+        }
         b0.block /= factor;
         // Recompute strides.
         for (auto &b : new_blocks) {
             if (&b == &b0) continue;
-            if (b.stride % factor != 0) ir_error_not_expected();
+            if (b.stride % factor != 0) {
+                ir_error_not_expected();
+                return layout_t();
+            }
             b.stride /= factor;
         }
     }
 
-    return layout_t(new_type, ndims(), new_offset, new_blocks);
+    return layout_t(new_type, ndims(), new_offset, new_blocks, do_normalize);
 }
 
 layout_t layout_t::split_block(
@@ -239,7 +256,8 @@ layout_t layout_t::split_block(
 
     new_blocks.insert(new_blocks.begin() + block_idx + 1, b1);
 
-    return layout_t(type(), ndims(), offset(), new_blocks);
+    return layout_t(
+            type(), ndims(), offset(), new_blocks, /*do_normalize=*/false);
 }
 
 layout_t layout_t::split_into_multi_blocks(
