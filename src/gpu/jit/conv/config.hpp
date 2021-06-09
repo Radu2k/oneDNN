@@ -43,9 +43,6 @@ public:
     conv_problem_t() = default;
 
     status_t init(convolution_pd_t *conv_pd) {
-        const convolution_desc_t &desc = *conv_pd->desc();
-        (void)desc;
-
         is_fwd = conv_pd->is_fwd();
         is_bwd_d = conv_pd->is_bwd_d();
         is_bwd_w = conv_pd->is_bwd_w();
