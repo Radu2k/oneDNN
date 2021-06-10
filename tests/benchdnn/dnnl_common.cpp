@@ -364,6 +364,22 @@ void check_binary_post_ops(const attr_t &attr, res_t *res) {
     }
 }
 
+// Sum with zero-point is not supported on GPU
+void check_sum_post_ops(const attr_t &attr, res_t *res) {
+    if (!is_gpu()) return;
+
+    const auto &po = attr.post_ops;
+    if (!po.is_def()) {
+        for (int idx = 0; idx < po.len(); ++idx) {
+            const auto &e = po.entry[idx];
+            if (e.is_sum_kind() && e.sum.zero_point != 0) {
+                res->state = SKIPPED, res->reason = CASE_NOT_SUPPORTED;
+                break;
+            }
+        }
+    }
+}
+
 bool is_cpu(const dnnl_engine_t &engine) {
     return get_engine_kind(engine) == dnnl_cpu;
 }
@@ -778,4 +794,12 @@ stream_t::stream_t(dnnl_engine_t engine) {
 
 stream_t::~stream_t() {
     DNN_SAFE_V(dnnl_stream_destroy(stream_));
+}
+
+float reorder_rescale_factor() {
+    float factor = 1.f;
+#if DNNL_CPU_RUNTIME != DNNL_RUNTIME_NONE
+    factor = dnnl::impl::cpu::platform::s8s8_weights_scale_factor();
+#endif
+    return factor;
 }

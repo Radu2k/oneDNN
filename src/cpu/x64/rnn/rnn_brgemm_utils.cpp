@@ -26,10 +26,11 @@ namespace rnn_brgemm_utils {
 
 namespace {
 
-std::tuple<dim_t, dim_t, x64::cpu_isa_t> brgemm_calc_k_block_with_isa(dim_t K1,
-        dim_t K2, dim_t M, dim_t n_block, alg_kind_t cell_kind,
-        dim_t src_layer_type_size, dim_t padding, dim_t As, dim_t Bs, dim_t Cs,
-        dim_t l2_cache_size, bool is_int8, bool is_bf16);
+x64::cpu_isa_t brgemm_calc_isa(dim_t K1, dim_t K2, bool is_int8, bool is_bf16);
+std::pair<dim_t, dim_t> brgemm_calc_k_block(dim_t K1, dim_t K2, dim_t M,
+        dim_t n_block, alg_kind_t cell_kind, dim_t src_layer_type_size,
+        dim_t As, dim_t Bs, dim_t Cs, dim_t l2_cache_size, x64::cpu_isa_t isa,
+        bool is_int8, bool is_bf16);
 std::pair<dim_t, dim_t> brgemm_calc_k_block_amx(
         dim_t K1, dim_t K2, bool is_int8);
 std::pair<dim_t, dim_t> brgemm_calc_k_block_vanilla_rnn(dim_t K1, dim_t K2,
@@ -49,23 +50,14 @@ dim_t brgemm_calc_m_block_lstm(dim_t nthr, dim_t M, dim_t N_blocks, bool is_f32,
 dim_t adjust_m_block_lstm(dim_t nthr, dim_t M, dim_t N_blocks, bool is_int8_amx,
         bool is_bf16_amx);
 
-std::tuple<dim_t, dim_t, x64::cpu_isa_t> brgemm_calc_k_block_with_isa(dim_t K1,
-        dim_t K2, dim_t M, dim_t n_block, alg_kind_t cell_kind,
-        dim_t src_layer_type_size, dim_t padding, dim_t As, dim_t Bs, dim_t Cs,
-        dim_t l2_cache_size, bool is_int8, bool is_bf16) {
+x64::cpu_isa_t brgemm_calc_isa(dim_t K1, dim_t K2, bool is_int8, bool is_bf16) {
     const bool is_amx_int8
             = is_int8 && x64::mayiuse(x64::avx512_core_bf16_amx_int8);
     const bool is_amx_bf16
             = is_bf16 && x64::mayiuse(x64::avx512_core_bf16_amx_bf16);
 
-    dim_t k1_block = K1;
-    dim_t k2_block = K2;
-    auto isa = x64::isa_any;
-
-    if (is_int8) { isa = x64::avx512_core_vnni; }
-    if (is_bf16) { isa = x64::avx512_core_bf16; }
-
     if (is_amx_int8 || is_amx_bf16) {
+        const dim_t padding = (is_int8 ? 4 : (is_bf16 ? 2 : 1));
         const auto result = brgemm_calc_k_block_amx(K1, K2, is_int8);
         const auto k1_block_amx = result.first;
         const auto k2_block_amx = result.second;
@@ -73,23 +65,37 @@ std::tuple<dim_t, dim_t, x64::cpu_isa_t> brgemm_calc_k_block_with_isa(dim_t K1,
         const auto k2_block_tail = K2 % k2_block_amx;
         const bool amx_block_invalid = k1_block_tail % padding
                 || k2_block_tail % padding || k1_block_amx % padding
-                || k2_block_amx % padding || k1_block != k2_block;
+                || k2_block_amx % padding;
 
         if (!amx_block_invalid) {
-            k1_block = k1_block_amx;
-            k2_block = k2_block_amx;
-            isa = is_amx_int8 ? x64::avx512_core_bf16_amx_int8
-                              : x64::avx512_core_bf16_amx_bf16;
-            return std::make_tuple(k1_block, k2_block, isa);
+            return is_amx_int8 ? x64::avx512_core_bf16_amx_int8
+                               : x64::avx512_core_bf16_amx_bf16;
         }
     }
 
-    if (cell_kind == alg_kind::vanilla_rnn)
-        std::tie(k1_block, k2_block) = brgemm_calc_k_block_vanilla_rnn(K1, K2,
-                M, n_block, src_layer_type_size, As, Bs, Cs, l2_cache_size,
-                is_bf16);
+    if (is_int8) {
+        return x64::avx512_core_vnni;
+    } else if (is_bf16) {
+        return x64::avx512_core_bf16;
+    }
 
-    return std::make_tuple(k1_block, k2_block, isa);
+    return x64::isa_any;
+}
+
+std::pair<dim_t, dim_t> brgemm_calc_k_block(dim_t K1, dim_t K2, dim_t M,
+        dim_t n_block, alg_kind_t cell_kind, dim_t src_layer_type_size,
+        dim_t As, dim_t Bs, dim_t Cs, dim_t l2_cache_size, x64::cpu_isa_t isa,
+        bool is_int8, bool is_bf16) {
+    const bool is_amx_int8 = is_int8 && isa == x64::avx512_core_bf16_amx_int8;
+    const bool is_amx_bf16 = is_bf16 && isa == x64::avx512_core_bf16_amx_bf16;
+
+    if (is_amx_int8 || is_amx_bf16)
+        return brgemm_calc_k_block_amx(K1, K2, is_int8);
+    else if (cell_kind == alg_kind::vanilla_rnn)
+        return brgemm_calc_k_block_vanilla_rnn(K1, K2, M, n_block,
+                src_layer_type_size, As, Bs, Cs, l2_cache_size, is_bf16);
+
+    return std::make_pair(K1, K2);
 }
 
 std::pair<dim_t, dim_t> brgemm_calc_k_block_amx(
@@ -259,8 +265,10 @@ void rnn_brgemm_base_t::init_scratchpad(const cpu::rnn_utils::rnn_conf_t &rnn,
                 gemm_acc_type_size, gemm_acc_align);
     }
 
-    const int max_K_Block = nstl::max(rnn.KB1_blocks + 1,
-            nstl::max(rnn.KBproj_blocks + 1, rnn.KB2_blocks + 1));
+    const int max_K_Block
+            = nstl::max(rnn.KB1_blocks + 1,
+                      nstl::max(rnn.KBproj_blocks + 1, rnn.KB2_blocks + 1))
+            * (rnn.brgemm_fwd_iter_layer_fuse_possible ? 2 : 1);
     scratchpad.template book<x64::brgemm_batch_element_t>(
             key_brgemm_primitive_batch, max_K_Block * rnn.nthr);
 }
@@ -289,14 +297,18 @@ status_t rnn_brgemm_t<prop_kind::forward>::configure_brgemm(
     const dim_t Cs
             = scratch_type_size * (rnn.n_gates + 1) * (rnn.M * rnn.n_block);
 
-    const dim_t padding = (rnn.is_int8()) ? 4 : (rnn.is_bf16()) ? 2 : 1;
+    const auto is_int8 = rnn.is_int8();
+    const auto is_bf16 = rnn.is_bf16();
+
+    const dim_t padding = (is_int8 ? 4 : (is_bf16 ? 2 : 1));
     rnn.K1padded = utils::rnd_up(rnn.K1, padding);
     rnn.K2padded = utils::rnd_up(rnn.K2, padding);
 
-    std::tie(rnn.k1_block, rnn.k2_block, rnn.brgemm_isa)
-            = brgemm_calc_k_block_with_isa(rnn.K1, rnn.K2, rnn.M, rnn.n_block,
-                    cell_kind, src_layer_type_size, padding, As, Bs, Cs,
-                    l2_cache_size, rnn.is_int8(), rnn.is_bf16());
+    rnn.brgemm_isa = brgemm_calc_isa(rnn.K1, rnn.K2, is_int8, is_bf16);
+
+    std::tie(rnn.k1_block, rnn.k2_block) = brgemm_calc_k_block(rnn.K1, rnn.K2,
+            rnn.M, rnn.n_block, cell_kind, src_layer_type_size, As, Bs, Cs,
+            l2_cache_size, rnn.brgemm_isa, rnn.is_int8(), rnn.is_bf16());
     rnn.KB1_blocks = rnn.K1 / rnn.k1_block;
     rnn.k1_tail = rnn.K1 % rnn.k1_block;
     rnn.KB2_blocks = rnn.K2 / rnn.k2_block;
@@ -317,6 +329,8 @@ status_t rnn_brgemm_t<prop_kind::forward>::configure_brgemm(
     rnn.LDA2[1] = rnn.dst_layer_ld_;
     rnn.LDA2[2] = rnn.ws_states_iter_ld;
 
+    rnn.brgemm_fwd_iter_layer_fuse_possible = rnn.slc == rnn.sic;
+
     rnn.LDB1 = rnn.n_block;
     rnn.LDB2 = rnn.n_block;
     rnn.LDC = rnn.scratch_gates_ld;
@@ -324,6 +338,7 @@ status_t rnn_brgemm_t<prop_kind::forward>::configure_brgemm(
     auto get_dim = [&](dim_t block, dim_t tail) {
         return (block == 0) ? tail : block;
     };
+
     dim_t n_block = nstl::min(rnn.N, rnn.n_block);
     dim_t n_tail = nstl::min(rnn.N, rnn.nproj_tail);
     if (rnn.LDA1[0] < rnn.k1_block && rnn.LDA1[1] < rnn.k1_block
@@ -442,10 +457,12 @@ void rnn_brgemm_t<prop_kind::forward>::init_kernels(
 
     const int brgemm_n = nstl::min(rnn.N, rnn.n_block);
     const int brgemm_n_tail = nstl::min(rnn.N, rnn.n_tail);
+    const int max_bs_factor = rnn.brgemm_fwd_iter_layer_fuse_possible ? 2 : 1;
+
     for (int i = 0; i < num_base_kernels_; i++) {
         init_brgemm(&desc_layer_b0_[i], rnn.brgemm_isa, kernel_layer_b0_[i],
                 rnn.m_block, brgemm_n, rnn.k1_block, rnn.LDA1[i], rnn.LDB1,
-                rnn.LDC, 0.0, rnn.KB1_blocks);
+                rnn.LDC, 0.0, max_bs_factor * rnn.KB1_blocks);
         init_brgemm(&desc_iter_b0_[i], rnn.brgemm_isa, kernel_iter_b0_[i],
                 rnn.m_block, brgemm_n, rnn.k2_block, rnn.LDA2[i], rnn.LDB2,
                 rnn.LDC, 0.0, rnn.KB2_blocks);
@@ -456,7 +473,7 @@ void rnn_brgemm_t<prop_kind::forward>::init_kernels(
             init_brgemm(&desc_layer_N_tail_b0_[i], rnn.brgemm_isa,
                     kernel_layer_N_tail_b0_[i], rnn.m_block, brgemm_n_tail,
                     rnn.k1_block, rnn.LDA1[i], rnn.LDB1, rnn.LDC, 0.0,
-                    rnn.KB1_blocks);
+                    max_bs_factor * rnn.KB1_blocks);
             init_brgemm(&desc_iter_N_tail_b0_[i], rnn.brgemm_isa,
                     kernel_iter_N_tail_b0_[i], rnn.m_block, brgemm_n_tail,
                     rnn.k2_block, rnn.LDA2[i], rnn.LDB2, rnn.LDC, 0.0,
@@ -469,7 +486,8 @@ void rnn_brgemm_t<prop_kind::forward>::init_kernels(
         if (rnn.k1_tail)
             init_brgemm(&desc_layer_K1_tail_b1_[i], rnn.brgemm_isa,
                     kernel_layer_K1_tail_b1_[i], rnn.m_block, brgemm_n,
-                    rnn.k1_tail, rnn.LDA1[i], rnn.LDB1, rnn.LDC, 1.0, 1);
+                    rnn.k1_tail, rnn.LDA1[i], rnn.LDB1, rnn.LDC, 1.0,
+                    max_bs_factor * 1);
         if (rnn.k2_tail)
             init_brgemm(&desc_iter_K2_tail_b1_[i], rnn.brgemm_isa,
                     kernel_iter_K2_tail_b1_[i], rnn.m_block, brgemm_n,
@@ -477,7 +495,8 @@ void rnn_brgemm_t<prop_kind::forward>::init_kernels(
         if (rnn.k1_tail && rnn.n_tail)
             init_brgemm(&desc_layer_NK1_tail_b1_[i], rnn.brgemm_isa,
                     kernel_layer_NK1_tail_b1_[i], rnn.m_block, brgemm_n_tail,
-                    rnn.k1_tail, rnn.LDA1[i], rnn.LDB1, rnn.LDC, 1.0, 1);
+                    rnn.k1_tail, rnn.LDA1[i], rnn.LDB1, rnn.LDC, 1.0,
+                    max_bs_factor * 1);
         if (rnn.k2_tail && rnn.n_tail)
             init_brgemm(&desc_iter_NK2_tail_b1_[i], rnn.brgemm_isa,
                     kernel_iter_NK2_tail_b1_[i], rnn.m_block, brgemm_n_tail,
@@ -618,14 +637,19 @@ status_t rnn_brgemm_t<prop_kind::backward>::configure_brgemm(
     const dim_t Cs = scratch_type_size * (rnn.n_gates + 1)
             * (diff_src_conf.M * diff_src_conf.n_block);
 
-    const dim_t padding = (rnn.is_int8()) ? 4 : (rnn.is_bf16()) ? 2 : 1;
+    const auto is_int8 = rnn.is_int8();
+    const auto is_bf16 = rnn.is_bf16();
+
+    const dim_t padding = (is_int8 ? 4 : (is_bf16 ? 2 : 1));
     diff_src_conf.Kpadded = utils::rnd_up(diff_src_conf.K, padding);
 
-    std::tie(diff_src_conf.k_block, std::ignore, diff_src_conf.isa)
-            = brgemm_calc_k_block_with_isa(diff_src_conf.K, diff_src_conf.K,
-                    diff_src_conf.M, diff_src_conf.n_block, cell_kind,
-                    src_layer_type_size, padding, As, Bs, Cs, l2_cache_size,
-                    rnn.is_int8(), rnn.is_bf16());
+    diff_src_conf.isa = brgemm_calc_isa(
+            diff_src_conf.K, diff_src_conf.K, is_int8, is_bf16);
+
+    std::tie(diff_src_conf.k_block, std::ignore) = brgemm_calc_k_block(
+            diff_src_conf.K, diff_src_conf.K, diff_src_conf.M,
+            diff_src_conf.n_block, cell_kind, src_layer_type_size, As, Bs, Cs,
+            l2_cache_size, diff_src_conf.isa, rnn.is_int8(), rnn.is_bf16());
 
     diff_src_conf.K_blocks = diff_src_conf.K / diff_src_conf.k_block;
     diff_src_conf.K_blocks *= rnn.n_gates;
@@ -677,11 +701,14 @@ status_t rnn_brgemm_t<prop_kind::backward>::configure_brgemm(
     const dim_t Cs_wei = scratch_type_size * (rnn.n_gates + 1)
             * (diff_wei_conf.M * diff_wei_conf.n_block);
 
-    std::tie(diff_wei_conf.k_block, std::ignore, diff_wei_conf.isa)
-            = brgemm_calc_k_block_with_isa(diff_wei_conf.K, diff_wei_conf.K,
+    diff_wei_conf.isa = brgemm_calc_isa(
+            diff_wei_conf.K, diff_wei_conf.K, is_int8, is_bf16);
+
+    std::tie(diff_wei_conf.k_block, std::ignore)
+            = brgemm_calc_k_block(diff_wei_conf.K, diff_wei_conf.K,
                     diff_wei_conf.M, diff_wei_conf.n_block, cell_kind,
-                    src_layer_type_size, padding, As_wei, Bs_wei, Cs_wei,
-                    l2_cache_size, rnn.is_int8(), rnn.is_bf16());
+                    src_layer_type_size, As_wei, Bs_wei, Cs_wei, l2_cache_size,
+                    diff_wei_conf.isa, rnn.is_int8(), rnn.is_bf16());
 
     diff_wei_conf.K_blocks = diff_wei_conf.K / diff_wei_conf.k_block;
     diff_wei_conf.k_tail = diff_wei_conf.K % diff_wei_conf.k_block;
