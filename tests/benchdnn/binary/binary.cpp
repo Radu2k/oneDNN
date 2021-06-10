@@ -45,6 +45,8 @@ int fill_mem(int input_idx, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp,
         const int64_t gen = (12 * i + 5 * input_idx + 16) % (range + 1);
         float value = (f_min + gen) * 1.25f;
         if (only_positive_values) value = fabs(value);
+        // Remove zeroes in src1 to avoid division by zero
+        if (input_idx == 1 && value == 0.0f) value = 1.0f;
         mem_fp.set_elem(i, round_to_nearest_representable(dt, value));
     });
 
@@ -140,6 +142,7 @@ void check_known_skipped_case(const prb_t *prb, res_t *res) {
     std::vector<dnnl_data_type_t> dts = prb->sdt;
     dts.push_back(prb->ddt);
     check_known_skipped_case_common(dts, FWD_D, res);
+    check_sum_post_ops(prb->attr, res);
     if (res->state == SKIPPED) return;
 
     if (prb->alg == alg_t::DIV) {
