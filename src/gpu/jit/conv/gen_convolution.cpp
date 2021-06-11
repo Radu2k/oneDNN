@@ -55,13 +55,13 @@ compute::kernel_t make_kernel(
             break;
 #if DNNL_WITH_XE_HPG
         case gpu_arch_t::xe_hpg:
-            jit_kernel = utils::make_unique<KernelT<gpu_xe_hp>>(
+            jit_kernel = utils::make_unique<KernelT<gpu_xe_hpg>>(
                     std::forward<ArgsT>(args)...);
             break;
 #endif
 #if DNNL_WITH_XE_HPC
         case gpu_arch_t::xe_hpc:
-            jit_kernel = utils::make_unique<KernelT<gpu_xe_hp>>(
+            jit_kernel = utils::make_unique<KernelT<gpu_xe_hpc>>(
                     std::forward<ArgsT>(args)...);
             break;
 #endif
