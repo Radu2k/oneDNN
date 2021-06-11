@@ -94,12 +94,16 @@ status_t xe_hp_1st_convolution_bwd_weights_t::pd_t::init_conf(
     bwd_w_compute_block_sizes(conf, engine);
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
-    const bool is_xe_hp = compute_engine->is_xe_hp();
+    const bool is_xe_hp_plus = compute_engine->is_xe_hp()
+#if DNNL_WITH_XE_HPG
+            || compute_engine->is_xe_hpg()
+#endif
+            ;
     const bool has_non_uniform_wg
             = compute_engine->mayiuse_non_uniform_work_groups();
 
     conf.sub_group_size = 8;
-    conf.lws_d[0] = is_xe_hp ? 32 : 16;
+    conf.lws_d[0] = is_xe_hp_plus ? 32 : 16;
     conf.lws_d[1] = 1;
     conf.lws_d[2] = 1;
     conf.kwb = utils::rnd_up(conf.kw, 8);

@@ -86,7 +86,7 @@ struct xe_lp_x8s8x_convolution_fwd_t : public gpu_primitive_t {
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
 
 #if DNNL_WITH_XE_HP
-            is_xe_hp = compute_engine->is_xe_hp()
+            is_xe_hp_plus = compute_engine->is_xe_hp()
 #if DNNL_WITH_XE_HPG
                     || compute_engine->is_xe_hpg()
 #endif
@@ -96,7 +96,7 @@ struct xe_lp_x8s8x_convolution_fwd_t : public gpu_primitive_t {
         }
 
 #if DNNL_WITH_XE_HP
-        bool is_xe_hp = false;
+        bool is_xe_hp_plus = false;
 #endif
         status_t init_conf();
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;

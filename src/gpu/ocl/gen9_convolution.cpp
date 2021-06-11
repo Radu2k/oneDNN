@@ -141,7 +141,7 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     conf.ocb = 1;
 #if DNNL_WITH_XE_HP
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
-    const bool is_xe_hp = compute_engine->is_xe_hp()
+    const bool is_xe_hp_plus = compute_engine->is_xe_hp()
 #if DNNL_WITH_XE_HPG
             || compute_engine->is_xe_hpg()
 #endif
@@ -166,7 +166,8 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
         conf.ver = ver_1stconv;
     } else if ((is_16oc && is_16ic) || is_dw_16g) {
         if (conf.mb % 32 == 0 && conf.is_depthwise
-                && utils::one_of(src_mdw.data_type(), bf16, f16) && is_xe_hp) {
+                && utils::one_of(src_mdw.data_type(), bf16, f16)
+                && is_xe_hp_plus) {
             conf.ver = ver_32mb16c;
         } else if (conf.mb % 16 == 0) {
             conf.ver = ver_16mb16c;
@@ -239,7 +240,7 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
                             * (conf.omb / conf.mb_block));
             conf.gws_d[2] = (conf.oc / conf.ocb) * (conf.mb / conf.omb);
 #if DNNL_WITH_XE_HP
-            conf.lws_d[0] = is_xe_hp ? 32 : 16;
+            conf.lws_d[0] = is_xe_hp_plus ? 32 : 16;
 #else
             conf.lws_d[0] = 16;
 #endif
@@ -281,7 +282,7 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
                 src_tag = utils::pick(conf.ndims - 3, ncw, nchw, ncdhw);
 
 #if DNNL_WITH_XE_HP
-            if (is_xe_hp && is_fp16) {
+            if (is_xe_hp_plus && is_fp16) {
                 dst_tag = (conf.mb == 8 || conf.mb == 16 || conf.mb % 32 == 0)
                         ? utils::pick(conf.ndims - 3, NCw32n16c, NChw32n16c,
                                 NCdhw32n16c)
@@ -545,7 +546,7 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
 #if DNNL_WITH_XE_HP
-    const bool is_xe_hp = compute_engine->is_xe_hp()
+    const bool is_xe_hp_plus = compute_engine->is_xe_hp()
 #if DNNL_WITH_XE_HPG
             || compute_engine->is_xe_hpg()
 #endif
@@ -568,7 +569,7 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
                 conf.icb = conf.ngroups;
                 conf.lws_d[0] = 1;
 #if DNNL_WITH_XE_HP
-                conf.lws_d[1] = is_xe_hp ? 32 : 16;
+                conf.lws_d[1] = is_xe_hp_plus ? 32 : 16;
 #else
                 conf.lws_d[1] = 16;
 #endif
@@ -583,7 +584,7 @@ status_t gen9_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
                     conf.icb /= 2;
                 }
 #if DNNL_WITH_XE_HP
-                conf.lws_d[0] = is_xe_hp ? 32 : 16;
+                conf.lws_d[0] = is_xe_hp_plus ? 32 : 16;
 #else
                 conf.lws_d[0] = 16;
 #endif
@@ -882,7 +883,7 @@ status_t gen9_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
 
 #if DNNL_WITH_XE_HP
-    const bool is_xe_hp = compute_engine->is_xe_hp()
+    const bool is_xe_hp_plus = compute_engine->is_xe_hp()
 #if DNNL_WITH_XE_HPG
             || compute_engine->is_xe_hpg()
 #endif
@@ -893,7 +894,7 @@ status_t gen9_convolution_bwd_weights_t::pd_t::init_conf(engine_t *engine) {
 
     conf.sub_group_size = 16;
 #if DNNL_WITH_XE_HP
-    conf.lws_d[0] = is_xe_hp ? 32 : 16;
+    conf.lws_d[0] = is_xe_hp_plus ? 32 : 16;
 #else
     conf.lws_d[0] = 16;
 #endif
