@@ -20,6 +20,7 @@
 #include <utility>
 
 #include "common/utils.hpp"
+#include "common/verbose.hpp"
 #include "gpu/jit/conv/config.hpp"
 #include "gpu/jit/conv/conv_kernel.hpp"
 #include "gpu/jit/conv/kernel_arg_info.hpp"
@@ -99,22 +100,31 @@ public:
 
     template <typename T>
     status_t init(T *primitive, engine_t *engine) {
-        auto &cfg = get_cfg(primitive);
+        try {
+            auto &cfg = get_cfg(primitive);
 
-        ir_trace() << "Configuration:" << std::endl;
-        ir_trace() << cfg;
+            ir_trace() << "Configuration:" << std::endl;
+            ir_trace() << cfg;
 
-        kernel_ = make_kernel<conv_kernel_t>(primitive, engine, cfg,
-                primitive->pd(), *primitive->pd()->kernel_arg_info);
-        if (!kernel_) return status::runtime_error;
+            kernel_ = make_kernel<conv_kernel_t>(primitive, engine, cfg,
+                    primitive->pd(), *primitive->pd()->kernel_arg_info);
+            if (!kernel_) return status::runtime_error;
 
-        if (cfg.zero_out_output) {
-            bool with_dpas = utils::one_of(
-                    cfg.fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw);
+            if (cfg.zero_out_output) {
+                bool with_dpas = utils::one_of(
+                        cfg.fma_kind, fma_kind_t::dpas, fma_kind_t::dpasw);
 
-            zero_out_kernel_ = make_kernel<zero_out_kernel_t>(
-                    primitive, engine, cfg.regs, with_dpas);
-            if (!zero_out_kernel_) return status::runtime_error;
+                zero_out_kernel_ = make_kernel<zero_out_kernel_t>(
+                        primitive, engine, cfg.regs, with_dpas);
+                if (!zero_out_kernel_) return status::runtime_error;
+            }
+        } catch (...) {
+            // If verbose is enabled, print the primitive case and rethrow the
+            // exception.
+            if (get_verbose())
+                printf("dnnl_verbose,error,%s\n",
+                        primitive->pd()->info(engine));
+            throw;
         }
 
         return status::success;
