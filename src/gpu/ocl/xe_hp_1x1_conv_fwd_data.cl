@@ -539,6 +539,13 @@ xe_hp_1x1_conv_fwd(const __global SRC_DATA_T *src,
         } \
         APPLY_POST_OPS_TRY_BURST(accumulator, float, dni, float, po_mb, 1, \
                 po_oc, dcntr *SUB_GROUP_SIZE, sg_local_id); \
+        if (OC % 32) { /* clear zero pad area */ \
+            unroll_for(int didx = 0; didx < dcntr; ++didx) { \
+                if (po_oc + didx * SUB_GROUP_SIZE + sg_local_id >= OC) { \
+                    accumulator[didx] = 0.f; \
+                } \
+            } \
+        } \
     }
 
 #define STORE_DST4(n, C0, C1, C2, C3, D, dst_ptr, mb_stride) \
