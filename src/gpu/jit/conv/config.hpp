@@ -623,7 +623,7 @@ public:
         do_post_bia_reorder = (with_bias && bia_data_type == data_type::bf16);
 
         fixup_inference_consistency();
-        try_reduce_grf_usage();
+        if (!try_reduce_grf_usage()) return status::unimplemented;
 
         std::string src_tag;
         std::string wei_tag;
@@ -1148,14 +1148,11 @@ private:
                 b_bytes, use_b_slm ? slm_msg_bytes : gmem_msg_bytes);
 
         if (fma_kind == fma_kind_t::dpasw) {
-            // Pessimistically reduce the smallest buffer by 2x.
-            if (a_regs < b_regs) {
-                a_regs /= 2;
-                a_headers /= 2;
-            } else {
-                b_regs /= 2;
-                b_headers /= 2;
-            }
+            // dpasw reuses registers between fused threads across tg0. M is
+            // split across tg1, N is split across tg0 so dpasw allows to share
+            // matrix A which is is (M x K).
+            a_regs = utils::div_up(a_regs, 2);
+            a_headers = utils::div_up(a_headers, 2);
         }
 
         // Temporary registers for GMEM -> SLM load.
@@ -1175,12 +1172,25 @@ private:
         int b_g2s_headers = utils::div_up(b_g2s_bytes, gmem_msg_bytes)
                 + utils::div_up(b_g2s_bytes, slm_msg_bytes);
 
+        // Extra registers for GRF <-> GRF reorders.
+        int reorder_regs = 0;
+
         // Assume A/B need reorders to temporary buffers.
         if (is_bwd_w) {
-            a_g2s_regs *= 2;
-            b_g2s_regs *= 2;
-            a_g2s_headers *= 2;
-            b_g2s_headers *= 2;
+            if (use_a_slm) {
+                a_g2s_regs *= 2;
+            } else {
+                a_regs *= 2;
+            }
+            if (use_b_slm) {
+                b_g2s_regs *= 2;
+            } else {
+                b_regs *= 2;
+            }
+            // Hardcode for now, this is the upper bound for the temporary
+            // buffer size for BWD_W.
+            int bwd_w_reorder_regs = 16;
+            reorder_regs += bwd_w_reorder_regs;
         }
 
         int g2s_regs = gmem_bufs * (a_g2s_regs + b_g2s_regs);
@@ -1188,8 +1198,11 @@ private:
 
         int data_regs = a_regs + b_regs + acc_regs + g2s_regs;
         int header_regs = a_headers + b_headers + g2s_headers;
+        if (reuse_headers) header_regs = 1;
 
-        return data_regs + header_regs;
+        int estimated_regs = data_regs + reorder_regs + header_regs;
+
+        return estimated_regs;
     }
 
     static std::string prepend_groups_to_tag(const std::string &tag) {
