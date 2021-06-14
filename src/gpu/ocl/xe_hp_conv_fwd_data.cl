@@ -329,8 +329,11 @@ xe_hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
     do { \
         for (int n_i = 0; n_i < 8; n_i++) { \
             PACK(C0, C1, C2, C3, n_i); \
-            QUANTIZE_ADD_BIAS(); \
-            DO_POST_OP(mb_shift, D0[n_i], D1[n_i]); \
+            const int po_mb = (group_mb * MB_BLOCK + mb_shift * 8 + n_i); \
+            if (MB % MB_BLOCK == 0 || po_mb < MB) { \
+                QUANTIZE_ADD_BIAS(); \
+                DO_POST_OP(mb_shift, D0[n_i], D1[n_i]); \
+            } \
             CONVERT_PACK(n_i); \
         } \
         WRITE_DST(); \
@@ -425,17 +428,11 @@ xe_hp_conv_fwd(const __global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
 #endif
 
         STORE_DST(0, C00, C01, C02, C03, D00, D10);
-#if MB > 8
         dst += 8 * OC_BLOCK;
         STORE_DST(1, C10, C11, C12, C13, D01, D11);
-#if MB > 16
         dst += 8 * OC_BLOCK;
         STORE_DST(2, C20, C21, C22, C23, D02, D12);
-#if MB > 24
         dst += 8 * OC_BLOCK;
         STORE_DST(3, C30, C31, C32, C33, D03, D13);
-#endif // MB > 24
-#endif // MB > 16
-#endif // MB > 8
     }
 }

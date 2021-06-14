@@ -362,17 +362,11 @@ xe_hp_conv_bwd_data(__global SRC_DATA_T *src, const __global WEI_DATA_T *wei,
 #endif
 
         STORE_SRC(C00, C01, C02, C03);
-#if MB > 8
         src += 8 * IC_BLOCK;
         STORE_SRC(C10, C11, C12, C13);
-#if MB > 16
         src += 8 * IC_BLOCK;
         STORE_SRC(C20, C21, C22, C23);
-#if MB > 24
         src += 8 * IC_BLOCK;
         STORE_SRC(C30, C31, C32, C33);
-#endif // MB > 24
-#endif // MB > 16
-#endif // MB > 8
     }
 }
