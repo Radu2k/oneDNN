@@ -886,8 +886,8 @@ layout_t dim_assignment_t::map(const layout_t &layout) const {
     }
     new_blocks = layout_t::normalize_blocks(
             new_ndims(), new_blocks, /*keep_size_1_blocks=*/true);
-    auto ret
-            = layout_t(layout.type(), new_ndims(), layout.offset(), new_blocks);
+    auto ret = layout_t(layout.type(), new_ndims(), layout.offset(), new_blocks,
+            /*do_normalize=*/false);
     ir_assert(layout.elems() == ret.elems())
             << "Assignment doesn't preserve number of elements.";
     return ret;
