@@ -362,7 +362,7 @@ status_t gen_convolution_bwd_weights_t::execute(const exec_ctx_t &ctx) const {
         kernel_arg_list_t arg_list;
         arg_list.set(0, *scratchpad);
         arg_list.set(1, CTX_OUT_STORAGE(DNNL_ARG_DIFF_WEIGHTS));
-        arg_list.set(2, elems);
+        arg_list.set(2, uint32_t(elems));
         int elems_per_thr = reorder_kernel_t<>::elems_per_thr;
         int simd = reorder_kernel_t<>::simd;
         compute::nd_range_t nd_range(
@@ -376,7 +376,7 @@ status_t gen_convolution_bwd_weights_t::execute(const exec_ctx_t &ctx) const {
         kernel_arg_list_t arg_list;
         arg_list.set(0, *scratchpad);
         arg_list.set(1, CTX_OUT_STORAGE(DNNL_ARG_DIFF_BIAS));
-        arg_list.set(2, elems);
+        arg_list.set(2, uint32_t(elems));
         int elems_per_thr = reorder_kernel_t<>::elems_per_thr;
         int simd = reorder_kernel_t<>::simd;
         compute::nd_range_t nd_range(
