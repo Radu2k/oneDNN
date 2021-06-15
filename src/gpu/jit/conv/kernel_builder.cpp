@@ -3837,10 +3837,12 @@ private:
         }
         stages.emplace_back(r2g.reg_view(), tmp_reg_buf, r2g.stmt()); // S_y
 
+        int nstages = int(stages.size());
+        int npost_ops = int(post_op_builders_.size());
+
         bool is_dpasw = (cfg_.fma_kind == fma_kind_t::dpasw);
 
         // Generate reorders between stages and create buffers.
-        int nstages = int(stages.size());
         for (int i = 0; i < nstages; i++) {
             auto *next_stage = (i + 1 < nstages ? &stages[i + 1] : nullptr);
             // Always perform reorder when dpasw is used. This is to ensure
@@ -3849,29 +3851,42 @@ private:
                     /*force_reorder=*/i == 0 && is_dpasw);
         }
 
-        stmt_t tile_stmt;
+        std::vector<stmt_t> tile_load_stmts;
+        for (int i = 0; i < npost_ops; i++) {
+            auto &po_builder = post_op_builders_[i];
+            // Generate load for post-op.
+            tile_load_stmts.push_back(po_builder.build_tile_load(tile));
 
-        // Generate loads for post-ops.
-        for (auto &po_builder : post_op_builders_) {
-            tile_stmt = tile_stmt.append(po_builder.build_tile_load(tile));
-        }
-
-        // Generate post-op statements.
-        for (int i = 1; i < int(post_op_builders_.size()) + 1; i++) {
-            auto &po_builder = post_op_builders_[i - 1];
-            auto &s = stages[i];
+            // Generate post-op statement.
+            auto &s = stages[i + 1];
             s.prepend_stmt(po_builder.build_tile_stmt(tile, s.view, s.buf));
         }
 
+        // Restore zero padding if needed.
         if (restore_zero_padding) {
             auto &s = stages[nstages - 2];
             zero_pad_builder_t builder(cset_, post_op_ctx_, s.view, s.buf);
             s.prepend_stmt(builder.stmt());
         }
 
-        // Add stage statements.
-        for (auto &s : stages) {
-            tile_stmt = tile_stmt.append(s.stmt);
+        stmt_t tile_stmt;
+
+        // Add stage statements. Emit stages in blocks to reduce GRF
+        // consumption.
+        int stage_blk = 8;
+        for (int i = 0; i < nstages; i += stage_blk) {
+            int stage_beg = i;
+            int stage_end = std::min(nstages, i + stage_blk);
+            int po_beg = std::max(0, i - 1);
+            int po_end = std::min(npost_ops, i + stage_blk - 1);
+            stmt_t blk_stmt;
+            for (int j = po_beg; j < po_end; j++) {
+                blk_stmt = blk_stmt.append(tile_load_stmts[j]);
+            }
+            for (int j = stage_beg; j < stage_end; j++) {
+                blk_stmt = blk_stmt.append(stages[j].stmt);
+            }
+            tile_stmt = tile_stmt.append(blk_stmt);
         }
 
         // Generate alloc statements for stage buffers.
@@ -3899,7 +3914,9 @@ private:
     expr_t mem_buf_;
     expr_t reg_buf_;
 
-    // TODO: Add logic to determine blocking bytes, hard-coding for now.
+    // Tile size in bytes. The tile data type is:
+    // - the destination data type without post-ops
+    // - f32 with post-ops
     static const int tmp_buf_size_ = 128;
     static const int pre_load_max_size_ = 256;
 
