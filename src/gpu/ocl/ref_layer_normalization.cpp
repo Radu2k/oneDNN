@@ -61,7 +61,7 @@ static status_t init_conf_common(lnorm_conf_t &conf,
     conf.dispatch_scaleshift_finalize = compute_engine->create_dispatch();
     conf.dispatch = compute_engine->create_dispatch(
             pd->is_fwd() ? dst_mdw.md_ : src_mdw.md_);
-    auto &dims = (pd->is_fwd() ? src_mdw : dst_mdw).dims();
+    const auto &dims = pd->is_fwd() ? src_mdw.padded_dims() : dst_mdw.dims();
     if (pd->is_fwd()) {
         if ((conf.norm_axis % 16 == 0) && ndims < 4
                 && (c_block == 1
@@ -266,8 +266,7 @@ status_t ref_layer_normalization_fwd_t::execute_forward(
             conf.use_scale ? DNNL_ARG_SCALE : DNNL_ARG_SCALE_SHIFT);
     auto &shift = CTX_IN_STORAGE(
             conf.use_scaleshift ? DNNL_ARG_SCALE_SHIFT : DNNL_ARG_SHIFT);
-    auto &dst = CTX_OUT_CLEAN_STORAGE(DNNL_ARG_DST, status);
-    CHECK(status);
+    auto &dst = CTX_OUT_STORAGE(DNNL_ARG_DST);
 
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, src);
