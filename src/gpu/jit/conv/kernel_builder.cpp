@@ -3577,8 +3577,7 @@ public:
 private:
     expr_t make_tmp_rhs_buffer() const {
         auto &rhs_name = post_op_.rhs_buf().as<var_t>().name;
-        return ir_ctx_.create_tmp_var(
-                type_t::byte_ptr(), "tmp_" + rhs_name + "_");
+        return ir_ctx_.create_tmp_var(type_t::byte_ptr(), "tmp_" + rhs_name);
     }
 
     void update_rhs_buf_size(const expr_t &buf, int size) {
