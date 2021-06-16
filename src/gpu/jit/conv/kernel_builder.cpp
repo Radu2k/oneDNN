@@ -3367,12 +3367,10 @@ public:
         // if it requires too much GRF memory.
         int estimated_rhs_bytes = 0;
 
-        rhs_orig_reg_buf_ = make_tmp_rhs_buffer();
         estimated_rhs_bytes
                 += int(post_op.rhs_view().create_dense_vlayout().size());
 
         if (needs_rhs_convert()) {
-            rhs_f32_reg_buf_ = make_tmp_rhs_buffer();
             estimated_rhs_bytes += int(post_op.rhs_view()
                                                .create_dense_vlayout()
                                                .retype(type_t::f32())
@@ -3385,23 +3383,17 @@ public:
         }
     }
 
-    // Original buffer to load rhs.
-    const expr_t &rhs_orig_reg_buf() const { return rhs_orig_reg_buf_; }
-    int rhs_orig_reg_buf_size() const { return rhs_orig_reg_buf_size_; }
-
-    // Buffer with rhs converted to f32.
-    const expr_t &rhs_f32_reg_buf() const { return rhs_f32_reg_buf_; }
-    int rhs_f32_reg_buf_size() const { return rhs_f32_reg_buf_size_; }
-
     // Pre-loads rhs data for the whole update.
     stmt_t build_pre_load() {
         if (!do_preload_) return stmt_t();
 
+        auto rhs_load_reg_buf = make_tmp_rhs_buffer();
         read_builder_t read(hw_, ir_ctx_, cset_, post_op_.rhs_view(),
-                post_op_.rhs_buf(), rhs_orig_reg_buf_, /*is_slm=*/false);
+                post_op_.rhs_buf(), rhs_load_reg_buf, /*is_slm=*/false);
+        pre_load_rhs_reg_buf_ = rhs_load_reg_buf;
         pre_load_rhs_reg_view_ = read.reg_view();
-        rhs_reg_buf_ = rhs_orig_reg_buf_;
-        rhs_orig_reg_buf_size_ = read.reg_buf_size();
+        if (!needs_rhs_convert()) rhs_reg_buf_ = rhs_load_reg_buf;
+        update_rhs_buf_size(rhs_load_reg_buf, read.reg_buf_size());
         return read.stmt();
     }
 
@@ -3409,17 +3401,18 @@ public:
     stmt_t build_pre_convert() {
         if (!do_preload_ || !needs_rhs_convert()) return stmt_t();
 
+        auto rhs_f32_reg_buf = make_tmp_rhs_buffer();
         auto f32_view
                 = pre_load_rhs_reg_view_.make_dense().retype(type_t::f32());
-        rhs_f32_reg_buf_size_ = int(f32_view.vlayout_size());
+        update_rhs_buf_size(rhs_f32_reg_buf, int(f32_view.vlayout_size()));
 
         // Reorder to f32.
         auto ret = create_reorder_stmt(pre_load_rhs_reg_view_, f32_view,
-                rhs_orig_reg_buf_, rhs_f32_reg_buf_);
+                pre_load_rhs_reg_buf_, rhs_f32_reg_buf);
 
         // Now rhs is converted to f32.
         pre_load_rhs_reg_view_ = f32_view;
-        rhs_reg_buf_ = rhs_f32_reg_buf_;
+        rhs_reg_buf_ = rhs_f32_reg_buf;
 
         return ret;
     }
@@ -3433,27 +3426,30 @@ public:
         if (post_op_.needs_load() && !do_preload_) {
             // Load and convert now.
             auto po = post_op_.create_sub_post_op(rhs_tile);
+            auto rhs_load_reg_buf = make_tmp_rhs_buffer();
             read_builder_t read(hw_, ir_ctx_, cset_, po.rhs_view(),
-                    po.rhs_buf(), rhs_orig_reg_buf_,
+                    po.rhs_buf(), rhs_load_reg_buf,
                     /*is_slm=*/false);
             stmt = stmt.append(read.stmt());
 
-            rhs_reg_view_ = read.reg_view();
-            rhs_reg_buf_ = rhs_orig_reg_buf_;
-            rhs_orig_reg_buf_size_
-                    = std::max(rhs_orig_reg_buf_size_, read.reg_buf_size());
+            update_rhs_buf_size(rhs_load_reg_buf, read.reg_buf_size());
+
             if (needs_rhs_convert()) {
-                // Reorder to f32.
+                auto rhs_f32_reg_buf = make_tmp_rhs_buffer();
                 auto f32_view
-                        = rhs_reg_view_.make_dense().retype(type_t::f32());
-                rhs_f32_reg_buf_size_ = std::max(
-                        rhs_f32_reg_buf_size_, int(f32_view.vlayout_size()));
-                stmt = stmt.append(create_reorder_stmt(rhs_reg_view_, f32_view,
-                        rhs_orig_reg_buf_, rhs_f32_reg_buf_));
+                        = read.reg_view().make_dense().retype(type_t::f32());
+                update_rhs_buf_size(
+                        rhs_f32_reg_buf, int(f32_view.vlayout_size()));
+                // Reorder to f32.
+                stmt = stmt.append(create_reorder_stmt(read.reg_view(),
+                        f32_view, rhs_load_reg_buf, rhs_f32_reg_buf));
 
                 // Now rhs is converted to f32.
                 rhs_reg_view_ = f32_view;
-                rhs_reg_buf_ = rhs_f32_reg_buf_;
+                rhs_reg_buf_ = rhs_f32_reg_buf;
+            } else {
+                rhs_reg_view_ = read.reg_view();
+                rhs_reg_buf_ = rhs_load_reg_buf;
             }
         } else {
             // Already pre-loaded and pre-converted.
@@ -3570,11 +3566,23 @@ public:
         return stmt;
     }
 
+    std::vector<stmt_t> allocs() const {
+        std::vector<stmt_t> allocs;
+        for (auto &kv : rhs_bufs_)
+            allocs.push_back(
+                    alloc_t::make(kv.first, kv.second, alloc_kind_t::grf));
+        return allocs;
+    }
+
 private:
     expr_t make_tmp_rhs_buffer() const {
         auto &rhs_name = post_op_.rhs_buf().as<var_t>().name;
         return ir_ctx_.create_tmp_var(
                 type_t::byte_ptr(), "tmp_" + rhs_name + "_");
+    }
+
+    void update_rhs_buf_size(const expr_t &buf, int size) {
+        rhs_bufs_[buf] = std::max(rhs_bufs_[buf], size);
     }
 
     bool needs_rhs_convert() const {
@@ -3589,15 +3597,13 @@ private:
 
     bool do_preload_ = false;
 
-    expr_t rhs_orig_reg_buf_;
-    int rhs_orig_reg_buf_size_ = 0;
-
-    expr_t rhs_f32_reg_buf_;
-    int rhs_f32_reg_buf_size_ = 0;
-
+    expr_t pre_load_rhs_reg_buf_;
     view_t pre_load_rhs_reg_view_;
-    view_t rhs_reg_view_;
+
     expr_t rhs_reg_buf_;
+    view_t rhs_reg_view_;
+
+    object_map_t<expr_t, int> rhs_bufs_;
 };
 
 // Zero pads a register buffer of f32 type.
@@ -3791,20 +3797,12 @@ private:
                 });
 
         // Generate alloc statements for rhs post-op buffers.
+        std::vector<stmt_t> allocs;
         for (auto &po_builder : post_op_builders_) {
-            auto &buf = po_builder.rhs_orig_reg_buf();
-            int size = po_builder.rhs_orig_reg_buf_size();
-            if (!buf.is_empty()) {
-                stmt_ = alloc_t::make(buf, size, alloc_kind_t::grf, {}, stmt_);
-            }
-
-            auto &f32_buf = po_builder.rhs_f32_reg_buf();
-            int f32_size = po_builder.rhs_f32_reg_buf_size();
-            if (!f32_buf.is_empty()) {
-                stmt_ = alloc_t::make(
-                        f32_buf, f32_size, alloc_kind_t::grf, {}, stmt_);
-            }
+            auto po_allocs = po_builder.allocs();
+            allocs.insert(allocs.end(), po_allocs.begin(), po_allocs.end());
         }
+        stmt_ = jit::inject_alloc_stmts(stmt_, allocs, /*put_innermost=*/true);
     }
 
     // Builds statements for a tile iterating through all stages (see stage_t
