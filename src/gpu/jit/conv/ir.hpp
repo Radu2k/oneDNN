@@ -421,28 +421,14 @@ class ir_context_t {
 public:
     expr_t create_tmp_var(
             const type_t &type, const std::string &prefix = "tmp") {
-        int id_max = 1024;
-        for (int id = 0; id < id_max; id++) {
-            bool ok = true;
-            auto try_name = prefix + "_" + std::to_string(id);
-            for (auto &v : all_vars_) {
-                if (v.as<var_t>().name == try_name) {
-                    ok = false;
-                    break;
-                }
-            }
-            if (ok) {
-                auto ret = var_t::make(type, try_name);
-                all_vars_.push_back(ret);
-                return ret;
-            }
-        }
-        ir_error_not_expected() << "Can't create a temporary variable.";
-        return expr_t();
+        int &id = prefix_ids_[prefix];
+        auto name = prefix + "_" + std::to_string(id);
+        id++;
+        return var_t::make(type, name);
     }
 
 private:
-    std::vector<expr_t> all_vars_;
+    std::unordered_map<std::string, int> prefix_ids_;
 };
 
 class alloc_updater_t : public ir_mutator_t {
