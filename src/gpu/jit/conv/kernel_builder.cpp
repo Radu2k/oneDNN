@@ -3038,6 +3038,89 @@ stmt_t unroll_loops(const stmt_t &s, ir_context_t &ir_ctx) {
     return ret;
 }
 
+class alloc_injector_t : public ir_mutator_t {
+public:
+    alloc_injector_t(const stmt_t &root, const std::vector<stmt_t> &allocs,
+            bool put_innermost)
+        : root_(root), put_innermost_(put_innermost) {
+        for (auto &_a : allocs) {
+            auto &a = _a.as<alloc_t>();
+            if (a.kind != alloc_kind_t::global) ir_assert(a.size > 0) << _a;
+            allocs_.insert({a.buf, _a});
+        }
+        mutate(root_);
+        buf_total_refs_ = buf_cur_refs_;
+        for (auto &kv : buf_cur_refs_)
+            kv.second = 0;
+        in_ctor_ = false;
+    }
+
+#define HANDLE_IR_OBJECT(type) \
+    object_t _mutate(const type *obj) override { return mutate_stmt(obj); }
+
+    HANDLE_STMT_IR_OBJECTS()
+
+#undef HANDLE_IR_OBJECT
+private:
+    object_t _mutate(const var_t *obj) override {
+        if (allocs_.find(obj) != allocs_.end()) buf_cur_refs_[obj]++;
+        return obj;
+    }
+
+    template <typename T>
+    object_t mutate_stmt(const T *obj) {
+        if (in_ctor_) return ir_mutator_t::_mutate(obj);
+        object_t new_obj = obj;
+        object_set_t<expr_t> undef_bufs;
+        if (put_innermost_) {
+            for (auto &kv : buf_cur_refs_)
+                if (kv.second == 0) undef_bufs.insert(kv.first);
+            new_obj = ir_mutator_t::_mutate(obj);
+        }
+        for (auto &kv : allocs_) {
+            auto &buf = kv.first;
+            if (kv.second.is_empty()) continue; // Already injected.
+            bool do_inject = false;
+            if (put_innermost_) {
+                int cur_refs = buf_cur_refs_[buf];
+                int total_refs = buf_total_refs_[buf];
+                bool was_undef = (undef_bufs.count(buf) != 0);
+                do_inject = was_undef && (cur_refs == total_refs);
+            } else {
+                do_inject = root_.is_same(obj);
+            }
+            if (do_inject) {
+                auto &a = kv.second.as<alloc_t>();
+                new_obj = alloc_t::make(a.buf, a.size, a.kind, a.attr, new_obj);
+                kv.second = stmt_t();
+            }
+        }
+        return new_obj;
+    }
+
+    bool in_ctor_ = true;
+    const stmt_t &root_;
+    bool put_innermost_;
+    object_map_t<expr_t, stmt_t> allocs_;
+    object_map_t<expr_t, int> buf_total_refs_;
+    object_map_t<expr_t, int> buf_cur_refs_;
+};
+
+stmt_t inject_alloc_stmts(const stmt_t &stmt, const std::vector<stmt_t> &allocs,
+        bool put_innermost = false) {
+    alloc_injector_t injector(stmt, allocs, put_innermost);
+    return injector.mutate(stmt);
+}
+
+stmt_t inject_let_stmts(const stmt_t &stmt, const std::vector<stmt_t> &lets) {
+    stmt_t ret = stmt;
+    for (auto it = lets.rbegin(); it != lets.rend(); ++it) {
+        auto &let = it->as<let_t>();
+        ret = let_t::make(let.var, let.value, ret);
+    }
+    return ret;
+}
+
 stmt_t create_reorder_stmt(const view_t &src, const view_t &dst,
         const expr_t &src_buf, const expr_t &dst_buf) {
     auto src_layout = src.create_vlayout();
@@ -4088,28 +4171,6 @@ layout_t convert_to_fma_friendly_layout(const conv_config_t &cfg,
 
     auto ret = layout_t(layout.type(), layout.ndims(), 0, new_blocks);
     ret = ret.make_dense();
-    return ret;
-}
-
-stmt_t inject_alloc_stmts(
-        const stmt_t &stmt, const std::vector<stmt_t> &allocs) {
-    stmt_t ret = stmt;
-    for (auto it = allocs.rbegin(); it != allocs.rend(); ++it) {
-        auto &alloc = it->as<alloc_t>();
-        if (alloc.kind != alloc_kind_t::global) {
-            ir_assert(alloc.size > 0) << *it;
-        }
-        ret = alloc_t::make(alloc.buf, alloc.size, alloc.kind, alloc.attr, ret);
-    }
-    return ret;
-}
-
-stmt_t inject_let_stmts(const stmt_t &stmt, const std::vector<stmt_t> &lets) {
-    stmt_t ret = stmt;
-    for (auto it = lets.rbegin(); it != lets.rend(); ++it) {
-        auto &let = it->as<let_t>();
-        ret = let_t::make(let.var, let.value, ret);
-    }
     return ret;
 }
 
