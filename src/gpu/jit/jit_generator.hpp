@@ -17,7 +17,10 @@
 #ifndef GPU_JIT_JIT_GENERATOR_HPP
 #define GPU_JIT_JIT_GENERATOR_HPP
 
+#include <memory>
+
 #include "common/float16.hpp"
+#include "common/nstl.hpp"
 #include "gpu/jit/jit_generator_base.hpp"
 #include "oneapi/dnnl/dnnl_config.h"
 

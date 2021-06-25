@@ -15,8 +15,8 @@
 *******************************************************************************/
 
 #include "gpu/ocl/ocl_gpu_device_info.hpp"
-#include "gpu/ocl/ocl_gpu_detect.hpp"
 #include "gpu/ocl/ocl_gpu_engine.hpp"
+#include "gpu/ocl/ocl_gpu_hw_info.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -35,20 +35,14 @@ status_t ocl_gpu_device_info_t::init_arch(engine_t *engine) {
     OCL_CHECK(err);
     if (vendor_id != intel_vendor_id) return status::success;
 
-    // try to detect gpu by device name first
-    gpu_arch_ = detect_gpu_arch_by_device_name(name());
+    cl_context context
+            = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &err);
+    OCL_CHECK(err);
 
-    // if failed, use slower method
-    if (gpu_arch_ == compute::gpu_arch_t::unknown) {
-        cl_context context
-                = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &err);
-        OCL_CHECK(err);
+    init_gpu_hw_info(device, context, gpu_arch_, stepping_id_);
 
-        gpu_arch_ = detect_gpu_arch(device, context);
-
-        err = clReleaseContext(context);
-        OCL_CHECK(err);
-    }
+    err = clReleaseContext(context);
+    OCL_CHECK(err);
 
     // XXX: temporary WA for different Xe_HP devices
 #if DNNL_WITH_XE_HP

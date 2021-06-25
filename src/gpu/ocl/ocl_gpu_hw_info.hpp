@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2020 Intel Corporation
+* Copyright 2020-2021 Intel Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GPU_OCL_OCL_GPU_DETECT_HPP
-#define GPU_OCL_OCL_GPU_DETECT_HPP
+#ifndef GPU_OCL_OCL_GPU_HW_INFO_HPP
+#define GPU_OCL_OCL_GPU_HW_INFO_HPP
 
 #include <CL/cl.h>
 
@@ -26,13 +26,12 @@ namespace impl {
 namespace gpu {
 namespace ocl {
 
-compute::gpu_arch_t detect_gpu_arch(cl_device_id device, cl_context context);
-
-compute::gpu_arch_t detect_gpu_arch_by_device_name(const std::string &name);
+void init_gpu_hw_info(cl_device_id device, cl_context context,
+        compute::gpu_arch_t &gpu_arch, int &stepping_id);
 
 } // namespace ocl
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
 
-#endif // GPU_OCL_OCL_GPU_DETECT_HPP
+#endif // GPU_OCL_OCL_GPU_HW_INFO_HPP

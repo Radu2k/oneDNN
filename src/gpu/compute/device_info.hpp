@@ -202,6 +202,7 @@ public:
 
     bool has(device_ext_t ext) const { return extensions_ & (uint64_t)ext; }
     gpu_arch_t gpu_arch() const { return gpu_arch_; }
+    int stepping_id() const { return stepping_id_; }
     int eu_count() const { return eu_count_; }
     int hw_threads() const { return hw_threads_[0]; }
     int hw_threads(bool large_grf_mode) const {
@@ -228,6 +229,7 @@ protected:
     virtual status_t init_attributes(engine_t *engine) = 0;
 
     compute::gpu_arch_t gpu_arch_ = compute::gpu_arch_t::unknown;
+    int stepping_id_ = 0;
 
     std::string name_;
     runtime_version_t runtime_version_;
