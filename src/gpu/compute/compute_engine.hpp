@@ -127,6 +127,18 @@ public:
     bool mayiuse_non_uniform_work_groups() const {
         return device_info_->mayiuse_non_uniform_work_groups();
     }
+    bool mayiuse_large_grf_mode() const {
+#if DNNL_WITH_XE_HPG
+        // XXX: XeHPG 128EU A0 causes hangs with large GRF mode.
+        if (is_xe_hpg() && device_info()->eu_count() == 128
+                && device_info()->stepping_id() == 0)
+            return false;
+#endif
+#if DNNL_WITH_XE_HP
+        return device_info_->gpu_arch() >= compute::gpu_arch_t::xe_hp;
+#endif
+        return false;
+    }
 
     dispatch_t create_dispatch(const memory_desc_t *md = nullptr) const {
         return dispatch_t(this, md);

@@ -50,6 +50,8 @@ struct xe_hp_convolution_fwd_t : public gpu_primitive_t {
 #endif
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;
+            if (!compute_engine->mayiuse_large_grf_mode())
+                return status::unimplemented;
 
             const auto attr_skip_mask
                     = primitive_attr_t::skip_mask_t::oscale_runtime
@@ -182,6 +184,8 @@ struct xe_hp_convolution_bwd_data_t : public gpu_primitive_t {
 #endif
             if (!compute_engine->mayiuse_ngen_kernels())
                 return status::unimplemented;
+            if (!compute_engine->mayiuse_large_grf_mode())
+                return status::unimplemented;
 
             bool ok = set_default_alg_kind(alg_kind::convolution_direct)
                     && is_bwd_d() && data_types_ok()
@@ -261,6 +265,8 @@ struct xe_hp_convolution_bwd_weights_t : public gpu_primitive_t {
             if (!compute_engine->is_xe_hp()) return status::unimplemented;
 #endif
             if (!compute_engine->mayiuse_ngen_kernels())
+                return status::unimplemented;
+            if (!compute_engine->mayiuse_large_grf_mode())
                 return status::unimplemented;
 
             // XXX: supported configs:

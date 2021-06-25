@@ -40,6 +40,7 @@ status_t xe_hp_systolic_gemm_t::pd_t::init(engine_t *engine) {
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
 
     if (!compute_engine->mayiuse_ngen_kernels()) return status::unimplemented;
+    if (!compute_engine->mayiuse_large_grf_mode()) return status::unimplemented;
 
     auto arch = compute_engine->device_info()->gpu_arch();
 

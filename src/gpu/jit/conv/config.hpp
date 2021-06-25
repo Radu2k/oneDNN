@@ -209,6 +209,8 @@ public:
         else
             ir_error_not_expected();
 
+        if (!hw_ok(engine)) return status::unimplemented;
+
         return status::success;
     }
 
@@ -798,6 +800,14 @@ public:
                     return false;
             }
         }
+        return true;
+    }
+
+    bool hw_ok(const engine_t *engine) const {
+        auto *compute_engine
+                = utils::downcast<const compute::compute_engine_t *>(engine);
+        if (regs == 256 && !compute_engine->mayiuse_large_grf_mode())
+            return false;
         return true;
     }
 
