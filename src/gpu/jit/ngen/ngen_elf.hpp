@@ -30,7 +30,7 @@ class ELFCodeGenerator : public BinaryCodeGenerator<hw>
 {
 public:
     inline std::vector<uint8_t> getBinary();
-    static inline HW getBinaryArch(const std::vector<uint8_t> &binary);
+    static inline void getHWInfo(const std::vector<uint8_t> &binary, HW &_hw, int &steppingID);
 
 protected:
     NEOInterfaceHandler interface_{hw};
@@ -284,16 +284,20 @@ std::vector<uint8_t> ELFCodeGenerator<hw>::getBinary()
 }
 
 template <HW hw>
-inline HW ELFCodeGenerator<hw>::getBinaryArch(const std::vector<uint8_t> &binary)
+void ELFCodeGenerator<hw>::getHWInfo(const std::vector<uint8_t> &binary, HW &_hw, int &steppingID)
 {
     auto zebinELF = reinterpret_cast<const ZebinELF *>(binary.data());
     if (zebinELF->valid()) {
         if (zebinELF->fileHeader.flags.parts.useGfxCoreFamily)
-            return npack::decodeGfxCoreFamily(static_cast<npack::GfxCoreFamily>(zebinELF->fileHeader.machine));
+            _hw = npack::decodeGfxCoreFamily(static_cast<npack::GfxCoreFamily>(zebinELF->fileHeader.machine));
         else
-            return npack::decodeProductFamily(static_cast<npack::ProductFamily>(zebinELF->fileHeader.machine));
+            _hw = npack::decodeProductFamily(static_cast<npack::ProductFamily>(zebinELF->fileHeader.machine));
+        // XXX: Report minHWRevision when minHWRevision != maxHWRevision: it's
+        // important to reliably detect early steppings to apply potential WAs.
+        steppingID = zebinELF->fileHeader.flags.parts.minHWRevision;
+    } else {
+        npack::getHWInfo(binary, _hw, steppingID);
     }
-    return npack::getBinaryArch(binary);
 }
 
 } /* namespace ngen */

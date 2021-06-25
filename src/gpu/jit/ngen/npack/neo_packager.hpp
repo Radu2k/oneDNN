@@ -217,11 +217,8 @@ inline HW decodeProductFamily(ProductFamily family)
     return HW::Unknown;
 }
 
-inline HW getBinaryArch(const std::vector<uint8_t> &binary)
+inline HW getBinaryArch(const std::vector<uint8_t> &binary, const SProgramBinaryHeader *pheader)
 {
-    const SProgramBinaryHeader *pheader = nullptr;
-
-    findDeviceBinary(binary, nullptr, &pheader, nullptr);
     auto hw = decodeGfxCoreFamily(pheader->Device);
 
 #if NGEN_XE_HPG
@@ -236,6 +233,14 @@ inline HW getBinaryArch(const std::vector<uint8_t> &binary)
     }
 #endif
     return hw;
+}
+
+inline void getHWInfo(const std::vector<uint8_t> &binary, HW &hw, int &steppingID) {
+    const SProgramBinaryHeader *pheader = nullptr;
+
+    findDeviceBinary(binary, nullptr, &pheader, nullptr);
+    hw = getBinaryArch(binary, pheader);
+    steppingID = pheader->SteppingId;
 }
 
 

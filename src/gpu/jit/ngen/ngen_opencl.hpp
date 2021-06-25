@@ -56,6 +56,7 @@ class OpenCLCodeGenerator : public ELFCodeGenerator<hw>
 public:
     inline std::vector<uint8_t> getBinary(cl_context context, cl_device_id device, const std::string &options = "-cl-std=CL2.0");
     inline cl_kernel getKernel(cl_context context, cl_device_id device, const std::string &options = "-cl-std=CL2.0");
+    static inline void getHWInfo(cl_context context, cl_device_id device, HW &_hw, int &steppingID);
     static inline HW detectHW(cl_context context, cl_device_id device);
 };
 
@@ -172,14 +173,24 @@ cl_kernel OpenCLCodeGenerator<hw>::getKernel(cl_context context, cl_device_id de
 }
 
 template <HW hw>
-HW OpenCLCodeGenerator<hw>::detectHW(cl_context context, cl_device_id device)
+void OpenCLCodeGenerator<hw>::getHWInfo(cl_context context, cl_device_id device, HW &_hw, int &steppingID)
 {
     const char *dummyCL = "kernel void _(){}";
     const char *dummyOptions = "";
 
     auto binary = detail::getOpenCLCProgramBinary(context, device, dummyCL, dummyOptions);
 
-    return ELFCodeGenerator<hw>::getBinaryArch(binary);
+    ELFCodeGenerator<hw>::getHWInfo(binary, _hw, steppingID);
+}
+
+template <HW hw>
+HW OpenCLCodeGenerator<hw>::detectHW(cl_context context, cl_device_id device)
+{
+    HW _hw;
+    int steppingID;
+    getHWInfo(context, device, _hw, steppingID);
+    (void)steppingID;
+    return _hw;
 }
 
 } /* namespace ngen */
