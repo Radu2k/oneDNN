@@ -464,26 +464,20 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
         static constexpr int vmm_zp_last_idx = 15;
         const auto vmm_src_zp
                 = Vmm(do_dst_zp ? vmm_zp_last_idx - 1 : vmm_zp_last_idx);
-        const bool do_zp_to_f32_cast
-                = utils::one_of(f32, prb_.itype, prb_.otype);
         if (do_src_zp) {
             uni_vpbroadcastd(vmm_src_zp, PARAM(src_zp));
-            if (do_zp_to_f32_cast) uni_vcvtdq2ps(vmm_src_zp, vmm_src_zp);
+            uni_vcvtdq2ps(vmm_src_zp, vmm_src_zp);
         }
         const auto vmm_dst_zp = Vmm(vmm_zp_last_idx);
         if (do_dst_zp) {
             uni_vpbroadcastd(vmm_dst_zp, PARAM(dst_zp));
-            if (do_zp_to_f32_cast) uni_vcvtdq2ps(vmm_dst_zp, vmm_dst_zp);
+            uni_vcvtdq2ps(vmm_dst_zp, vmm_dst_zp);
         }
 #undef PARAM
 
         const auto apply_zp_ps = [&](const Vmm vmm) {
             if (do_src_zp) uni_vsubps(vmm, vmm, vmm_src_zp);
             if (do_dst_zp) uni_vaddps(vmm, vmm, vmm_dst_zp);
-        };
-        const auto apply_zp_d = [&](const Vmm vmm) {
-            if (do_src_zp) uni_vpsubd(vmm, vmm, vmm_src_zp);
-            if (do_dst_zp) uni_vpaddd(vmm, vmm, vmm_dst_zp);
         };
 
         for (int off = 0; off < len;) {
@@ -520,7 +514,9 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
                     if (prb_.otype == f32) {
                         apply_zp_ps(vmm);
                     } else if (prb_.otype == s32) {
-                        apply_zp_d(vmm);
+                        uni_vcvtdq2ps(vmm, vmm);
+                        apply_zp_ps(vmm);
+                        uni_vcvtps2dq(vmm, vmm);
                     }
                 }
             }
@@ -896,6 +892,15 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
         }
 #undef PARAM
 
+        /* adjust scale application */
+        if (prb_.scale_adjust != 1.f) {
+            uni_vmovd(xmm_tmp_, reg_scale_adjust_);
+            uni_vpshufd(xmm_tmp_, xmm_tmp_, 0x0);
+            for (int ur = 0; ur < reg_unroll; ur += ur_step) {
+                uni_vmulps(Xmm(ur), Xmm(ur), xmm_tmp_);
+            }
+        }
+
         if (need_saturation) {
             init_saturate_f32(
                     xmm_zero, xmm_saturation_ubound, reg_tmp, f32, prb_.otype);
@@ -920,18 +925,28 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
             const auto uni_vpaddd_wrapper
                     = [&](const Xmm &xmm, const Address &addr) {
                           if (mayiuse_avx2)
-                              uni_vpaddd(xmm, xmm, addr);
+                              vpaddd(xmm, xmm, addr);
                           else {
                               //isas < avx2 demand paddd instruction addr to be aligned
                               uni_vmovups(xmm_tmp, addr);
                               paddd(xmm, xmm_tmp);
                           }
                       };
-
             if (can_store_xmm) {
                 enum class comp_load_type_t { bcast, load, gather };
 
                 for (int ur = 0; ur < reg_unroll; ur += ur_step) {
+
+                    bool all_ip_padding_one = true;
+                    bool all_ip_padding_zero = true;
+                    for (int r = ur; r < ur + ur_step; r++) {
+                        if (ip_padding[r] != 1)
+                            all_ip_padding_one = false;
+                        else
+                            all_ip_padding_zero = false;
+                    }
+                    if (all_ip_padding_one) continue;
+
                     comp_load_type_t comp_load_type = comp_load_type_t::bcast;
 
                     for (int r = ur + 1; r < ur + ur_step; ++r)
@@ -941,7 +956,7 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
                         }
 
                     if (comp_load_type == comp_load_type_t::bcast
-                            && !h_padded) {
+                            && all_ip_padding_zero) {
                         const auto reduction_xmm = get_temp_xmm();
                         const auto xmm_reorder_result = Xmm(ur);
                         uni_vcvttps2dq(reduction_xmm, xmm_reorder_result);
@@ -957,13 +972,15 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
                         continue;
                     }
 
-                    for (int r = ur + 1; r < ur + ur_step; ++r)
-                        if (c_off[r] != c_off[r - 1] + 1) {
-                            comp_load_type = comp_load_type_t::gather;
-                            break;
-                        }
+                    if (comp_load_type == comp_load_type_t::load)
+                        for (int r = ur + 1; r < ur + ur_step; ++r)
+                            if (c_off[r] != c_off[r - 1] + 1) {
+                                comp_load_type = comp_load_type_t::gather;
+                                break;
+                            }
 
-                    if (comp_load_type == comp_load_type_t::load && !h_padded) {
+                    if (comp_load_type == comp_load_type_t::load
+                            && all_ip_padding_zero) {
                         const auto xmm_reorder_result_dq = get_temp_xmm();
                         const auto xmm_reorder_result = Xmm(ur);
                         const auto comp_addr = c_addr(c_off[ur]);
@@ -974,16 +991,18 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
                         continue;
                     }
 
+                    const auto xmm_reorder_result_dq = get_temp_xmm();
+                    const auto xmm_reorder_result = Xmm(ur);
+                    uni_vcvttps2dq(xmm_reorder_result_dq, xmm_reorder_result);
+
                     for (int r = ur; r < ur + ur_step; ++r) {
                         if (ip_padding[r] == 0 || !h_padded) {
-                            const auto xmm_reorder_result_dq = get_temp_xmm();
-                            const auto xmm_reorder_result = Xmm(ur);
+                            uni_vshufps(xmm_tmp_, xmm_reorder_result_dq,
+                                    xmm_reorder_result_dq, r);
+                            const Reg32 reg_tmp_32 = reg_tmp_.cvt32();
+                            uni_vmovd(reg_tmp_32, xmm_tmp_);
                             const auto comp_addr = c_addr(c_off[r]);
-                            uni_vcvttps2dq(
-                                    xmm_reorder_result_dq, xmm_reorder_result);
-                            uni_vpaddd_wrapper(
-                                    xmm_reorder_result_dq, comp_addr);
-                            uni_vmovss(comp_addr, xmm_reorder_result_dq);
+                            add(comp_addr, reg_tmp_32);
                         }
                     }
                 }
@@ -1010,7 +1029,6 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
                     uni_vblendps(Xmm(ur), Xmm(ur), xmm_zero, mask);
                 }
             }
-
             if (prb_.otype != f32)
                 cvt2odt(Xmm(ur), prb_.otype, interim_f32 ? f32 : prb_.itype);
 
@@ -1034,7 +1052,8 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
                 || ((prb_.req_src_zp || prb_.req_dst_zp)
                                 ? !(prb_.itype == s32 && prb_.otype == s32)
                                 : false)
-                || (prb_.itype != f32 && compensation_needed_);
+                || (prb_.itype != f32 && compensation_needed_)
+                || prb_.scale_adjust != 1.f;
     }
 
     void process_unroll_generic(const int ndims, int len, const bool h_padded) {
@@ -1211,10 +1230,11 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
             mov(reg_ptr_scale, PARAM(scale));
         }
         if (compensation_needed_)
-            mov(reg_ptr_comp, PARAM(compensation_scratch));
-        mov(reg_ptr_in, PARAM(in));
-        mov(reg_ptr_out, PARAM(out));
-        mov(reg_blk_chunks, PARAM(blk_chunks));
+            mov(reg_ptr_comp_, PARAM(compensation_scratch));
+        if (prb_.scale_adjust == 0.5f) { mov(reg_scale_adjust_, 0x3f000000); }
+        mov(reg_ptr_in_, PARAM(in));
+        mov(reg_ptr_out_, PARAM(out));
+        mov(reg_blk_chunks_, PARAM(blk_chunks));
 
 #undef PARAM
 
@@ -1241,35 +1261,36 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator {
     ~jit_uni_reorder_kernel_f32_t() override { delete bf16_emu_; }
 
 private:
-    int itype_sz;
-    int otype_sz;
-    int stype_sz;
+    int itype_sz_;
+    int otype_sz_;
+    int stype_sz_;
 
-    Reg64 reg_ptr_in = rsi;
-    Reg64 reg_ptr_out = rdx;
-    Reg64 reg_ptr_scale = abi_not_param1;
-    Reg64 reg_ptr_comp = rbx;
+    Reg64 reg_ptr_in_ = rsi;
+    Reg64 reg_ptr_out_ = rdx;
+    Reg64 reg_ptr_scale_ = abi_not_param1;
+    Reg64 reg_ptr_comp_ = rbx;
+    Reg32 reg_scale_adjust_ = ebp;
 
-    Reg64 reg_off_in = r8;
-    Reg64 reg_off_out = r9;
-    Reg64 reg_off_scale = r10;
-    Reg64 reg_off_comp = r11;
+    Reg64 reg_off_in_ = r8;
+    Reg64 reg_off_out_ = r9;
+    Reg64 reg_off_scale_ = r10;
+    Reg64 reg_off_comp_ = r11;
 
-    Reg64 reg_blk_chunks = r12;
-    Reg64 reg_last_loop_cnt = r15;
+    Reg64 reg_blk_chunks_ = r12;
+    Reg64 reg_last_loop_cnt_ = r15;
 
-    Reg64 reg_tmp = rax;
+    Reg64 reg_tmp_ = rax;
 
-    Xmm xmm_scale = xmm15;
-    Xmm xmm_zero = xmm14;
-    Xmm xmm_4x127b = xmm13; // TODO: unite with ymm_zero
-    Ymm ymm_zero = ymm14;
-    Ymm ymm_8x127b = ymm13;
-    Xmm xmm_tmp = xmm12;
-    Xmm xmm_src_zp = xmm9;
-    Xmm xmm_dst_zp = xmm11;
-    Xmm xmm_saturation_ubound = xmm12;
-    Ymm ymm_saturation_ubound = ymm12;
+    Xmm xmm_scale_ = xmm15;
+    Xmm xmm_zero_ = xmm14;
+    Xmm xmm_4x127b_ = xmm13; // TODO: unite with ymm_zero_
+    Ymm ymm_zero_ = ymm14;
+    Ymm ymm_8x127b_ = ymm13;
+    Xmm xmm_tmp_ = xmm12;
+    Xmm xmm_src_zp_ = xmm9;
+    Xmm xmm_dst_zp_ = xmm11;
+    Xmm xmm_saturation_ubound_ = xmm12;
+    Ymm ymm_saturation_ubound_ = ymm12;
 
     /* bf16 support on SKX */
     bf16_emulation_t *bf16_emu_;
@@ -2087,22 +2108,36 @@ void jit_uni_reorder_t::omp_driver(const char *in, char *out,
     //reduction of intermediate compensation results to the final output
     if (req_compensation) {
         const int nthr = ndims - ndims_ker == 0 ? 1 : pd()->nthr_;
-        reduce_compensation(out, compensation_reduce_scratch, nthr, G, N,
-                wspace_per_thr_size);
+        reduce_compensation(
+                out, compensation_reduce_scratch, nthr, wspace_per_thr_size);
     }
 }
 
 void jit_uni_reorder_t::reduce_compensation(char *out,
-        const int32_t *compensation_reduce_scratch, const int nthr, const int G,
-        const int N, const dim_t wspace_per_thr_size) const {
+        const int32_t *compensation_reduce_scratch, const int nthr,
+        const dim_t wspace_per_thr_size) const {
+
+    const memory_desc_wrapper id(pd()->dst_md());
+    const auto G = pd()->with_groups_ ? id.dims()[0] : 1;
+    const auto N = id.dims()[pd()->with_groups_ ? 1 : 0];
 
     const memory_desc_wrapper od(pd()->dst_md());
-    size_t offset = od.padded_dims()[0];
-    for (int dim = 1; dim < od.ndims(); dim++)
+    size_t offset = od.data_type_size();
+    for (int dim = 0; dim < od.ndims(); dim++)
         offset *= od.padded_dims()[dim];
+
+    static constexpr auto comp_dt_size = sizeof(int32_t);
     const size_t zp_offset
             = offset + (pd()->prb_.req_s8s8_comp ? G * N * sizeof(int32_t) : 0);
     static constexpr int32_t comp_s8s8_shift = 128;
+
+    // zero out the compensation memory in case of padding
+    const auto G_padded = pd()->with_groups_ ? id.padded_dims()[0] : 1;
+    const auto N_padded = id.padded_dims()[pd()->with_groups_ ? 1 : 0];
+    const auto GN_padded_elems = G_padded * N_padded;
+    const auto GN = G * N;
+    if (GN_padded_elems != GN)
+        std::memset(out + offset, 0, GN_padded_elems * comp_dt_size);
 
     const bool req_s8s8_comp = pd()->prb_.req_s8s8_comp;
     const bool req_asymmetric_comp = pd()->prb_.req_asymmetric_comp;
