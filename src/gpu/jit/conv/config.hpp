@@ -59,7 +59,8 @@ public:
         dst_data_type = orig_dst_md.data_type;
         bia_data_type = orig_bia_md.data_type;
 
-        if (with_bias) bia_layout = layout_t(orig_bia_md, "a");
+        if (with_bias)
+            bia_layout = layout_t(orig_bia_md, "a", /*do_normalize=*/false);
 
         ndims = conv_pd->ndims();
 
@@ -369,17 +370,17 @@ public:
 
         // Validate layouts.
         bool is_src_nhwc = (orig_src_mdw().is_plain()
-                && src_layout == layout_t(src_md, "axb"));
+                && src_layout == make_layout(src_md, "axb"));
         bool is_dst_nhwc = (orig_dst_mdw().is_plain()
-                && dst_layout == layout_t(dst_md, "axb"));
+                && dst_layout == make_layout(dst_md, "axb"));
         if (is_src_nhwc != is_dst_nhwc) return status::unimplemented;
 
-        if (!is_src_nhwc && src_layout != layout_t(src_md, src_tag))
+        if (!is_src_nhwc && src_layout != make_layout(src_md, src_tag))
             return status::unimplemented;
-        if (!is_dst_nhwc && dst_layout != layout_t(dst_md, dst_tag))
+        if (!is_dst_nhwc && dst_layout != make_layout(dst_md, dst_tag))
             return status::unimplemented;
 
-        if (wei_layout != layout_t(wei_md, wei_tag))
+        if (wei_layout != make_layout(wei_md, wei_tag))
             return status::unimplemented;
 
         // HWord loads require 32 byte alignment. For NHWC layout it means
@@ -515,17 +516,17 @@ public:
 
         // Validate layouts.
         bool is_src_nhwc = (orig_src_mdw().is_plain()
-                && src_layout == layout_t(src_md, "axb"));
+                && src_layout == make_layout(src_md, "axb"));
         bool is_dst_nhwc = (orig_dst_mdw().is_plain()
-                && dst_layout == layout_t(dst_md, "axb"));
+                && dst_layout == make_layout(dst_md, "axb"));
         if (is_src_nhwc != is_dst_nhwc) return status::unimplemented;
 
-        if (!is_src_nhwc && src_layout != layout_t(src_md, src_tag))
+        if (!is_src_nhwc && src_layout != make_layout(src_md, src_tag))
             return status::unimplemented;
-        if (!is_dst_nhwc && dst_layout != layout_t(dst_md, dst_tag))
+        if (!is_dst_nhwc && dst_layout != make_layout(dst_md, dst_tag))
             return status::unimplemented;
 
-        if (wei_layout != layout_t(wei_md, wei_tag))
+        if (wei_layout != make_layout(wei_md, wei_tag))
             return status::unimplemented;
 
         // HWord loads require 32 byte alignment. For NHWC layout it means
@@ -653,11 +654,11 @@ public:
         dst_layout = init_layout(dst_md, dst_tag);
         if (with_bias) bia_layout = init_layout(bia_md, "a");
 
-        if (src_layout != layout_t(src_md, src_tag))
+        if (src_layout != make_layout(src_md, src_tag))
             return status::unimplemented;
-        if (wei_layout != layout_t(wei_md, wei_tag))
+        if (wei_layout != make_layout(wei_md, wei_tag))
             return status::unimplemented;
-        if (dst_layout != layout_t(dst_md, dst_tag))
+        if (dst_layout != make_layout(dst_md, dst_tag))
             return status::unimplemented;
 
         if (do_post_wei_reorder) {
@@ -788,7 +789,7 @@ public:
                         po.binary.src1_desc.dims, ndims);
                 // per_oc broadcast is always supported.
                 if ((mask & (1 << 1)) == 0) continue;
-                auto rhs_layout = layout_t(po.binary.src1_desc);
+                auto rhs_layout = make_layout(po.binary.src1_desc);
                 auto rhs0 = rhs_layout.blocks()[0];
                 int block_bytes = rhs0.block * rhs_layout.type().size();
                 // Innermost block must:
@@ -1227,10 +1228,19 @@ private:
     }
 
     static layout_t init_layout(memory_desc_t &md, const std::string &tag) {
-        if (md.format_kind != format_kind::any) return layout_t(md);
-        auto ret = layout_t(md, tag, /*do_normalize=*/false);
+        if (md.format_kind != format_kind::any) return make_layout(md);
+        auto ret = make_layout(md, tag);
         md = ret.to_dnnl(md.dims);
         return ret;
+    }
+
+    static layout_t make_layout(const memory_desc_t &md) {
+        return layout_t(md, /*do_normalize=*/false);
+    }
+
+    static layout_t make_layout(
+            const memory_desc_t &md, const std::string &tag) {
+        return layout_t(md, tag, /*do_normalize=*/false);
     }
 };
 

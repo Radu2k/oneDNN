@@ -306,14 +306,14 @@ private:
                 bound_check_mask |= (1 << i);
             }
         }
-        return view_t(layout_t(type, 0, rhs_dims), lhs_view_.vvars(),
-                bound_check_mask);
+        return view_t(layout_t(type, 0, rhs_dims, /*do_normalize=*/false),
+                lhs_view_.vvars(), bound_check_mask);
     }
 
     // rhs tensor layout is defined by rhs_md.
     view_t create_rhs_view(
             const memory_desc_t &rhs_md, uint32_t &rhs_mask) const {
-        layout_t rhs_layout(rhs_md);
+        layout_t rhs_layout(rhs_md, /*do_normalize=*/false);
         std::vector<dim_t> rhs_dims(rhs_md.dims, rhs_md.dims + rhs_md.ndims);
         std::vector<dim_t> rhs_padded_dims(
                 rhs_md.padded_dims, rhs_md.padded_dims + rhs_md.ndims);
@@ -346,7 +346,7 @@ private:
         ir_assert(rhs_layout.ndims() == int(rhs_dims.size()));
         if (rhs_layout.ndims() < ndims) {
             rhs_layout = layout_t(rhs_layout.type(), ndims, rhs_layout.offset(),
-                    rhs_layout.blocks());
+                    rhs_layout.blocks(), /*do_normalize=*/false);
             rhs_dims.resize(ndims, 1);
             rhs_padded_dims.resize(ndims, 1);
         }
