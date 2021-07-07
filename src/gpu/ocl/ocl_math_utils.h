@@ -316,7 +316,7 @@ DECLARE_BLOCK_WRITE(_us, block_write_us_emu, ushort, __local, ushort)
         return acc; \
     }
 
-#ifdef cl_intel_subgroup_matrix_multiply_accumulate
+#if defined(cl_intel_subgroup_matrix_multiply_accumulate) && !DISABLE_DPAS
 
 int8 __attribute__((overloadable)) mmad8x8(uint8 a, int8 b, int8 acc) {
     return intel_sub_group_u8_i8_matrix_mad_k32(a, b, acc);

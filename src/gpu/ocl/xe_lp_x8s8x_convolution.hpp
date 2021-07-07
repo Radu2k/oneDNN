@@ -92,6 +92,10 @@ struct xe_lp_x8s8x_convolution_fwd_t : public gpu_primitive_t {
 #endif
                     ;
 #endif
+#if DNNL_WITH_XE_HPG
+            if (compute_engine->is_xe_hpg()) disable_dpas = true;
+#endif
+
             return ok ? status::success : status::unimplemented;
         }
 
@@ -103,6 +107,8 @@ struct xe_lp_x8s8x_convolution_fwd_t : public gpu_primitive_t {
         void init_scratchpad();
 
         const memory_desc_t *scales_md() const { return &scales_md_; }
+
+        bool disable_dpas = false;
 
         conv_conf_t conf;
 
@@ -233,6 +239,10 @@ struct xe_lp_x8s8x_convolution_bwd_data_t : public gpu_primitive_t {
             status_t status = init_conf();
             if (status != status::success) return status;
 
+#if DNNL_WITH_XE_HPG
+            if (compute_engine->is_xe_hpg()) disable_dpas = true;
+#endif
+
             ok = set_default_formats_common(
                     conf.src_tag, conf.wei_tag, conf.dst_tag);
             return ok ? status::success : status::unimplemented;
@@ -242,6 +252,8 @@ struct xe_lp_x8s8x_convolution_bwd_data_t : public gpu_primitive_t {
         status_t init_kernel_ctx(compute::kernel_ctx_t &kernel_ctx) const;
 
         conv_conf_t conf;
+
+        bool disable_dpas = false;
 
         bool support_bias() const override { return true; }
     };
