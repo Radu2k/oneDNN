@@ -93,6 +93,9 @@ if(WIN32 AND DNNL_WITH_SYCL)
     append(CMAKE_EXE_LINKER_FLAGS "-Xlinker /IGNORE:4078")
     append(CMAKE_SHARED_LINKER_FLAGS "-Xlinker /IGNORE:4078")
 
+    # XXX: SYCL does not like __thiscall convention coming from TBB,
+    # suppress warnings for now.
+    append(CMAKE_CCXX_FLAGS "-Wno-ignored-attributes")
     # XXX: compiler always pulls in release C++ runtime by default, until
     # this is fixed we have to explicitly drop release C++ runtime for
     # debug build types.
