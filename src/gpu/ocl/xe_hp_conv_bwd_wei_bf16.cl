@@ -116,6 +116,12 @@
                 + (2 * i_c + 1) * INT_PER_READ]); \
     } while (0)
 
+#define ZERO_SRC(i_c) \
+    do { \
+        S[i_c][0] = 0; \
+        S[i_c][1] = 0; \
+    } while (0)
+
 #define PACK(i) as_uint((short2)(D_tmp[0][i], D_tmp[1][i]))
 
 #if WITH_BIAS
@@ -211,7 +217,6 @@
 #if OC_BLK_SUBGROUP == 2
 #define COMPUTE(i_c) \
     do { \
-        READ_SRC(i_c); \
         GEMM_IC_blk(0, i_c); \
         GEMM_IC_blk(1, i_c); \
         GEMM_IC_blk(2, i_c); \
@@ -220,7 +225,6 @@
 #elif OC_BLK_SUBGROUP == 1
 #define COMPUTE(i_c) \
     do { \
-        READ_SRC(i_c); \
         GEMM_IC_blk(0, i_c); \
         GEMM_IC_blk(1, i_c); \
     } while (0)
@@ -477,17 +481,29 @@ xe_hp_conv_bwd_wei_bf16(const __global ushort *src, __global float *diff_wei,
             // Read first 16n block of diff_dst
             // (block layout: Xc16c16n, X=OC_BLK_SUBGROUP) from SLM
             READ_DST();
-            // Compute 2Xo16i (X=OC_BLK_SUBGROUP) with reduction on first block of 16n
-            COMPUTE(0);
-
-#if IC_BLK_SUBGROUP == 2
-            // Compute next IC_BLOCK, i.e.2Xo16i (X=OC_BLK_SUBGROUP)
-            // with reduction on first block of 16n
-            COMPUTE(1);
-#endif
+            READ_SRC(0);
 #if MAX_SGID_COMPUTE < WORKGROUP_SIZE
+        } else {
+            ZERO_SRC(0);
         }
 #endif
+        // Compute 2Xo16i (X=OC_BLK_SUBGROUP) with reduction on first block of 16n
+        COMPUTE(0);
+
+#if IC_BLK_SUBGROUP == 2
+#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
+        if (compute_block) {
+#endif
+            READ_SRC(1);
+#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
+        } else {
+            ZERO_SRC(1);
+        }
+#endif
+        // Compute next IC_BLOCK, i.e.2Xo16i (X=OC_BLK_SUBGROUP)
+        // with reduction on first block of 16n
+        COMPUTE(1);
+#endif // IC_BLK_SUBGROUP == 2
 
         if (k_blk < max_k_blocks - (NUM_BUF - 1)) {
 #if MAX_SGID_IC < WORKGROUP_SIZE
@@ -537,24 +553,36 @@ xe_hp_conv_bwd_wei_bf16(const __global ushort *src, __global float *diff_wei,
             }
         }
 
+#if MB_BLK_WORKGROUP == 2
 #if MAX_SGID_COMPUTE < WORKGROUP_SIZE
         if (compute_block) {
 #endif
-#if MB_BLK_WORKGROUP == 2
             src_loc_read += src_slm_offset;
             diff_dst_loc_read += dst_slm_offset;
 
             // Read second 16n block of diff_dst (block size: 2c16n16c) from SLM
             READ_DST();
-            // Reduce on the same block(32o32i) with reduction on second block of 16n
-            COMPUTE(0);
-#if IC_BLK_SUBGROUP == 2
-            COMPUTE(1);
-#endif
-#endif
+            READ_SRC(0);
 #if MAX_SGID_COMPUTE < WORKGROUP_SIZE
+        } else {
+            ZERO_SRC(0);
         }
 #endif
+        // Reduce on the same block(32o32i) with reduction on second block of 16n
+        COMPUTE(0);
+#if IC_BLK_SUBGROUP == 2
+#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
+        if (compute_block) {
+#endif
+            READ_SRC(1);
+#if MAX_SGID_COMPUTE < WORKGROUP_SIZE
+        } else {
+            ZERO_SRC(0);
+        }
+#endif
+        COMPUTE(1);
+#endif // IC_BLK_SUBGROUP == 2
+#endif // MB_BLK_WORKGROUP == 2
 
         if (k_blk < max_k_blocks - (NUM_BUF - 1)) {
             barrier(CLK_LOCAL_MEM_FENCE);
