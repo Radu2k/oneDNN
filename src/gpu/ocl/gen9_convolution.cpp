@@ -340,7 +340,7 @@ status_t gen9_convolution_fwd_t::pd_t::init_conf(engine_t *engine) {
     if (int8_dst) {
         if (is_1stconv && conf.ic_without_padding < 4) {
             dst_tag = utils::pick(conf.ndims - 3, ncw, nchw, ncdhw);
-        } else if (conf.mb % 16 == 0 || (conf.mb == 8 && !is_depthwise)) {
+        } else if (conf.ver == ver_16mb16c || conf.ver == ver_32mb16c) {
             dst_tag = utils::pick(
                     conf.ndims - 3, NCw32n32c, NChw32n32c, NCdhw32n32c);
         } else {
