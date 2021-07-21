@@ -96,8 +96,10 @@ status_t xe_hp_bf16_convolution_bwd_weights_t::pd_t::init_conf(
     conf.ic = utils::rnd_up(conf.ic, conf.ic_block);
     conf.oc = utils::rnd_up(conf.oc, conf.oc_block);
     conf.max_blk_wg = 16;
-    conf.oc_blk_wg = utils::max_div(conf.oc / conf.oc_block, conf.max_blk_wg);
-    conf.ic_blk_wg = utils::max_div(conf.ic / conf.ic_block, conf.max_blk_wg);
+    conf.oc_blk_wg = std::min(
+            utils::max_div(conf.oc / conf.oc_block, conf.max_blk_wg), 4);
+    conf.ic_blk_wg = std::min(
+            utils::max_div(conf.ic / conf.ic_block, conf.max_blk_wg), 4);
 
     // TODO: Fine-tune blocking sizes on real hardware
     if (conf.oc_blk_wg * conf.ic_blk_wg <= max_workgroup_size) {
