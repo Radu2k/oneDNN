@@ -927,14 +927,14 @@ void brgemm_inner_product_bwd_weights_t<isa>::compute_diff_weights_and_bias(
     };
 
     const auto ker = [&](const int osc, const int icb, const int ocb) {
-        int os_chunks_per_thr = utils::div_up(os_chunks, jbgp.nthr_mb);
+        dim_t os_chunks_per_thr = utils::div_up(os_chunks, jbgp.nthr_mb);
         int ic_chunks = utils::div_up(jbgp.nb_ic, jbgp.nb_ic_blocking);
-        int ic_chunks_per_thr = utils::div_up(ic_chunks, jbgp.nthr_ic_b);
+        dim_t ic_chunks_per_thr = utils::div_up(ic_chunks, jbgp.nthr_ic_b);
 
         int osc_l_idx = osc - ti->os_c_start;
         int icb_l_idx = icb - ti->ic_c_start * jbgp.nb_ic_blocking;
         int ocb_l_idx = ocb - ti->oc_c_start * jbgp.nb_oc_blocking;
-        int a_buf_idx = osc_l_idx * ic_chunks_per_thr * jbgp.nb_ic_blocking
+        dim_t a_buf_idx = osc_l_idx * ic_chunks_per_thr * jbgp.nb_ic_blocking
                 + icb_l_idx;
         int b_buf_idx = osc_l_idx;
 
