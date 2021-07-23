@@ -287,6 +287,7 @@ status_t xe_hp_convolution_bwd_data_t::pd_t::init_conf(engine_t *engine) {
 
     status_t status = status::success;
 
+    if (conf.ic < 8) return status::unimplemented;
     if (conf.mb < 8) return status::unimplemented;
 
     auto *compute_engine = utils::downcast<compute::compute_engine_t *>(engine);
