@@ -222,7 +222,9 @@ private:
     void injector_preamble(const injector_utils::vmm_index_set_t &vmm_idxs,
             injector_utils::vmm_index_set_iterator_t &start_idx_tail_it,
             const injector_utils::vmm_index_set_t &vmm_aux_indices);
-    void injector_preamble_tail(int n_vregs_not_preserved);
+    void injector_preamble_tail(
+            const injector_utils::vmm_index_set_iterator_t &start_idx_tail_it,
+            int n_vregs_not_preserved);
     void injector_postamble();
     void assign_regs();
     Wmm vmm_aux(int idx);
@@ -309,6 +311,8 @@ private:
         soft_relu_one_twenty_six, // 126.f
         soft_relu_mantissa_sign_mask, // mask for mantissa bits and sign
         soft_relu_pol, // see correspondent table for float values
+        // arg below which ln(1 + exp(x)) == exp(x) to f32 precision (-16.f)
+        soft_relu_tail_bound,
         gelu_tanh_fitting_const, // 0.044715f
         gelu_tanh_fitting_const_times_three, // 0.134145f
         gelu_tanh_sqrt_two_over_pi, // sqrtf(2.f/pi) = 0.797884f
@@ -341,8 +345,10 @@ private:
         // assumption: all table entries sharing the same key also
         // share their broadcast property
         // TODO: enforce through data structure
-        const auto it = entry_map_.find(key); // search an entry for a key
-        if (it == entry_map_.end()) {
+        // A key can have several entries. std::multimap::find() may return
+        // any of them, so use lower_bound() to get the first one.
+        const auto it = entry_map_.lower_bound(key);
+        if (it == entry_map_.end() || it->first != key) {
             assert(!"Non-existent key");
             return 0;
         }

@@ -176,6 +176,7 @@ const data_type_t u8 = dnnl_u8;
 const data_type_t s4 = dnnl_s4;
 const data_type_t u4 = dnnl_u4;
 const data_type_t u2 = dnnl_u2;
+const data_type_t u3 = dnnl_u3;
 const data_type_t boolean = dnnl_boolean;
 const data_type_t data_type_max = dnnl_data_type_max;
 
@@ -2039,7 +2040,6 @@ const primitive_kind_t group_normalization = dnnl_group_normalization;
 const primitive_kind_t internal_only_start = (primitive_kind_t)(1 << 12);
 const primitive_kind_t zero_pad = internal_only_start;
 const primitive_kind_t sdpa = (primitive_kind_t)(internal_only_start + 1);
-const primitive_kind_t gated_mlp = (primitive_kind_t)(internal_only_start + 2);
 } // namespace primitive_kind
 
 using query_t = dnnl_query_t;

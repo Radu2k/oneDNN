@@ -121,6 +121,8 @@ status_t ref_grouped_t::execute(const exec_ctx_t &ctx) const {
     const auto wei_scale_group_k = attr_scales.get_group(DNNL_ARG_WEIGHTS, -2);
     const auto wei_scale_ngroups_k
             = wei_scale_group_k > 1 ? K_fixed / wei_scale_group_k : 1;
+    const auto wei_scale_group_n = attr_scales.get_group(DNNL_ARG_WEIGHTS, -1);
+    const auto wei_scale_ngroups_n = N / wei_scale_group_n;
     const void *wei_scales
             = CTX_IN_MEM(const void *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS);
 
@@ -135,9 +137,20 @@ status_t ref_grouped_t::execute(const exec_ctx_t &ctx) const {
 
     const bool with_wei_zps = !attr_zps.has_default_values(DNNL_ARG_WEIGHTS);
     const auto wei_zp_dt = attr_zps.get_data_type(DNNL_ARG_WEIGHTS);
+    // Wei zp is dense [G, K/gK, N/gN], dims not in the mask have size 1
+    const int wei_zp_mask = attr_zps.get_mask(DNNL_ARG_WEIGHTS);
     const auto wei_zp_group_k = attr_zps.get_group(DNNL_ARG_WEIGHTS, -2);
     const dim_t wei_zp_ngroups_k
-            = wei_zp_group_k > 1 ? K_fixed / wei_zp_group_k : 1;
+            = (wei_zp_mask & (1 << 1)) ? K_fixed / wei_zp_group_k : 1;
+    const auto wei_zp_group_n = attr_zps.get_group(DNNL_ARG_WEIGHTS, -1);
+    const dim_t wei_zp_ngroups_n
+            = (wei_zp_mask & (1 << 2)) ? N / wei_zp_group_n : 1;
+    const dim_t wei_zp_stride_g = (wei_zp_mask & (1 << 0))
+            ? wei_zp_ngroups_k * wei_zp_ngroups_n
+            : 0;
+    const dim_t wei_zp_stride_k
+            = (wei_zp_mask & (1 << 1)) ? wei_zp_ngroups_n : 0;
+    const dim_t wei_zp_stride_n = (wei_zp_mask & (1 << 2)) ? 1 : 0;
     const void *wei_zps = CTX_IN_MEM(
             const void *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS);
 
@@ -154,7 +167,7 @@ status_t ref_grouped_t::execute(const exec_ctx_t &ctx) const {
     const bool use_woq = utils::one_of(src_dt, data_type::f32, data_type::bf16,
                                  data_type::f16)
             && utils::one_of(wei_dt, data_type::s8, data_type::u8,
-                    data_type::s4, data_type::u4)
+                    data_type::s4, data_type::u4, data_type::u3)
             && pd()->attr()->fpmath_.apply_to_int_;
 
     const auto &po = pd()->attr()->post_ops_;
@@ -212,30 +225,35 @@ status_t ref_grouped_t::execute(const exec_ctx_t &ctx) const {
         }
     }
 
-    // Parallelize over groups (experts in MoE)
-    // Expectation is to see 128-256+ groups, with varying M per group
-    // and possibly some empty groups (M == 0)
-    parallel_nd(group_count, [= COMPAT_THIS_CAPTURE](dim_t group_id) {
-        dim_t M_g, K_g;
+    // Parallelize over output rows flattened across all groups to keep the
+    // work balanced when group sizes are highly skewed (e.g., "hot" benchdnn
+    // profile where one group holds almost all tokens)
+    const dim_t total_rows
+            = is_2dby2d ? group_count * M_fixed : src_d.dims()[0];
+    parallel_nd(total_rows, [= COMPAT_THIS_CAPTURE](dim_t row) {
+        dim_t group_id, m, K_g;
         dim_t src_group_start, wei_group_start, dst_group_start;
         dim_t src_attr_row_base = 0;
         dim_t dst_offset_start = 0;
 
         if (is_2dby2d) {
+            group_id = row / M_fixed;
+            m = row % M_fixed;
             const dim_t k_start
                     = (group_id == 0) ? 0 : src_offsets[group_id - 1];
             const dim_t k_end = src_offsets[group_id];
-            M_g = M_fixed;
             K_g = k_end - k_start;
             src_group_start = k_start;
             wei_group_start = k_start;
             dst_group_start = group_id;
         } else {
+            group_id = std::upper_bound(
+                               src_offsets, src_offsets + group_count, row)
+                    - src_offsets;
             const dim_t src_offset_start
                     = (group_id == 0) ? 0 : src_offsets[group_id - 1];
-            const dim_t src_offset_end = src_offsets[group_id];
+            m = row - src_offset_start;
             dst_offset_start = (group_id == 0) ? 0 : dst_offsets[group_id - 1];
-            M_g = src_offset_end - src_offset_start;
             K_g = K_fixed;
             src_group_start = src_offset_start;
             wei_group_start = group_id;
@@ -247,13 +265,9 @@ status_t ref_grouped_t::execute(const exec_ctx_t &ctx) const {
         const dim_t wei_base = wei_group_start * wei_group_stride;
         const dim_t dst_base = dst_group_start * dst_group_stride;
 
-        // skip empty group
         // Note, that K_g == 0 must still write zeros
-        if (M_g == 0) return;
-
         const dim_t k_group_size = K_g / n_k_groups;
 
-        for_(dim_t m = 0; m < M_g; ++m)
         for (dim_t n = 0; n < N; ++n) {
             float result = 0.0f;
 
@@ -279,16 +293,19 @@ status_t ref_grouped_t::execute(const exec_ctx_t &ctx) const {
                     if (with_wei_scales) {
                         const dim_t wei_k_group
                                 = i_group * wei_scale_ngroups_k / n_k_groups;
-                        const dim_t idx = group_id * wei_scale_ngroups_k * N
-                                + wei_k_group * N + n;
+                        const dim_t idx
+                                = (group_id * wei_scale_ngroups_k + wei_k_group)
+                                        * wei_scale_ngroups_n
+                                + n / wei_scale_group_n;
                         wei_scale = io::load_float_value(
                                 wei_scale_dt, wei_scales, idx);
                     }
                     if (with_wei_zps) {
                         const dim_t wei_k_group
                                 = i_group * wei_zp_ngroups_k / n_k_groups;
-                        const dim_t idx = group_id * wei_zp_ngroups_k * N
-                                + wei_k_group * N + n;
+                        const dim_t idx = group_id * wei_zp_stride_g
+                                + wei_k_group * wei_zp_stride_k
+                                + n / wei_zp_group_n * wei_zp_stride_n;
                         wei_zp_val
                                 = io::load_int_value(wei_zp_dt, wei_zps, idx);
                     }
@@ -371,8 +388,10 @@ status_t ref_grouped_t::execute(const exec_ctx_t &ctx) const {
                     if (with_wei_scales) {
                         const dim_t wei_k_group
                                 = i_group * wei_scale_ngroups_k / n_k_groups;
-                        const dim_t idx = group_id * wei_scale_ngroups_k * N
-                                + wei_k_group * N + n;
+                        const dim_t idx
+                                = (group_id * wei_scale_ngroups_k + wei_k_group)
+                                        * wei_scale_ngroups_n
+                                + n / wei_scale_group_n;
                         const float wei_scale = io::load_float_value(
                                 wei_scale_dt, wei_scales, idx);
                         acc *= wei_scale;

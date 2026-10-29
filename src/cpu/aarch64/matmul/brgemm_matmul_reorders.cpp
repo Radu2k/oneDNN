@@ -1,7 +1,7 @@
 /*******************************************************************************
 * Copyright 2022 Intel Corporation
 * Copyright 2024 FUJITSU LIMITED
-* Copyright 2025 Arm Ltd. and affiliates
+* Copyright 2025-2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -16,9 +16,10 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include "common/compiler_workarounds.hpp"
 #include "common/dnnl_thread.hpp"
-#include "cpu/aarch64/cpu_isa_traits.hpp"
 
+#include "cpu/aarch64/cpu_isa_traits.hpp"
 #include "cpu/aarch64/matmul/brgemm_matmul_reorders.hpp"
 
 namespace dnnl {
@@ -39,17 +40,11 @@ status_t brgemm_matmul_copy_reorder_t::pd_t::init(const engine_t *engine,
 
     const auto type_i = id.data_type();
     const auto type_o = od.data_type();
-    // TODO: enable support for type_i != type_o cases
-    const bool dt_ok = true && type_i == type_o
-            && utils::one_of(type_o, data_type::s8, data_type::bf16,
-                    data_type::f16, data_type::f32);
-    const bool is_f16 = utils::one_of(data_type::f16, type_i, type_o);
-    const bool is_s8s8 = type_i == data_type::s8 && type_o == data_type::s8;
+    // Currently only f32 is supported.
+    // TODO: enable support for bf16, f16, s8 and type_i != type_o cases.
+    const bool dt_ok = type_i == data_type::f32 && type_o == data_type::f32;
     const bool has_adj_scale
             = od.extra().flags & memory_extra_flags::scale_adjust;
-    UNUSED(is_f16);
-    UNUSED(is_s8s8);
-    assert(!(is_f16 || is_s8s8));
     const bool args_ok = true && dt_ok && id.is_dense()
             && utils::one_of(ndims, 2, 3) && !has_adj_scale
             && attr()->has_default_values() && od.is_blocking_desc()
@@ -168,7 +163,7 @@ status_t brgemm_matmul_copy_reorder_t::execute_body(
                 : (dt_sz) * (md).blk_off((d0), (d1)))
 
     parallel_nd(kernel_conf.batch, div_up(kernel_conf.N, kernel_conf.N_blk),
-            [&](dim_t batch, dim_t n_blk_idx) {
+            [= COMPAT_THIS_CAPTURE](dim_t batch, dim_t n_blk_idx) {
         const auto n = n_blk_idx * kernel_conf.N_blk;
         const bool is_N_tail = (kernel_conf.N - n < kernel_conf.N_blk);
         auto ker_exec_ctx = matmul::jit_brgemm_matmul_copy_b_t::ctx_t();

@@ -47,8 +47,9 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
 
     attr_args_t attr_args;
     attr_args.prepare_post_ops_mds(prb->attr, prb->ndims, prb->dims.data());
-    auto dnnl_attr = make_benchdnn_dnnl_wrapper(
-            create_dnnl_attr(prb->attr, attr_args, prb->ndims));
+    benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
+    DNN_SAFE_STATUS(
+            create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims));
 
     if (dir & FLAG_FWD) {
         auto prop = prb->dir & FLAG_INF ? dnnl_forward_inference
@@ -544,8 +545,9 @@ int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
     const auto &prim = prb->dir & FLAG_FWD ? v_prim[0] : v_prim[1];
 
     dnn_mem_map_t mem_map, ref_mem_map;
-    init_memory_args(
-            mem_map, prb, v_prim[0], res, /*override_dir_with_fwd=*/true);
+    SAFE(init_memory_args(
+                 mem_map, prb, v_prim[0], res, /*override_dir_with_fwd=*/true),
+            WARN);
     TIME_FILL(SAFE(
             init_ref_memory_args(ref_mem_map, mem_map, v_prim[0], prb, res),
             WARN));
@@ -562,7 +564,7 @@ int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
 
     if (prb->dir & FLAG_BWD) {
         // Pass same memory map as we need data from forward on backward.
-        init_memory_args(mem_map, prb, v_prim[1], res);
+        SAFE(init_memory_args(mem_map, prb, v_prim[1], res), WARN);
         TIME_FILL(SAFE(
                 init_ref_memory_args(ref_mem_map, mem_map, v_prim[1], prb, res),
                 WARN));

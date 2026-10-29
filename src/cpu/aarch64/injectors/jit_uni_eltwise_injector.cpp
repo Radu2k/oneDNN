@@ -94,9 +94,9 @@ void jit_uni_eltwise_injector_t<isa>::injector_preamble(
     assert(preserved_vecs_count == vecs_to_preserve);
 
     // jit_generator_t provides a collection of temporary gprs we can use.
-    assert(aux_gprs_count() <= h->x_tmp_vec.size());
+    assert(aux_gprs_count() <= h->temp_xregs.size());
     size_t preserved_gprs_count = 0;
-    for (const auto &x_tmp : h->x_tmp_vec) {
+    for (const auto &x_tmp : h->temp_xregs) {
         // Already allocated enough gprs, we are done.
         if (preserved_gprs_count == aux_gprs_count()) { break; }
 
@@ -124,9 +124,9 @@ void jit_uni_eltwise_injector_t<isa>::injector_preamble(
             for (size_t i = 0; i < preserved_vecs_count; ++i)
                 store_preserved_vec(i, preserved_vec_idxs[i]);
         }
-        load_table_addr();
     }
 
+    load_table_addr();
     assign_regs();
     set_coef_to_regs();
 }
@@ -251,10 +251,19 @@ void jit_uni_eltwise_injector_t<isa>::set_coef_to_regs() {
             case eltwise_exp_use_dst_for_bwd:
             case eltwise_exp:
             case eltwise_gelu_tanh:
-            case eltwise_swish:
             case eltwise_log:
             case eltwise_gelu_erf:
             case eltwise_round: break;
+            case eltwise_swish:
+                table_val(swish_alpha_log2e, vmm_aux3);
+                if (isa == sve) {
+                    table_val(swish_fexpa_shift, vmm_aux4);
+                    table_val(swish_polynomial_exp_c1, vmm_aux5);
+                    table_val(swish_polynomial_exp_c2, vmm_aux6);
+                } else {
+                    table_val(exponent_bias, vmm_aux4);
+                }
+                break;
             default: assert(!"unsupported eltwise algorithm");
         }
     } else {
@@ -294,150 +303,35 @@ void jit_uni_eltwise_injector_t<isa>::set_coef_to_regs() {
 }
 
 template <cpu_isa_t isa>
-void jit_uni_eltwise_injector_t<isa>::compute_cmp_mask(
-        const TRegS &vmm_src, const TRegS &compare_operand, int cmp_predicate) {
-    enum {
-        EQ_OQ = 0,
-        LT_OS = 1,
-        LE_OS = 2,
-        UNORD_Q = 3,
-        NEQ_UQ = 4,
-        NLT_US = 5,
-        NLE_US = 6,
-        ORD_Q = 7,
-        EQ_UQ = 8,
-        NGE_US = 9,
-        NGT_US = 10,
-        FALSE_OQ = 11,
-        NEQ_OQ = 12,
-        GE_OS = 13,
-        GT_OS = 14,
-        TRUE_UQ = 15,
-        EQ_OS = 16,
-        LT_OQ = 17,
-        LE_OQ = 18,
-        UNORD_S = 19,
-        NEQ_US = 20,
-        NLT_UQ = 21,
-        NLE_UQ = 22,
-        ORD_S = 23,
-        EQ_US = 24,
-        NGE_UQ = 25,
-        NGT_UQ = 26,
-        FALSE_OS = 27,
-        NEQ_OS = 28,
-        GE_OQ = 29,
-        GT_OQ = 30,
-        TRUE_US = 31,
-    };
-
+void jit_uni_eltwise_injector_t<isa>::compute_cmp_mask(const TRegS &vmm_src,
+        const TRegS &compare_operand, alg_kind_t cmp_predicate) {
     h->mov(PRegB(IDX(p_tmp0)), p_all / T_z, p_all.b);
+    using namespace alg_kind;
     switch (cmp_predicate) {
-        case EQ_OQ:
-            h->fcmeq(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case LT_OS:
-            h->fcmlt(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case LE_OS:
-            h->fcmle(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case NEQ_UQ:
-            h->fcmne(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case NLT_US:
-            h->fcmge(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case NLE_US:
+        case binary_gt:
             h->fcmgt(
                     PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
             break;
-        case EQ_UQ:
-            h->fcmeq(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case NGE_US:
-            h->fcmlt(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case NGT_US:
-            h->fcmle(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case NEQ_OQ:
-            h->fcmne(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case GE_OS:
+        case binary_ge:
             h->fcmge(
                     PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
             break;
-        case GT_OS:
-            h->fcmgt(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case EQ_OS:
+        case binary_eq:
             h->fcmeq(
                     PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
             break;
-        case LT_OQ:
-            h->fcmlt(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case LE_OQ:
-            h->fcmle(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case NEQ_US:
+        case binary_ne:
             h->fcmne(
                     PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
             break;
-        case NLT_UQ:
-            h->fcmge(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case NLE_UQ:
-            h->fcmgt(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case EQ_US:
-            h->fcmeq(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case NGE_UQ:
+        case binary_lt:
             h->fcmlt(
                     PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
             break;
-        case NGT_UQ:
+        case binary_le:
             h->fcmle(
                     PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
             break;
-        case NEQ_OS:
-            h->fcmne(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case GE_OQ:
-            h->fcmge(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-        case GT_OQ:
-            h->fcmgt(
-                    PRegS(IDX(p_mask)), p_tmp0 / T_z, vmm_src, compare_operand);
-            break;
-
-        case UNORD_Q:
-        case ORD_Q:
-        case FALSE_OQ:
-        case TRUE_UQ:
-        case UNORD_S:
-        case ORD_S:
-        case FALSE_OS:
-        case TRUE_US:
         default: assert(!"Unsupported compare mode"); break;
     }
 }
@@ -871,7 +765,8 @@ void jit_uni_eltwise_injector_t<isa>::soft_relu_compute_vector_fwd(
 
     // get vmm_mask = src > max logf
     // y = (x < max log f) ? soft_relu(x) : x
-    compute_cmp_mask(vmm_aux2, table_val(exp_ln_flt_max_f, z_tmp), _cmp_gt_os);
+    compute_cmp_mask(
+            vmm_aux2, table_val(exp_ln_flt_max_f, z_tmp), alg_kind::binary_gt);
     blend_with_mask(vmm_src, vmm_aux2);
     if (alpha_ == 1.f) { // standard soft_relu case
         // Skip an instruction.
@@ -911,17 +806,53 @@ void jit_uni_eltwise_injector_t<isa>::logistic_compute_vector_fwd(
     blend_with_mask(vmm_src, vmm_aux0);
 }
 
+// Swish is evaluated as x * 2^k / (2^k + 2^(-r)), where
+// alpha*x*log2(e) = k + r. FEXPA computes the grid-rounded 2^k term,
+// and a quadratic polynomial approximates the small residual 2^(-r).
 template <cpu_isa_t isa>
 void jit_uni_eltwise_injector_t<isa>::swish_compute_vector_fwd(
         const TRegS &vmm_src) {
-    // IMPORTANT: we use vmm_aux2 to save src as logistic does not use it.
-    h->mov(ZRegD(vmm_aux2.getIdx()), ZRegD(IDX(vmm_src)));
-    // x*alpha
-    if (alpha_ != 1.f) { h->fmul(vmm_src, vmm_src, table_val(alpha, z_tmp)); }
-    // sigmoid(x*alpha)
-    logistic_compute_vector_fwd(vmm_src);
-    // x*sigmoid(alpha*x)
-    h->fmul(vmm_src, vmm_src, vmm_aux2);
+    // FEXPA produces the 2^k term directly.
+    // SHIFT rounds k to FEXPA's grid, leaving only a small residual for
+    // the quadratic approximation of 2^(-r).
+    // Convert exp(alpha*x) to base 2. For a=alpha*x*log2(e)=k+r:
+    //   swish(x) = x*2^k / (2^k + 2^(-r)).
+    const auto &v_scale = z_tmp;
+    const auto &v_neg_r = vmm_aux0;
+    const auto &v_poly = vmm_aux1;
+    const auto &v_tmp = vmm_aux2;
+    const auto &v_alpha_log2e = vmm_aux3;
+    const auto &v_shift = vmm_aux4;
+    const auto &v_c1 = vmm_aux5;
+    const auto &v_c2 = vmm_aux6;
+
+    // a = x*(alpha*log2(e)); the combined constant is generated as FP32.
+    h->movprfx(ZReg(IDX(v_neg_r)), ZReg(IDX(vmm_src)));
+    h->fmul(v_neg_r, p_all / T_m, v_alpha_log2e);
+    // Clamp a to log2(e)*[-32,32]. This bounds the exponential argument
+    // while keeping the encoded exponent in a safe range.
+    h->fmaxnm(v_neg_r, p_all / T_m, table_val(swish_polynomial_exp_min, v_tmp));
+    h->fminnm(v_neg_r, p_all / T_m, table_val(swish_polynomial_exp_max, v_tmp));
+
+    h->movprfx(ZReg(IDX(v_scale)), ZReg(IDX(v_shift)));
+    h->fadd(v_scale, p_all / T_m, v_neg_r);
+    // k = (SHIFT+a)-SHIFT and -r = k-a.
+    h->fsub(v_poly, v_scale, v_shift);
+    // FEXPA consumes the encoded bits of SHIFT+a and returns 2^k.
+    h->fexpa(v_scale, v_scale);
+    h->fsub(v_neg_r, v_poly, v_neg_r);
+
+    // Form the numerator x*2^k while the scale is available.
+    h->fmul(vmm_src, vmm_src, v_scale);
+
+    // Approximate 2^(-r) with 1 + (-r)*(c1 + c2*(-r))
+    h->movprfx(ZReg(IDX(v_poly)), ZReg(IDX(v_c1)));
+    h->fmla(v_poly, p_all / T_m, v_neg_r, v_c2);
+    h->fmov(v_tmp, 1.);
+    h->fmla(v_tmp, p_all / T_m, v_neg_r, v_poly);
+    // x*2^k / (2^k + 2^(-r))
+    h->fadd(v_neg_r, v_scale, v_tmp);
+    h->fdiv(vmm_src, p_all / T_m, v_neg_r);
 }
 
 template <cpu_isa_t isa>
@@ -1193,12 +1124,12 @@ void jit_uni_eltwise_injector_t<isa>::elu_compute_vector_bwd(
         // R = exp(s)
         exp_compute_vector_fwd(vmm_src);
         // after exponentiation, get mask by comparing with exp(0)=1.f, not 0.f
-        compute_cmp_mask(vmm_src, table_val(one, z_tmp), _cmp_gt_os);
+        compute_cmp_mask(vmm_src, table_val(one, z_tmp), alg_kind::binary_gt);
         // R * alpha, then blend with 1.f
         h->fmul(vmm_src, vmm_src, table_val(alpha, z_tmp));
     } else {
         // get mask of `d` > 0
-        compute_cmp_mask(vmm_src, table_val(zero, z_tmp), _cmp_gt_os);
+        compute_cmp_mask(vmm_src, table_val(zero, z_tmp), alg_kind::binary_gt);
         // R = `d` + alpha, then blend with 1.f
         h->fadd(vmm_src, vmm_src, table_val(alpha, z_tmp));
     }
@@ -1272,10 +1203,10 @@ template <cpu_isa_t isa>
 void jit_uni_eltwise_injector_t<isa>::abs_compute_vector_bwd(
         const TRegS &vmm_src) {
     // replace positive values with 1.f
-    compute_cmp_mask(vmm_src, table_val(zero, z_tmp), _cmp_gt_os);
+    compute_cmp_mask(vmm_src, table_val(zero, z_tmp), alg_kind::binary_gt);
     blend_with_mask(vmm_src, table_val(one, z_tmp));
     // replace negative values with -1.f
-    compute_cmp_mask(vmm_src, table_val(zero, z_tmp), _cmp_lt_os);
+    compute_cmp_mask(vmm_src, table_val(zero, z_tmp), alg_kind::binary_lt);
     blend_with_mask(vmm_src, table_val(minus_one, z_tmp));
 }
 
@@ -1543,6 +1474,7 @@ size_t jit_uni_eltwise_injector_t<isa>::aux_gprs_count() {
         case eltwise_tanh:
         case eltwise_gelu_tanh:
         case eltwise_gelu_erf: num_gprs_needed = 2; break;
+        case eltwise_swish: break;
         default: return 0;
     }
 
@@ -1585,8 +1517,7 @@ size_t jit_uni_eltwise_injector_t<isa>::aux_vecs_count() {
             case eltwise_exp: return (isa == asimd) ? 5 : 3;
             case eltwise_gelu_tanh:
                 return (isa == asimd) ? 8 : 6; /* = tanh + 1 */
-            case eltwise_swish:
-                return (isa == asimd) ? 7 : 4; /* = logistic + 1 */
+            case eltwise_swish: return isa == asimd ? 6 : 8;
             case eltwise_log: return 7;
             case eltwise_clip:
             case eltwise_clip_v2_use_dst_for_bwd:
@@ -1868,6 +1799,22 @@ void jit_uni_eltwise_injector_t<isa>::register_table_entries() {
             {exp_scale_thresh, {0x43400000, true}}, // 192.0f
             {exp_special_offset, {0x82000000, true}},
             {exp_special_bias, {0x7f000000, true}},
+    };
+
+    static const table_t sve_swish_polynomial_consts {
+            {swish_fexpa_shift, {0x48001fc0, true}}, // 131199.f
+            {swish_polynomial_exp_c1, {0x3f3174c1, true}}, // 0.6931878021f
+            {swish_polynomial_exp_c2, {0x3e760066, true}}, // 0.2402358998f
+            {swish_polynomial_exp_min, {0xc238aa3b, true}}, // -32 * log2(e)
+            {swish_polynomial_exp_max, {0x4238aa3b, true}}, // 32 * log2(e)
+    };
+    static const table_t asimd_swish_polynomial_consts {
+            {swish_polynomial_exp_min, {0xc238aa3b, true}}, // -32 * log2(e)
+            {swish_polynomial_exp_max, {0x4238aa3b, true}}, // 32 * log2(e)
+            {swish_asimd_exp2_c1, {0x3f3170ca, true}}, // 0.6931272745f
+            {swish_asimd_exp2_c2, {0x3e75fcc9, true}}, // 0.2402221113f
+            {swish_asimd_exp2_c3, {0x3d64ddb6, true}}, // 0.05587550253f
+            {swish_asimd_exp2_c4, {0x3c1e721f, true}}, // 0.009670763277f
     };
 
     // mish(x) constants
@@ -2158,7 +2105,6 @@ void jit_uni_eltwise_injector_t<isa>::register_table_entries() {
             {gelu_erf_lut_bias, {0x47800000, true}}, // 65536.f
             {gelu_erf_lut_max_index, {0x00000200, true}}, // 512
     };
-
     // gelu_erf(x) polynomial approximation
     static const table_t gelu_erf_polynomial {
             {gelu_erf_pol, {0x3e827906, true}}, // p1 = 0.254829592f
@@ -2445,6 +2391,8 @@ void jit_uni_eltwise_injector_t<isa>::register_table_entries() {
     };
 
     need_t need(alg_);
+    const bool use_swish_poly = is_fwd_ && alg_ == alg_kind::eltwise_swish;
+    if (use_swish_poly) need.exp_ = false;
 
     auto push_arg_entry_of = [&](const key_t key, const table_entry_val_t val,
                                      const bool broadcast) {
@@ -2506,6 +2454,12 @@ void jit_uni_eltwise_injector_t<isa>::register_table_entries() {
                         gelu_erf_lut_scale, float2int(scale_val), false);
             }
         }
+    }
+    if (use_swish_poly) {
+        constexpr float log2e = 1.4426950408889634f;
+        push_arg_entry_of(swish_alpha_log2e, float2int(alpha_ * log2e), true);
+        push_entries_of(isa == sve ? sve_swish_polynomial_consts
+                                   : asimd_swish_polynomial_consts);
     }
     // Now that we registered the entries, we set the offsets.  No
     // entries should be registered after this point.  This allows to
@@ -3038,19 +2992,6 @@ void jit_uni_eltwise_injector_t<asimd>::logistic_compute_vector_fwd(
 }
 
 template <>
-void jit_uni_eltwise_injector_t<asimd>::swish_compute_vector_fwd(
-        const TRegS &vmm_src) {
-    // IMPORTANT: we use vmm_aux5 to save src as logistic does not use it.
-    h->mov(VReg16B(vmm_aux5.getIdx()), VReg16B(vmm_src.getIdx()));
-    // x*alpha
-    if (alpha_ != 1.f) { h->fmul(vmm_src, vmm_src, table_val(alpha, z_tmp)); }
-    // sigmoid(x*alpha)
-    logistic_compute_vector_fwd(vmm_src);
-    // x*sigmoid(alpha*x)
-    h->fmul(vmm_src, vmm_src, vmm_aux5);
-}
-
-template <>
 void jit_uni_eltwise_injector_t<asimd>::log_compute_vector_fwd(
         const TRegS &vmm_src) {
     // ------------------------------------------------------------------------
@@ -3274,6 +3215,50 @@ void jit_uni_eltwise_injector_t<asimd>::gelu_erf_compute_vector_fwd(
     h->fmla(vmm_src, vmm_aux0, vmm_src);
 }
 
+// ASIMD replaces FEXPA with an integer FP32 exponent construction. For
+// a=alpha*x*log2(e)=k+r, rounding a to an integer leaves -r=k-a in
+// [-0.5,0.5], where a fitted quartic approximates 2^(-r).
+template <>
+void jit_uni_eltwise_injector_t<asimd>::swish_compute_vector_fwd(
+        const TRegS &vmm_src) {
+    const auto &v_neg_r = z_tmp;
+    const auto &v_scale = vmm_aux0;
+    const auto &v_poly = vmm_aux1;
+    const auto &v_scratch = vmm_aux2;
+    const auto &v_alpha_log2e = vmm_aux3;
+    const auto &v_exponent_bias = vmm_aux4;
+
+    // a = x*(alpha*log2(e)); the combined constant is generated as FP32.
+    h->fmul(v_neg_r, vmm_src, v_alpha_log2e);
+    // Clamp a to log2(e)*[-32,32] before constructing 2^k from an IEEE-754
+    // exponent field.
+    h->fmaxnm(v_neg_r, v_neg_r, table_val(swish_polynomial_exp_min, v_poly));
+    h->fminnm(v_neg_r, v_neg_r, table_val(swish_polynomial_exp_max, v_poly));
+    // k = round_to_nearest_even(a), then -r = k-a.
+    h->frintn(v_scale, v_neg_r);
+    h->fsub(v_neg_r, v_scale, v_neg_r);
+
+    // Construct 2^k directly as FP32 bits: (int32(k)+127)<<23. Integer and
+    // floating-point operations share the vector register.
+    h->fcvtzs(v_scale, v_scale);
+    h->add(v_scale, v_scale, v_exponent_bias);
+    h->shl(v_scale, v_scale, n_mantissa_bits);
+
+    // Horner evaluation of the fitted quartic:
+    //   2^(-r) ~= 1 + (-r)*(c1 + (-r)*(c2 + (-r)*(c3 + c4*(-r)))).
+    table_val(swish_asimd_exp2_c4, v_poly);
+    h->fmla(table_val(swish_asimd_exp2_c3, v_scratch), v_poly, v_neg_r);
+    h->fmla(table_val(swish_asimd_exp2_c2, v_poly), v_scratch, v_neg_r);
+    h->fmla(table_val(swish_asimd_exp2_c1, v_scratch), v_poly, v_neg_r);
+    h->fmov(v_poly, 1.f);
+    h->fmla(v_poly, v_scratch, v_neg_r);
+
+    // x*2^k / (2^k + 2^(-r)).
+    h->fmul(vmm_src, vmm_src, v_scale);
+    h->fadd(v_neg_r, v_scale, v_poly);
+    h->fdiv(vmm_src, vmm_src, v_neg_r);
+}
+
 template <>
 void jit_uni_eltwise_injector_t<asimd>::round_compute_vector_fwd(
         const TRegS &vmm_src) {
@@ -3330,7 +3315,7 @@ DEFINE_ASIMD_EMPTY_FUNC(hardsigmoid_compute_vector_bwd);
 
 template <>
 void jit_uni_eltwise_injector_t<asimd>::compute_cmp_mask(const TRegS &vmm_src,
-        const TRegS &compare_operand, int cmp_predicate) {}
+        const TRegS &compare_operand, alg_kind_t cmp_predicate) {}
 
 template <>
 void jit_uni_eltwise_injector_t<asimd>::blend_with_mask(

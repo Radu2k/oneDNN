@@ -1,5 +1,6 @@
 #===============================================================================
 # Copyright 2016-2024 Intel Corporation
+# Copyright 2020, 2026 Arm Ltd. and affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,6 +35,11 @@ endif()
 # CMake 3.27: The FindCUDA module is removed.
 if(POLICY CMP0146)
     cmake_policy(SET CMP0146 OLD)
+endif()
+
+# CMake 4.3: CMAKE_<LANG>_LINK_FLAGS adds link flags to all target types
+if(POLICY CMP0210)
+    cmake_policy(SET CMP0210 NEW)
 endif()
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
@@ -101,11 +107,16 @@ include("cmake/ACL.cmake")
 include("cmake/blas.cmake")
 include("cmake/doc.cmake")
 include("cmake/version.cmake")
+include("cmake/readme.cmake")
 include("cmake/coverage.cmake")
 include("cmake/build_types.cmake")
 include("cmake/testing.cmake")
 include("cmake/host_compiler.cmake")
 include("cmake/configuring_primitive_list.cmake")
+
+if(DNNL_AARCH64_USE_KAI)
+    add_definitions_with_host_compiler(-DDNNL_AARCH64_USE_KAI=1)
+endif()
 
 if(UNIX OR MINGW)
     # CMAKE_<lang>_STANDARD support, so set it to our defaults, unless
@@ -138,11 +149,6 @@ configure_file(
     "${PROJECT_BINARY_DIR}/include/oneapi/dnnl/dnnl_config.h"
 )
 include_directories_with_host_compiler_before(${PROJECT_BINARY_DIR}/include)
-
-configure_file(
-    "${PROJECT_SOURCE_DIR}/README.binary.in"
-    "${PROJECT_BINARY_DIR}/README"
-)
 
 if(DNNL_INSTALL_MODE STREQUAL "BUNDLE" AND NOT DEFINED CMAKE_INSTALL_LIBDIR)
     # define CMAKE_INSTALL_LIBDIR as "lib" in the case of bundle

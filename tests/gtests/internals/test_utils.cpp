@@ -49,7 +49,8 @@ void fill_random(std::vector<float> &out, const memory::desc &desc, float min,
             d = dist_f(get_generator());
     }
 
-    auto elems = product(desc.get_dims());
+    const auto dims = desc.get_dims();
+    auto elems = product(dims);
     for (memory::dim i = 0; i < elems; i += nrand) {
         size_t chunk = std::min(nrand, elems - i);
         std::memcpy(&out[i], random_data_f.data(), chunk * sizeof(float));
@@ -270,7 +271,7 @@ void transpose_strides(const dnnl::engine &eng, memory &out, memory &in) {
         size_t lastdim = ndims - 1;
         size_t n2lastdim = lastdim - 1;
 
-        dynamic_iterate_alldims(dims, [&](std::vector<int64_t> idxs) {
+        dynamic_iterate_alldims(dims, [&](const std::vector<int64_t> &idxs) {
             int is_odd = idxs[lastdim] % 2;
             int is_odd_t = idxs[n2lastdim] % 2;
 
@@ -337,7 +338,7 @@ std::ostream &operator<<(std::ostream &ss, const memory::data_type &dt) {
 }
 
 void dynamic_iterate_alldims(const std::vector<int64_t> &dims,
-        const std::function<void(std::vector<int64_t> idxs)> &fn) {
+        const std::function<void(const std::vector<int64_t> &idxs)> &fn) {
     size_t ndims = dims.size();
     assert(ndims > 1); // TODO: will fail w/ndim == 1
     size_t lastdim = ndims - 1;

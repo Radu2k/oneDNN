@@ -56,8 +56,9 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
         attr_args.prepare_quant(
                 prb->attr, DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, 1);
     }
-    auto dnnl_attr = make_benchdnn_dnnl_wrapper(
-            create_dnnl_attr(prb->attr, attr_args, prb->ndims));
+    benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
+    DNN_SAFE_STATUS(
+            create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims));
 
     switch (prb->dir) {
         case FWD_D:
@@ -449,7 +450,7 @@ int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
     const auto &prim_ref = v_prim[1];
 
     dnn_mem_map_t mem_map, ref_mem_map;
-    init_memory_args(mem_map, prb, prim, res);
+    SAFE(init_memory_args(mem_map, prb, prim, res), WARN);
     TIME_FILL(SAFE(init_ref_memory_args(
                            ref_mem_map, mem_map, prim, prb, res, prim_ref),
             WARN));

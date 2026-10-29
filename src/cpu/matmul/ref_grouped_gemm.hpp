@@ -90,7 +90,7 @@ struct ref_grouped_t : public primitive_t {
             const bool is_fp_wei = utils::one_of(
                     wei_type, f32, bf16, f16, f8_e5m2, f8_e4m3, f4_e2m1);
             const bool is_int_src = utils::one_of(src_type, u8, s8);
-            const bool is_int_wei = utils::one_of(wei_type, u8, s8, s4, u4);
+            const bool is_int_wei = utils::one_of(wei_type, u8, s8, s4, u4, u3);
 
             // Supported configurations: fp src + int wei (weight-only quantization),
             // int src + int wei, fp src + fp wei
@@ -108,6 +108,12 @@ struct ref_grouped_t : public primitive_t {
             VDISPATCH_MATMUL(IMPLICATION(is_fp_src && is_int_wei,
                                      attr()->fpmath_.apply_to_int_),
                     VERBOSE_UNSUPPORTED_DT_CFG);
+            VDISPATCH_MATMUL(platform::has_data_type_support(src_type),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_MATMUL(platform::has_data_type_support(wei_type),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_MATMUL(platform::has_data_type_support(dst_type),
+                    VERBOSE_UNSUPPORTED_DT);
 
             // Check for supported quantization schemes
             const auto &attr_scales = attr()->scales_;
@@ -139,7 +145,7 @@ struct ref_grouped_t : public primitive_t {
                 const int wei_mask = attr_scales.get_mask(DNNL_ARG_WEIGHTS);
                 const int colwise_mask = wei_qmask_N();
                 const int blocked_mask = wei_qmask_K() | wei_qmask_N();
-                // Allow column-wise or blocked (K grouping) scales for weights
+                // Allow column-wise or blocked (K or KxN grouping) wei scales
                 VDISPATCH_MATMUL(
                         utils::one_of(
                                 attr_scales.get_data_type(DNNL_ARG_WEIGHTS),
@@ -157,7 +163,8 @@ struct ref_grouped_t : public primitive_t {
                     VDISPATCH_MATMUL(
                             K() % gK == 0, VERBOSE_UNSUPPORTED_SCALES_CFG);
                     const auto gN = attr_scales.get_group(DNNL_ARG_WEIGHTS, -1);
-                    VDISPATCH_MATMUL(gN == 1, VERBOSE_UNSUPPORTED_SCALES_CFG);
+                    VDISPATCH_MATMUL(
+                            N() % gN == 0, VERBOSE_UNSUPPORTED_SCALES_CFG);
                 }
             }
             // Zero-points are supported for src and wei: for WOQ (fp src) and
@@ -188,7 +195,8 @@ struct ref_grouped_t : public primitive_t {
                 }
             }
 
-            // Allow column-wise or blocked (K grouping) zps for weights
+            // Allow column-wise or blocked (K or KxN grouping) zps for weights,
+            // and common zps for u3 wei only
             if (!attr_zps.has_default_values(DNNL_ARG_WEIGHTS)) {
                 VDISPATCH_MATMUL(is_int_wei, VERBOSE_UNSUPPORTED_ZP_CFG);
                 VDISPATCH_MATMUL(
@@ -198,23 +206,22 @@ struct ref_grouped_t : public primitive_t {
                 const int zp_mask = attr_zps.get_mask(DNNL_ARG_WEIGHTS);
                 const int colwise_mask = wei_qmask_N();
                 const int blocked_mask = wei_qmask_K() | wei_qmask_N();
-                VDISPATCH_MATMUL(
-                        zp_mask == colwise_mask || zp_mask == blocked_mask,
+                const bool common_ok = zp_mask == 0 && wei_type == u3;
+                VDISPATCH_MATMUL(zp_mask == colwise_mask
+                                || zp_mask == blocked_mask || common_ok,
                         VERBOSE_UNSUPPORTED_ZP_CFG);
                 if (!attr_zps.get(DNNL_ARG_WEIGHTS).has_default_groups()) {
                     const auto gK = attr_zps.get_group(DNNL_ARG_WEIGHTS, -2);
                     VDISPATCH_MATMUL(gK > 1, VERBOSE_UNSUPPORTED_ZP_CFG);
                     VDISPATCH_MATMUL(K() % gK == 0, VERBOSE_UNSUPPORTED_ZP_CFG);
                     const auto gN = attr_zps.get_group(DNNL_ARG_WEIGHTS, -1);
-                    VDISPATCH_MATMUL(gN == 1, VERBOSE_UNSUPPORTED_ZP_CFG);
+                    VDISPATCH_MATMUL(N() % gN == 0, VERBOSE_UNSUPPORTED_ZP_CFG);
                 }
             }
 
             // for src/wei scales group size in case of K grouping,
             // one must be a multiple of the other
-            if (!attr_scales.has_default_values(DNNL_ARG_SRC)
-                    && !attr_scales.get(DNNL_ARG_SRC).has_default_groups()
-                    && !attr_scales.has_default_values(DNNL_ARG_WEIGHTS)
+            if (!attr_scales.get(DNNL_ARG_SRC).has_default_groups()
                     && !attr_scales.get(DNNL_ARG_WEIGHTS)
                                 .has_default_groups()) {
                 const auto src_gK = attr_scales.get_group(DNNL_ARG_SRC, -1);
@@ -225,7 +232,7 @@ struct ref_grouped_t : public primitive_t {
 
             // Scales and ZPs groups must match
             if (!attr_scales.has_default_values(DNNL_ARG_WEIGHTS)
-                    && !attr_zps.has_default_values(DNNL_ARG_WEIGHTS)) {
+                    && !attr_zps.get(DNNL_ARG_WEIGHTS).has_default_groups()) {
                 const auto scale_gK
                         = attr_scales.get_group(DNNL_ARG_WEIGHTS, -2);
                 const auto zp_gK = attr_zps.get_group(DNNL_ARG_WEIGHTS, -2);
@@ -270,6 +277,12 @@ struct ref_grouped_t : public primitive_t {
             VDISPATCH_MATMUL(src_type == wei_type && src_type == dst_type
                             && utils::one_of(src_type, f32, bf16, f16),
                     VERBOSE_UNSUPPORTED_DT_CFG);
+            VDISPATCH_MATMUL(platform::has_data_type_support(src_type),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_MATMUL(platform::has_data_type_support(wei_type),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_MATMUL(platform::has_data_type_support(dst_type),
+                    VERBOSE_UNSUPPORTED_DT);
 
             VDISPATCH_MATMUL(
                     attr()->has_default_values(), VERBOSE_UNSUPPORTED_ATTR);

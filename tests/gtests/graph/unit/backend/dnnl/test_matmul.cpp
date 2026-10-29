@@ -869,12 +869,13 @@ TEST(test_matmul_compile, MatmulInt8WeightScaleSupport) {
     std::vector<int64_t> weight_shape = {3, 3, 4, 2};
     std::vector<int64_t> bias_shape {2};
     std::vector<int64_t> dst_shape = {3, 3, 8, 2};
-    size_t scales_wei_sizes = dst_shape.back();
-    std::vector<float> scale_wei(scales_wei_sizes, 1 / 127.f);
-    std::vector<int64_t> zp_wei(scales_wei_sizes, 0);
 
     std::vector<size_t> axes = {0, 1, 2, 3};
     for (auto &axis : axes) {
+        const size_t scales_wei_size = weight_shape[axis];
+        std::vector<float> scale_wei(scales_wei_size, 1 / 127.f);
+        std::vector<int64_t> zp_wei(scales_wei_size, 0);
+
         graph::op_t dqdata_op(1, graph::op_kind::Dequantize, "dqdata_op");
         dqdata_op.set_attr<std::string>(graph::op_attr::qtype, "per_tensor");
         dqdata_op.set_attr<std::vector<int64_t>>(graph::op_attr::zps, {0});
@@ -948,15 +949,8 @@ TEST(test_matmul_compile, MatmulInt8WeightScaleSupport) {
         std::vector<const graph::logical_tensor_t *> lt_ins {
                 &src_u8, &weight_s8, &bias_f32};
         std::vector<const graph::logical_tensor_t *> lt_outs {&dst_s8};
-        // Matmul only support applying scale per channel along the last
-        // dimension for DNNL_ARG_WEIGHTS.
-        if (axis == weight_shape.size() - 1) {
-            ASSERT_EQ(p.compile(&cp, lt_ins, lt_outs, engine),
-                    graph::status::success);
-        } else {
-            ASSERT_EQ(p.compile(&cp, lt_ins, lt_outs, engine),
-                    graph::status::unimplemented);
-        }
+        ASSERT_EQ(p.compile(&cp, lt_ins, lt_outs, engine),
+                graph::status::success);
     }
 }
 
@@ -3060,6 +3054,12 @@ TEST(test_matmul_execute_subgraph_int8, MatmulBiasU8s8bf16_CPU) {
     // gpu doesn't support mixed int8-bf16 matmul with runtime zero points
     SKIP_IF(engine->kind() == graph::engine_kind::gpu, "skip on gpu");
 
+    graph::engine_t *eng = get_engine();
+    static auto isa = dnnl_get_effective_cpu_isa();
+    SKIP_IF((isa < dnnl_cpu_isa_avx512_core)
+                    && eng->kind() == graph::engine_kind::cpu,
+            "Skip bf16 tests for systems that do not support avx512_core.");
+
     std::string qtype = "per_channel";
     std::vector<int64_t> src_shape = {1, 8, 16};
     std::vector<int64_t> weight_shape = {8, 16};
@@ -3181,6 +3181,12 @@ TEST(test_matmul_execute_subgraph_int8, MatmulU8U8bf16) {
     graph::engine_t *engine = get_engine();
     graph::stream_t *strm = get_stream();
 
+    graph::engine_t *eng = get_engine();
+    static auto isa = dnnl_get_effective_cpu_isa();
+    SKIP_IF((isa < dnnl_cpu_isa_avx512_core)
+                    && eng->kind() == graph::engine_kind::cpu,
+            "Skip bf16 tests for systems that do not support avx512_core.");
+
     std::string qtype = "per_channel";
     std::vector<int64_t> src_shape = {1, 8, 16};
     std::vector<int64_t> weight_shape = {8, 16};
@@ -3293,6 +3299,12 @@ TEST(test_matmul_execute_subgraph_int8, MatmulBiasAddBF16U8s8bf16_CPU) {
 
     // gpu doesn't support mixed int8-bf16 matmul with runtime zero points
     SKIP_IF(engine->kind() == graph::engine_kind::gpu, "skip on gpu");
+
+    graph::engine_t *eng = get_engine();
+    static auto isa = dnnl_get_effective_cpu_isa();
+    SKIP_IF((isa < dnnl_cpu_isa_avx512_core)
+                    && eng->kind() == graph::engine_kind::cpu,
+            "Skip bf16 tests for systems that do not support avx512_core.");
 
     std::string qtype = "per_channel";
     std::vector<int64_t> src_shape = {1, 8, 16};
@@ -3435,6 +3447,13 @@ TEST(test_matmul_execute_subgraph_int8, MatmulBiasaddAddBF16U8s8bf16_CPU) {
     // gpu doesn't support mixed int8-bf16 matmul
     SKIP_IF(engine->kind() == graph::engine_kind::gpu,
             "skip on gpu for unsupported mixed int8-bf16 matmul with runtime ");
+
+    graph::engine_t *eng = get_engine();
+    static auto isa = dnnl_get_effective_cpu_isa();
+    SKIP_IF((isa < dnnl_cpu_isa_avx512_core)
+                    && eng->kind() == graph::engine_kind::cpu,
+            "Skip bf16 tests for systems that do not support avx512_core.");
+
     std::string qtype = "per_channel";
     std::vector<int64_t> src_shape = {1, 8, 16};
     std::vector<int64_t> weight_shape = {8, 16};

@@ -137,7 +137,7 @@ static inline int getPartialCrosspack(Type T, const MatrixAddressing &atype, con
 //  the base pointer (a Subregister, MultishiftSubregister or integer) and leading dimension.
 template <HW hw>
 template <typename BO>
-void Generator<hw>::setupAddr(Type T, const GRFRange &addr, const BO &ptr, const RegisterBlock &block, const Subregister &bld,
+void Generator<hw>::setupAddr(Type T, const RegisterRange &addr, const BO &ptr, const RegisterBlock &block, const Subregister &bld,
                               const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy,
                               const CommonStrategy &strategy, CommonState &state,
                               const Address2DParams &params, LDMultiples ldMultiples)
@@ -180,6 +180,7 @@ void Generator<hw>::setupAddr(Type T, const GRFRange &addr, const BO &ptr, const
                 for (int r = 0; r < addr.getLen(); r += 2) {
                     int nr = std::min(2, addr.getLen() - r);
                     int simd = nr * ne;
+                    simd = std::min(32, simd);
                     auto ld0 = findLDMultiple(ldMultiples, a64, r * ne / consecutive, strategy, state);
                     auto ldStride = (ldMultiples.a64 && !a64) ? 2 : 1;
                     auto ldR = ld0(ldStride, consecutive, 0);
@@ -223,8 +224,9 @@ void Generator<hw>::setupAddr(Type T, const GRFRange &addr, const BO &ptr, const
                         auto iv2 = accessIndexVec(simd1 / consecutive, state)(tblock, tblock * consecutive, 0);
                         mulConstant(simd2, addr[2].ud(0)(udStride), iv2, stride);
                         mulConstant(simd1, addr[0].ud(0)(udStride), iv, stride);
-                    } else
+                    } else {
                         mulConstant(simdSize, addr[0].ud(0)(udStride), iv, stride);
+                    }
                     if (simd2)
                         eadd(simd2, addr[2].uq(), addr[udStride].ud(0)(udStride), ptrShifted, strategy, state);
                     eadd(simd1, addr[0].uq(), addr[0].ud(0)(udStride), ptrShifted, strategy, state);
@@ -310,9 +312,13 @@ void Generator<hw>::setupAddr(Type T, const GRFRange &addr, const BO &ptr, const
             auto boffX  = memCM ? block.offsetR : block.offsetC;
             auto boffY  = memCM ? block.offsetC : block.offsetR;
 
-            boffX *= T;
-            if (boffX % block.ebytes) stub();
-            boffX /= block.ebytes;
+            if (T.is3() && astrategy.accessType == AccessType::Block2DTranspose)
+                boffX = div_up(boffX * T.bits(), block.ebytes * 8);
+            else {
+                boffX *= T;
+                if (boffX % block.ebytes) stub();
+                boffX /= block.ebytes;
+            }
 
             // If the base address may not be aligned to HW requirements,
             //  we need to emit code to align it down and offset x/width appropriately.
@@ -350,7 +356,11 @@ void Generator<hw>::setupAddr(Type T, const GRFRange &addr, const BO &ptr, const
                              : mov(1, addr[0].ud(2), fixedX * T - 1);
                 ny.isValid() ? add(1, addr[0].ud(3), ny, -1)
                              : mov(1, addr[0].ud(3), fixedY - 1);
-                offX.isValid() ? addScaled(1, addr[0].ud(5), boffX, offX, int(T.paddedSize()), block.ebytes * T.perByte(), state) :
+                // u3 advances block.ebytes bytes per group of 8 elements,
+                // so the scaling denominator is 8 * block.ebytes.
+                offX.isValid() ? addScaled(1, addr[0].ud(5), boffX, offX, int(T.paddedSize()),
+                                            T.is3() ? (8 * block.ebytes) : (block.ebytes * T.perByte()),
+                                            state, astrategy.prefetch ? false : true) :
                   doBaseAdjust ? add(1, addr[0].ud(5), baseAdjustElems, boffX)
                                : mov(1, addr[0].ud(5), boffX);
                 offY.isValid() ? add(1, addr[0].ud(6), offY, boffY)
@@ -421,7 +431,7 @@ void Generator<hw>::setupAddr(Type T, const GRFRange &addr, const BO &ptr, const
                     mov<uint32_t>(n1 - n0, addr[1][0](2), addr[0][n0 % xCacheLines](0, xCacheLines, 1));
                 mov<uint32_t>(n0, addr[0][0](2), addr[0][0](0, xCacheLines, 1));
                 for (int y = 1; y < ny; y++) {
-                    auto r = addr.sub(hw, xCacheLines * y, DataType::uq);
+                    auto r = GRFRange(addr.getBase(), addr.getLen()).sub(hw, xCacheLines * y, DataType::uq);
                     auto ld = (y == 1) ? bld : findLDMultiple(ldMultiples, a64, y, strategy, state);
                     eadd(xCacheLines, r(1), r.ud(0)(2), ld, strategy, state);
                 }
@@ -445,7 +455,7 @@ void Generator<hw>::setupAddr(Type T, const GRFRange &addr, const BO &ptr, const
 
 // Shift an address block by a combination of a fixed and LD offset.
 template <HW hw>
-void Generator<hw>::offsetAddr(const GRFRange &addrDst, const GRFRange &addrSrc,
+void Generator<hw>::offsetAddr(const RegisterRange &addrDst, const RegisterRange &addrSrc,
                                const RegisterBlock &blockDst, const RegisterBlock &blockSrc,
                                int offsetFixed, int offsetLD, const Subregister &ld,
                                const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy,
@@ -460,7 +470,8 @@ void Generator<hw>::offsetAddr(const GRFRange &addrDst, const GRFRange &addrSrc,
             incAddr(addrDst, addrSrc, offsetFixed, blockDst, blockSrc, atype, astrategy, strategy, state);
     } else {
         // Reuse ld * offsetLD calculation if available.
-        auto ldInc = findLDMultiple(ldMultiples, a64, offsetLD, strategy, state);
+        Subregister ldInc;
+        ldInc = findLDMultiple(ldMultiples, a64, offsetLD, strategy, state);
 
         if (ldInc.isValid() && offsetFixed == 0)
             incAddr(addrDst, addrSrc, (offsetLD == 1) ? ld : ldInc, blockDst, blockSrc, atype, astrategy, strategy, state);
@@ -489,7 +500,7 @@ void Generator<hw>::offsetAddr(const GRFRange &addrDst, const GRFRange &addrSrc,
 
 // Output code for initializing address/header GRFs for one block based on another block's headers.
 template <HW hw>
-void Generator<hw>::setupAddrRel(const GRFRange &addrDst, const GRFRange &addrSrc,
+void Generator<hw>::setupAddrRel(const RegisterRange &addrDst, const RegisterRange &addrSrc,
                                  const RegisterBlock &blockDst, const RegisterBlock &blockSrc, const RegisterLayout &layout,
                                  const Subregister &ld, const CommonStrategy &strategy, CommonState &state, const LDMultiples &ldMultiples)
 {
@@ -522,8 +533,10 @@ void Generator<hw>::setupAddrRel(const GRFRange &addrDst, const GRFRange &addrSr
         offsetAddr(addrDst, addrSrc, blockDst, blockSrc, offsetFixed, offsetLD, ld, atype, astrategy, strategy, state, ldMultiples);
     }
 
-    if (isBlock2D(astrategy.accessType))
-        updateBlock2DSizes(addrDst, blockDst, blockSrc, atype, astrategy.prefetch);
+    if (isBlock2D(astrategy.accessType)) {
+        GRF addr = GRF(addrDst.getBase());
+        updateBlock2DSizes(addr, blockDst, blockSrc, atype, astrategy.prefetch);
+    }
 }
 
 static inline int findBaseBlock(const RegisterBlock &block, const RegisterLayout &layout, int start, int end,
@@ -547,7 +560,7 @@ static inline int findBaseBlock(const RegisterBlock &block, const RegisterLayout
 //  ptr is an integer, Subregister, or MultishiftSubregister holding the base pointer/offset.
 template <HW hw>
 template <typename BO>
-void Generator<hw>::setupAddr(const vector<GRFRange> &addr, const BO &ptr, const RegisterLayout &layout, const Subregister &ld,
+void Generator<hw>::setupAddr(const vector<RegisterRange> &addr, const BO &ptr, const RegisterLayout &layout, const Subregister &ld,
                               const CommonStrategy &strategy, CommonState &state,
                               const Address2DParams &params, const LDMultiples &ldMultiples, int start)
 {
@@ -610,7 +623,7 @@ void Generator<hw>::setupAddr(const vector<GRFRange> &addr, const BO &ptr, const
 // The amount may be an immediate, Subregister, or MultishiftSubregister.
 template <HW hw>
 template <typename I, typename Ir, typename Ic>
-void Generator<hw>::incAddr(const GRFRange &addrDst, const GRFRange &addrSrc, I inc, Ir incR, Ic incC,
+void Generator<hw>::incAddr(const RegisterRange &addrDst, const RegisterRange &addrSrc, I inc, Ir incR, Ic incC,
                             const RegisterBlock &blockDst, const RegisterBlock &blockSrc,
                             const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy,
                             const CommonStrategy &strategy, CommonState &state)
@@ -624,7 +637,7 @@ void Generator<hw>::incAddr(const GRFRange &addrDst, const GRFRange &addrSrc, I 
 
 template <HW hw>
 template <typename I>
-void Generator<hw>::incAddr(const GRFRange &addrDst, const GRFRange &addrSrc, I inc,
+void Generator<hw>::incAddr(const RegisterRange &addrDst, const RegisterRange &addrSrc, I inc,
                             const RegisterBlock &blockDst, const RegisterBlock &blockSrc,
                             const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy,
                             const CommonStrategy &strategy, CommonState &state)
@@ -635,7 +648,7 @@ void Generator<hw>::incAddr(const GRFRange &addrDst, const GRFRange &addrSrc, I 
 
 template <HW hw>
 template <typename I, typename Ir, typename Ic>
-void Generator<hw>::incAddrShifted(const GRFRange &addrDst, const GRFRange &addrSrc, I inc, Ir incR, Ic incC,
+void Generator<hw>::incAddrShifted(const RegisterRange &addrDst, const RegisterRange &addrSrc, I inc, Ir incR, Ic incC,
                                    const RegisterBlock &blockDst, const RegisterBlock &blockSrc,
                                    const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy,
                                    const CommonStrategy &strategy, CommonState &state)
@@ -689,11 +702,28 @@ void Generator<hw>::incAddrShifted(const GRFRange &addrDst, const GRFRange &addr
             if (addrDst != addrSrc)
                 mov<uint32_t>(8, addrDst[0], addrSrc[0]);
             if (astrategy.address2D) {
+                // Prefetches and u3 (non-power-of-2 bits, rarely divides
+                // evenly) don't need exactness; allow conservative round-up.
+                bool exact = !astrategy.prefetch && is_zero_or_pow2(int(blockDst.extra));
                 if (isColMajor(atype.layout)) {
-                    if (cincR != 0) addScaled(1, addrDst[0].d(5), addrDst[0].d(5), cincR, blockDst.extra, blockDst.ebytes * 8, state, true);
+                    if (cincR != 0) {
+                        if (blockDst.extra == 3 && blockDst.offsetR != blockSrc.offsetR)
+                            add(1, addrDst[0].d(5), addrDst[0].d(5),
+                                    div_up(blockDst.offsetR * 3, blockDst.ebytes * 8)
+                                    - div_up(blockSrc.offsetR * 3, blockDst.ebytes * 8));
+                        else
+                            addScaled(1, addrDst[0].d(5), addrDst[0].d(5), cincR, blockDst.extra, blockDst.ebytes * 8, state, exact);
+                    }
                     if (cincC != 0) add(1, addrDst[0].d(6), addrDst[0].d(6), cincC);
                 } else {
-                    if (cincC != 0) addScaled(1, addrDst[0].d(5), addrDst[0].d(5), cincC, blockDst.extra, blockDst.ebytes * 8, state, true);
+                    if (cincC != 0) {
+                        if (blockDst.extra == 3 && blockDst.offsetC != blockSrc.offsetC)
+                            add(1, addrDst[0].d(5), addrDst[0].d(5),
+                                    div_up(blockDst.offsetC * 3, blockDst.ebytes * 8)
+                                    - div_up(blockSrc.offsetC * 3, blockDst.ebytes * 8));
+                        else
+                            addScaled(1, addrDst[0].d(5), addrDst[0].d(5), cincC, blockDst.extra, blockDst.ebytes * 8, state, exact);
+                    }
                     if (cincR != 0) add(1, addrDst[0].d(6), addrDst[0].d(6), cincR);
                 }
             } else
@@ -706,7 +736,7 @@ void Generator<hw>::incAddrShifted(const GRFRange &addrDst, const GRFRange &addr
 // The amount may be an immediate or a subregister.
 template <HW hw>
 template <typename I, typename Ir, typename Ic>
-void Generator<hw>::incAddr(const vector<GRFRange> &addr, I inc, Ir incR, Ic incC, const RegisterLayout &layout,
+void Generator<hw>::incAddr(const vector<RegisterRange> &addr, I inc, Ir incR, Ic incC, const RegisterLayout &layout,
                             const CommonStrategy &strategy, CommonState &state)
 {
     for (int b = 0; b < layout.blocks(); b++) {
@@ -717,7 +747,7 @@ void Generator<hw>::incAddr(const vector<GRFRange> &addr, I inc, Ir incR, Ic inc
 
 template <HW hw>
 template <typename I>
-void Generator<hw>::incAddr(const vector<GRFRange> &addr, I inc, const RegisterLayout &layout,
+void Generator<hw>::incAddr(const vector<RegisterRange> &addr, I inc, const RegisterLayout &layout,
                             const CommonStrategy &strategy, CommonState &state)
 {
     if (layout.addressingStrategy().address2D) stub();
@@ -726,7 +756,7 @@ void Generator<hw>::incAddr(const vector<GRFRange> &addr, I inc, const RegisterL
 
 template <HW hw>
 template <typename I, typename Ir, typename Ic>
-void Generator<hw>::incAddrShifted(const vector<GRFRange> &addr, I inc, Ir incR, Ic incC, const RegisterLayout &layout,
+void Generator<hw>::incAddrShifted(const vector<RegisterRange> &addr, I inc, Ir incR, Ic incC, const RegisterLayout &layout,
                                    const CommonStrategy &strategy, CommonState &state)
 {
     for (int b = 0; b < layout.blocks(); b++) {
@@ -737,7 +767,7 @@ void Generator<hw>::incAddrShifted(const vector<GRFRange> &addr, I inc, Ir incR,
 
 template <HW hw>
 template <typename I>
-void Generator<hw>::incAddrShifted(const vector<GRFRange> &addr, I inc, const RegisterLayout &layout,
+void Generator<hw>::incAddrShifted(const vector<RegisterRange> &addr, I inc, const RegisterLayout &layout,
                                    const CommonStrategy &strategy, CommonState &state)
 {
     if (layout.addressingStrategy().address2D) stub();
@@ -775,7 +805,7 @@ void Generator<hw>::incDecAddr(const A &addr, I inc, const RegisterLayout &layou
 }
 
 template <HW hw>
-void Generator<hw>::incAddrK(const vector<GRFRange> &addr, bool column, int k,
+void Generator<hw>::incAddrK(const vector<RegisterRange> &addr, bool column, int k,
                              const SubregisterPair &ld, const LDIncrements &incs, const RegisterLayout &layout,
                              const CommonStrategy &strategy, CommonState &state)
 {
@@ -789,7 +819,7 @@ void Generator<hw>::incAddrK(const vector<GRFRange> &addr, bool column, int k,
 }
 
 template <HW hw>
-void Generator<hw>::setAddrRemainder(Type T, const GRFRange &addr, const RegisterBlock &block, const Subregister &remR, const Subregister &remC,
+void Generator<hw>::setAddrRemainder(Type T, const RegisterRange &addr, const RegisterBlock &block, const Subregister &remR, const Subregister &remC,
                                      const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy,
                                      const CommonStrategy &strategy, CommonState &state)
 {
@@ -818,7 +848,8 @@ void Generator<hw>::setAddrRemainder(Type T, const GRFRange &addr, const Registe
         addScaled(1, addr[0].ud(2), -1, remW.uw(), T, state, true);
     }
     if (remH.isValid())
-        addScaled(1, addr[0].ud(3), -1, remH.uw(), T, state, true, multiX);
+        addScaled(1, addr[0].ud(3), -1, remH.uw(), T, state,
+                (T.bits() * multiX) % 8 == 0, multiX);
     if (remW.isValid() && T.paddedSize() < 4)
         or_(1, addr[0].ud(2), addr[0].ud(2), 3);
 
@@ -826,7 +857,7 @@ void Generator<hw>::setAddrRemainder(Type T, const GRFRange &addr, const Registe
 }
 
 template <HW hw>
-void Generator<hw>::setAddrRemainder(const vector<GRFRange> &addr, const RegisterLayout &layout,
+void Generator<hw>::setAddrRemainder(const vector<RegisterRange> &addr, const RegisterLayout &layout,
                                      const Subregister &remR, const Subregister &remC,
                                      const CommonStrategy &strategy, CommonState &state)
 {

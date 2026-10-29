@@ -16,8 +16,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "common/dnnl_thread.hpp"
-
 #include "cpu/aarch64/jit_uni_binary_kernel.hpp"
 
 namespace dnnl {
@@ -86,35 +84,13 @@ jit_uni_binary_kernel_t<isa>::jit_uni_binary_kernel_t(
     : binary_kernel_t(cpu_isa_traits<isa>::vlen, pd, conf, tail_kernel)
     , offt_src0_(vlen_)
     , offt_src1_(conf_.use_stride_src1 ? offt_src0_ : 0)
-    , io_(this, isa, {conf_.src0_type, conf_.src1_type, conf_.dst_type},
-              {false},
-              io::io_tail_conf_t {simd_w_, tail_size_, tail_opmask_,
-                      static_cast<int>(vmm_tail_vmask_.getIdx()), reg_tmp_,
-                      reg_tmp1_},
-              create_saturation_vmm_map(),
-              io::io_gather_conf_t {simd_w_, full_mask_,
-                      static_cast<int>(vmm_full_mask_.getIdx()), reg_tmp_,
-                      reg_tmp1_, static_cast<int>(vmm_tmp_gather_.getIdx())}) {
-    init();
-}
+    , io_sat_conf_(vreg_saturation_lbound_, vreg_saturation_ubound_)
+    , io_tail_conf_(tail_size_, tail_opmask_) {
 
-template <cpu_isa_t isa>
-std::map<data_type_t, io::io_saturation_conf_t>
-jit_uni_binary_kernel_t<isa>::create_saturation_vmm_map() const {
+    safe_ptr_assign(io_,
+            new io::jit_io_helper_t<to_vla_sve(isa)>(
+                    this, io_sat_conf_, io_tail_conf_, reg_tmp_));
 
-    std::map<data_type_t, io::io_saturation_conf_t> saturation_map {};
-
-    if (conf_.is_i8)
-        saturation_map.emplace(conf_.dst_type,
-                io::io_saturation_conf_t {static_cast<int>(vreg_zero_.getIdx()),
-                        static_cast<int>(vreg_saturation_ubound_.getIdx()),
-                        reg_tmp_});
-
-    return saturation_map;
-}
-
-template <cpu_isa_t isa>
-void jit_uni_binary_kernel_t<isa>::init() {
     if (conf_.with_postops) init_post_ops_injector();
 }
 
@@ -123,9 +99,8 @@ void jit_uni_binary_kernel_t<isa>::init_post_ops_injector() {
     const memory_desc_wrapper dst_d(pd_->dst_md(0));
     const auto &po = pd_->attr()->post_ops_;
 
-    const eltwise_injector::static_params_t esp(true /*save_state*/,
-            reg_elt_inj_table_, elt_inj_opmask_, elt_inj_p_tmp0_,
-            true /*is_fwd*/, false /*use_dst*/);
+    const eltwise_injector::static_params_t esp(false /*save_state*/,
+            reg_elt_inj_table_, elt_inj_opmask_, elt_inj_p_tmp0_);
     const binary_injector::rhs_arg_static_params_t rhs_arg_bsp {10, reg_tmp_,
             reg_elt_inj_table_, x13, true /*preserve gpr*/,
             true /*preserve vmm*/, PARAM_OFF(post_ops_binary_rhs_arg_vec),
@@ -148,11 +123,11 @@ void jit_uni_binary_kernel_t<isa>::apply_postops(int unroll, bool tail) {
             const Vmm vreg_tmp = conf_.is_src_different_layouts
                     ? vmm_gathered_src_
                     : Vmm(unroll + i + vmm_start_idx_);
-            io_.at(conf_.dst_type)
-                    ->load(dst_ptr(offt
-                                   * types::data_type_size(conf_.dst_type)),
-                            offt, vreg_tmp, tail);
-            this->float_point_fused_multiply_add(
+
+            const auto &addr = prepare_xaddr_reg_with_dst_ptr(
+                    offt * types::data_type_size(conf_.dst_type));
+            io_->load(conf_.dst_type, vreg_tmp, addr, tail);
+            float_point_fused_multiply_add(
                     vreg_tmp_src0, vreg_tmp, vreg_sum_scale_);
         }
     };
@@ -215,21 +190,23 @@ void jit_uni_binary_kernel_t<isa>::load_kernel_params() {
 }
 
 template <cpu_isa_t isa>
-XReg jit_uni_binary_kernel_t<isa>::src0_ptr(size_t offt) {
+XReg jit_uni_binary_kernel_t<isa>::prepare_xaddr_reg_with_src0_ptr(
+        size_t offt) {
     add(X_DEFAULT_ADDR, reg_src0_, reg_offt_src0_);
     if (offt) add_imm(X_DEFAULT_ADDR, X_DEFAULT_ADDR, offt, X_TMP_0);
     return X_DEFAULT_ADDR;
 }
 
 template <cpu_isa_t isa>
-XReg jit_uni_binary_kernel_t<isa>::src1_ptr(size_t offt) {
+XReg jit_uni_binary_kernel_t<isa>::prepare_xaddr_reg_with_src1_ptr(
+        size_t offt) {
     add(X_DEFAULT_ADDR, reg_src1_, reg_offt_src1_);
     if (offt) add_imm(X_DEFAULT_ADDR, X_DEFAULT_ADDR, offt, X_TMP_0);
     return X_DEFAULT_ADDR;
 }
 
 template <cpu_isa_t isa>
-XReg jit_uni_binary_kernel_t<isa>::dst_ptr(size_t offt) {
+XReg jit_uni_binary_kernel_t<isa>::prepare_xaddr_reg_with_dst_ptr(size_t offt) {
     const XReg &reg_offt_dst = conf_.is_i8 ? reg_offt_dst_ : reg_offt_src0_;
     add(X_DEFAULT_ADDR, reg_dst_, reg_offt_dst);
     if (offt) add_imm(X_DEFAULT_ADDR, X_DEFAULT_ADDR, offt, X_TMP_0);
@@ -363,20 +340,18 @@ void jit_uni_binary_kernel_t<isa>::perform_op(
 template <cpu_isa_t isa>
 void jit_uni_binary_kernel_t<isa>::prepare_isa_kernel() {
     fmov(vreg_one_.s, 1.0);
-    if (tail_size_ > 0) io_.prepare_tail_mask();
-    if (conf_.is_src_different_layouts && is_superset(isa, sve_128)) {
-        io_.init_full_mask();
-        io_.prepare_full_mask();
-    }
+    io_->init_tail();
 }
 
 template <cpu_isa_t isa>
 void jit_uni_binary_kernel_t<isa>::compute_bcast(bool tail) {
     if (conf_.broadcast_src1_value) {
         if (conf_.is_i8) uni_clear(xreg_bcast_src1_);
-        io_.at(conf_.src1_type)->broadcast(src1_ptr(), 0, vreg_bcast_src1_);
+        const auto &addr = prepare_xaddr_reg_with_src1_ptr();
+        io_->broadcast_load(conf_.src1_type, vreg_bcast_src1_, addr);
     } else if (!conf_.is_i8 && offt_src1_ == 0) {
-        io_.at(conf_.src1_type)->load(src1_ptr(), 0, vreg_bcast_src1_, tail);
+        const auto &addr = prepare_xaddr_reg_with_src1_ptr();
+        io_->load(conf_.src1_type, vreg_bcast_src1_, addr, tail);
     }
 }
 
@@ -390,21 +365,15 @@ void jit_uni_binary_kernel_t<isa>::pop(const Xbyak_aarch64::XReg &reg) {
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_kernel_t<isa>::uni_broadcast(
-        const Vmm &dst, const Xbyak_aarch64::XReg &addr) {
-    uni_ld1rw(dst.s, addr, 0);
-}
-
-template <cpu_isa_t isa>
 void jit_uni_binary_kernel_t<isa>::load_src1(
         const Vmm &vreg_src1, const int offt, bool tail) {
     if (conf_.is_src_different_layouts) {
-        // if different layouts, gather data with strides
+        // if different layouts, gather_load data with strides
         // after getting to stride range, offset is restored and
         // increased
-        io_.at(conf_.src1_type)
-                ->gather(reg_src1_, vmm_indices_, vreg_src1, tail);
-        // gather is using register instead of operand to read address
+        io_->gather_load(
+                conf_.src1_type, vreg_src1, reg_src1_, vmm_indices_, tail);
+        // gather_load is using register instead of operand to read address
         // use reg_src1_ directly, without offset stored in second
         // register
         add_imm(reg_src1_, reg_src1_,
@@ -428,10 +397,11 @@ void jit_uni_binary_kernel_t<isa>::load_src1(
             mov(reg_reverse_src1_stride_range_, reg_src1_stride_range_);
         }
         L(src1_stride_range_not_exceed);
-    } else
-        io_.at(conf_.src1_type)
-                ->load(src1_ptr(offt * types::data_type_size(conf_.src1_type)),
-                        offt, vreg_src1, tail);
+    } else {
+        const auto addr = prepare_xaddr_reg_with_src1_ptr(
+                offt * types::data_type_size(conf_.src1_type));
+        io_->load(conf_.src1_type, vreg_src1, addr, tail);
+    }
 }
 
 template <cpu_isa_t isa>
@@ -450,14 +420,15 @@ void jit_uni_binary_kernel_t<isa>::store(int unroll, bool tail) {
                 uni_clear(vreg_zero_);
                 movprfx(ZReg(vreg_zero_.getIdx()).s, tail_opmask_ / T_m,
                         ZReg(vreg_tmp_src0.getIdx()).s);
-                io_.at(conf_.dst_type)
-                        ->store(vreg_zero_, dst_ptr(offt * dt_size), 0, false);
+                const auto &addr
+                        = prepare_xaddr_reg_with_dst_ptr(offt * dt_size);
+                io_->store(conf_.dst_type, vreg_zero_, addr, false);
                 off_base = simd_w_ * dt_size;
                 zero_pad_left -= simd_w_ - tail_size_;
             } else {
-                io_.at(conf_.dst_type)
-                        ->store(vreg_tmp_src0, dst_ptr(offt * dt_size), 0,
-                                true);
+                const auto &addr
+                        = prepare_xaddr_reg_with_dst_ptr(offt * dt_size);
+                io_->store(conf_.dst_type, vreg_tmp_src0, addr, true);
                 off_base = tail_size_ * dt_size;
             }
 
@@ -466,7 +437,8 @@ void jit_uni_binary_kernel_t<isa>::store(int unroll, bool tail) {
                 const auto off_num
                         = off_start + zero_pad_left * dt_size - off_start;
                 eor(X_TMP_4, X_TMP_4, X_TMP_4);
-                const auto &reg_ptr = dst_ptr(offt * dt_size + off_start);
+                const auto &reg_ptr = prepare_xaddr_reg_with_dst_ptr(
+                        offt * dt_size + off_start);
                 int done = 0;
                 int residual = off_num;
                 while (residual > 0) {
@@ -487,9 +459,10 @@ void jit_uni_binary_kernel_t<isa>::store(int unroll, bool tail) {
                     residual = off_num - done;
                 }
             }
-        } else
-            io_.at(conf_.dst_type)
-                    ->store(vreg_tmp_src0, dst_ptr(offt * dt_size), 0, tail);
+        } else {
+            const auto &addr = prepare_xaddr_reg_with_dst_ptr(offt * dt_size);
+            io_->store(conf_.dst_type, vreg_tmp_src0, addr, tail);
+        }
     }
 }
 
@@ -502,19 +475,15 @@ void jit_uni_binary_kernel_t<isa>::compute_dst_body(int unroll, bool tail) {
                 : Vmm(unroll + i + vmm_start_idx_);
         const Vmm vreg_tmp_src1 = offt_src1_ ? vreg_tmp : vreg_bcast_src1_;
         const int offt = simd_w_ * i;
-        io_.at(conf_.src0_type)
-                ->load(src0_ptr(offt * types::data_type_size(conf_.src0_type)),
-                        0, vreg_tmp_src0, tail);
+        const auto &addr = prepare_xaddr_reg_with_src0_ptr(
+                offt * types::data_type_size(conf_.src0_type));
+        io_->load(conf_.src0_type, vreg_tmp_src0, addr, tail);
         if (offt_src1_) load_src1(vreg_tmp_src1, offt, tail);
 
         // avoid multiple multiplication on input scale for broadcasted vreg
         // not needed for different layouts
         if (!conf_.is_src_different_layouts) {
-            if (isa == asimd)
-                mov(VReg16B(vreg_tmp.getIdx()),
-                        VReg16B(vreg_tmp_src1.getIdx()));
-            else
-                mov(ZRegD(vreg_tmp.getIdx()), ZRegD(vreg_tmp_src1.getIdx()));
+            uni_mov(vreg_tmp, vreg_tmp_src1);
         }
         perform_op(
                 vreg_tmp_src0, vreg_tmp, vreg_scales_src0_, vreg_scales_src1_);
@@ -546,7 +515,6 @@ void jit_uni_binary_kernel_t<isa>::forward() {
             } else {
                 uni_clear(ZReg(vreg_zero_.getIdx()));
             }
-            io_.init_saturate_f32({conf_.dst_type});
             eor(reg_offt_dst_, reg_offt_dst_,
                     reg_offt_dst_); // offt_dst to get addr of dst
         }
@@ -667,7 +635,6 @@ void jit_uni_binary_kernel_t<isa>::forward_over_outer_dims() {
         } else {
             uni_clear(ZReg(vreg_zero_.getIdx()));
         }
-        io_.init_saturate_f32({conf_.dst_type});
         eor(reg_offt_dst_, reg_offt_dst_,
                 reg_offt_dst_); // offt_dst to get addr of dst
     }
@@ -698,10 +665,13 @@ void jit_uni_binary_kernel_t<isa>::generate() {
     else if (isa == sve_128)
         ptrue(P_ALL_ONE.b, VL16);
 
+    io_->init_tail();
+    io_->init_saturation(conf_.dst_type);
+
     load_kernel_params();
     prepare_isa_kernel();
     // if outer dims is not aligned to simd_w, iterate over it to avoid
-    // modifying the gather indices
+    // modifying the gather_load indices
     if (is_src1_outer_dims_tail_)
         forward_over_outer_dims();
     else

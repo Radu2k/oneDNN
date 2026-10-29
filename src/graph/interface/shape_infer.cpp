@@ -1546,6 +1546,15 @@ status_t infer_static_reshape_output_shape(op_t *n,
     auto in0 = logical_tensor_wrapper_t(inputs[0]);
     const dims &in_dims = in0.vdims();
     dims out_dims = n->get_attr<dims>(op_attr::shape);
+    // The inferred rank is taken directly from the user-provided shape
+    // attribute, so bound it before it is written into the fixed-size dims of
+    // the output logical tensor in set_shape_and_strides.
+    VCHECK_INVALID_SHAPE(
+            (out_dims.size() <= static_cast<size_t>(DNNL_MAX_NDIMS)),
+            "%s, the number of output dims (%zu) should not exceed the maximum "
+            "supported ndims (%d)",
+            op_t::kind2str(n->get_kind()).c_str(), out_dims.size(),
+            DNNL_MAX_NDIMS);
     const bool special_zero = n->get_attr<bool>(op_attr::special_zero);
 
     bool find_uncertain_dim = false; // shape contains -1
@@ -2437,40 +2446,6 @@ status_t infer_dnnl_layernorm_output_shape(op_t *n,
         auto status = infer_norm_output_shape(n, inputs, outputs);
         if (status != status::success) return status;
     }
-    return status::success;
-}
-
-status_t infer_gated_mlp_output_shape(op_t *n,
-        std::vector<logical_tensor_t *> &inputs,
-        std::vector<logical_tensor_t *> &outputs) {
-    auto src = ltw(inputs[0]);
-    auto wei0 = ltw(inputs[1]);
-    auto wei1 = ltw(inputs[2]);
-    auto wei2 = ltw(inputs[3]);
-    auto dst = ltw(outputs[0]);
-
-    auto wei0_ndims = wei0.ndims();
-
-    VCHECK_INVALID_SHAPE(wei0_ndims == 2,
-            "%s, only support 2D weight for gated mlp, but got weight dim: %d",
-            op_t::kind2str(n->get_kind()).c_str(), wei0_ndims);
-    VCHECK_INVALID_SHAPE(wei0.vdims() == wei1.vdims(),
-            "%s, wei0 and wei1 should have the same shape, but got wei0 shape: "
-            "%s, wei1 shape: %s",
-            op_t::kind2str(n->get_kind()).c_str(),
-            dims2str(wei0.vdims()).c_str(), dims2str(wei1.vdims()).c_str());
-
-    dims inferred = src.vdims();
-    inferred.back() = wei2.vdims().back();
-
-    if (dst.ndims() != -1) {
-        VCHECK_INVALID_SHAPE(validate(inferred, dst.vdims()),
-                "%s, inferred out shape is not compatible with the given "
-                "output shape",
-                op_t::kind2str(n->get_kind()).c_str());
-    }
-    set_shape_and_strides(*outputs[0], inferred);
-
     return status::success;
 }
 

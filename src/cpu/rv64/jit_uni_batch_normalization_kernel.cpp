@@ -91,7 +91,142 @@ void dispatch_jit_batch_normalization_bwd_apply_dt(
         dispatch_jit_batch_normalization_bwd_apply<data_type, false>(p);
 }
 
+template <data_type_t data_type, bool calculate_variance>
+const jit_uni_batch_normalization_fwd_stat_kernel_t &
+get_jit_batch_normalization_fwd_stat_kernel() {
+    static const jit_uni_batch_normalization_fwd_stat_kernel_t kernel(
+            data_type, calculate_variance);
+    return kernel;
+}
+
+template <data_type_t data_type>
+const jit_uni_batch_normalization_fwd_stat_kernel_t &
+get_jit_batch_normalization_fwd_stat_kernel_dt(bool calculate_variance) {
+    if (calculate_variance)
+        return get_jit_batch_normalization_fwd_stat_kernel<data_type, true>();
+    return get_jit_batch_normalization_fwd_stat_kernel<data_type, false>();
+}
+
 } // namespace
+
+jit_uni_batch_normalization_fwd_stat_kernel_t::
+        jit_uni_batch_normalization_fwd_stat_kernel_t(
+                data_type_t data_type, bool calculate_variance)
+    : jit_generator_t("jit_uni_batch_normalization_fwd_stat_kernel")
+    , data_type_(data_type)
+    , calculate_variance_(calculate_variance) {
+    status_ = create_kernel();
+}
+
+const jit_uni_batch_normalization_fwd_stat_kernel_t &
+get_jit_uni_batch_normalization_fwd_stat_kernel(
+        data_type_t dt, bool calculate_variance) {
+    if (dt == data_type::bf16)
+        return get_jit_batch_normalization_fwd_stat_kernel_dt<data_type::bf16>(
+                calculate_variance);
+    if (dt == data_type::f16)
+        return get_jit_batch_normalization_fwd_stat_kernel_dt<data_type::f16>(
+                calculate_variance);
+    return get_jit_batch_normalization_fwd_stat_kernel_dt<data_type::f32>(
+            calculate_variance);
+}
+
+void jit_uni_batch_normalization_fwd_stat_kernel_t::generate() {
+#if defined(XBYAK_RISCV_V) && XBYAK_RISCV_V == 1
+    const Reg reg_param = a0;
+    const Reg reg_src = a1;
+    const Reg reg_len = a2;
+    const Reg reg_result = a3;
+    const Reg reg_vl = t0;
+    const Reg reg_bytes = t1;
+
+    const FReg f_mean = fa0;
+    const FReg f_result = fa1;
+
+    const VReg v_src16(2);
+    const VReg v_src(4);
+    const VReg v_reduction(8);
+
+    ld(reg_src, reg_param, 0);
+    ld(reg_len, reg_param, 8);
+    ld(reg_result, reg_param, 16);
+    if (calculate_variance_) flw(f_mean, reg_param, 24);
+
+    // Seed the reduction from the caller-provided scalar. This permits an ncsp
+    // channel to be accumulated across its non-contiguous minibatch slices.
+    flw(f_result, reg_result, 0);
+
+    Label loop, done;
+    if (data_type_ == data_type::f32) {
+        // Accumulate element-wise into a VLMAX-wide vector so no scalar FP
+        // dependency chain is formed; tail-undisturbed keeps the partial sums
+        // of lanes beyond a short final vl. Reduce once per call.
+        const VReg v_acc(8);
+        const VReg v_data(16);
+        const VReg v_sum(4);
+
+        vsetvli(reg_vl, x0, SEW::e32, LMUL::m4, VTA::ta, VMA::ma);
+        vmv_v_i(v_acc, 0);
+
+        L(loop);
+        beqz(reg_len, done);
+        vsetvli(reg_vl, reg_len, SEW::e32, LMUL::m4, VTA::tu, VMA::ma);
+        vle32_v(v_data, reg_src);
+        if (calculate_variance_) {
+            vfsub_vf(v_data, v_data, f_mean);
+            vfmacc_vv(v_acc, v_data, v_data);
+        } else {
+            vfadd_vv(v_acc, v_acc, v_data);
+        }
+        slli(reg_bytes, reg_vl, 2);
+        add(reg_src, reg_src, reg_bytes);
+        sub(reg_len, reg_len, reg_vl);
+        j_(loop);
+
+        L(done);
+        vsetvli(reg_vl, x0, SEW::e32, LMUL::m4, VTA::ta, VMA::ma);
+        vfmv_s_f(v_sum, f_result);
+        vfredusum_vs(v_sum, v_acc, v_sum);
+        vfmv_f_s(f_result, v_sum);
+        fsw(f_result, reg_result, 0);
+        ret();
+        return;
+    }
+
+    L(loop);
+    beqz(reg_len, done);
+
+    vsetvli(reg_vl, reg_len, SEW::e16, LMUL::m1, VTA::ta, VMA::ma);
+    vle16_v(v_src16, reg_src);
+    if (data_type_ == data_type::bf16)
+        vfwcvtbf16_f_f_v(v_src, v_src16);
+    else
+        vfwcvt_f_f_v(v_src, v_src16);
+    vsetvli(reg_vl, reg_vl, SEW::e32, LMUL::m2, VTA::ta, VMA::ma);
+    if (calculate_variance_) {
+        vfsub_vf(v_src, v_src, f_mean);
+        vfmul_vv(v_src, v_src, v_src);
+    }
+
+    // Use an ordered reduction so each chunk is folded into the scalar seed in
+    // input order. Variance is a separate pass to avoid E[x^2] - E[x]^2
+    // cancellation for inputs with a large mean and small variance.
+    vfmv_v_f(v_reduction, f_result);
+    vfredosum_vs(v_reduction, v_src, v_reduction);
+    vfmv_f_s(f_result, v_reduction);
+
+    slli(reg_bytes, reg_vl, 1);
+    add(reg_src, reg_src, reg_bytes);
+    sub(reg_len, reg_len, reg_vl);
+    j_(loop);
+
+    L(done);
+    fsw(f_result, reg_result, 0);
+    ret();
+#else
+    ret();
+#endif
+}
 
 jit_uni_batch_normalization_fwd_kernel_t::
         jit_uni_batch_normalization_fwd_kernel_t(

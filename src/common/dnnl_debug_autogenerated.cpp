@@ -62,6 +62,7 @@ const char *dnnl_dt2str(dnnl_data_type_t v) {
     if (v == dnnl_f4_e2m1) return "f4_e2m1";
     if (v == dnnl_s64) return "s64";
     if (v == dnnl_u2) return "u2";
+    if (v == dnnl_u3) return "u3";
     if (v == dnnl_data_type_max) return "data_type_max";
     assert(!"unknown dt");
     return "unknown dt";
@@ -1825,7 +1826,6 @@ const char *dnnl_prim_kind2str(dnnl_primitive_kind_t v) {
     if (v == dnnl_group_normalization) return "group_normalization";
     if (v == dnnl_primitive_kind_max) return "primitive_kind_max";
     if (v == dnnl::impl::primitive_kind::sdpa) return "sdpa";
-    if (v == dnnl::impl::primitive_kind::gated_mlp) return "gated_mlp";
     assert(!"unknown prim_kind");
     return "unknown prim_kind";
 }

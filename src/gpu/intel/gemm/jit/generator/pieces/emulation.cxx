@@ -64,7 +64,7 @@ void Generator<hw>::eadd3(const InstructionModifier &mod, const RegData &dst, co
 template <HW hw>
 template <typename S0>
 void Generator<hw>::ecsel(const InstructionModifier &mod, const InstructionModifier &cmod, const FlagRegister &flag,
-                          const RegData &dst,  const S0 &src0,
+                          const RegData &dst, const S0 &src0,
                           const RegData &src1, const RegData &src2, ngen::SourceLocation loc)
 {
     if (dst.getByteOffset() & 7) {
@@ -115,7 +115,7 @@ void Generator<hw>::emov(const ngen::InstructionModifier &mod, ngen::RegData dst
 
 template <HW hw>
 template <typename DT>
-void Generator<hw>::emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, const ngen::RegData &src1, const CommonStrategy &strategy,  CommonState &state,  ngen::SourceLocation loc)
+void Generator<hw>::emul(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, const ngen::RegData &src1, const CommonStrategy &strategy, CommonState &state, ngen::SourceLocation loc)
 {
     const bool is_xe3p = (hw == ngen::HW::Xe3p);
     const bool dstBf = dst.getType() == DataType::bf;
@@ -152,8 +152,9 @@ void Generator<hw>::eadd(const InstructionModifier &mod, const RegData &dst, con
         add(mod, dst, src0, temp.bf(0)(1), loc);
 
         state.ra.safeRelease(alloced);
-    } else
+    } else {
         EmulationImplementation::eadd<DT>(*this, mod, dst, src0, src1, strategy.emulate, state.emulate, loc);
+    }
 }
 
 template <HW hw>
@@ -186,7 +187,7 @@ void Generator<hw>::emad(const InstructionModifier &mod, const RegData &dst, con
         auto ttype = withSignedness(dst.getType(), isSigned(src1.getType()) || isSigned(src2.getType()));
         RegData temp;
         Subregister tempSub;
-        GRFRange tempRange;
+        RegisterRange tempRange;
         if (mod.getExecSize() == 1)
             temp = tempSub = state.ra.alloc_sub(ttype);
         else {
@@ -225,7 +226,7 @@ void Generator<hw>::emad(const InstructionModifier &mod, const RegData &dst, con
     } else {
         auto ttype = (isSigned(src1.getType()) || src2 < 0) ? DataType::d : DataType::ud;
         Subregister tempScalar;
-        GRFRange tempGRFs;
+        RegisterRange tempGRFs;
         RegData temp;
         if (mod.getExecSize() == 1)
             temp = tempScalar = state.ra.alloc_sub(ttype);
@@ -245,10 +246,18 @@ template <typename S0>
 void Generator<hw>::eaddScaled(const InstructionModifier &mod, const RegData &dst, const S0 &src0, const RegData &src1, Type src2,
                                const CommonStrategy &strategy, CommonState &state, ngen::SourceLocation loc)
 {
-    if (src2.is4()) {
+    if (src2.is3()) {
+        // u3 packs 8 elements into 3 bytes; byte offset = (elemIdx * 3) / 8.
         auto tmpRange = state.ra.alloc_range(2);
         auto tmp = tmpRange[0].retype(src1.getType());
-        eshr(mod, tmp, src1, 1, strategy, state, loc);
+        emulConstant(mod, tmp, src1, 3, strategy, state, loc);
+        eshr(mod, tmp, tmp, 3, strategy, state, loc);
+        eadd(mod, dst, tmp, src0, strategy, state, loc);
+        state.ra.safeRelease(tmpRange);
+    } else if (src2.isSubByte()) {
+        auto tmpRange = state.ra.alloc_range(2);
+        auto tmp = tmpRange[0].retype(src1.getType());
+        eshr(mod, tmp, src1, src2.logPerByte(), strategy, state, loc);
         eadd(mod, dst, tmp, src0, strategy, state, loc);
         state.ra.safeRelease(tmpRange);
     } else
@@ -260,8 +269,13 @@ template <typename DT>
 void Generator<hw>::emulConstant(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, Type src1,
                                  const CommonStrategy &strategy, const CommonState &state, ngen::SourceLocation loc)
 {
-    if (src1.is4())
-        eshr<DT>(mod, dst, src0, 1, strategy, state, loc);
+    if (src1.isSubByte() && !src1.is3())
+        eshr<DT>(mod, dst, src0, src1.logPerByte(), strategy, state, loc);
+    else if (src1.is3()) {
+        // u3 packs 8 elements into 3 bytes; byte size = (elemCount * 3) / 8.
+        emulConstant<DT>(mod, dst, src0, 3, strategy, state, loc);
+        eshr<DT>(mod, dst, dst, 3, strategy, state, loc);
+    }
     else
         emulConstant<DT>(mod, dst, src0, src1.size(), strategy, state, loc);
 }
@@ -302,5 +316,28 @@ void Generator<hw>::ejmpi(InstructionModifier mod, Label &dst, ngen::SourceLocat
         jmpi(mod, dst, loc);
 }
 
+template <HW hw>
+template <typename DT>
+void Generator<hw>::emin_(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, const ngen::Immediate &src1, CommonState &state, ngen::SourceLocation loc) {
+        min_(mod, dst, src0, src1, loc);
+}
+
+template <HW hw>
+template <typename DT>
+void Generator<hw>::emin_(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, const ngen::RegData &src1, CommonState &state, ngen::SourceLocation loc) {
+        min_(mod, dst, src0, src1, loc);
+}
+
+template <HW hw>
+template <typename DT>
+void Generator<hw>::emax_(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, const ngen::Immediate &src1, CommonState &state, ngen::SourceLocation loc) {
+        max_(mod, dst, src0, src1, loc);
+}
+
+template <HW hw>
+template <typename DT>
+void Generator<hw>::emax_(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, const ngen::RegData &src1, CommonState &state, ngen::SourceLocation loc) {
+        max_(mod, dst, src0, src1, loc);
+}
 
 GEMMSTONE_NAMESPACE_END

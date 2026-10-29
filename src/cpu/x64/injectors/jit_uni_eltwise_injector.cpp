@@ -86,6 +86,20 @@ void jit_uni_eltwise_injector_t<Wmm>::injector_preamble(
             vmm_aux_indices.size()
                     == static_cast<size_t>(n_vregs_to_preserve_)));
 
+    // Preserve vmm mask register first. If preserved last, there may not be
+    // enough free registers to fit all vmm registers, and an algorithm
+    // requiring a mask will fail.
+    // The scalar fallback preserves the accumulator before the call.
+    const auto preserve = [&](int preserve_idx) {
+        if (need_vmm_mask_register_ && n_vregs_preserved_ == 0)
+            preserved_vmm_tail_indices_[n_vregs_preserved_++] = preserve_idx;
+        else {
+            preserved_vmm_indices_[n_vregs_preserved_ - need_vmm_mask_register_]
+                    = preserve_idx;
+            n_vregs_preserved_++;
+        }
+    };
+
     const auto start_idx = *(vmm_compute_idxs.begin());
     const auto end_idx = *(vmm_compute_idxs.rbegin()) + 1;
     for (int idx = n_vregs_preserved_; idx < n_vregs_; idx++) {
@@ -114,27 +128,35 @@ void jit_uni_eltwise_injector_t<Wmm>::injector_preamble(
         } else {
             // ... but when indices are passed, it secures that external indices
             // don't overlap with those to compute alg on.
-            assert(!(start_idx <= preserve_idx && preserve_idx < end_idx));
+            assert(vmm_compute_idxs.count(preserve_idx) == 0);
         }
 
-        // Preserve vmm mask register first. If preserved last, there may not be
-        // enough free registers to fit all vmm registers, and an algorithm
-        // requiring a mask will fail.
-        // The scalar fallback preserves the accumulator before the call.
-        if (need_vmm_mask_register_ && n_vregs_preserved_ == 0)
-            preserved_vmm_tail_indices_[n_vregs_preserved_++] = preserve_idx;
-        else {
-            preserved_vmm_indices_[n_vregs_preserved_ - need_vmm_mask_register_]
-                    = preserve_idx;
-            n_vregs_preserved_++;
-        }
+        preserve(preserve_idx);
     }
+
+    // The set does not need to be contiguous. When too few vmms lie outside its
+    // range the gaps between the accumulators come next.
+    if (vmm_aux_indices.empty()) {
+        for (int idx = start_idx;
+                idx < end_idx && n_vregs_preserved_ < n_vregs_to_preserve_;
+                idx++)
+            if (vmm_compute_idxs.count(idx) == 0) preserve(idx);
+    }
+
+    // The mask vmm must come from outside the set. Both rounds share it, so a
+    // borrowed accumulator cannot hold it.
+    JIT_ASSERT(IMPLICATION(need_vmm_mask_register_, n_vregs_preserved_ > 0)
+            && "eltwise injector: every vmm is in the set");
 
     // If it happened that there was not enough spare registers to preserve,
     // injector will take first `n_vregs_not_preserved` from `vmm_compute_idxs`
     // to have legit generated code. This fact is saved through
     // `start_idx_tail_it` iterator and a second round of compute will happen.
     int n_vregs_not_preserved = n_vregs_to_preserve_ - n_vregs_preserved_;
+    // The second round borrows as many vmms from the accumulators the first
+    // round computes (see `injector_preamble_tail()`).
+    JIT_ASSERT(2 * n_vregs_not_preserved <= (int)vmm_compute_idxs.size()
+            && "eltwise injector: too few accumulators to borrow vmms from");
     for (int i = 0; i < n_vregs_not_preserved; i++) {
         preserved_vmm_indices_[n_vregs_preserved_ - need_vmm_mask_register_]
                 = *start_idx_tail_it;
@@ -212,6 +234,7 @@ void jit_uni_eltwise_injector_t<Wmm>::injector_preamble(
 
 template <typename Wmm>
 void jit_uni_eltwise_injector_t<Wmm>::injector_preamble_tail(
+        const injector_utils::vmm_index_set_iterator_t &start_idx_tail_it,
         int n_vregs_not_preserved) {
     // There was enough vmm registers to compute everything in one round.
     if (n_vregs_not_preserved == 0) return;
@@ -231,12 +254,12 @@ void jit_uni_eltwise_injector_t<Wmm>::injector_preamble_tail(
                             + (i - n_vregs_not_preserved) * vlen_]);
     }
 
-    // Update the rightmost indices. The injector uses vmms with indices coming
-    // after compute vmm indices.
-    // TODO: is it always a valid index?
-    for (int i = 0; i < n_vregs_not_preserved; ++i)
-        preserved_vmm_indices_[idx_off + i - need_vmm_mask_register_]
-                += n_vregs_not_preserved;
+    // The second round takes its auxiliary vmms from the first accumulators
+    // the first round computed. They follow the borrowed ones in the set,
+    // which need not be contiguous.
+    auto it = start_idx_tail_it;
+    for (int i = 0; i < n_vregs_not_preserved; ++i, ++it)
+        preserved_vmm_indices_[idx_off + i - need_vmm_mask_register_] = *it;
 
     if (save_state_ && preserve_vmm_) {
         for (int i = 0; i < n_vregs_not_preserved; ++i)
@@ -743,6 +766,11 @@ void jit_uni_eltwise_injector_t<Wmm>::soft_relu_compute_vector_fwd(
     vec_shift(vmm_aux(1), vmm_aux(1), true /*shift_left*/, n_mantissa_bits_);
     // calculate ln(1 + y)
     h->uni_vmulps(vmm_aux(3), vmm_aux(3), table_val(two)); // 2*exp(r)
+    // Reuse the just-computed `2*exp(r)` and `2^-(n-1)` to reconstruct
+    // exp(x) = 2^n * exp(r) = (2*exp(r)) / 2^-(n-1) for the deep-negative tail
+    // blend below. Division by an exact power of two is exact, so this matches
+    // a dedicated exp() while avoiding a second exp evaluation.
+    h->uni_vdivps(vmm_aux(4), vmm_aux(3), vmm_aux(1)); // exp(x)
     h->uni_vaddps(vmm_aux(3), vmm_aux(3), vmm_aux(1)); // 2^-(n-1) + 2*exp(r)
     h->uni_vdivps(
             vmm_aux(3), vmm_aux(3), table_val(two)); // (2^-(n-1) + 2*exp(r))/2
@@ -779,6 +807,15 @@ void jit_uni_eltwise_injector_t<Wmm>::soft_relu_compute_vector_fwd(
     // y = (x < max log f) ? soft_relu(x) : x
     compute_cmp_mask(vmm_aux(2), table_val(exp_ln_flt_max_f), _cmp_gt_os);
     blend_with_mask(vmm_src, vmm_aux(2));
+
+    // For sufficiently negative arguments exp(x) underflows towards zero and
+    // the `n * ln2 + ln(2^-n + exp(r))` reconstruction above cancels
+    // catastrophically: the tiny `exp(r)` term is lost when added to the large
+    // `2^-n`, flooring the result at ~2^-17 instead of the true value which is
+    // on the order of exp(x). In this regime `ln(1 + exp(x)) == exp(x)` to f32
+    // precision, so blend in the exp(x) value reconstructed earlier.
+    compute_cmp_mask(vmm_aux(2), table_val(soft_relu_tail_bound), _cmp_lt_os);
+    blend_with_mask(vmm_src, vmm_aux(4));
     if (alpha_ == 1.f) { // standard soft_relu case
         // Skip an instruction.
     } else if (alpha_ == -1) { // logsigmoid case
@@ -883,9 +920,10 @@ void jit_uni_eltwise_injector_t<Wmm>::log_compute_vector_fwd(
             vlen_ / sizeof(float)); // equal to 2/3/4 for xmm/ymm/zmm
     vec_shift(vmm_aux(1), vmm_aux(1), true, simd_w);
 
-    const auto it = entry_map_.find(log_predefined_vals);
-    if (it == entry_map_.end()) {
-        assert(it != entry_map_.end());
+    // The key has several entries. Use lower_bound() to get the first one.
+    const auto it = entry_map_.lower_bound(log_predefined_vals);
+    if (it == entry_map_.end() || it->first != log_predefined_vals) {
+        assert(!"Non-existent key");
         return;
     }
     const auto table_start_idx = (*it).second.off;
@@ -1696,7 +1734,7 @@ int jit_uni_eltwise_injector_t<Wmm>::aux_vecs_count(
             case eltwise_sqrt_use_dst_for_bwd:
             case eltwise_sqrt: n_vmms = 0; break;
             case eltwise_linear: n_vmms = 1; break;
-            case eltwise_soft_relu: n_vmms = 4; break;
+            case eltwise_soft_relu: n_vmms = 5; break;
             case eltwise_mish: n_vmms = 3; break;
             case eltwise_logistic_use_dst_for_bwd:
             case eltwise_logistic: n_vmms = 3; break;
@@ -1949,7 +1987,7 @@ void jit_uni_eltwise_injector_t<Wmm>::compute_vector_range(
     const auto &start_idx_it = vmm_compute_idxs.begin();
     const auto &end_idx_it = vmm_compute_idxs.end();
     assert(*start_idx_it < *vmm_compute_idxs.rbegin() + 1
-            && *vmm_compute_idxs.rbegin() <= n_vregs_);
+            && *vmm_compute_idxs.rbegin() < n_vregs_);
 
     // This is something that can be moved in preamble.
     auto start_idx_tail_it = vmm_compute_idxs.begin();
@@ -1962,7 +2000,7 @@ void jit_uni_eltwise_injector_t<Wmm>::compute_vector_range(
     // `injector_preamble_tail`.
     const int n_vregs_not_preserved
             = static_cast<int>(std::distance(start_idx_it, start_idx_tail_it));
-    injector_preamble_tail(n_vregs_not_preserved);
+    injector_preamble_tail(start_idx_tail_it, n_vregs_not_preserved);
     compute_body(start_idx_it, start_idx_tail_it);
     injector_postamble();
 }
@@ -2292,6 +2330,7 @@ void jit_uni_eltwise_injector_t<Wmm>::register_table_entries() {
     static const table_t soft_relu_consts {
             {soft_relu_one_twenty_six, {0x42fc0000, true}},
             {soft_relu_mantissa_sign_mask, {0x807fffff, true}},
+            {soft_relu_tail_bound, {0xc1800000, true}}, // -16.f
     };
 
     // soft_relu ln(1 + x) polynomial approximation

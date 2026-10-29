@@ -54,7 +54,15 @@
     (pfx##_stride_d0 * d0 + pfx##_stride_d1 * d1 + pfx##_stride_d2 * d2)
 
 __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
-        __global DST_DATA_T *C, __global BIA_DATA_T *bia,
+#if WITH_DYN_DST_SCALE
+        __global float *C,
+#else
+        __global DST_DATA_T *C,
+#endif
+#if WITH_SUM
+        __global SUM_DATA_T *C_sum,
+#endif
+        __global BIA_DATA_T *bia,
 #if WITH_HOST_SRC_ZP
         SRC_ZP_DATA_T a0_value,
 #else
@@ -215,6 +223,8 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
 #endif
 #if WEI_DT_U2
             ACC_DATA_T w_raw = WEI_TO_REF(GET_QUARTER_BYTE(B, wei_off));
+#elif WEI_DT_U3
+            ACC_DATA_T w_raw = WEI_TO_REF(GET_U3(B, wei_off));
 #elif WEI_DT_S4 || WEI_DT_U4 || WEI_DT_F4_E2M1
             ACC_DATA_T w_raw = WEI_TO_REF(GET_HALF_BYTE(B, wei_off));
 #else
@@ -283,7 +293,11 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
 
     float dst_data;
 #if WITH_SUM
-    dst_data = SUM_TO_REF(C[dst_off]);
+#if DST_PACKED
+    dst_data = SUM_TO_REF(GET_HALF_BYTE(C_sum, dst_off));
+#else
+    dst_data = SUM_TO_REF(C_sum[dst_off]);
+#endif
 #endif // WITH_SUM
 
     float po_acc = convert_float(temp);
@@ -329,13 +343,13 @@ __kernel void ref_matmul(__global SRC_DATA_T *A, __global WEI_DATA_T *B,
     po_acc += dst_zp;
 
 #if WITH_DYN_DST_SCALE
-    ((__global ACC_DATA_T *)C)[dst_off] = po_acc;
+    C[dst_off] = po_acc;
 #else
     C[dst_off] = TO_DST(po_acc);
 #endif
 #else // WITH_BIAS || NON_DEFAULT_ATTRS
 #if WITH_DYN_DST_SCALE
-    ((__global ACC_DATA_T *)C)[dst_off] = acc;
+    C[dst_off] = acc;
 #else
     C[dst_off] = TO_DST(acc);
 #endif

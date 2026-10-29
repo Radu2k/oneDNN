@@ -58,6 +58,13 @@ bool allow_perf_heuristics(const jit_brgemm_conv_conf_t &jcp) {
     if (one_of(true, jcp.is_f32_f16, jcp.is_f32_bf16)) return false;
     return true;
 }
+
+// Whether the weights data type allows padding of the reduce dimension to a
+// block in the weights layout (see is_rd_padded_to_block).
+bool wei_rd_can_be_padded(const jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa) {
+    return one_of(jcp.wei_dt, bf16, f16, s8, f8_e5m2, f8_e4m3)
+            && IMPLICATION(jcp.wei_dt == f16, isa != avx10_1_512);
+}
 } // namespace
 
 namespace brgemm_convolution_utils {
@@ -572,7 +579,14 @@ status_t brg_blocking_t::estimate_brgemm_ur() {
         LDA = kh_koef * stride_w * ic_stride;
     }
     bool reduce_kw = ow == 1 && !is_reduced_rtus;
-    if (reduce_kw) { LDA *= ext_kw; }
+    if (reduce_kw) {
+        // With os blocking the rows of A are rows of the input buffer, and the
+        // trans kernel rounds the buffer row width up to stride_w.
+        if (!is_rtus && exec_type == exec_trans && is_os_blocking)
+            LDA = kh_koef * inp_ic_block * rnd_up(ext_kw, stride_w);
+        else
+            LDA *= ext_kw;
+    }
 
     LDB = wei_plain ? oc_without_padding : oc_block;
     LDC = use_buffer ? oc_block : oc_without_padding;
@@ -648,8 +662,8 @@ status_t brg_blocking_t::estimate_brgemm_ur() {
     const auto vM = M > 0 ? M : M_tail;
     const auto vN = N > 0 ? N : N_tail;
 
-    const float alpha = 1.0;
-    const float beta = 0.0;
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
     brgemm_desc_t brg;
     CHECK(brgemm_utils::init_brgemm_conf(&brg, isa, brgemm_addr, src_dt, wei_dt,
             brgemm_row_major, alpha, beta, LDA, LDB, LDC, vM, vN, vK, nullptr,
@@ -890,15 +904,14 @@ float brg_blocking_t::est_eff() {
 
     const auto ur_eff = static_cast<float>(sp_block)
             / static_cast<float>(rnd_up(sp_block, ur));
-    const auto brgemm_eff = squeeze_val(static_cast<float>(ur)
-                    * (2.f
-                            - nstl::min(1.9f,
-                                    static_cast<float>(ur)
-                                            / static_cast<float>(sp_block)))
-                    / 64,
-            0.5f);
+    const auto ur_f = static_cast<float>(ur);
+    const auto ur_use = ur_f
+            * (2.f - nstl::min(1.9f, ur_f / static_cast<float>(sp_block)));
+    const auto brgemm_eff = is_amx(isa) ? 1.f : squeeze_val(ur_use / 64, 0.5f);
 
-    const dim_t sp_amount = static_cast<dim_t>(nb_od) * nb_oh * nb_sp;
+    const dim_t sp_amount = is_os_blocking
+            ? static_cast<dim_t>(nb_od) * nb_oh
+            : static_cast<dim_t>(nb_od) * nb_oh * nb_sp;
     const auto work_amount = sp_amount * mb * ngroups * nb_oc;
     const auto sp_eff = (static_cast<float>(sp)
             / static_cast<float>(rnd_up(sp, sp_block)));
@@ -1857,11 +1870,21 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         // IMPLICATION(jcp.ic > jcp.simd_w, jcp.ic % jcp.simd_w == 0)
         // TODO: check if it may go to kw lowering
         const bool pure_1d = (jcp.mb == 1 && jcp.id == 1 && jcp.ih == 1);
+        // A padded weights layout pads ic of every kw point, so the fold needs
+        // ic % simd_w == 0. AMX uses it, other ISAs if new kw and ow are 1.
+        const auto may_pad_rd = [&](int koef) {
+            const bool may_use_padded_layout = is_amx(isa)
+                    || (is_superset(isa, avx512_core) && jcp.od == 1
+                            && jcp.ow == 1 && jcp.kw == koef);
+            return wei_rd_can_be_padded(jcp, isa) && may_use_padded_layout
+                    && jcp.ic * koef > jcp.simd_w;
+        };
         auto w_koef_max = nstl::min(jcp.kw, nstl::min(jcp.stride_w, jcp.iw));
         for (int i = 1; i <= w_koef_max; i++) {
             if (IMPLICATION(!pure_1d, jcp.iw % i == 0)
                     && IMPLICATION(jcp.ic * i > jcp.simd_w,
                             (jcp.ic * i) % jcp.simd_w == 0)
+                    && IMPLICATION(may_pad_rd(i), jcp.ic % jcp.simd_w == 0)
                     && jcp.iw % i == 0 && jcp.kw % i == 0
                     && jcp.stride_w % i == 0)
                 jcp.trans_dim_koef = i;
@@ -2023,8 +2046,7 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     const auto kw_koef = jcp.is_relo() ? jcp.kw : 1;
     const auto kh_koef = jcp.is_relo_whi() ? jcp.kh : 1;
 
-    jcp.is_rd_padded_to_block = !jcp.is_1x1
-            && one_of(jcp.wei_dt, bf16, f16, s8, f8_e5m2, f8_e4m3)
+    jcp.is_rd_padded_to_block = !jcp.is_1x1 && wei_rd_can_be_padded(jcp, isa)
             && jcp.ic * kw_koef * kh_koef > rd_padded_block && is_amx(isa);
 
     jcp.idp = jcp.id + jcp.f_pad + jcp.back_pad;
@@ -2201,6 +2223,15 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             is_int8_convolution, cpu().has(Xbyak::util::Cpu::tAVX512_VBMI));
     const bool relo_reasonable_isa = is_superset(isa, avx512_core);
 
+    const auto is_rd_padded_to_block = [&](dim_t rd) {
+        return wei_rd_can_be_padded(jcp, isa) && rd > rd_padded_block;
+    };
+    // The regular weights layout pads ic of every spatial point, so the relo
+    // reduce dimension is contiguous only if ic is a multiple of that padding.
+    const auto wei_ic_padding = [&](dim_t rd) {
+        return is_rd_padded_to_block(rd) ? rd_padded_block : jcp.vnni_block;
+    };
+
     // try_relo_wi
     bool try_relo_wi = false;
     bool relo_conv_weights_wi = true;
@@ -2210,7 +2241,7 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     if (!jcp.wei_plain && !(jcp.is_fp8 && jcp.vnni_block == 2)
             && relo_supported_isa && relo_reasonable_isa) {
         if (jcp.vnni_block == 1 /* For f32 weights are in needed layout */
-                || (jcp.ic % jcp.vnni_block == 0
+                || (jcp.ic % wei_ic_padding(rd_wi) == 0
                         && IMPLICATION(
                                 rd_wi > jcp.simd_w, rd_wi % jcp.simd_w == 0)))
             relo_conv_weights_wi = false;
@@ -2251,7 +2282,7 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             && !jcp.is_fp8) {
         const dim_t rd_whi = jcp.kh * jcp.kw * jcp.ic;
         //TODO: support fp8
-        if (jcp.ic % jcp.vnni_block == 0
+        if (jcp.ic % wei_ic_padding(rd_whi) == 0
                 && IMPLICATION(rd_whi > jcp.simd_w, rd_whi % jcp.simd_w == 0)
                 && one_of(1, jcp.kh, jcp.kw))
             relo_conv_weights_whi = false;
@@ -2327,10 +2358,7 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
 
         const auto rd_ksize = (jcp.is_relo() ? jcp.kw : 1)
                 * (jcp.is_relo_whi() ? jcp.kh : 1);
-        jcp.is_rd_padded_to_block
-                = one_of(jcp.wei_dt, bf16, f16, s8, f8_e5m2, f8_e4m3)
-                && IMPLICATION(jcp.wei_dt == f16, isa != avx10_1_512)
-                && jcp.ic * rd_ksize > rd_padded_block;
+        jcp.is_rd_padded_to_block = is_rd_padded_to_block(jcp.ic * rd_ksize);
 
         // Disable os blocking to avoid using large buffer
         // The value is empirical
@@ -3244,12 +3272,12 @@ status_t init_conf_bwd_w(jit_brgemm_conv_conf_t &jcp,
     // init_jcp().
     const bool is_ace_dt = brgemm_utils::ace_dt_ok(
             src_d.data_type(), diff_dst_d.data_type());
-
-    jcp.isa = (is_ace_dt && mayiuse(avx10_2_ace))
-            ? avx10_2_ace
-            : (is_fp8 ? (mayiuse(avx10_2_amx_2) ? avx10_2_amx_2
-                                                : avx512_core_amx_fp16)
-                      : (is_f16 ? avx512_core_amx_fp16 : avx512_core_amx));
+    // pd_t::init() allows only bf16, f16 and fp8 src, with diff_dst == src,
+    // so avx10_2_amx_2 is a usable fallback for every case when available.
+    jcp.isa = (is_ace_dt && mayiuse(avx10_2_ace)) ? avx10_2_ace
+            : mayiuse(avx10_2_amx_2)
+            ? avx10_2_amx_2
+            : ((is_fp8 || is_f16) ? avx512_core_amx_fp16 : avx512_core_amx);
 
     // disabling verbose dispatch messages for unsupported isa for better readability
     if (!mayiuse(jcp.isa)) return status::unimplemented;

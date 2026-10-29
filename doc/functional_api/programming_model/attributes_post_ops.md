@@ -281,6 +281,11 @@ Currently the following scenarios are optimized:
   post-operation which format may be queried from attributes using
   `dnnl::post_ops::get_params_binary(...)` function call.
 
+@note Binary post-op source tensors (\f$Source\_1\f$, and \f$Source\_2\f$ for
+the select operation) of a sub-byte data type (fewer than 8 bits per element)
+cannot be created with `format_tag::any`; they require a concrete format tag so
+that storage-unit (byte) aligned strides can be validated.
+
 For the binary select operation, an additional conditional tensor is required
 to execute the operation which is implemented using:
 
@@ -329,6 +334,8 @@ The subclass carries the following limitations:
 * The \f$Source\_1\f$ memory descriptor must either describe the same format as
   the destination memory descriptor or be created with
   #dnnl::memory::format_tag::any.
+* The destination memory descriptor must not use runtime dimensions or strides
+  (see #DNNL_RUNTIME_DIM_VAL).
 
 @anchor dev_guide_attributes_post_ops_prelu
 ### Prelu Post-op

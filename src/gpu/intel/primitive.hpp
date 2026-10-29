@@ -96,17 +96,24 @@ struct primitive_t : public gpu::primitive_t {
     status_t create_kernel(impl::engine_t *engine, compute::kernel_t *kernel,
             const char *kernel_name, const compute::kernel_ctx_t &kernel_ctx);
 
+    // Creates the kernels in kernel_names and registers them in that order.
+    // Only those kernels are stored in the cache blob, so only those may be
+    // used from the bundle. The generator's info is only available when the
+    // kernels come from the kernel cache; with a cache blob the primitive
+    // restores that state from its blob.
     template <typename T>
     status_t create_kernels(impl::engine_t *engine,
-            std::vector<compute::kernel_t> &kernels,
+            compute::kernel_bundle_t &bundle,
             const std::vector<const char *> &kernel_names, const T &params) {
         auto *intel_engine = utils::downcast<intel::engine_t *>(engine);
+        std::vector<compute::kernel_t> kernels;
         if (cache_blob()) {
             CHECK(intel_engine->create_kernels_from_cache_blob(
                     cache_blob(), kernels, kernel_names));
             for (auto &k : kernels)
                 k.hash_dump("blob");
             CHECK(register_kernels(kernels));
+            bundle = compute::kernel_bundle_t(std::move(kernels), kernel_names);
             return status::success;
         }
 
@@ -114,14 +121,18 @@ struct primitive_t : public gpu::primitive_t {
                 params, intel_engine->engine_id());
         gpu_assert(key->key.is_valid());
 
+        using value_type = typename trivial_key_t<T>::value_type;
         cache_state_t kernel_cache_status;
-        CHECK(get_cached_kernels<typename trivial_key_t<T>::value_type>(
-                std::move(key), engine, kernels, kernel_names,
-                kernel_cache_status));
+        value_type value;
+        CHECK(get_cached_kernels<value_type>(
+                std::move(key), engine, value, kernel_cache_status));
         if (kernel_cache_status == cache_state_t::kernel_hit) {
             creation_cached_state_ = cache_state_t::kernel_hit;
         }
+        bundle = to_kernel_bundle(std::move(value));
 
+        // Register in kernel_names order, the order the cache blob is read
+        CHECK(bundle.get_kernels(kernels, kernel_names));
         for (auto &k : kernels)
             k.hash_dump("real");
         CHECK(register_kernels(kernels));
@@ -132,11 +143,12 @@ struct primitive_t : public gpu::primitive_t {
     template <typename T>
     status_t create_kernel(impl::engine_t *engine, compute::kernel_t &kernel,
             const char *kernel_name, const T &params) {
-        std::vector<compute::kernel_t> kernels(1);
-        VCHECK_KERNEL(create_kernels(engine, kernels, {kernel_name}, params),
+        // The kernel is looked up by name in the bundle
+        if (!kernel_name) return status::invalid_arguments;
+        compute::kernel_bundle_t bundle;
+        VCHECK_KERNEL(create_kernels(engine, bundle, {kernel_name}, params),
                 VERBOSE_KERNEL_CREATION_FAIL, kernel_name);
-        kernel = kernels[0];
-        return status::success;
+        return bundle.get_kernels({kernel_name}, kernel);
     }
 
     static status_t parallel_for(const exec_ctx_t &ctx,
@@ -176,6 +188,19 @@ private:
             const compute::kernel_arg_list_t &arg_list,
             const xpu::event_t &deps, xpu::event_t &out_dep) {
         return kernel.parallel_for(stream, range, arg_list, deps, out_dep);
+    }
+
+    // A kernel cache value as a bundle keyed by kernel name
+    static compute::kernel_bundle_t to_kernel_bundle(
+            compute::kernel_t &&kernel) {
+        const std::string name = kernel.name();
+        std::vector<compute::kernel_t> kernels;
+        kernels.emplace_back(std::move(kernel));
+        return compute::kernel_bundle_t(std::move(kernels), {name.c_str()});
+    }
+    static compute::kernel_bundle_t to_kernel_bundle(
+            compute::kernel_bundle_t &&bundle) {
+        return std::move(bundle);
     }
 
     // Persistent cache versioning is not used by default. To enable versioning

@@ -53,8 +53,9 @@ struct jit_rvv_1x1_convolution_fwd_t : public primitive_t {
             VDISPATCH_CONV(is_fwd(), VERBOSE_BAD_PROPKIND);
             VDISPATCH_CONV(set_default_alg_kind(alg_kind::convolution_direct),
                     VERBOSE_BAD_ALGORITHM);
-            // Accepted input dtype combos (dst always f32; bf16/f16 widen into
-            // f32 accumulators):
+            // Accepted input dtype combos (bf16/f16 widen into f32
+            // accumulators; dst is f32, or f16 narrowed from the f32
+            // accumulators when Zvfh is available):
             //   f32 /f32  : plain f32.
             //   bf16/bf16 : symmetric bf16, widening FMA (Zvfbfwma).
             //   f16 /f16  : symmetric f16, widening FMA (Zvfh).
@@ -66,9 +67,11 @@ struct jit_rvv_1x1_convolution_fwd_t : public primitive_t {
             const auto src_dt = src_d.data_type();
             const auto wei_dt = weights_d.data_type();
             const auto dst_dt = dst_d.data_type();
-            // Drive the impl name by the low-precision operand: src for the
-            // symmetric paths, weights for weight compression (f32 src).
-            const auto name_dt = src_dt == data_type::f32 ? wei_dt : src_dt;
+            // Account for f16 destination narrowing; otherwise use src for
+            // symmetric paths or weights for weight compression (f32 src).
+            const auto name_dt = dst_dt == data_type::f16
+                    ? data_type::f16
+                    : (src_dt == data_type::f32 ? wei_dt : src_dt);
             isa_ = name_dt == data_type::bf16
                     ? zvfbfwma
                     : (name_dt == data_type::f16 ? zvfh : v);
@@ -81,7 +84,9 @@ struct jit_rvv_1x1_convolution_fwd_t : public primitive_t {
                     && ((wei_dt == data_type::bf16 && mayiuse(zvfbfwma))
                             || (wei_dt == data_type::f16 && mayiuse(zvfh)));
             VDISPATCH_CONV((all_f32 || sym_lowp || wei_decomp)
-                            && dst_dt == data_type::f32,
+                            && (dst_dt == data_type::f32
+                                    || (dst_dt == data_type::f16
+                                            && mayiuse(zvfh))),
                     VERBOSE_UNSUPPORTED_DT);
             // Bias is added into the f32 accumulators; a bf16/f16 bias (== src)
             // is widened to f32 in-kernel, matching x64/aarch64.
@@ -204,7 +209,7 @@ struct jit_rvv_1x1_convolution_fwd_t : public primitive_t {
 private:
     void execute_forward(const exec_ctx_t &ctx) const;
     void execute_forward_thr(const int ithr, const int nthr, const char *src,
-            const char *weights, const float *bias, float *dst,
+            const char *weights, const char *bias, char *dst,
             const memory_tracking::grantor_t &scratchpad) const;
 
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }

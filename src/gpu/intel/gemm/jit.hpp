@@ -34,6 +34,7 @@
 #include "gpu/intel/gemm/primitive.hpp"
 #include "gpu/intel/gemm/utils.hpp"
 #include "gpu/intel/logging.hpp"
+#include "gpu/intel/primitive_attr.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -115,8 +116,14 @@ struct gen_t : public primitive_t {
                     | smask_t::scales | smask_t::scales_data_type
                     | smask_t::scales_groups | smask_t::precomputed_reductions
                     | smask_t::zero_points | smask_t::zero_points_data_type
-                    | smask_t::zero_points_groups | smask_t::post_ops_inplace;
+                    | smask_t::zero_points_groups | smask_t::post_ops_inplace
+                    | smask_t::gpu_attr;
             VDISPATCH_GEMM(attr()->has_default_values(attr_skip_mask),
+                    VERBOSE_UNSUPPORTED_ATTR);
+            VDISPATCH_GEMM(!attr()->gpu_attr_
+                            || utils::downcast<const gpu_primitive_attr_t *>(
+                                    attr()->gpu_attr_.get())
+                                       ->has_only_kernel_override(),
                     VERBOSE_UNSUPPORTED_ATTR);
             VDISPATCH_GEMM(
                     !utils::one_of(DNNL_RUNTIME_DIM_VAL, d->m(), d->n(), d->k(),
@@ -160,7 +167,7 @@ struct gen_t : public primitive_t {
 
             // Check parameters.
             if (utils::one_of(d->c_type(), s32, f16, bf16, f32, u8, s8)
-                    && utils::one_of(d->a_type(), u8, s8, u4, s4)) {
+                    && utils::one_of(d->a_type(), u8, s8, u4, s4, u2, u3)) {
                 VDISPATCH_GEMM(
                         (utils::one_of(d->b_type(), u8, s8) || wei_decomp_),
                         VERBOSE_UNSUPPORTED_DT);
@@ -228,8 +235,11 @@ struct gen_t : public primitive_t {
                     = jit::convert_dnnl_to_kernel_type(desc_.c_desc.data_type);
             for (int i = 0; i < desc_.c_desc.ndims; i++) {
                 auto c_stride = desc_.c_desc.format_desc.blocking.strides[i];
-                VDISPATCH_GEMM(IMPLICATION(c_kernel_type.is4(),
-                                       c_stride == 1 || c_stride % 2 == 0),
+                VDISPATCH_GEMM(
+                        IMPLICATION(c_kernel_type.isSubByte(),
+                                c_stride == 1
+                                        || c_stride % c_kernel_type.perByte()
+                                                == 0),
                         VERBOSE_SHAPE_RESTRICTION);
             }
 
@@ -302,6 +312,11 @@ struct gen_t : public primitive_t {
                 kernel_desc_.set_efficient_64b(dev_info_->is_efficient_64bit());
 
             bool kernel_success = false;
+            if (is_dev_mode() && attr()->gpu_attr_) {
+                auto *gpu_attr = utils::downcast<gpu_primitive_attr_t *>(
+                        attr()->gpu_attr_.get());
+                kernel_desc_.set_kernel_override(gpu_attr->kernel_override());
+            }
             auto lda = ld(DNNL_ARG_A);
             auto ldb = ld(DNNL_ARG_B);
             if (swap_ab_) std::swap(lda, ldb);
@@ -309,15 +324,21 @@ struct gen_t : public primitive_t {
                     alpha(), beta(), m, n, d->k(), lda, ldb, d->ldc(),
                     d->batch());
 
-            for (auto &entry : entries) {
+            for (size_t entry_idx = 0; entry_idx < entries.size();
+                    entry_idx++) {
+                auto *entry = entries[entry_idx];
+                int g = (int)(entry - jit::catalog().entries);
+                auto skip = [&](const char *why) {
+                    gpu_debug() << "[" << lpad(g, 4) << "] skip " << entry_idx
+                                << "/" << entries.size() << " " << entry->str()
+                                << "," << why;
+                };
                 kernel_desc_.set_entry(entry);
                 kernel_desc_.set_problem(problem);
                 auto status = kernel_desc_.finalize();
                 // select_kernel can return a strategy that failed in the finalize call
                 bool valid = status == status::success;
-                if (!valid)
-                    gpu_debug() << "skipping:" << entry->str()
-                                << ",Strategy finalization failed.";
+                if (!valid) skip("Strategy finalization failed.");
                 // Global k-parallel kernels don't support post-ops or non-f32/s32
                 //   accumulation unless fusion is enabled.
                 if (kernel_desc_.driver_info()->kParallel()
@@ -325,9 +346,7 @@ struct gen_t : public primitive_t {
                     bool po_valid = !non_scale_po_
                             && !(with_sum_ && with_c_scales())
                             && utils::one_of(d->c_type(), f32, s32);
-                    if (!po_valid)
-                        gpu_debug() << "skipping:" << entry->str()
-                                    << ",Invalid post op.";
+                    if (!po_valid) skip("Invalid post op.");
                     valid &= po_valid;
                 }
                 // An in-place binary post-op reads C as its right-hand side,
@@ -338,9 +357,7 @@ struct gen_t : public primitive_t {
                 if (post_ops_.has_inplace_binary()) {
                     bool c_intact = !kernel_desc_.driver_info()->kParallel()
                             && !kernel_desc_.driver_info()->kParallelVariable();
-                    if (!c_intact)
-                        gpu_debug() << "skipping:" << entry->str()
-                                    << ",In-place post op over k-parallel C.";
+                    if (!c_intact) skip("In-place post op over k-parallel C.");
                     valid &= c_intact;
                 }
                 // Limited post-op support for low-precision accumulation.
@@ -348,23 +365,19 @@ struct gen_t : public primitive_t {
                     bool need_x32_acc = with_binary
                             || !IMPLICATION(with_sum_, sum_at_begin_);
                     valid &= !need_x32_acc;
-                    if (need_x32_acc)
-                        gpu_debug() << "skipping:" << entry->str()
-                                    << ",Invalid post op.";
+                    if (need_x32_acc) skip("Invalid post op.");
                 }
                 // Ensure kernel can be run deterministically if required.
                 if (attr()->deterministic_) {
                     bool deterministic
                             = !kernel_desc_.driver_info()->nondeterministic();
                     valid &= deterministic;
-                    if (!deterministic)
-                        gpu_debug() << "skipping:" << entry->str()
-                                    << ",Non deterministic kernel.";
+                    if (!deterministic) skip("Non deterministic kernel.");
                 }
 
                 if (valid) {
                     auto try_create = [&]() {
-                        std::vector<compute::kernel_t> kernel_(1);
+                        compute::kernel_t kernel;
                         const auto *intel_engine
                                 = utils::downcast<const intel::engine_t *>(
                                         engine);
@@ -373,7 +386,6 @@ struct gen_t : public primitive_t {
                                                 gemm::jit::gen_nocopy_desc_t>>(
                                 kernel_desc_, intel_engine->engine_id());
                         cache_state_t kernel_cache_status;
-                        auto kernel_name = "gemm_kernel";
                         auto verbose
                                 = get_verbose(verbose_t::create_profile) >= 1;
                         double start_ms = 0;
@@ -381,8 +393,8 @@ struct gen_t : public primitive_t {
                         status = get_cached_kernels<typename trivial_key_t<
                                 dnnl::impl::gpu::intel::gemm::jit::
                                         gen_nocopy_desc_t>::value_type>(
-                                std::move(key), intel_engine, kernel_,
-                                {kernel_name}, kernel_cache_status);
+                                std::move(key), intel_engine, kernel,
+                                kernel_cache_status);
                         if (verbose && status == status::success) {
                             double duration_ms = get_msec() - start_ms;
                             const char *str
@@ -395,17 +407,18 @@ struct gen_t : public primitive_t {
                     status = try_create();
                     if (status == status::success) {
                         kernel_success = true;
-                        if (kernel_desc_.has_entry()) {
-                            gpu_info() << "catalog entry["
-                                       << (entry - jit::catalog().entries)
-                                       << "]:" << entry->str();
-                        } else {
-                            gpu_info() << "catalog entry[overridden]:"
-                                       << entry->str();
-                        }
+                        if (kernel_desc_.has_entry())
+                            gpu_info() << "[" << lpad(g, 4) << "] use "
+                                       << entry_idx << "/" << entries.size()
+                                       << " " << kernel_desc_.str();
+                        else
+                            gpu_info()
+                                    << "[override] use " << kernel_desc_.str();
                         break;
                     }
                 }
+                // Overrides do not depend on the entry.
+                if (!kernel_desc_.has_entry()) break;
             }
 
             VDISPATCH_GEMM(
@@ -437,8 +450,10 @@ struct gen_t : public primitive_t {
             auto m = d->m();
             auto n = d->n();
             auto k = d->k();
-            auto a_t = (utils::one_of(d->a_type(), s4, u4)) ? s8 : d->a_type();
-            auto b_t = (utils::one_of(d->b_type(), s4, u4)) ? s8 : d->b_type();
+            auto a_t = (utils::one_of(d->a_type(), s4, u4, u2)) ? s8
+                                                                : d->a_type();
+            auto b_t = (utils::one_of(d->b_type(), s4, u4, u2)) ? s8
+                                                                : d->b_type();
             auto c_t = d->c_type();
 
             bool is_f16 = utils::everyone_is(f16, a_t, b_t, c_t);
@@ -531,8 +546,12 @@ struct gen_t : public primitive_t {
                         md, md.ndims, dims, md.data_type, strides));
                 return status::success;
             };
-            if (a_any) CHECK(cache_line_align_md(a_desc));
-            if (b_any) CHECK(cache_line_align_md(b_desc));
+            // u3 requires the natural Block2DTranspose layout;
+            // cache_line_align_md assumes a whole-byte type.
+            if (a_any && a_desc.data_type != u3)
+                CHECK(cache_line_align_md(a_desc));
+            if (b_any && b_desc.data_type != u3)
+                CHECK(cache_line_align_md(b_desc));
 
             if ((is_f16 || is_bf16) && is_xe_hp_plus && use_tn) {
                 if (a_any && b_any) {
@@ -671,11 +690,12 @@ private:
             const memory_storage_t *zero_buf_scratchpad,
             const memory_storage_t *sround_seed, int po_count,
             const memory_storage_t **po_src, int64_t offset_a, int64_t offset_b,
-            int64_t offset_c, int64_t offset_aq, int64_t offset_bq,
-            int64_t offset_co, int64_t *offset_po_src, int32_t lda, int32_t ldb,
-            int32_t ldc, int32_t m, int32_t n, int32_t k, int32_t k0,
-            float alpha, float beta, int32_t cmask, bool last_k_block,
-            bool swap_ab, bool disable_hilbert) const;
+            int64_t offset_c, int64_t offset_ao, int64_t offset_bo,
+            int64_t offset_aq, int64_t offset_bq, int64_t offset_co,
+            int64_t *offset_po_src, int32_t lda, int32_t ldb, int32_t ldc,
+            int32_t ldaq, int32_t ldbq, int32_t m, int32_t n, int32_t k,
+            int32_t k0, float alpha, float beta, int32_t cmask,
+            bool last_k_block, bool swap_ab, bool disable_hilbert) const;
 
     const pd_t *pd() const { return (const pd_t *)primitive_t::pd().get(); }
     const gemmstone::CommonDriverInfo *nocopy_info() const {

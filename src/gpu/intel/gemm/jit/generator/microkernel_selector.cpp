@@ -111,10 +111,10 @@ std::vector<Protocol::Argument> arguments(const GEMMOptions &o) {
     if (o.kParallelLocal) argsV.push_back({"local_id_k", In, s32});
     if (o.slmPtr) argsV.push_back({"slm", In, LocalPointer});
     if (o.scaleA) argsV.push_back({"a_scale", In, GlobalPointer});
-    if (o.offsetA) argsV.push_back({"a_offset", In, GlobalPointer});
+    if (o.offsetA) argsV.push_back({"a_offset", In, o.offsetAHostScalar ? StructuredType(StructuredType::s16) : StructuredType(GlobalPointer)});
     if (o.offsetA || o.scaleA) argsV.push_back({"ldaq", In, s32});
     if (o.scaleB) argsV.push_back({"b_scale", In, GlobalPointer});
-    if (o.offsetB) argsV.push_back({"b_offset", In, GlobalPointer});
+    if (o.offsetB) argsV.push_back({"b_offset", In, o.offsetBHostScalar ? StructuredType(StructuredType::s16) : StructuredType(GlobalPointer)});
     if (o.offsetB || o.scaleB) { argsV.push_back({"ldbq", In, s32}); }
 
     return argsV;
@@ -170,10 +170,16 @@ InterfaceHandler GEMMOptions::generateInterface(HW hw, HostPayload host) const {
     if (kParallelLocal)    interface.newArgument("local_id_k", DataType::d);
     if (slmPtr)            interface.newArgument("slm_base", ExternalArgumentType::LocalPtr);
     if (scaleA)            interface.newArgument("a_scale_ptr", ExternalArgumentType::GlobalPtr);
-    if (offsetA)           interface.newArgument("ao_ptr", ExternalArgumentType::GlobalPtr);
+    if (offsetA) {
+        if (offsetAHostScalar) interface.newArgument("ao", DataType::w);
+        else                  interface.newArgument("ao_ptr", ExternalArgumentType::GlobalPtr);
+    }
     if (scaleA || offsetA) interface.newArgument("ldaq", DataType::d);
     if (scaleB)            interface.newArgument("b_scale_ptr", ExternalArgumentType::GlobalPtr);
-    if (offsetB)           interface.newArgument("bo_ptr", ExternalArgumentType::GlobalPtr);
+    if (offsetB) {
+        if (offsetBHostScalar) interface.newArgument("bo", DataType::w);
+        else                  interface.newArgument("bo_ptr", ExternalArgumentType::GlobalPtr);
+    }
     if (scaleB || offsetB) interface.newArgument("ldbq", DataType::d);
     return interface;
 }
@@ -183,6 +189,7 @@ GEMMOptions GEMMOptions::transpose() const {
     std::swap(ret.localA, ret.localB);
     std::swap(ret.scaleA, ret.scaleB);
     std::swap(ret.offsetA, ret.offsetB);
+    std::swap(ret.offsetAHostScalar, ret.offsetBHostScalar);
     return ret;
 }
 
@@ -199,46 +206,35 @@ std::string strategyToString(HW hw, const GEMMProblem &problem, const GEMMStrate
     return ss.str();
 }
 
-Package selectGEMM(const GEMMOptions &options, HostPayload host, HWInformation hwInfo, SizeParams sizes,
-                   const GEMMProblem &problem_, const std::vector<StrategyRequirement> &reqs_,
-                   StrategyAdjuster strategyAdjuster, SelectionObserver *observer)
+GEMMSelector::GEMMSelector(const GEMMOptions &options_, HostPayload host_, HWInformation hwInfo_,
+                           SizeParams sizes_, const GEMMProblem &problem_,
+                           const std::vector<StrategyRequirement> &reqs_,
+                           StrategyAdjuster strategyAdjuster_)
+    : options(options_), host(host_), hwInfo(hwInfo_), sizes(sizes_), baseProblem(problem_),
+      reqs(reqs_), strategyAdjuster(std::move(strategyAdjuster_))
 {
-    bool transC = !isColMajor(problem_.C.layout);
+    auto &problem = baseProblem;
 
-    GEMMOptions effOptions = transC ? options.transpose() : options;
-    bool localA = effOptions.localA;
-    bool localB = effOptions.localB;
-    bool beta1 = effOptions.addToC;
-    bool scaleA = effOptions.scaleA;
-    bool scaleB = effOptions.scaleB;
-    bool offsetA = effOptions.offsetA;
-    bool offsetB = effOptions.offsetB;
-    bool kParallelLocal = effOptions.kParallelLocal;
-
-    auto problem = problem_;
-    auto reqs = reqs_;
+    if (!isColMajor(problem.C.layout))
+        stub("Microkernel selection requires column-major C");
 
     problem.alpha = 1;
-    problem.beta = beta1 ? 1 : 0;
+    problem.beta = options.addToC ? 1 : 0;
 
     problem.C.setAlignment(4);
 
-    if (transC) {
-        problem.transpose();
-        std::swap(sizes.m, sizes.n);
-        for (auto &req: reqs)
-            req.transpose();
-    }
-
-    if (scaleA != problem.aScale2D() || scaleB != problem.bScale2D())
+    if (options.scaleA != problem.aScale2D() || options.scaleB != problem.bScale2D())
         stub("Protocol scales do not match problem description");
-    if (offsetA != (problem.aoPtrDims >= 0) || offsetB != (problem.boPtrDims >= 0))
+    if (options.offsetA != (problem.hasAOffsetPtr() || problem.aOffsetHostScalar())
+            || options.offsetB != (problem.hasBOffsetPtr() || problem.bOffsetHostScalar())
+            || options.offsetAHostScalar != problem.aOffsetHostScalar()
+            || options.offsetBHostScalar != problem.bOffsetHostScalar())
         stub("Protocol offsets do not match problem description");
 
     /* Get hardware information */
     auto product = npack::decodeHWIPVersion(hwInfo.gmdid);
-    auto hw = getCore(product.family);
-    auto stepping = hwInfo.gmdid & 0xFF;
+    hw = getCore(product.family);
+    stepping = hwInfo.gmdid & 0xFF;
 
     problem.product = product;
     problem.autoTypeConversions(hwInfo.systolicAvailable);
@@ -280,27 +276,23 @@ Package selectGEMM(const GEMMOptions &options, HostPayload host, HWInformation h
     evalParams.product = product;
     evalParams.euCount = hwInfo.euCount;
 
-    /* Generate interface */
-    InterfaceHandler interface = effOptions.generateInterface(hw, host);
-
     kcatalog::Catalog catalog = [&]() {
-        if (localA)
+        if (options.localA)
             return kcatalog::Catalog(CatalogLMR);
-        else if (localB)
+        else if (options.localB)
             return kcatalog::Catalog(CatalogMLR);
         else
             return kcatalog::Catalog(CatalogMMR);
     }();
 
     /* Call kernel selector */
-    EvaluateAuxOutput auxParams;
-    std::vector<const kcatalog::Entry*> entries = select(catalog, 1, &matchParams, evalParams, auxParams);
+    entries = select(catalog, 1, &matchParams, evalParams, auxParams);
     auto last_entry = std::remove_if(begin(entries), end(entries), [&](const kcatalog::Entry* e) {
         GEMMStrategy strategy(hw, stepping);
         strategy.unroll[LoopM] = e->driverInfo.unroll[LoopM];
         strategy.unroll[LoopN] = e->driverInfo.unroll[LoopN];
-        parseStrategy(e->strategy, hw, problem, strategy);
-        return (!kParallelLocal && strategy.kParallelLocal) ||
+        parseStrategy(e->strategy, problem, strategy);
+        return (!options.kParallelLocal && strategy.kParallelLocal) ||
             // named barriers are not supported by generateShim
             (strategy.namedBarriers[LoopM] > 0 ||
             strategy.namedBarriers[LoopN] > 0);
@@ -317,7 +309,7 @@ Package selectGEMM(const GEMMOptions &options, HostPayload host, HWInformation h
                 strategy.unroll[LoopN] = e->driverInfo.unroll[LoopN];
                 problemVerbose.A.setAlignment(e->driverInfo.alignment[0]);
                 problemVerbose.B.setAlignment(e->driverInfo.alignment[1]);
-                parseStrategy(e->strategy, hw, problemVerbose, strategy);
+                parseStrategy(e->strategy, problemVerbose, strategy);
                 std::cout << "entry candidate: "
                           << gemmstone::evaluate(*e, evalParams, auxParams) << " "
                           << e->selector.hw << " "
@@ -328,144 +320,221 @@ Package selectGEMM(const GEMMOptions &options, HostPayload host, HWInformation h
             }
         }
     }
+}
 
-    /* Run the caller's adjuster, preflight, and code generation for one sized strategy.
-       Returns true on success, with the microkernel written to `out`. */
-    auto generate = [&](const kcatalog::Entry *entry, GEMMStrategy strategy, Package &out) -> bool {
-        /* Allow caller to adjust strategy further */
-        if (strategyAdjuster) strategyAdjuster(strategy);
+bool GEMMSelector::next(GEMMCandidate &candidate)
+{
+    /* Large GRF variant of the last entry, whose small GRF variant was returned before. */
+    if (pendingLargeGRF) {
+        pendingLargeGRF = false;
+        candidate = std::move(largeGRFCandidate);
+        if (finish(largeGRFEntry, candidate))
+            return true;
+    }
 
-        try {
-            strategy.preflight(hw, problem);
-        } catch (const std::runtime_error &ex) {
-            if (getVerbose(gemmstone::GEMMVerbose::DebugInfo) >= 2) {
-                std::cout << "preflight failed(" << ex.what() << "):"
-                          << strategyToString(hw, problem, strategy) << std::endl;
-            }
-            return false;
+    while (nextEntry < entries.size()) {
+        const kcatalog::Entry *entry = entries[nextEntry++];
+        GEMMCandidate base;
+        if (!prepare(entry, base))
+            continue;
+
+        /* Size the GRF mode for inlining into the host kernel, for both catalog and heuristic
+           strategies. If the estimate selected the small mode, the large mode follows as the
+           next candidate in case it was low and generation runs out of registers. */
+        GEMMCandidate small = base;
+        if (chooseMicrokernelGRFMode(hw, small.problem, small.strategy, host.liveBytes)
+                && finish(entry, small)) {
+            largeGRFCandidate = std::move(base);
+            largeGRFCandidate.strategy.GRFs = largeGRF;
+            largeGRFEntry = entry;
+            pendingLargeGRF = true;
+            candidate = std::move(small);
+            return true;
         }
 
-        /* Update problem from strategy */
-        if (isPacked(problem.A.layout))
-            problem.A.packSize = strategy.unroll[LoopM];
-        if (isPacked(problem.B.layout))
-            problem.B.packSize = strategy.unroll[LoopN];
+        candidate = std::move(base);
+        candidate.strategy.GRFs = largeGRF;
+        if (finish(entry, candidate))
+            return true;
+    }
 
+    return false;
+}
+
+/* Build a candidate's strategy from a catalog entry, or from heuristics if there is no entry. */
+bool GEMMSelector::prepare(const kcatalog::Entry *entry, GEMMCandidate &candidate) const
+{
+    auto &problem = candidate.problem;
+    auto &strategy = candidate.strategy;
+
+    problem = baseProblem;
+    strategy = GEMMStrategy(hw, stepping);
+
+    if (entry) {
+        problem.A.setAlignment(std::max(problem.Ta.paddedSize(), entry->driverInfo.alignment[0]));
+        problem.B.setAlignment(std::max(problem.Tb.paddedSize(), entry->driverInfo.alignment[1]));
+
+        /* Prepare strategy parameters */
+        strategy.unroll[LoopM] = entry->driverInfo.unroll[LoopM];
+        strategy.unroll[LoopN] = entry->driverInfo.unroll[LoopN];
+        parseStrategy(entry->strategy, problem, strategy);
+        adjustStrategy(hw, problem, strategy);
+        modifyStrategy(strategy, auxParams);
+
+        /* Xe2-XeHPC compatibility logic */
+        if (hw == ngen::HW::Xe2 || hw == ngen::HW::Xe3) {
+            // Use XeHPC register banking on Xe2/Xe3, in order
+            //   to successfully reuse XeHPC strategies.
+            strategy.raHW = ngen::HW::XeHPC;
+
+            // Bump up alignments to 16 bytes for block 2D if available.
+            bool block2DA = false, block2DB = false;
+            for (auto c = entry->restrictions.tags; *c; c++) {
+                block2DA |= (*c == kcatalog::ReqBlock2DA);
+                block2DB |= (*c == kcatalog::ReqBlock2DB);
+            }
+            if (block2DA && strategy.legalAAlignment(problem, 16))
+                problem.A.setAlignment(std::max<int>(problem.A.alignment, 16));
+            if (block2DB && strategy.legalBAlignment(problem, 16))
+                problem.B.setAlignment(std::max<int>(problem.B.alignment, 16));
+        }
+        if (hw == ngen::HW::Xe3p && !hwInfo.isEfficient64Bit) {
+            // Use XeHPC banking if reusing XeHPC strategies (legacy mode)
+            strategy.raHW = ngen::HW::XeHPC;
+        }
+    } else if (!reqs.empty() &&
+               !getStrategyByHeuristics(hw, strategy, options.localA, options.localB, problem, hwInfo,
+                                        sizes, reqs))
+        return false; /* No heuristic strategy found */
+
+    strategy.systolicAvailable &= hwInfo.systolicAvailable;
+
+    /* Disable strategies not related to microkernels */
+    strategy.kParallel = strategy.kParallelVariable = strategy.persistent = false;
+    strategy.cWalkOrder = WalkOrder::HW2D;
+
+    /* Disable k-parallelization if the protocol does not allow it */
+    if (!options.kParallelLocal) {
+        strategy.kParallelLocal = strategy.kInterleave = false;
+        strategy.wg[LoopK] = 1;
+    }
+
+    /* Adjust strategy for performance */
+    if (strategy.barrierFreq > 0 && sizes.k < 4 * strategy.barrierFreq)
+        strategy.barrierFreq = 0;
+
+    /* Keep size down by only using checkAdd32 when really needed */
+    strategy.checkAdd32 &= (hw != HW::XeHPC);
+
+    /* C output in registers */
+    strategy.C.base = AddressBase{};
+
+    return true;
+}
+
+/* Run the caller's adjuster and preflight on a candidate sized for its GRF mode. */
+bool GEMMSelector::finish(const kcatalog::Entry *entry, GEMMCandidate &candidate) const
+{
+    auto &problem = candidate.problem;
+    auto &strategy = candidate.strategy;
+
+    /* Allow caller to adjust strategy further */
+    if (strategyAdjuster) strategyAdjuster(strategy);
+
+    try {
+        strategy.preflight(hw, problem);
+    } catch (const std::runtime_error &ex) {
         if (getVerbose(gemmstone::GEMMVerbose::DebugInfo) >= 2) {
-            std::cout << "attempting " << (entry ? "db " : "heuristic ")
-                      << "strategy: " << strategyToString(hw, problem, strategy) << std::endl;
+            std::cout << "preflight failed(" << ex.what() << "):"
+                      << strategyToString(hw, problem, strategy) << std::endl;
         }
+        return false;
+    }
 
+    /* Update problem from strategy */
+    if (isPacked(problem.A.layout))
+        problem.A.packSize = strategy.unroll[LoopM];
+    if (isPacked(problem.B.layout))
+        problem.B.packSize = strategy.unroll[LoopN];
+
+    if (getVerbose(gemmstone::GEMMVerbose::DebugInfo) >= 2) {
+        std::cout << "attempting " << (entry ? "db " : "heuristic ")
+                  << "strategy: " << strategyToString(hw, problem, strategy) << std::endl;
+    }
+
+    return true;
+}
+
+/* Generate a candidate, mapping it back to the caller's operands when C was transposed for selection. */
+static Package generatePackage(const GEMMOptions &options, HostPayload host, HWInformation hwInfo,
+                               const GEMMCandidate &candidate, bool transC)
+{
+    auto product = npack::decodeHWIPVersion(hwInfo.gmdid);
+    auto hw = getCore(product.family);
+    auto stepping = hwInfo.gmdid & 0xFF;
+
+    /* Generate interface */
+    GEMMOptions effOptions = transC ? options.transpose() : options;
+    InterfaceHandler interface = effOptions.generateInterface(hw, host);
+
+    /* Generate microkernel */
+    #define ARCH_DISPATCH(arch)                                                                         \
+        case HW::arch: {                                                                                \
+            Generator<HW::arch> generator(product);                                                     \
+            generator.setStepping(stepping);                                                            \
+            return generator.gemmMicrokernelPackage(candidate.problem, candidate.strategy, interface,   \
+                                                    makeProtocol(options), hwInfo.gmdid, transC);       \
+        }
+    switch (hw) {
+        REG_XEHPG_ISA(ARCH_DISPATCH(XeHPG))
+        REG_XEHPC_ISA(ARCH_DISPATCH(XeHPC))
+        REG_XE2_ISA(ARCH_DISPATCH(Xe2))
+        REG_XE3_ISA(ARCH_DISPATCH(Xe3))
+        REG_XE3P_ISA(ARCH_DISPATCH(Xe3p))
+        default: throw std::runtime_error("Unsupported architecture");
+    }
+    #undef ARCH_DISPATCH
+}
+
+Package generateGEMM(const GEMMOptions &options, HostPayload host, HWInformation hwInfo,
+                     const GEMMCandidate &candidate)
+{
+    return generatePackage(options, host, hwInfo, candidate, false);
+}
+
+Package selectGEMM(const GEMMOptions &options, HostPayload host, HWInformation hwInfo, SizeParams sizes,
+                   const GEMMProblem &problem_, const std::vector<StrategyRequirement> &reqs_,
+                   StrategyAdjuster strategyAdjuster, SelectionObserver *observer)
+{
+    /* Selection works on column-major C, so transpose the request otherwise. */
+    bool transC = !isColMajor(problem_.C.layout);
+
+    auto problem = problem_;
+    auto reqs = reqs_;
+
+    if (transC) {
+        problem.transpose();
+        std::swap(sizes.m, sizes.n);
+        for (auto &req: reqs)
+            req.transpose();
+    }
+
+    GEMMOptions effOptions = transC ? options.transpose() : options;
+    GEMMSelector selector(effOptions, host, hwInfo, sizes, problem, reqs, strategyAdjuster);
+
+    GEMMCandidate candidate;
+    while (selector.next(candidate)) {
         try {
-            /* Generate microkernel */
-            #define ARCH_DISPATCH(arch)                                                         \
-                case HW::arch: {                                                                \
-                    Generator<HW::arch> generator(product);                                     \
-                    generator.setStepping(stepping);                                            \
-                    out = generator.gemmMicrokernelPackage(problem, strategy, interface,        \
-                                                           makeProtocol(options), hwInfo.gmdid, \
-                                                           transC);                             \
-                    return true;                                                                \
-                }
-            switch (hw) {
-                REG_XEHPG_ISA(ARCH_DISPATCH(XeHPG))
-                REG_XEHPC_ISA(ARCH_DISPATCH(XeHPC))
-                REG_XE2_ISA(ARCH_DISPATCH(Xe2))
-                REG_XE3_ISA(ARCH_DISPATCH(Xe3))
-                REG_XE3P_ISA(ARCH_DISPATCH(Xe3p))
-                default: throw std::runtime_error("Unsupported architecture");
-            }
-            #undef ARCH_DISPATCH
+            return generatePackage(options, host, hwInfo, candidate, transC);
         } catch (const std::runtime_error &ex) {
             /* Try next strategy */
             if (getVerbose(gemmstone::GEMMVerbose::DebugInfo) >= 2) {
+                auto hw = getCore(npack::decodeHWIPVersion(hwInfo.gmdid).family);
                 std::cout << "strategy failed(" << ex.what() << "):"
-                          << strategyToString(hw, problem, strategy) << std::endl;
+                          << strategyToString(hw, candidate.problem, candidate.strategy) << std::endl;
             }
-            return false;
         }
-        return false;
-    };
-
-    /* Build one candidate strategy and generate it. */
-    auto tryCandidate = [&](const kcatalog::Entry *entry, Package &out) -> bool {
-        GEMMStrategy strategy(hw, stepping);
-
-        if (entry) {
-            problem.A.setAlignment(std::max(problem.Ta.paddedSize(), entry->driverInfo.alignment[0]));
-            problem.B.setAlignment(std::max(problem.Tb.paddedSize(), entry->driverInfo.alignment[1]));
-
-            /* Prepare strategy parameters */
-            strategy.unroll[LoopM] = entry->driverInfo.unroll[LoopM];
-            strategy.unroll[LoopN] = entry->driverInfo.unroll[LoopN];
-            parseStrategy(entry->strategy, hw, problem, strategy);
-            adjustStrategy(hw, problem, strategy);
-            modifyStrategy(strategy, auxParams);
-
-            /* Xe2-XeHPC compatibility logic */
-            if (hw == ngen::HW::Xe2 || hw == ngen::HW::Xe3) {
-                // Use XeHPC register banking on Xe2/Xe3, in order
-                //   to successfully reuse XeHPC strategies.
-                strategy.raHW = ngen::HW::XeHPC;
-
-                // Bump up alignments to 16 bytes for block 2D if available.
-                bool block2DA = false, block2DB = false;
-                for (auto c = entry->restrictions.tags; *c; c++) {
-                    block2DA |= (*c == kcatalog::ReqBlock2DA);
-                    block2DB |= (*c == kcatalog::ReqBlock2DB);
-                }
-                if (block2DA && strategy.legalAAlignment(problem, 16))
-                    problem.A.setAlignment(std::max<int>(problem.A.alignment, 16));
-                if (block2DB && strategy.legalBAlignment(problem, 16))
-                    problem.B.setAlignment(std::max<int>(problem.B.alignment, 16));
-            }
-            if (hw == ngen::HW::Xe3p && !hwInfo.isEfficient64Bit) {
-                // Use XeHPC banking if reusing XeHPC strategies (legacy mode)
-                strategy.raHW = ngen::HW::XeHPC;
-            }
-        } else if (!reqs.empty() &&
-                   !getStrategyByHeuristics(hw, strategy, localA, localB, problem, hwInfo, sizes, reqs))
-            return false; /* No heuristic strategy found */
-
-        strategy.systolicAvailable &= hwInfo.systolicAvailable;
-
-        /* Disable strategies not related to microkernels */
-        strategy.kParallel = strategy.kParallelVariable = strategy.persistent = false;
-        strategy.cWalkOrder = WalkOrder::HW2D;
-
-        /* Disable k-parallelization if the protocol does not allow it */
-        if (!kParallelLocal) {
-            strategy.kParallelLocal = strategy.kInterleave = false;
-            strategy.wg[LoopK] = 1;
-        }
-
-        /* Adjust strategy for performance */
-        if (strategy.barrierFreq > 0 && sizes.k < 4 * strategy.barrierFreq)
-            strategy.barrierFreq = 0;
-
-        /* Keep size down by only using checkAdd32 when really needed */
-        strategy.checkAdd32 &= (hw != HW::XeHPC);
-
-        /* C output in registers */
-        strategy.C.base = AddressBase{};
-
-        /* Size the GRF mode for inlining into the host kernel, for both catalog and heuristic
-           strategies, and generate. If the estimate selected the small mode, retry in large GRF
-           in case it was low and we ran out of registers. */
-        GEMMStrategy smallGRFStrategy = strategy;
-        if (chooseMicrokernelGRFMode(hw, problem, smallGRFStrategy, host.liveBytes)
-                && generate(entry, smallGRFStrategy, out))
-            return true;
-
-        GEMMStrategy largeGRFStrategy = strategy;
-        largeGRFStrategy.GRFs = largeGRF;
-        return generate(entry, largeGRFStrategy, out);
-    };
-
-    Package package;
-    for(const kcatalog::Entry *entry : entries)
-        if (tryCandidate(entry, package))
-            return package;
+    }
     throw std::runtime_error("No matching kernel");
 }
 
@@ -486,51 +555,73 @@ static inline bool getStrategyByHeuristics(HW hw, GEMMStrategy &strategy, bool l
     int min2DAlignmentA = block2DMinAlignment(hw, problem.A, strategy.A, /* asIfBlock2D */ true);
     int min2DAlignmentB = block2DMinAlignment(hw, problem.B, strategy.B, /* asIfBlock2D */ true);
 
-    bool systolic = hwInfo.systolicAvailable;
+    auto &s = strategy;
+    s.unroll[LoopK] = 1;
+    s.wg[LoopK] = 1;
+    s.unroll[LoopM] = s.unroll[LoopN] = 0;
+    s.wg[LoopM] = s.wg[LoopN] = 0;
+
+    for (auto &req: reqs) switch (req.param) {
+        case StrategyRequirement::UnrollM: s.unroll[LoopM] = req.value; break;
+        case StrategyRequirement::UnrollN: s.unroll[LoopN] = req.value; break;
+        case StrategyRequirement::WGM:         s.wg[LoopM] = req.value; break;
+        case StrategyRequirement::WGN:         s.wg[LoopN] = req.value; break;
+        case StrategyRequirement::WGK:         s.wg[LoopK] = req.value; break;
+        default: break;
+    }
+
+    if (s.wgTile(LoopM) * s.wgTile(LoopN) == 0)
+        return false;
+
+    bool systolic = hwInfo.systolicAvailable &&
+                   (problem.Ta.paddedSize() <= 2 || problem.Ta == Type::tf32) &&
+                   (problem.Tb.paddedSize() <= 2 || problem.Tb == Type::tf32);
     // Non-systolic integer dot products require byte operands. Keep the
-    // external int4 format and let the generator unpack it for computation.
+    // external int4/2 format and let the generator unpack it for computation.
     if (!systolic) {
-        if (problem.Ta.isInt4())
+        if (problem.Ta.isSubByteInt())
             problem.Ta = problem.Ta.isSigned() ? Type::s8 : Type::u8;
-        if (problem.Tb.isInt4())
+        if (problem.Tb.isSubByteInt())
             problem.Tb = problem.Tb.isSigned() ? Type::s8 : Type::u8;
     }
     bool block2DA = (hw >= HW::XeHPC) && systolic && (problem.A.alignment % min2DAlignmentA) == 0;
     bool block2DB = (hw >= HW::XeHPC) && systolic && (problem.B.alignment % min2DAlignmentB) == 0;
     bool useNewDP = (hw >= HW::XeHP);
 
-    auto &s = strategy;
+    // u3 is computed as u4, so size its loads as u4
+    Type Ta_load = problem.Ta_ext.is3() ? Type(Type::u4) : problem.Ta_ext;
+
     s.ka_load = s.kb_load = 16;
     if (!systolic) {
         // Keep eight bytes per integer operand without enlarging the other
         // operand's load for mixed-precision inputs. Preserve floating-point defaults.
-        s.ka_load = problem.Ta_ext.isInteger() ? 8 / problem.Ta_ext : 4;
+        s.ka_load = Ta_load.isInteger() ? 8 / Ta_load : 4;
         s.kb_load = problem.Tb_ext.isInteger() ? 8 / problem.Tb_ext : 4;
     }
 
+    auto m_iter = std::max(1, s.unroll[LoopM] / elementsPerGRF<uint32_t>(hw));
     if (problem.A.layout == MatrixLayout::Pc) {
         s.A.accessType = AccessType::Block;
-        s.A_copies = 4 / problem.Ta_ext;
+        s.A_copies = 2;
         s.A.padded = true;
     } else if (!block2DA) {
         s.A.accessType = AccessType::Block;
         if (systolic)
-            s.ka_load = (problem.A.layout == MatrixLayout::T) ? 64 / problem.Ta_ext : 16;
+            s.ka_load = (problem.A.layout == MatrixLayout::T) ? 64 / Ta_load / m_iter : 16;
         s.slmA = (hw >= HW::XeHP);
     } else if (problem.A.layout == MatrixLayout::T) {
         s.A.accessType = AccessType::Block2DTranspose;
-        s.ka_load = (int)(64.f / ceil(( 1.f * problem.Ta) +
-                                (problem.aOffset2D() ? (1.f * problem.Tao) : 0)));
-        s.ka_load = utils::roundup_pow2(s.ka_load);
+        s.ka_load = 64 / Ta_load / m_iter;
     } else if (problem.A.layout == MatrixLayout::N) {
         s.A.accessType = AccessType::Block2DVNNI;
-        s.A_copies = 4 / problem.Ta;
+        s.ka_load =  s.unroll[LoopM] / m_iter;
+        s.A_copies = 2;
     }
 
     if (problem.B.layout == MatrixLayout::Pr) {
         s.B.accessType = AccessType::Block;
         s.B.padded = true;
-        s.B_copies = 4 / problem.Tb_ext;
+        s.B_copies = 2;
     } else if (!block2DB) {
         s.B.accessType = AccessType::Block;
         if (systolic) {
@@ -546,6 +637,18 @@ static inline bool getStrategyByHeuristics(HW hw, GEMMStrategy &strategy, bool l
     }
 
     s.C.accessType = AccessType::Block;
+
+    bool slmDequantize2DA = (problem.aOffset2D() || problem.aScale2D()) && s.slmA;
+    bool slmDequantize2DB = (problem.bOffset2D() || problem.bScale2D()) && s.slmB;
+    if (slmDequantize2DA && slmDequantize2DB) {
+        // A and B quantization parameters share one SLM load schedule, so each
+        // thread's SLM copy must cover the same k range for both. A k split
+        // divides unrollKSLM by the workgroup size, so split both in m/n.
+        if (s.unroll[LoopM] % s.wg[LoopN] || s.unroll[LoopN] % s.wg[LoopM])
+            return false;
+        s.ka_load = s.kb_load = std::min(64, std::max(s.ka_load, s.kb_load));
+        s.coopA = s.coopB = CoopSplit::MN;
+    }
 
     s.A.base = localA ? AddressBase::createSLM() : AddressBase::createA64(true);
     s.B.base = localB ? AddressBase::createSLM() : AddressBase::createA64(true);
@@ -573,20 +676,6 @@ static inline bool getStrategyByHeuristics(HW hw, GEMMStrategy &strategy, bool l
         s.kb_pfStride = s.kb_prefetch = s.kb_load;
     }
 
-    s.unroll[LoopK] = 1;
-    s.wg[LoopK] = 1;
-    s.unroll[LoopM] = s.unroll[LoopN] = 0;
-    s.wg[LoopM] = s.wg[LoopN] = 0;
-
-    for (auto &req: reqs) switch (req.param) {
-        case StrategyRequirement::UnrollM: s.unroll[LoopM] = req.value; break;
-        case StrategyRequirement::UnrollN: s.unroll[LoopN] = req.value; break;
-        case StrategyRequirement::WGM:         s.wg[LoopM] = req.value; break;
-        case StrategyRequirement::WGN:         s.wg[LoopN] = req.value; break;
-        case StrategyRequirement::WGK:         s.wg[LoopK] = req.value; break;
-        default: break;
-    }
-
     if(block2DA && !localA) {
         problem.A.alignment = std::min(problem.A.alignment,
                                         static_cast<uint8_t>(block2DMinAlignment(hw, problem.A, strategy.A)));
@@ -598,23 +687,6 @@ static inline bool getStrategyByHeuristics(HW hw, GEMMStrategy &strategy, bool l
                                         static_cast<uint8_t>(block2DMinAlignment(hw, problem.B, strategy.B)));
     } else {
         problem.B.alignment = std::min<uint8_t>(16, problem.B.alignment);
-    }
-
-    if (s.wgTile(LoopM) * s.wgTile(LoopN) == 0)
-        return false;
-
-    if(s.A.accessType == AccessType::Block2DVNNI) {
-        s.ka_load =  s.unroll[LoopN] / problem.Ta_ext;
-    } else if(s.A.accessType == AccessType::Block2DTranspose) {
-        s.ka_load = std::min(s.ka_load, s.unroll[LoopM] * 2);
-    }
-
-    bool slmDequantize2DA = (problem.aOffset2D() || problem.aScale2D()) && s.slmA;
-    bool slmDequantize2DB = (problem.bOffset2D() || problem.bScale2D()) && s.slmB;
-    if (slmDequantize2DA && slmDequantize2DB) {
-        // TODO: try max of ka_load/kb_load and see if it performs better
-        int min_load = std::min(s.ka_load, s.kb_load);
-        s.ka_load = s.kb_load = min_load;
     }
 
     s.systolic = systolic;
@@ -631,7 +703,7 @@ static inline bool getStrategyByHeuristics(HW hw, GEMMStrategy &strategy, bool l
         s.loadBFirst = true;
 
     if (s.slmA || s.slmB) {
-        s.slmBuffers = 1;
+        s.slmBuffersA = s.slmBuffersB = 1;
         s.unrollKSLM = std::max(int(s.slmA) * s.ka_load, int(s.slmB) * s.kb_load);
 
         // Remainder handling can change an MN copy split to a K split. Keep
@@ -644,6 +716,16 @@ static inline bool getStrategyByHeuristics(HW hw, GEMMStrategy &strategy, bool l
         if (s.slmB && problem.Tb.isInteger())
             s.unrollKSLM = lcm(s.unrollKSLM,
                     std::get<1>(slmCP) * s.wg[LoopM]);
+
+        // Quantization parameters are loaded per unrollKSLM, or per group if
+        // unrollKSLM is not a multiple of the group size.
+        if (slmDequantize2DA && slmDequantize2DB) {
+            auto kqLoad = [&](int groupK) {
+                return (s.unrollKSLM % groupK == 0) ? s.unrollKSLM : groupK;
+            };
+            if (kqLoad(problem.aqGroupK) != kqLoad(problem.bqGroupK))
+                return false;
+        }
     }
 
     if (hw == HW::Xe2 || hw == HW::Xe3)

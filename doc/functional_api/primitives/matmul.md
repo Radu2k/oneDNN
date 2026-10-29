@@ -102,15 +102,20 @@ types for source, destination, weights, and bias tensors:
 | Source              | Weights                                | Destination                         | Bias                        |
 |:--------------------|:---------------------------------------|:------------------------------------|:----------------------------|
 | f64                 | f64                                    | f64                                 | f32, f16, bf16              |
-| f32                 | f32, u8, s8, u4, s4                    | f32                                 | f32, bf16, f16              |
-| f16                 | f16, u8, s8, u4, s4                    | f16, u8, s8                         | f32                         |
-| f16                 | f16, u8, s8, u4, s4, u2                | f32, f16                            | f32, f16                    |
-| bf16                | bf16, u8, s8, u4, s4                   | f32, bf16                           | f32, bf16                   |
-| f32, bf16, f16      | u8, s8, u4, s4                         | f32, bf16, f16                      | f32, bf16, f16              |
+| f32                 | f32, u8, s8, u4, s4, u2, u3            | f32                                 | f32, bf16, f16              |
+| f16                 | f16, u8, s8, u4, s4, u2, u3            | f16, u8, s8                         | f32                         |
+| f16                 | f16, u8, s8, u4, s4, u2, u3            | f32, f16                            | f32, f16                    |
+| bf16                | bf16, u8, s8, u4, s4, u2, u3           | f32, bf16                           | f32, bf16                   |
+| f32, bf16, f16      | u8, s8, u4, s4, u2, u3                 | f32, bf16, f16                      | f32, bf16, f16              |
 | bf16, f16           | f8_e5m2, f8_e4m3, f4_e2m1              | f32, f16, bf16                      | f32, bf16, f16              |
 | f8_e5m2, f8_e4m3    | f8_e5m2, f8_e4m3                       | f32, f16, bf16, f8_e5m2, f8_e4m3    | f32, bf16, f16              |
 | f4_e2m1             | f4_e2m1                                | f32, f16, bf16, f4_e2m1             | f32, bf16, f16              |
-| u8, s8              | u8, s8, u4, s4                         | u8, s8, s32, f32, f16, bf16         | u8, s8, s32, f32, f16, bf16 |
+| u8, s8              | u8, s8, u4, s4, u3                     | u8, s8, s32, f32, f16, bf16         | u8, s8, s32, f32, f16, bf16 |
+
+@note Sub-byte weights types pack several elements into each byte, so every stride
+greater than 1 in such memory descriptor must be a multiple of the number of
+packed elements: 2 for the 4-bit types (`s4`, `u4`, `f4_e2m1`),
+4 for `u2` (2-bit), and 8 for `u3` (3-bit, packs 8 elements into 3 bytes).
 
 ### Data Representation
 
@@ -148,9 +153,9 @@ The following attributes and post-ops are supported:
 | Type      | Operation                                                      | Description                                                                   | Restrictions                        |
 |:----------|:---------------------------------------------------------------|:------------------------------------------------------------------------------|:------------------------------------|
 | Attribute | [Scales](@ref dnnl::primitive_attr::set_scales_mask)           | [Scales](@ref dgaq_scaling)  the result by given scaling factor(s)                                |                                     |
-| Attribute | [Zero-points](@ref dnnl::primitive_attr::set_zero_points_mask) | Sets [zero-point(s)](@ref dgaq_zps) for the corresponding tensors                             |                     |
+| Attribute | [Zero-points](@ref dnnl::primitive_attr::set_zero_points_mask) | Sets [zero-point(s)](@ref dgaq_zps) for the corresponding tensors                             | Source and weights zero-points require a quantized (integer, `f8`, or `f4`) data type for the corresponding tensor; destination zero-points require an integer destination data type |
 | Attribute | [Dropout](@ref dnnl::primitive_attr::set_dropout)              | Applies pseudo-random [dropout](@ref dev_guide_attributes_dropout) to destination buffer, also fills mask buffer   |                                     |
-| Attribute | [Precomputed reductions](@ref dnnl::primitive_attr::set_precomputed_reductions) | Sets [precomputed reductions](@ref dgaq_precomputed_reductions) for the corresponding tensors  |  Requires weight zero-points and full matrix mask |
+| Attribute | [Precomputed reductions](@ref dnnl::primitive_attr::set_precomputed_reductions) | Sets [precomputed reductions](@ref dgaq_precomputed_reductions) for the corresponding tensors  |  Requires weight zero-points, full matrix mask, and 8-bit integer weights |
 | Post-op   | [Eltwise](@ref dnnl::post_ops::append_eltwise)                 | Applies an @ref dnnl_api_eltwise operation to the result                      |                                     |
 | Post-op   | [Sum](@ref dnnl::post_ops::append_sum)                         | [Adds](@ref dnnl_api_sum) the operation result to the destination tensor instead of overwriting it |                                     |
 | Post-op   | [Binary](@ref dnnl::post_ops::append_binary)                   | Applies a @ref dnnl_api_binary operation to the result                        | General binary post-op restrictions |
@@ -186,16 +191,21 @@ run-time attributes in use.
      * Runtime dimensions.
      * Three and higher-dimensional matrices.
    - The layout of dropout mask has to be exactly the same as that of dst.
-
+   - Grouped quantization for scales and weights zero points must be in blocks
+     that are a multiple of 16. Source zero points data must be in blocks that
+     are a multiple of 32.
+   - Grouped quantization is unsupported for source `m` dimension.
 
 3. **CPU**
    - Configurations with `s8`/`u8` source data type, `s8` weight data type and `f16`
      destination data type aren't supported.
    - Configurations with floating point source data type, integer weights data
      type and floating point destination data type are not optimized.
-   - Block-wise (K-grouped, e.g. `mask = (1 << 0) | (1 << 1)`) weights scales
-     require K group size to be a multiple of 16 elements.
    - The layout of dropout mask has to be exactly the same as that of dst.
+   - Grouped quantization for scales and weights zero points must be in blocks
+     that are a multiple of 16. Source zero points data must be in blocks that
+     are a multiple of 32.
+   - Grouped quantization is unsupported for source `m` dimension.
 
 ## Performance Tips
 
@@ -506,17 +516,19 @@ The following are supported:
     The scale tensor follows the same concatenated layout as src, with total
     size `[total_tokens, K/gK]`.
   - Weight Scales: column-wise (`mask = (1 << 0) | (1 << 2)`) and
-    K-grouped (`mask = (1 << 0) | (1 << 1) | (1 << 2)`) with group specification
-    are supported.
+    K-grouped or K- and N-grouped (`mask = (1 << 0) | (1 << 1) | (1 << 2)`)
+    with group specification are supported. The scale tensor has size
+    `[num_groups, K/gK, N/gN]`.
   - Scales are not supported when the corresponding tensor data type is
     `f32`, `bf16`, or `f16`. Scale data type depends on tensor data type:
 
     | Tensor data type           | Scale data type           |
     |:---------------------------|:--------------------------|
     | f8_e5m2, f8_e4m3, f4_e2m1  | f32, e8m0, f8_e4m3        |
-    | u8, s8, s4, u4             | f32, bf16, f16            |
+    | u8, s8, s4, u4, u3         | f32, bf16, f16            |
 - Zero points attribute for source and weights tensors:
-  - The masks must match the scales mask
+  - The masks must match the scales mask. The exception is a common weights
+    zero point (`mask = 0`), which is supported for `u3` weights only.
   - Source zero points data types include `u8`, `s8`, `s32`
   - Weights zero points data types include `u8`, `s8`, `u4`, `s4`, `s32`
 - Post-ops: eltwise and binary multiplication post-ops are supported. Binary post-op
@@ -542,13 +554,13 @@ The following are supported:
 
 The following combinations of data types for source, destination, weights, and bias tensors are supported.
 
-| Source           | Weights            | Destination    | Bias           |
-|:-----------------|:-------------------|:---------------|:---------------|
-| f32, bf16, f16   | f32, bf16, f16     | f32, bf16, f16 | f32, bf16, f16 |
-| f8_e5m2, f8_e4m3 | f8_e5m2, f8_e4m3   | f32, bf16, f16 |                |
-| f4_e2m1          | f4_e2m1            | f32, bf16, f16 |                |
-| f32, bf16, f16   | u8, s8, s4, u4 (1) | f32, bf16, f16 | f32, bf16, f16 |
-| u8, s8           | u8, s8, s4, u4     | f32, bf16, f16 | f32, bf16, f16 |
+| Source           | Weights                | Destination    | Bias           |
+|:-----------------|:-----------------------|:---------------|:---------------|
+| f32, bf16, f16   | f32, bf16, f16         | f32, bf16, f16 | f32, bf16, f16 |
+| f8_e5m2, f8_e4m3 | f8_e5m2, f8_e4m3       | f32, bf16, f16 |                |
+| f4_e2m1          | f4_e2m1                | f32, bf16, f16 |                |
+| f32, bf16, f16   | u8, s8, s4, u4, u3 (1) | f32, bf16, f16 | f32, bf16, f16 |
+| u8, s8           | u8, s8, s4, u4         | f32, bf16, f16 | f32, bf16, f16 |
 
 Footnotes:
 1. Weight-Only Quantization (WOQ): floating-point source with integer weights

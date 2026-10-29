@@ -55,7 +55,7 @@ bool GEMMStrategy::needsUnnamedBarrier(const GEMMProblem &problem) const
 {
     if (needsKLoopBarrier() && (!namedBarriers[LoopM] || !namedBarriers[LoopN]))
         return true;
-    if (slmBuffers > 0) {
+    if (std::max(slmBuffersA, slmBuffersB) > 0) {
         if (persistentLoop()) return true;
         if (problem.needsASums() || problem.needsBSums()) return true;
     }
@@ -93,6 +93,15 @@ bool useAutoAtomic(HW hw, const GEMMProblem &problem, const GEMMStrategy &strate
             && !isBlock2D(strategy.C.accessType);
 }
 
+int GEMMStrategy::defaultBlockK(HW hw, const GEMMProblem &problem) const
+{
+    if (hw >= HW::XeHPG) return 16777216;
+    int points = 1;
+    if (slmA || (problem.A.layout != MatrixLayout::T)) points++;
+    if (slmB || (problem.B.layout != MatrixLayout::N)) points++;
+    return std::min(2048, (2048 * points) / problem.Ta);
+}
+
 // Validate a GEMM strategy, correcting settings as necessary.
 void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
 {
@@ -119,6 +128,26 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     // Remove variable k-parallelization when batching.
     if (kParallelVariable && problem.batch != BatchMode::None)
         C.atomic = CO.atomic = kParallelVariable = kParallelLocal = false;
+
+    // Stream-K combines per-workgroup partial C via atomic add, which is
+    // safe for plain grouped scaling (no cross-workgroup shared state) but
+    // not late 2D scaling.
+    bool aLateScale = usesLateScale(problem, *this, /*isA=*/true);
+    bool bLateScale = usesLateScale(problem, *this, /*isA=*/false);
+    bool lateScaleHazard = (aLateScale || bLateScale) && problem.Tc_ext.isInteger();
+    if (kParallelVariable && lateScaleHazard)
+        C.atomic = CO.atomic = kParallelVariable = kParallelLocal = false;
+
+    // Only A/B sums computed in the outer product (systolic, or dp4a with C repacking) are
+    // scaled by late 2D scales; other sums are accumulated unscaled, which is wrong when
+    // scales vary across k groups.
+    bool cColMajor = isRegisterColMajor(problem.Tc_ext, problem.C, C);
+    bool opSums = systolic || (!dotVL && problem.isIGEMM() && problem.Tc != problem.Tc_compute());
+    bool opSumA = opSums && cColMajor, opSumB = opSums && !cColMajor;
+    if (aLateScale && problem.needsASums() && !opSumA)
+        stub("Late A scales unsupported with these A sums");
+    if (bLateScale && problem.needsBSums() && !opSumB)
+        stub("Late B scales unsupported with these B sums");
 
     C.atomic |= useAutoAtomic(hw, problem, *this);
 
@@ -164,8 +193,8 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     if (!(kParallelVariable || (kParallel && altFusedBeta)))
         kPadding = 0;
 
-    slmA &= (slmBuffers > 0);
-    slmB &= (slmBuffers > 0);
+    slmA &= (slmBuffersA > 0);
+    slmB &= (slmBuffersB > 0);
 
     A.preflight(hw); A_prefetch.preflight(hw); AO.preflight(hw);
     B.preflight(hw); B_prefetch.preflight(hw); BO.preflight(hw);
@@ -211,6 +240,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     checkBeta1 |= C.atomic && !problem.beta1();
 
     GRFs = std::min(GRFs, GRF::maxRegs(hw));
+
     // CRI has unique GRF mode behaviour - automatically update to optimal options
     if (problem.product.family == ngen::ProductFamily::CRI) {
         if (GRFs == 128) GRFs = 192;
@@ -224,7 +254,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
         bool doubleM = (wg[LoopM] == 8);
 
         slmCopies = (slmCopies == 3) ? 3 : 1;
-        slmBuffers = (splitCopy || doubleM) ? 4 : 3;
+        slmBuffersA = slmBuffersB = (splitCopy || doubleM) ? 4 : 3;
         slmA = slmB = true;
         GRFs = 256;
         altCRemainder = false;
@@ -279,9 +309,16 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     spf &= !C.atomic;
     spf &= !doubleMasking;
 
+    // 64-bit strength reduction handling.
     checkAdd32 &= !emulate.emulate64_add32;
     checkAdd32 &= (A.base.isStateless() || B.base.isStateless() || problem.quantized2DA() || problem.quantized2DB());
     checkAdd32 &= !(A.address2D && B.address2D && (!prefetchA || A_prefetch.address2D) && (!prefetchB || B_prefetch.address2D));
+
+    // Dot product handling.
+    if (dotVL) {
+        dotVL = align_up(dotVL, elementsPerGRF(hw, Tc));
+        forceCopyC = doubleMasking = true;
+    }
 
     int opCount = outerProductCount(problem, *this);
     int minOPCount = minOuterProductCount(problem, *this);
@@ -291,8 +328,8 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
         moveR0 = MoveR0::None;
 
     // SLM copy logic.
-    int slmVersions = std::max(1, lcm(slmCopies, slmBuffers));
-    if (slmBuffers > 0) {
+    int slmVersions = std::max(1, lcm(slmCopies, std::max(slmBuffersA, slmBuffersB)));
+    if (std::max(slmBuffersA, slmBuffersB) > 0) {
         moveR0 = MoveR0::None;
         barrierFreq = 0;
         if (wg[LoopM] <= 0 || wg[LoopN] <= 0)
@@ -307,7 +344,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     if (kb_load_masked == 0) kb_load_masked = kb_load;
 
     int maskedOPCount = minOPCount;
-    if(problem.product.family == ProductFamily::CRI && kChain >= 2)
+    if (problem.product.family == ProductFamily::CRI && kChain >= 2)
         // On CRI, dpas fwd modifier is required for optimal compute throughput
         maskedOPCount *= 2;
 
@@ -316,8 +353,23 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     ka_load_masked = align_up(ka_load_masked, maskedOPCount);
     kb_load_masked = align_up(kb_load_masked, maskedOPCount);
 
+    if (ka_repack && repackPeriod(true, problem) != ka_repack)
+        stub("Invalid A repack period");
+    if (kb_repack && repackPeriod(false, problem) != kb_repack)
+        stub("Invalid B repack period");
+
     if (ka_load == 0 || kb_load == 0)
         stub("Zero k-load granularity is invalid");
+
+    // u3 Block2DTranspose loads address k in whole dwords (32 elements = 3 dwords),
+    //  so each k load must cover a whole number of dwords.
+    auto u3DwordAligned = [](int k) { return (k * 3) % 32 == 0; };
+    if (problem.Ta_ext.is3() && A.accessType == AccessType::Block2DTranspose
+            && !(u3DwordAligned(ka_load) && u3DwordAligned(ka_load_masked)))
+        stub("u3 Block2DTranspose A loads must be dword-aligned in k");
+    if (problem.Tb_ext.is3() && B.accessType == AccessType::Block2DTranspose
+            && !(u3DwordAligned(kb_load) && u3DwordAligned(kb_load_masked)))
+        stub("u3 Block2DTranspose B loads must be dword-aligned in k");
 
     // Systolic handling.
     if (systolic) {
@@ -331,11 +383,8 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
         dotVL = 0;
     }
 
-    // Dot product handling.
-    if (dotVL) {
-        dotVL = align_up(dotVL, elementsPerGRF(hw, Tc));
-        forceCopyC = doubleMasking = true;
-    }
+    // Repack C if using sub-DWord atomics.
+    forceCopyC |= (C.atomic && Tc.real().size() < 4);
 
     // Prefetch handling.
     cooperativePF &= (prefetchA || prefetchB);
@@ -408,6 +457,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
             if (problem.bqGroupK % wg[LoopK]) stub();
             kchunk0 = lcm(kchunk0, std::max(1, problem.bqGroupK / wg[LoopK]));
         }
+        if (kchunk0 <= 0) stub("k-interleave incompatible with SLM copy");
         kInterleaveChunk = align_up(kInterleaveChunk, kchunk0);
         kInterleaveChunk = std::max(kInterleaveChunk, kchunk0);
     }
@@ -432,6 +482,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     if (l3PrefetchA) ukAlign = lcm(ukAlign, ka_prefetchL3);
     if (l3PrefetchB) ukAlign = lcm(ukAlign, kb_prefetchL3);
 
+    if (ukAlign <= 0) stub("Zero k-unroll alignment");
     unroll[LoopK] = align_up(unroll[LoopK], ukAlign);
 
     if (unrollKSLM == 0)
@@ -464,16 +515,13 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
 
     if (blocking[LoopM] <= 0) blocking[LoopM] = defaultMBlock;
     if (blocking[LoopN] <= 0) blocking[LoopN] = defaultNBlock;
-    if (blocking[LoopK] <= 0) {
-        if (hw >= HW::XeHPG)
-            blocking[LoopK] = 16777216;
-        else {
-            int points = 1;
-            if (slmA || (problem.A.layout != MatrixLayout::T)) points++;
-            if (slmB || (problem.B.layout != MatrixLayout::N)) points++;
-            blocking[LoopK] = std::min(2048, (2048 * points) / problem.Ta);
-        }
-    }
+    if (blocking[LoopK] <= 0) blocking[LoopK] = defaultBlockK(hw, problem);
+
+    /* Quantization groups must not straddle k blocks */
+    int kqGroup = 1;
+    if (problem.quantized2DA() && problem.aqGroupK > 1) kqGroup = lcm(kqGroup, problem.aqGroupK);
+    if (problem.quantized2DB() && problem.bqGroupK > 1) kqGroup = lcm(kqGroup, problem.bqGroupK);
+    blocking[LoopK] = align_up(blocking[LoopK], kqGroup);
 
     auto defaultBlockAltK = blocking[LoopK];
     if (hw == HW::XeHP) defaultBlockAltK = std::min(defaultBlockAltK, 1024);
@@ -501,9 +549,10 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
 
     if (wg[loopOrder[0]] <= 0) wg[loopOrder[0]] = defaultWGX;
     if (wg[loopOrder[1]] <= 0) wg[loopOrder[1]] = defaultWGY;
+    auto ssThreads = threadsPerEU(problem.product, *this) * eusPerSubslice(hw);
     if (wg[LoopK] <= 0) {
         if (kParallelLocal)
-            wg[LoopK] = (threadsPerEU(problem.product, *this) * eusPerSubslice(hw)) / (wg[LoopM] * wg[LoopN]);
+            wg[LoopK] = ssThreads / (wg[LoopM] * wg[LoopN]);
         else
             wg[LoopK] = 1;
     }
@@ -511,6 +560,10 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     kParallelLocal &= (wg[LoopK] > 1);
     if (!kParallelLocal)
         wg[LoopK] = 1;
+
+    if (wgPadFactor < 1) stub("Invalid workgroup padding factor");
+    if (ssThreads && wg[LoopM] * wg[LoopN] * wg[LoopK] * (splitCopy ? 2 : 1) * wgPadFactor > ssThreads)
+        stub("Workgroup exceeds subslice thread capacity");
 
     skewLocalIDs &= (wg[LoopM] * wg[LoopN] > eusPerSubslice(hw));
 
@@ -575,12 +628,32 @@ bool GEMMStrategy::minimize(HW hw, const GEMMProblem &problem)
     return better;
 }
 
+// Return the A/B repack period for the current k loads: ka/kb_repack if valid, else the default.
+int GEMMStrategy::repackPeriod(bool isA, const GEMMProblem &problem) const
+{
+    int opCount = outerProductCount(problem, *this);
+    int k_load = isA ? ka_load : kb_load;
+    int k_repack = isA ? ka_repack : kb_repack;
+    if (k_repack > 0 && k_repack % opCount == 0 && k_load % k_repack == 0)
+        return k_repack;
+    int repackMin = std::min(std::max(4 / (isA ? problem.Ta_ext : problem.Tb_ext), 1), k_load);
+    int period = gcd(k_load, align_up(std::max(std::min(ka_load, kb_load), repackMin), opCount));
+    // Avoid spanning quantization groups if the period stays a multiple of opCount.
+    bool q2D = isA ? problem.quantized2DA() : problem.quantized2DB();
+    int qGroupK = isA ? problem.aqGroupK : problem.bqGroupK;
+    if (q2D && qGroupK > 0 && qGroupK % period != 0 && period % qGroupK != 0) {
+        int qPeriod = gcd(qGroupK, period);
+        if (qPeriod % opCount == 0) period = qPeriod;
+    }
+    return period;
+}
+
 // Return preferred k alignment for this kernel (avoiding remainder loads).
 int GEMMStrategy::kAlign(const GEMMProblem &problem) const
 {
     int align = lcm(ka_load, kb_load);
     align = lcm(align, extraKAlign);
-    if (slmBuffers > 0) align = lcm(align, unrollKSLM);
+    if (std::max(slmBuffersA, slmBuffersB) > 0) align = lcm(align, unrollKSLM);
 
     if (kParallelLocal && kInterleave) {
         /* Ensure k0 is aligned to prefetch strides */
@@ -625,6 +698,10 @@ void MatrixAddressingStrategy::preflight(HW hw)
 {
     newDP |= isBlock2D(accessType) || (hw >= HW::Xe2);
     padded |= (base.getModel() == ModelSLM);
+
+    // Xe3p uses sendg[x] instructions: downgrade surface accesses to a64
+    if (hw == HW::Xe3p && base.getModel() == ModelBTS)
+        forceA64();
 
     if (prefetch && newDP && cachingR == CacheSettingsLSC::Default)
         cachingR = CacheSettingsLSC::L1C_L3C;

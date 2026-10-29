@@ -29,8 +29,19 @@ template <HW hw>
 void Generator<hw>::addScaled(const InstructionModifier &mod, const RegData &dst, int src0, const RegData &src1,
                               int numerator, int denominator, CommonState &state, bool exact)
 {
-    if (!is_zero_or_pow2(numerator)) stub();
     if (!is_zero_or_pow2(denominator)) stub();
+
+    if (!is_zero_or_pow2(numerator)) {
+        // Non-power-of-2 numerator (e.g. u3's 3-bit packing): use a real multiply
+        // followed by a power-of-2 shift instead of the shift-only fast paths below.
+        auto temp = state.ra.alloc_sub(src1.getType());
+        mulConstant(mod, temp, src1, numerator);
+        if (!exact) add(mod, temp, temp, denominator - 1);
+        asr(mod, temp, temp, ilog2(denominator));
+        (src0 != 0) ? add(mod, dst, temp, src0) : mov(mod, dst, temp);
+        state.ra.safeRelease(temp);
+        return;
+    }
 
     if (numerator == denominator) {
         (src0 != 0)   ? add(mod, dst, src1, src0) :
@@ -51,8 +62,19 @@ template <HW hw>
 void Generator<hw>::addScaled(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1,
                               int numerator, int denominator, CommonState &state, bool exact)
 {
-    if (!is_zero_or_pow2(numerator)) stub();
     if (!is_zero_or_pow2(denominator)) stub();
+
+    if (!is_zero_or_pow2(numerator)) {
+        // Non-power-of-2 numerator (e.g. u3's 3-bit packing): use a real multiply
+        // followed by a power-of-2 shift instead of the shift-only fast paths below.
+        auto temp = state.ra.alloc_sub(src1.getType());
+        mulConstant(mod, temp, src1, numerator);
+        if (!exact) add(mod, temp, temp, denominator - 1);
+        asr(mod, temp, temp, ilog2(denominator));
+        add(mod, dst, temp, src0);
+        state.ra.safeRelease(temp);
+        return;
+    }
 
     if (numerator == denominator)
         add(mod, dst, src1, src0);
@@ -75,7 +97,6 @@ template <HW hw>
 void Generator<hw>::addScaled(const InstructionModifier &mod, const RegData &dst, const RegData &src0, int src1,
                               int numerator, int denominator, CommonState &state, bool exact)
 {
-    if (!is_zero_or_pow2(numerator)) stub();
     if (!is_zero_or_pow2(denominator)) stub();
     if (exact && ((numerator * src1) % denominator))
         stub("Misaligned immediate value.");
@@ -87,7 +108,7 @@ template <typename S0, typename S1>
 void Generator<hw>::addScaled(const InstructionModifier &mod, const RegData &dst, S0 src0, S1 src1,
                               Type T, CommonState &state, bool exact, int scale)
 {
-    addScaled(mod, dst, src0, src1, T.paddedSize() * scale, T.perByte(), state, exact);
+    addScaled(mod, dst, src0, src1, T.bits() * scale, 8, state, exact);
 }
 
 // Multiply by a constant, optimizing for power-of-2 constants.
@@ -101,9 +122,9 @@ void Generator<hw>::mulConstant(const InstructionModifier &mod, const RegData &d
         if (dst != src0) mov<DT>(mod, dst, src0);
     } else if (src1 == -1)
         mov<DT>(mod, dst, -src0);
-    else if (is_zero_or_pow2(src1))
+    else if (is_zero_or_pow2(src1)) {
         shl<DT>(mod, dst, src0, uint16_t(ilog2(src1)));
-    else if (src1 >= 0x10000)
+    } else if (src1 >= 0x10000)
         mul<DT>(mod, dst, src0, uint32_t(src1));
     else if (src1 < -0x8000)
         mul<DT>(mod, dst, src0, int32_t(src1));
@@ -185,8 +206,8 @@ void Generator<hw>::divDown(const ngen::Subregister &dst, const ngen::Subregiste
 }
 
 // Divide an unsigned value by a constant, rounding up.
-// Default algorithm: dst = (src / divisor) + (src % divisor > 0) 
-// Relax algorithm (can overflow): dst = (src + divisor - 1) / divisor 
+// Default algorithm: dst = (src / divisor) + (src % divisor > 0)
+// Relax algorithm (can overflow): dst = (src + divisor - 1) / divisor
 template <HW hw>
 template <typename DT>
 void Generator<hw>::divUp(const Subregister &dst, const Subregister &src, uint32_t divisor, const CommonStrategy &strategy, CommonState &state, bool relax)

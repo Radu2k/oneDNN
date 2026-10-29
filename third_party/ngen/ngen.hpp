@@ -207,7 +207,7 @@ protected:
 
     DebugLine debugLine;
 
-    std::unique_ptr<std::atomic<bool>> cancelAutoSWSB_;
+    std::unique_ptr<std::atomic<bool>> cancelAutoSWSB_ = nullptr;
 
 private:
     InstructionModifier defaultModifier;
@@ -1977,10 +1977,14 @@ using scope::L1WT_L2UC_L3UC;    using scope::L1WT_L2UC_L3WB; using scope::L1WT_L
 using scope::L1S_L2UC_L3WB;     using scope::L1S_L2WB_L3UC;  using scope::L1S_L2WB_L3WB; \
 using scope::L1WB_L2WB_L3UC;    using scope::L1WB_L2UC_L3WB;
 #define NGEN_FORWARD_SCOPE_REGISTERS_EXTRA2(scope)
+
+#define NGEN_FORWARD_SCOPE_REGISTERS_EXTRA3(scope)
+
 #define NGEN_FORWARD_SCOPE_REGISTERS(scope)    \
     NGEN_FORWARD_SCOPE_REGISTERS_BASE(scope)   \
     NGEN_FORWARD_SCOPE_REGISTERS_EXTRA1(scope) \
-    NGEN_FORWARD_SCOPE_REGISTERS_EXTRA2(scope)
+    NGEN_FORWARD_SCOPE_REGISTERS_EXTRA2(scope) \
+    NGEN_FORWARD_SCOPE_REGISTERS_EXTRA3(scope)
 #endif
 
 template <HW hw>
@@ -1990,7 +1994,6 @@ inline void BinaryCodeGenerator<hw>::unsupported()
     throw unsupported_instruction();
 #endif
 }
-
 
 template <HW hw>
 typename BinaryCodeGenerator<hw>::InstructionStream *BinaryCodeGenerator<hw>::popStream()
@@ -2170,6 +2173,7 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
             i.binaryXe3pImm.src0Reg8 = 0;
         i.binaryXe3p.dstReg8 = getHighBit(dst);
         i.binaryXe3p.src0Reg8 = getHighBit(src0);
+        checkXe3pFPRegion(hw, op, dst, src0);
     }
 
     db(i, loc);
@@ -2205,7 +2209,7 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
     if (getBytes(src0.getType()) == 8)
         i.imm64.value = static_cast<uint64_t>(src0);
     else
-        i.imm32.value = (int32_t)static_cast<uint64_t>(src0);
+        i.imm32.value = (uint32_t)static_cast<uint64_t>(src0);
 
     db(i, loc);
 }
@@ -2338,6 +2342,7 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
         i.binaryXe3p.src0Reg8 = getHighBit(src0);
         i.binaryXe3p.src1Reg8 = getHighBit(src1);
         i.binaryXe3p.src1Scalar = checkSrc1Scalar(op, src1, dst, tag);
+        checkXe3pFPRegion(hw, op, dst, src0, src1);
     }
 
     db(i, loc);
@@ -2375,7 +2380,7 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
     i.binary.src0RegFile = src0.getRegFile();
     i.binary.src1RegFile = src1.getRegFile();
 
-    i.imm32.value = (int32_t)static_cast<uint64_t>(src1);
+    i.imm32.value = (uint32_t)static_cast<uint64_t>(src1);
 
     db(i, loc);
 }
@@ -2419,6 +2424,7 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
     if (hw >= HW::Xe3p) {
         i.binaryXe3pImm.dstReg8 = getHighBit(dst);
         i.binaryXe3pImm.src0Reg8 = getHighBit(src0);
+        checkXe3pFPRegion(hw, op, dst, src0);
     }
 
     db(i, loc);
@@ -2537,6 +2543,8 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
 
     encodeTernary512GRF(i, dst, src0, src1, src2, tag);
 
+    checkXe3pFPRegion(hw, op, dst, src0, src1, src2);
+
     db(i, loc);
 }
 
@@ -2590,6 +2598,8 @@ void BinaryCodeGenerator<hw>::opBfn(Opcode op, DataType defaultType, const Instr
     i.bfn.bfnCtrl47 = (bfnCtrl >> 4);
 
     encodeTernary512GRF(i, dst, src0, src1, src2, tag);
+
+    checkXe3pFPRegion(hw, op, dst, src0, src1, src2);
 
     db(i, loc);
 }

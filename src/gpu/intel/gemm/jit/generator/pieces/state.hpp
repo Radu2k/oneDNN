@@ -93,7 +93,7 @@ public:
 
 // Cached vector of leading dimension multiples (ld*0, ld*1, ld*2, etc.), for address setup.
 struct LDMultiples {
-    ngen::GRFRange range;
+    ngen::RegisterRange range;
     bool a64 = false;
     int count = 0;
 };
@@ -109,7 +109,9 @@ struct Address2DParams {
 // Cached set of leading dimension multiples for address increments.
 struct LDIncrements {
     using value_type = std::pair<int, SubregisterPair>;
-    LDIncrements(const MatrixAddressingStrategy &s): type(s.base.isA64() ? ngen::DataType::q : ngen::DataType::ud) {}
+    LDIncrements(ngen::HW hw, const MatrixAddressingStrategy &s) {
+        type = s.base.isA64() ? ngen::DataType::q : ngen::DataType::ud;
+    }
     std::vector<value_type>::iterator begin() { return increments.begin(); }
     std::vector<value_type>::const_iterator begin()const { return increments.begin(); }
     std::vector<value_type>::iterator end() { return increments.end(); }
@@ -151,8 +153,8 @@ struct CommonState {
     ngen::Subregister lsDescConstant[4];
     ngen::FlagRegister flagSwizzle;
     ngen::EmulationState emulate;
-    ngen::GRFRange eatomicAddRegs[2];
-    ngen::GRFRange remaskRegs[3];
+    ngen::RegisterRange eatomicAddRegs[2];
+    ngen::RegisterRange remaskRegs[3];
     VirtualFlag vflagEAtomicAdd;
     VirtualFlag blockEMask;
     ngen::Label blockDone;
@@ -162,6 +164,7 @@ struct CommonState {
     ngen::Subregister lid0;
     GRFMultirange indexVec;                         // uw
     int ivEntries = 0;
+    int aqCopies = 1, bqCopies = 1;             // sub-GRF copies of repacked A/B scales/offsets (Xe3p+)
     struct {
         ngen::GRF zero, one;
         ngen::GRFRange src1Storage;
@@ -181,7 +184,9 @@ struct CommonState {
     VirtualFlag allocVFlag(ngen::HW hw, int n = 1);
     void wipeActiveVFlags();
     bool vflagsEnabled() const                    { return !vflagStorage.empty(); }
-    void usePhysicalFlag(ngen::FlagRegister flag) { activeVFlags[flag.index()] = flag; }
+    void usePhysicalFlag(ngen::FlagRegister flag, ngen::HW hw) {
+        activeVFlags[flag.index(hw)] = VirtualFlag(flag, hw);
+    }
 
     void allocEmulate64Temp(const ngen::EmulationStrategy &estrategy);
 };
@@ -272,23 +277,26 @@ struct GEMMState : public CommonState {
     ngen::Subregister effAo, effBo;
     ngen::Subregister effAp, effBp, effCp;
     ngen::Subregister effAs, effBs;
-    std::vector<ngen::GRFRange> A_addrs, B_addrs, C_addrs[2];
-    std::vector<ngen::GRFRange> A_addrsRem, B_addrsRem;
-    std::vector<ngen::GRFRange> A_addrsAlt, B_addrsAlt;
-    std::vector<ngen::GRFRange> A_addrsAltRem, B_addrsAltRem;
-    std::vector<ngen::GRFRange> Ai_addrs, Bi_addrs;
-    std::vector<std::vector<ngen::GRFRange>> Ai_addrsK, Bi_addrsK;
-    std::vector<ngen::GRFRange> Ai_addrsRem, Bi_addrsRem;
-    std::vector<ngen::GRFRange> Ao_addrs, Bo_addrs;
-    std::vector<ngen::GRFRange> Ap_addrs, Bp_addrs, Cp_addrs;
-    std::vector<ngen::GRFRange> Ap_addrsAlt, Bp_addrsAlt;
-    std::vector<ngen::GRFRange> A_offsetAddrs, B_offsetAddrs;
-    std::vector<ngen::GRFRange> A_scaleAddrs, B_scaleAddrs, C_scaleAddrs;
-    std::vector<ngen::GRFRange> Ag_addrs, Bg_addrs;
+    std::vector<ngen::RegisterRange> A_addrs, B_addrs, C_addrs[2];
+    std::vector<ngen::RegisterRange> A_addrsRem, B_addrsRem;
+    std::vector<ngen::RegisterRange> A_addrsAlt, B_addrsAlt;
+    std::vector<ngen::RegisterRange> A_addrsAltRem, B_addrsAltRem;
+    std::vector<ngen::RegisterRange> Ai_addrs, Bi_addrs;
+    std::vector<std::vector<ngen::RegisterRange>> Ai_addrsK, Bi_addrsK;
+    std::vector<ngen::RegisterRange> Ai_addrsRem, Bi_addrsRem;
+    std::vector<ngen::RegisterRange> Ao_addrs, Bo_addrs;
+    std::vector<ngen::RegisterRange> Ap_addrs, Bp_addrs, Cp_addrs;
+    std::vector<ngen::RegisterRange> Ap_addrsAlt, Bp_addrsAlt;
+    std::vector<ngen::RegisterRange> A_offsetAddrs, B_offsetAddrs;
+    std::vector<ngen::RegisterRange> A_scaleAddrs, B_scaleAddrs, C_scaleAddrs;
+    std::vector<ngen::RegisterRange> Ag_addrs, Bg_addrs;
+    std::vector<ngen::RegisterRange> A_offsetAddrsRem, B_offsetAddrsRem;
+    std::vector<ngen::RegisterRange> A_scaleAddrsRem, B_scaleAddrsRem;
+    std::vector<ngen::RegisterRange> Ag_addrsRem, Bg_addrsRem;
     // Auxiliary (quantization) prefetch addresses, advanced with the A/B prefetch schedule (strategy.pfaux).
-    std::vector<ngen::GRFRange> Ap_offsetAddrs, Bp_offsetAddrs;
-    std::vector<ngen::GRFRange> Ap_scaleAddrs, Bp_scaleAddrs;
-    std::vector<ngen::GRFRange> Agp_addrs, Bgp_addrs;
+    std::vector<ngen::RegisterRange> Ap_offsetAddrs, Bp_offsetAddrs;
+    std::vector<ngen::RegisterRange> Ap_scaleAddrs, Bp_scaleAddrs;
+    std::vector<ngen::RegisterRange> Agp_addrs, Bgp_addrs;
     std::vector<GRFMultirange> A_regs, B_regs, C_regs;
     GRFMultirange Ar_regs, Br_regs;                         // Repacked A/B registers.
     GRFMultirange Cr_regs;                                  // C registers to be repacked.
@@ -306,16 +314,16 @@ struct GEMMState : public CommonState {
     GRFMultirange Ar_scaleRegs, Br_scaleRegs;               // Repacked A/B scales.
     GRFMultirange Agr_regs, Bgr_regs;                       // Repacked A/B groupwise reductions.
     std::vector<MaskAssignment> AB_masks, AB_masksCoop;
-    std::vector<ngen::GRFRange> tempMul_regs;
+    std::vector<ngen::RegisterRange> tempMul_regs;
     ngen::Subregister groupCountMN, groupIDMN;              // ud
     ngen::Subregister i0, j0, h0;                           // d
     ngen::Subregister wgI0, wgJ0;                           // d
     ngen::Subregister unclampedI0;                          // d
     ngen::Subregister ctiShiftJ0;                           // d
     ngen::Subregister threadK0, k0Rem, wgK;                 // ud
-    ngen::Subregister remainders[3];                        // d (todo: w)
+    ngen::Subregister remainders[3];                        // d (TODO: w)
     ngen::Subregister remaindersFused[2];                   // w
-    ngen::Subregister remaindersWG[2];                      // d (todo: w)
+    ngen::Subregister remaindersWG[2];                      // d (TODO: w)
     ngen::Subregister remaindersCoop[3];                    // d
     ngen::Subregister remFusedStorage;                      // d
     ngen::Subregister diagA, diagB, diagC;                  // d
@@ -343,6 +351,7 @@ struct GEMMState : public CommonState {
     ngen::GRF tmpCScales;                                   // Internal storage of dynamic scales
     ngen::Subregister statusFlagAddr;                        // uq
     bool systolicSumA = false, systolicSumB = false;
+    bool fmaSumA = false, fmaSumB = false;                  // dp4a A/B sums computed in outerProductFMA
     bool useBDPAS = false;
     bool lateKLoopCheck = false;
     bool splitBarrierAlways = false;
@@ -377,6 +386,9 @@ struct GEMMState : public CommonState {
     RegisterLayout A_offsetLayout, B_offsetLayout;
     RegisterLayout A_scaleLayout, B_scaleLayout, C_scaleLayout;
     RegisterLayout Ag_layout, Bg_layout;
+    RegisterLayout A_offsetLayoutRem, B_offsetLayoutRem;
+    RegisterLayout A_scaleLayoutRem, B_scaleLayoutRem;
+    RegisterLayout Ag_layoutRem, Bg_layoutRem;
     RegisterLayout Ar_offsetLayout, Br_offsetLayout;
     RegisterLayout Ar_scaleLayout, Br_scaleLayout;
     RegisterLayout Agr_layout, Bgr_layout;
@@ -416,7 +428,8 @@ struct GEMMState : public CommonState {
     bool useTempC = false;
     bool repackA = false, repackB = false;
     bool repackARem = false, repackBRem = false;
-    int ka_repack, ka_repackRem, kb_repackRem;
+    int ka_repack = 0, kb_repack = 0;
+    int ka_repackRem, kb_repackRem;
     int cRepackPeriod = 0;
     bool remActiveA, remActiveB, remActiveSLM;
     std::vector<MaskAssignment> kMasksA, kMasksB, kMasksAi, kMasksBi;
@@ -432,7 +445,7 @@ struct GEMMState : public CommonState {
     ngen::Subregister nextFlagL3PFA, nextFlagL3PFB;
     ngen::FlagRegister flagL3PFA, flagL3PFB;
     RegisterLayout Apl3_layout, Bpl3_layout;
-    std::vector<ngen::GRFRange> Apl3_addrs, Bpl3_addrs;
+    std::vector<ngen::RegisterRange> Apl3_addrs, Bpl3_addrs;
 
     std::vector<ngen::Subregister> effBinary;
 
@@ -441,10 +454,10 @@ struct GEMMState : public CommonState {
     } sysgemm;
 
     GEMMState(ngen::HW hw, const GEMMStrategy &strategy) : CommonState(hw),
-                                                           ldaIncrements(strategy.A),        ldbIncrements(strategy.B),
-                                                           ldaoIncrements(strategy.AO),      ldboIncrements(strategy.BO),
-                                                           ldasIncrements(strategy.A_scale), ldbsIncrements(strategy.B_scale),
-                                                           ldagIncrements(strategy.Ag),      ldbgIncrements(strategy.Bg) {}
+                                                           ldaIncrements(hw, strategy.A),        ldbIncrements(hw, strategy.B),
+                                                           ldaoIncrements(hw, strategy.AO),      ldboIncrements(hw, strategy.BO),
+                                                           ldasIncrements(hw, strategy.A_scale), ldbsIncrements(hw, strategy.B_scale),
+                                                           ldagIncrements(hw, strategy.Ag),      ldbgIncrements(hw, strategy.Bg) {}
 
     int internalSIMD() const { return simd32KMasks ? 32 : 16; }
 

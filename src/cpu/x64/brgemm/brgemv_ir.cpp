@@ -25,7 +25,6 @@
 // current requirements.
 
 #include <cstdint>
-#include <memory>
 #include <vector>
 
 #include "common/c_types_map.hpp"
@@ -38,10 +37,8 @@
 #include "cpu/x64/brgemm/brgemv_ir.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/injectors/jit_uni_postops_injector.hpp"
-#include "cpu/x64/ir/emitter/emitter.hpp"
+#include "cpu/x64/ir/codegen.hpp"
 #include "cpu/x64/ir/ir.hpp"
-#include "cpu/x64/ir/postops_injector.hpp"
-#include "cpu/x64/ir/reg_alloc.hpp"
 #include "cpu/x64/jit_generator.hpp"
 
 #define GET_OFF(field) offsetof(brgemm_kernel_params_t, field)
@@ -284,10 +281,10 @@ m_loop_input_regs_t init_m_loop_input_regs(
         regs.advancing.store_ptr = ir.new_gpr();
         ir.mov_reg(regs.advancing.store_ptr, regs.advancing.y_ptr);
 
-        const ir::label_t store_ptr_done = ir.new_label();
-        ir.jz(regs.invariant.do_post_ops, store_ptr_done);
+        const int if_post_ops
+                = ir.if_begin(regs.invariant.do_post_ops, ir::cmp_t::ne, 0);
         ir.load_param(regs.advancing.store_ptr, GET_OFF(ptr_D));
-        ir.label(store_ptr_done);
+        ir.if_end(if_post_ops);
     } else {
         regs.advancing.store_ptr = regs.advancing.y_ptr;
     }
@@ -433,8 +430,8 @@ void emit_m_block(ir::ir_t &ir, const brgemv_ir_conf_t &cfg,
         // post-ops apply after bias. The two scales can swap because both are
         // multiplies but a scale must not move past the bias and the bias must
         // not move past the post-ops.
-        const ir::label_t skip_post_ops = ir.new_label();
-        ir.jz(regs.invariant.do_post_ops, skip_post_ops);
+        const int if_post_ops
+                = ir.if_begin(regs.invariant.do_post_ops, ir::cmp_t::ne, 0);
 
         if (cfg.with_src_scales) {
             // Loaded once and applied to every output.
@@ -490,7 +487,7 @@ void emit_m_block(ir::ir_t &ir, const brgemv_ir_conf_t &cfg,
             ir.inject_postops(acc, regs.advancing.store_ptr, out_byte_off);
         }
 
-        ir.label(skip_post_ops);
+        ir.if_end(if_post_ops);
     }
 
     for (int r = 0; r < m_block; r++)
@@ -540,17 +537,7 @@ void build_gemv(const brgemm_desc_t &brg, ir::ir_t &ir) {
 
 namespace {
 
-// generate() runs the full IR pipeline:
-//
-// - Build IR for the given `brgemm_desc_t` descriptor
-// - Allocate registers
-// - Emit code
-// - Wrap in standard preamble, stack frame, and postamble
-//
-// TODO: Generalize the IR pipeline runner so it is shared across all kernels,
-// while allowing different builder implementations to plug into the same
-// fixed sequence:
-// IR build -> register allocation -> preamble -> codegen -> postamble).
+// IR-based BRGEMV kernel.
 struct jit_brgemv_ir_kernel_t : public brgemm_kernel_t {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_brgemv_ir_kernel_t)
 
@@ -558,71 +545,21 @@ struct jit_brgemv_ir_kernel_t : public brgemm_kernel_t {
         : brgemm_kernel_t(jit_name(), abrg.isa_impl), brg_(abrg) {}
 
     void generate() override {
-        // Build IR for non-transposed GEMV kernel
         ir::ir_t ir;
         nontrans::build_gemv(brg_, ir);
 
-        // Scratch registers (2 gpr + 3 vec) reserved for spill code.
-        const int gpr_scratch0 = 10, gpr_scratch1 = 11;
-        const int vec_scratch0 = 13, vec_scratch1 = 14, vec_scratch2 = 15;
-        // AVX-512 opmasks reserved for the post-ops injector, which writes both
-        // and restores neither (see `postops_injector_t`).
-        const int eltwise_opmask = 6, binary_tail_opmask = 7;
-
-        const int rsp_idx = Xbyak::Operand::RSP;
-        const int param_idx = abi_param1.getIdx();
-
-        // Build register configuration for code emission
-        const ir::reg_config_t reg_cfg = ir::make_reg_config(brg_.isa_impl,
-                param_idx, rsp_idx, {gpr_scratch0, gpr_scratch1},
-                {vec_scratch0, vec_scratch1, vec_scratch2},
-                {eltwise_opmask, binary_tail_opmask});
-
-        // Register allocation
-        ir::reg_alloc_result_t alloc = allocate_registers(ir, reg_cfg.pools);
-
-        // The injector is created here, not in the emitter, because it spans
-        // the whole codegen flow (emits during `emit()`, writes its table after
-        // the postamble) and needs descriptor inputs the generic emitter lacks.
-        // The emitter drives it through the `inject_postops` operation.
-        std::unique_ptr<ir::postops_injector_t> postops_injector;
-
+        ir::postops_config_t postops;
         if (brg_.with_eltwise || brg_.with_binary || brg_.with_sum) {
+            postops.post_ops = &brg_.attr()->post_ops_;
+            postops.dst_md = brg_.dst_md();
+            postops.rhs_arg_offset = GET_OFF(post_ops_binary_rhs_arg_vec);
+            postops.dst_orig_off = GET_OFF(data_C_ptr_);
             // A partial right-hand-side load reads the vector tail, or one
             // element for a scalar accumulator.
-            const int postops_tail_elems
-                    = brg_.gemv_acc_is_vector() ? brg_.gemv_tail : 1;
-
-            postops_injector.reset(new ir::postops_injector_t(*this,
-                    brg_.isa_impl, brg_.attr()->post_ops_, *brg_.dst_md(),
-                    abi_param1, GET_OFF(post_ops_binary_rhs_arg_vec),
-                    GET_OFF(data_C_ptr_), postops_tail_elems, eltwise_opmask,
-                    binary_tail_opmask));
+            postops.tail_elems = brg_.gemv_acc_is_vector() ? brg_.gemv_tail : 1;
         }
 
-        preamble();
-
-        // Stack frame setup
-        if (alloc.frame_bytes > 0) sub(rsp, (uint32_t)alloc.frame_bytes);
-
-        // Code generation. `ir::emit` dispatches to the ISA-specific emitter
-        // based on `brg_.isa_impl`.
-        // The emitter may accumulate static data (e.g. the mask table) that we
-        // need to write down after the postamble.
-        ir::data_section_t data;
-        ir::emit(*this, ir, alloc, reg_cfg, data, postops_injector.get());
-
-        // Stack cleanup
-        if (alloc.frame_bytes > 0) add(rsp, (uint32_t)alloc.frame_bytes);
-
-        postamble();
-
-        // Emit any static data the emitter accumulated.
-        ir::emit_data_section(*this, data);
-
-        // Emit the injector's constant table (a no-op unless the chain has
-        // eltwise or sum).
-        if (postops_injector) postops_injector->maybe_prepare_table();
+        ir::generate_kernel(*this, ir, postops);
     }
 
 private:

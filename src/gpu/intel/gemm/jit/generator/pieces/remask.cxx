@@ -35,13 +35,20 @@ void Generator<hw>::setupTeardownRemask(Type T, int index, bool setup, int nq, S
     if (T.paddedSize() > 4) T = Type::u32;
 
     if (setup) {
-        bool halfByte = T.is4();
-        if (halfByte) {
-            nq = div_up(nq, 2);
+        bool subByte = T.isSubByte();
+        bool thirdByte = T.is3();
+        bool packedSubByte = subByte && !thirdByte;
+        Type Tsrc = T;
+        if (packedSubByte) {
+            nq = div_up(nq, Tsrc.perByte());
+            T = Type::u8;
+        } else if (thirdByte) {
+            // Mask u3 data at whole 8-element group granularity.
             T = Type::u8;
         }
 
-        auto masks = state.remaskRegs[index] = state.ra.alloc_range(div_up(T.paddedSize(), 2) * div_up(nq * 2, GRF::bytes(hw)));
+        auto maskAlloc = state.ra.alloc_range(div_up(T.paddedSize(), 2) * div_up(nq * 2, GRF::bytes(hw)));
+        auto masks = state.remaskRegs[index] = maskAlloc;
         int ne16 = elementsPerGRF(hw, Type::u16);
         int n16 = std::min(nq, ne16);
         int ne = elementsPerGRF(hw, T);
@@ -52,7 +59,7 @@ void Generator<hw>::setupTeardownRemask(Type T, int index, bool setup, int nq, S
         bool haveVariableOff = variableOffQ.isValid();
         bool haveFixedOff = (fixedOffQ != 0);
 
-        if (haveVariableOff || haveFixedOff || halfByte) {
+        if (haveVariableOff || haveFixedOff || packedSubByte) {
             auto nremQ = state.ra.alloc_sub<uint32_t>();
             freeRemQ = true;
 
@@ -62,11 +69,10 @@ void Generator<hw>::setupTeardownRemask(Type T, int index, bool setup, int nq, S
                 add(1, nremQ, remQ, -variableOffQ);
             else if (haveFixedOff)
                 add(1, nremQ, remQ, -fixedOffQ);
-            if (halfByte)
-                avg(1, nremQ, (haveVariableOff || haveFixedOff) ? nremQ : remQ, 0);
+            if (packedSubByte)
+                divUp(nremQ, (haveVariableOff || haveFixedOff) ? nremQ : remQ, Tsrc.perByte(), strategy, state, true);
             remQ = nremQ;
         }
-
         mov<uint16_t>(8, masks[0][0](1), Immediate::uv(0,1,2,3,4,5,6,7));
         if (nq > 8)
             mov<uint16_t>(8, masks[0][8](1), Immediate::uv(8,9,10,11,12,13,14,15));
@@ -75,7 +81,6 @@ void Generator<hw>::setupTeardownRemask(Type T, int index, bool setup, int nq, S
         add<uint16_t>(n16, masks[0], masks[0], -remQ.w());
         if (!useCMP) for (int q0 = n16; q0 < nq; q0 += n16)
             add<uint16_t>(n16, masks[q0 / n16], masks[0], q0);
-
         switch (T.paddedSize()) {
             case 1:
             case 2:
@@ -88,8 +93,9 @@ void Generator<hw>::setupTeardownRemask(Type T, int index, bool setup, int nq, S
                         asr(simd, r1, r1, 15);
                     });
                 }
-                if (T.paddedSize() == 1) for (int q0 = 0; q0 < nq; q0 += n16)
-                    mov(n16, masks[q0 / ne].ub(q0 % ne)(1), masks[q0 / n16].ub(1)(2));
+                if (T.paddedSize() == 1)
+                    for (int q0 = 0; q0 < nq; q0 += n16)
+                        mov(n16, masks[q0 / ne].ub(q0 % ne)(1), masks[q0 / n16].ub(1)(2));
                 break;
             case 4:
                 for (int qq0 = div_up(nq, ne16) - 1; qq0 >= 1; qq0--) {
@@ -137,11 +143,11 @@ void Generator<hw>::remaskLayout(int index, bool column,
 
                 auto necp = ne * crosspack;
                 necp = std::min(necp, 2 * elementsPerGRF(hw, Tr));
-                if ((necp * Tr) & 3) stub();
+                if (!T.is3() && ((necp * Tr) & 3)) stub();
 
                 int mstride;
                 Type mtype = Type::u32;
-                int dwCrosspack = std::max(1, 4 / Tr);
+                int dwCrosspack = T.is3() ? crosspack : std::max(1, 4 / Tr);
 
                 if (colMajor != column && crosspack == 1)
                     mstride = 1;
@@ -159,7 +165,6 @@ void Generator<hw>::remaskLayout(int index, bool column,
                 auto mregion = mask(mstride);
                 if (Tr.paddedSize() > 4 && mstride == 1)
                     mregion = mask(1, Tr.size() / 4, 0);
-
                 and_<uint32_t>((necp * Tr) / 4, sub.ud()(1), mregion, sub.ud()(1));
                 x0 += necp / crosspack;
             }

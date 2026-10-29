@@ -27,6 +27,11 @@ using namespace ngen;
 using namespace ngen::utils;
 using std::vector;
 
+static int int3RowSpreadOffset(int byte, int ld, int crosspack)
+{
+    return (byte / crosspack) * (ld * crosspack) + byte % crosspack;
+}
+
 namespace SendSpec {
 int MaxBlock2DWidthBytes(ngen::HW hw, bool prefetch) { return (hw == HW::Xe3p && prefetch) ? 256 : 64; }
 } // namespace SendSpec
@@ -138,6 +143,50 @@ RegisterBlock::RegisterBlock(HW hw_, Type T, int r, int c, const MatrixAddressin
         case AccessType::ChannelScattered:
         case AccessType::Scattered:
         {
+            if (T.is3() && !prefetch) {
+                // u3 (3-bit) scattered access; prefetches fall through
+                // to generic scattered. Only D32xV3/D64xV3 give a
+                // multiple of 3 bytes, else stub; reuses Block2DTranspose.
+                bool channelScattered = (accessType == AccessType::ChannelScattered);
+
+                if (channelScattered || atomic || !astrategy.newDP || isColMajor(atype.layout)
+                        || remainderR || remainderC)
+                         stub("u3 scattered access requires newDP, non-atomic, non-channel-scattered, "
+                         "row-major layout, and no remainder masking.");
+
+                auto maxSIMD = maxScatteredSIMD(hw, astrategy);
+                auto minSIMD = minScatteredSIMD(hw, astrategy);
+
+                int simd = rounddown_pow2(std::min({r, maxRBlock, maxSIMD}));
+                if (simd < minSIMD) simd = std::min(maxSIMD, minSIMD);
+                if (simd <= 0 || r % simd)
+                    stub("u3 scattered access: row count does not fit an exact SIMD width.");
+
+                // Prefer the larger D64xV3 (64-element) group when it fits exactly;
+                // fall back to the smaller D32xV3 (32-element) group otherwise.
+                int ebytesChoice = 0, elemsPerLane = 0;
+                for (auto cand : {std::make_pair(8, 64), std::make_pair(4, 32)}) {
+                    int eb = cand.first, epl = cand.second;
+                    if (epl > maxCBlock || epl > c) continue;
+                    if (c % epl == 0) { ebytesChoice = eb; elemsPerLane = epl; break; }
+                }
+                if (ebytesChoice == 0)
+                    stub("u3 scattered access: no groups-of-8 message (D32xV3/D64xV3) exactly fits the column block.");
+
+                rblock = simd;
+                cblock = elemsPerLane;
+                colMajor = true;
+                ebytes = ebytesChoice;
+                crosspack = ebytesChoice;      // power-of-2 unit width (D32 = 4 / D64 = 8 bytes)
+                count = 3;                     // LSC vector count V3 -- the multiple-of-3-bytes vcount
+                simdSize = rblock;
+                ld = roundup_pow2(rblock);
+                extra = 1;                     // "consecutive" elements/address; u3 groups are addressed as 1 unit
+                addrShift = 0;
+
+                break;
+            }
+
             bool channelScattered = (accessType == AccessType::ChannelScattered);
 
             // Detect large crosspack case.
@@ -339,6 +388,8 @@ RegisterBlock::RegisterBlock(HW hw_, Type T, int r, int c, const MatrixAddressin
         case AccessType::Block:
         case AccessType::PseudoBlock:
         {
+            if (T.is3()) stub("u3 block and pseudo-block access is unsupported.");
+
             // Three types of block messages:
             //    block_oword: 16 byte align, BLK masking (= dw)
             //  aligned_oword:  4 byte align, no masking, read only
@@ -410,6 +461,8 @@ RegisterBlock::RegisterBlock(HW hw_, Type T, int r, int c, const MatrixAddressin
                 int simdCap = maxSIMD;
                 if (atomic && !nativeAtomic)
                     simdCap = 16;
+                if (byte1PerSlot && a64 && !writable)
+                    simdCap = std::min(simdCap, 16);
                 maxElements = simdCap * maxNPack;
                 if (T.paddedSize() > stride)
                     maxElements = maxElements * stride / T;
@@ -657,27 +710,53 @@ RegisterBlock::RegisterBlock(HW hw_, Type T, int r, int c, const MatrixAddressin
                 if ((Y * Tblock) % 4) hw_unsupported();
                 maxXBlock = std::min(maxXBlock, 16);
             } else {
+                // find()/blockRegion()'s u3 group addressing needs the
+                // row-spread packing from a transposing 2D block message;
+                // plain Block2D doesn't produce that layout.
+                if (T.is3() && !prefetch)
+                    stub("u3 is only supported with Block2DTranspose access.");
                 if (Tblock.paddedSize() > 8) Tblock = Type::u64;
                 crosspack = atype.crosspack;
             }
-            if ((X * T) % 4) hw_unsupported();
+            if (T.is3()) {
+                // u3 is not addressable at native GRF granularity (see
+                // RegisterBlock::find()), so the byte-alignment check below
+                // (which assumes X*T lands on a whole byte) doesn't apply.
+            } else if ((X * T) % 4) hw_unsupported();
 
             int minAlign = block2DMinAlignment(hw, atype, astrategy);
             if (atype.alignment % minAlign) hw_unsupported();
 
             // Reinterpret X/maxXBlock to underlying type.
-            maxXBlock = (maxXBlock * T) / Tblock;
             auto X_logical = X;
-            X = (X * T) / Tblock;
+            if (T.is3() && !prefetch) {
+                // u3 uses a 4-byte group pitch (crosspack = 4 below).
+                // Round up instead of flooring, so a small tail rounds
+                // to one group (over-reads into padding) not zero.
+                const int groupBytes = 4;
+                auto toGroupsCeil = [&](int elems) {
+                    int bytes = static_cast<int>(elems * T);
+                    return div_up(bytes, groupBytes);
+                };
+                maxXBlock = std::max(1, toGroupsCeil(maxXBlock));
+                X = toGroupsCeil(X);
+            } else {
+                maxXBlock = (maxXBlock * T) / Tblock;
+                X = (X * T) / Tblock;
+            }
 
             // Carve out a maximal allowed block size - up to 64 bytes, or exactly 256 byte prefetches
             int maxBlockBytes = SendSpec::MaxBlock2DWidthBytes(hw, prefetch);
             if (X * Tblock < maxBlockBytes) {
                 // Max-size prefetches only, or fall back to regular block size limitations
-                maxBlockBytes =  SendSpec::MaxBlock2DWidthBytes(hw, false);
+                maxBlockBytes = SendSpec::MaxBlock2DWidthBytes(hw, false);
             }
             xblock = std::min(X, maxBlockBytes / Tblock);
             xblock = std::max(xblock, 4 / Tblock);
+            // Block2D transpose messages only support power-of-2 widths
+            // (u3's 3-dword tail can't be covered by widening). Round
+            // down; appendBlocks() recurses on the leftover remainder.
+            if (transpose && (!T.is3() || !prefetch)) xblock = rounddown_pow2(xblock);
             int yblockLimit = writable ? 8 : 32;
 
             if (isPacked(atype.layout) && 2 * xblock <= X && static_cast<uint32_t>(X_logical) == atype.packSize) {
@@ -711,16 +790,40 @@ RegisterBlock::RegisterBlock(HW hw_, Type T, int r, int c, const MatrixAddressin
             else if (atype.crosspack == icrosspack)
                 crosspack = 1;
             else return;
+            // u3's packed-group addressing is incompatible with crosspack
+            // rearrangement; repurpose crosspack to record the 4-byte
+            // column pitch instead, consumed by find()/blockRegion().
+            if (T.is3() && transpose) crosspack = 4;
 
             // Convert size from underlying type to our actual type.
-            xblock = (xblock * Tblock) / T;
+            if (T.is3() && !prefetch) {
+                int bytes = xblock * Tblock;
+                xblock = div_up(bytes * 8, T.bits());
+
+                // Transpose sends split on dword boundaries; the element
+                // straddling a boundary is unpacked from the merged layout.
+                if (transpose)
+                    xblock = (bytes * 8) / T.bits();
+                xblock = std::min(xblock, X_logical);
+            } else {
+                xblock = (xblock * Tblock) / T;
+            }
 
             simdSize = 1;
             ld = roundup_pow2(transpose ? yblock : xblock);
-            ebytes = Tblock.paddedSize();
+            // u3 has no native per-element hardware register type, so
+            // ebytes reflects the column pitch of its 8-element/3-byte
+            // packing group (crosspack) rather than Tblock's own size.
+            ebytes = T.is3() ? crosspack : Tblock.paddedSize();
             extra = T.bits();
             auto bytes = align_up((colMajor ? cblock : rblock) / count, crosspack) * ld * count * T;
+            // u3's row pitch isn't necessarily a power of 2; round up so
+            // the block message's register footprint is sized correctly.
+            if (T.is3())
+                bytes = ((colMajor ? cblock : rblock) / count) * roundup_pow2(ld * T) * count;
             msgRegs = GRF::bytesToGRFs(hw, bytes);
+            if (T.is3() && vnni)
+                stub("u3 does not support Block2DVNNI access; use Block2D or Block2DTranspose instead.");
             if (vnni && (T.bits() < 8)) {
                 byteGlue = true;
                 crosspack /= T.perByte();
@@ -738,6 +841,9 @@ RegisterBlock::RegisterBlock(HW hw_, Type T, int r, int c, const MatrixAddressin
             break;
         }
         case AccessType::CacheLine: {
+            if (T.is3())
+                stub("u3 is only supported with Block2DTranspose access.");
+
             // Let X be the contiguous dimension in memory, Y the scattered dimension.
             int x = colMajor ? r : c;
             int y = colMajor ? c : r;
@@ -835,9 +941,14 @@ RegisterBlock RegisterBlock::trySlice(Type T, bool column, int x1, int x2, int x
         return blockDst;
 
     if (colMajor == column) {
-        if (x1 % crosspack) return RegisterBlock();
-
-        blockDst.offsetBytes += (x1 * bytes) / oldNS;
+        if (T.is3() && !isLoadBlock() && colMajor && !byteGlue) {
+            if (x1 % 8) return RegisterBlock();
+            int phase = offsetBytes % crosspack;
+            blockDst.offsetBytes += int3RowSpreadOffset(phase + x1 / 8 * 3, ld, crosspack) - phase;
+        } else {
+            if (x1 % crosspack) return RegisterBlock();
+            blockDst.offsetBytes += (x1 * bytes) / oldNS;
+        }
 
         if (isLoadBlock()) switch (effAccessType) {
             case AccessType::Scattered:
@@ -895,7 +1006,8 @@ RegisterBlock RegisterBlock::trySlice(Type T, bool column, int x1, int x2, int x
                 break;
         }
     } else {
-        blockDst.offsetBytes += x1 * Telem * crosspack;
+        blockDst.offsetBytes += (T.is3() && !isLoadBlock() && colMajor && !byteGlue)
+                ? x1 * crosspack : x1 * Telem * crosspack;
 
         if (isLoadBlock()) switch (effAccessType) {
             case AccessType::Block:
@@ -913,11 +1025,11 @@ RegisterBlock RegisterBlock::trySlice(Type T, bool column, int x1, int x2, int x
             }
             case AccessType::Scattered:
             case AccessType::ChannelScattered: {
-                if (T.paddedSize() > blockDst.ebytes)   return RegisterBlock();
-                if (x1 != 0)                            return RegisterBlock();
-                if (!is_zero_or_pow2(x2))               return RegisterBlock();
+                if (x1 != 0)              return RegisterBlock();
+                if (!is_zero_or_pow2(x2)) return RegisterBlock();
 
-                blockDst.simdSize = div_up(ns * T, blockDst.ebytes);
+                // Keep the same number of lanes per row/column. Non-power-of-2 blocks have padding lanes.
+                blockDst.simdSize = div_up(ns * simdSize, roundup_pow2(oldNS));
 
                 auto minSIMD = minScatteredSIMD(hw, astrategy);
                 if (blockDst.simdSize <= minSIMD && simdSize > minSIMD) {
@@ -965,6 +1077,33 @@ Subregister RegisterBlock::find(Type T, int ii, int jj, const GRFMultirange &reg
     int xx = colMajor ? ii : jj;
     int yy = colMajor ? jj : ii;
     int nx = colMajor ? nr : nc;
+
+    // u3 has no native register type; return the start of the 3-byte
+    // group of 8 elements containing (ii, jj), as Type::ngen_u3() --
+    // unpacked only by CopyPlan::planInt3Upconvert.
+    if (T.is3()) {
+        if (!colMajor || byteGlue)
+            stub("Flat u3 register access is unsupported.");
+
+        int elIndex = xx + yy * ld;
+        if (elIndex & 7)
+            stub("u3 element index must be aligned to an 8-element (3-byte) group boundary.");
+
+        int group = yy / 8;
+        // A sliced layout can start partway through a packed dword.
+        int phase = offsetBytes % crosspack;
+        int byteOff = int3RowSpreadOffset(phase + group * 3, ld, crosspack)
+                - phase + xx * crosspack;
+        byteOff += offsetBytes;
+
+        int consecutive;
+        auto result = regs.sub(hw, byteOff, Te.ngen(), &consecutive);
+        // Groups run along the outer axis and are vectorized across the
+        // inner row-spread lane axis in a single mov.
+        if (nelems) *nelems = nx - xx;
+        return result;
+    }
+
     int ne = nx - xx;
 
     int yyx = yy % crosspack;
@@ -1016,15 +1155,24 @@ void RegisterBlock::calcBytes(Type T, const MatrixAddressingStrategy &astrategy)
 {
     if (astrategy.newDP && astrategy.prefetch)
         bytes = 0;
-    else
+    else {
         calcBytes(T);
+        if (T.is3() && astrategy.accessType == AccessType::Block2DTranspose && isLoadBlock())
+            bytes = msgRegs * GRF::bytes(hw);
+    }
 }
 
 void RegisterBlock::calcBytes(Type T)
 {
     if (cxComponent != Interleaved)
         T = T.real();
-    bytes = align_up(colMajor ? nc : nr, crosspack) * ld * T;
+    if (T.is3() && !isLoadBlock() && colMajor && !byteGlue) {
+        int phase = offsetBytes % crosspack;
+        int lastByte = phase + div_up(nc * T.bits(), 8) - 1;
+        bytes = int3RowSpreadOffset(lastByte, ld, crosspack) - phase
+                + (nr - 1) * crosspack + 1;
+    } else
+        bytes = align_up(colMajor ? nc : nr, crosspack) * ld * T;
     if (isLoadBlock() && msgRegs == 0)
         msgRegs = GRF::bytesToGRFs(hw, bytes);
 }
@@ -1097,7 +1245,12 @@ void RegisterBlock::getBlock2DWH(int &w, int &h, int &count, const MatrixAddress
     bool transpose = (isColMajor(atype.layout) != colMajor);
     w = isColMajor(atype.layout) ? nr : nc;
     h = isColMajor(atype.layout) ? nc : nr;
-    w = (w * extra) / (ebytes * 8);     /* extra: #bits in logical data type */
+    if (transpose && extra == 3 && !prefetch) {
+        int offset = isColMajor(atype.layout) ? offsetR : offsetC;
+        w = div_up((offset + w) * extra, ebytes * 8)
+                - div_up(offset * extra, ebytes * 8);
+    } else
+        w = (w * extra) / (ebytes * 8);
     if (isPacked(atype.layout)) {
         // prefetch: allow max-size or regular max width fallback
         int maxWBytes = SendSpec::MaxBlock2DWidthBytes(hw, prefetch);
@@ -1280,6 +1433,44 @@ RegisterLayout::RegisterLayout(Type T_, const MatrixAddressing &atype_, const Ma
     updateDims();
 }
 
+RegisterLayout RegisterLayout::int3UnpackLayout() const
+{
+    if (!T.is3() || astrategy.accessType != AccessType::Block2DTranspose)
+        return *this;
+
+    vector<RegisterBlock> merged;
+    merged.reserve(list.size());
+    bool memCM = isColMajor(atype.layout);
+    for (size_t i = 0; i < list.size(); i++) {
+        auto block = list[i];
+        auto width = memCM ? &RegisterBlock::nr : &RegisterBlock::nc;
+        auto offset = memCM ? &RegisterBlock::offsetR : &RegisterBlock::offsetC;
+        auto otherSize = memCM ? &RegisterBlock::nc : &RegisterBlock::nr;
+        auto otherOffset = memCM ? &RegisterBlock::offsetC : &RegisterBlock::offsetR;
+
+        while (!is_zero_or_pow2(int(block.*width))) {
+            if (i + 1 >= list.size()) stub("Incomplete u3 transpose load.");
+            const auto &next = list[i + 1];
+            if (next.*offset != block.*offset + block.*width
+                    || next.*otherOffset != block.*otherOffset
+                    || next.*otherSize != block.*otherSize
+                    || next.offsetBytes != block.offsetBytes + block.bytes
+                    || next.component != block.component
+                    || next.cxComponent != block.cxComponent
+                    || next.colMajor != block.colMajor
+                    || next.ld != block.ld || next.crosspack != block.crosspack)
+                stub("Noncontiguous u3 transpose load.");
+            block.*width += next.*width;
+            block.bytes += next.bytes;
+            block.simdSize = 0;
+            block.msgRegs = 0;
+            i++;
+        }
+        merged.push_back(block);
+    }
+    return RegisterLayout(T, atype, astrategy, std::move(merged));
+}
+
 
 bool RegisterLayout::appendBlocks(int r, int c, int roff, int coff, RemainderOptions remOpts, int maxRBlock, int maxCBlock)
 {
@@ -1289,6 +1480,23 @@ bool RegisterLayout::appendBlocks(int r, int c, int roff, int coff, RemainderOpt
 
     if (!blockTemplate.valid() || rblock == 0 || cblock == 0)
         return false;       /* Cannot handle requested block and remainder. */
+
+    if (T.is3() && astrategy.accessType == AccessType::Block2DTranspose
+            && !astrategy.prefetch) {
+        bool memCM = isColMajor(atype.layout);
+        int offset = memCM ? roff : coff;
+        int &width = memCM ? rblock : cblock;
+        // Transpose messages address u3 in whole dwords (32 elements = 3 dwords).
+        //  Sub-blocks may split groups, but the full load must end on a dword.
+        if (((offset + (memCM ? r : c)) * T.bits()) % 32)
+            return false;
+        int messageWidth = div_up((offset + width) * T.bits(), 32)
+                - div_up(offset * T.bits(), 32);
+        int lastElement = ((div_up(offset * T.bits(), 32) + messageWidth) * 32)
+                / T.bits();
+        width = std::min(memCM ? r : c, lastElement - offset);
+        (memCM ? blockTemplate.nr : blockTemplate.nc) = width;
+    }
 
     list.reserve(list.size() + T.components() * (r / rblock) * (c / cblock));
 
@@ -1457,6 +1665,23 @@ bool RegisterLayout::append1DBlocks(int r, int c)
     }
 
     return true;
+}
+
+// Repoint this layout at a different in-memory representation.
+void RegisterLayout::retarget(const MatrixAddressing &atype_, const MatrixAddressingStrategy &astrategy_)
+{
+    atype = atype_;
+    astrategy = astrategy_;
+
+    // Any previously-computed address-coalescing offsets were derived for the old
+    //   addressing scheme and may not be valid for the new one (e.g. a packed layout
+    //   with a different row/column pitch than the original memory layout). Clear them
+    //   before recomputing, so that blocks the new coalesceAddrs() pass doesn't touch
+    //   don't retain stale, incorrect offsets.
+    for (auto &block: list)
+        block.offsetAddr = 0;
+
+    coalesceAddrs();
 }
 
 // Return maximum immediate address offset for a send message.
@@ -1679,6 +1904,12 @@ void RegisterLayout::finalize()
 {
     int offsetBytes = 0;
     for (auto &block: *this) {
+        if (T.is3() && astrategy.accessType == AccessType::Block2DTranspose
+                && !astrategy.prefetch && block.isLoadBlock()) {
+            int width, height, count;
+            block.getBlock2DWH(width, height, count, atype, astrategy.prefetch);
+            block.msgRegs = GRF::bytesToGRFs(hw, width * height * block.ebytes * count);
+        }
         if (block.isLoadBlock() || isBlock2D(astrategy.accessType))
             offsetBytes = ngen::utils::alignup_pow2(offsetBytes, GRF::bytes(hw));
         block.calcBytes(T, astrategy);
@@ -1807,8 +2038,9 @@ int RegisterLayout::regs() const
     if (empty()) return 0;
 
     int lastByte = 0;
-    for (auto &block: *this)
+    for (auto &block: *this) {
         lastByte = std::max(lastByte, block.offsetBytes + block.bytes);
+    }
 
     return GRF::bytesToGRFs(hw, lastByte);
 }
@@ -1831,11 +2063,11 @@ void RegisterLayout::sort(bool reverse)
     });
 }
 
-void RegisterLayout::assignUniformMask(FlagRegister flag, int idx)
+void RegisterLayout::assignUniformMask(FlagRegister flag, HW hw, int idx)
 {
     for (auto &block: *this) {
         if (block.flag[idx]) stub();     /* Already has a flag? */
-        block.flag[idx] = flag;
+        block.flag[idx] = VirtualFlag(flag, hw);
     }
 }
 
@@ -1975,7 +2207,7 @@ RegisterLayout RegisterLayout::slice(bool column, int x1, int x2, bool overrunOK
     return result;
 }
 
-RegisterLayout RegisterLayout::slice(vector<GRFRange> &subaddrs, const vector<GRFRange> &addrs, bool column, int x1, int x2, bool overrunOK) const
+RegisterLayout RegisterLayout::slice(vector<RegisterRange> &subaddrs, const vector<RegisterRange> &addrs, bool column, int x1, int x2, bool overrunOK) const
 {
     auto result = trySlice(subaddrs, addrs, column, x1, x2, overrunOK);
     if (!result) stub("Could not slice register layout");
@@ -1994,7 +2226,7 @@ RegisterLayout RegisterLayout::trySlice(bool column, int x1, int x2, bool overru
     return trySlice(nullptr, nullptr, nullptr, column, x1, x2, overrunOK, decoalesce);
 }
 
-RegisterLayout RegisterLayout::trySlice(vector<GRFRange> &subaddrs, const vector<GRFRange> &addrs, bool column, int x1, int x2, bool overrunOK) const
+RegisterLayout RegisterLayout::trySlice(vector<RegisterRange> &subaddrs, const vector<RegisterRange> &addrs, bool column, int x1, int x2, bool overrunOK) const
 {
     return trySlice(&subaddrs, nullptr, &addrs, column, x1, x2, overrunOK);
 }
@@ -2004,7 +2236,7 @@ RegisterLayout RegisterLayout::trySlice(vector<int> &indices, bool column, int x
     return trySlice(nullptr, &indices, nullptr, column, x1, x2, overrunOK);
 }
 
-RegisterLayout RegisterLayout::trySlice(vector<GRFRange> *subaddrs, vector<int> *indices, const vector<GRFRange> *addrs,
+RegisterLayout RegisterLayout::trySlice(vector<RegisterRange> *subaddrs, vector<int> *indices, const vector<RegisterRange> *addrs,
                                         bool column, int x1, int x2, bool overrunOK, bool decoalesce) const
 {
     auto RegisterBlock::*nq      = column ? &RegisterBlock::nc      : &RegisterBlock::nr;
@@ -2073,7 +2305,7 @@ RegisterLayout RegisterLayout::tryUpgradeToBlock2D(const MatrixAddressing &atype
 
     int r0 = -1, c0 = -1, b0 = -1;
     int nr = 0, nc = 0;
-    bool ok = true;
+    bool ok = true, lastDense = false;
 
     auto make2DBlock = [&] {
         if (r0 < 0 || c0 < 0) return;
@@ -2086,7 +2318,14 @@ RegisterLayout RegisterLayout::tryUpgradeToBlock2D(const MatrixAddressing &atype
         if ((block.offsetBytes & omask) || (block.bytes & omask))          return RegisterLayout();
         if (!transpose && (block.colMajor ? block.nr : block.nc) * T > 64) return RegisterLayout();    /* avoid lots of small blocks */
 
-        bool consecutive = (block.offsetBytes == (b0 + GRF::bytes(hw)));
+        // 2D block messages pad each row in GRF to the next power of two.
+        int inner = block.colMajor ? block.nr : block.nc;
+        int outer = block.colMajor ? block.nc : block.nr;
+        int ld2D = roundup_pow2(inner);
+        if (block.crosspack != 1 || (outer > 1 && block.ld != ld2D)) return RegisterLayout();
+
+        // Only merge with the previous block if it had no trailing padding.
+        bool consecutive = lastDense && (block.offsetBytes == (b0 + GRF::bytes(hw)));
         if (regCM && block.offsetC == c0 + nc && consecutive && nr == block.nr)
             nc++;
         else if (!regCM && block.offsetR == r0 + nr && consecutive && nc == block.nc)
@@ -2097,9 +2336,11 @@ RegisterLayout RegisterLayout::tryUpgradeToBlock2D(const MatrixAddressing &atype
             nr = block.nr; nc = block.nc;
         }
         b0 = block.offsetBytes;
+        lastDense = (block.bytes == ld2D * outer * T);
     }
 
     make2DBlock();
+    if (!ok) return RegisterLayout();
 
     layout2D.sort();
     layout2D.postprocess();

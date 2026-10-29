@@ -31,7 +31,8 @@ status_t with_post_ops_t::pd_t::init(const impl::engine_t *engine) {
     const auto attr_skip_mask = smask_t::scales_data_type
             | smask_t::scales_groups | smask_t::post_ops
             | smask_t::accumulation_mode | smask_t::fpmath_mode
-            | smask_t::zero_points_data_type | smask_t::dropout;
+            | smask_t::zero_points_data_type | smask_t::dropout
+            | smask_t::gpu_attr;
 
     bool wei_decomp = (utils::one_of(d->c_type(), f32, f16, bf16)
                               && utils::one_of(d->a_type(), u8, s8, u4, s4, u2)
@@ -117,7 +118,9 @@ status_t with_post_ops_t::pd_t::init(const impl::engine_t *engine) {
     int src_mask = zp.get_mask(DNNL_ARG_SRC);
     int wei_mask = zp.get_mask(DNNL_ARG_WEIGHTS);
     if (!zp.has_default_values(DNNL_ARG_SRC)) {
-        CHECK(attributes_without_po.zero_points_.set(DNNL_ARG_SRC, src_mask));
+        const auto dt = attr()->zero_points_.get_data_type(DNNL_ARG_SRC);
+        CHECK(attributes_without_po.zero_points_.set(
+                DNNL_ARG_SRC, src_mask, dt, 0, {}));
     }
     if (!zp.has_default_values(DNNL_ARG_WEIGHTS)) {
         const auto dt = attr()->zero_points_.get_data_type(DNNL_ARG_WEIGHTS);

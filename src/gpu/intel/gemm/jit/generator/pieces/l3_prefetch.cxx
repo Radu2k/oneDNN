@@ -108,8 +108,8 @@ void Generator<hw>::gemmInitL3Prefetch(bool nextWave, const GEMMProblem &problem
     int ma_prefetchL3, ka_prefetchL3;
     int kb_prefetchL3, nb_prefetchL3;
 
-    if (doA) coopSplit(true,  ma_prefetchL3, ka_prefetchL3, strategy.unroll[LoopM], strategy.ka_prefetchL3, strategy.wgTile(LoopM), coopSplitA, globalA, strategy);
-    if (doB) coopSplit(false, kb_prefetchL3, nb_prefetchL3, strategy.kb_prefetchL3, strategy.unroll[LoopN], strategy.wgTile(LoopN), coopSplitB, globalB, strategy);
+    if (doA) coopSplit(true,  ma_prefetchL3, ka_prefetchL3, strategy.unroll[LoopM], strategy.ka_prefetchL3, strategy.wgTile(LoopM), coopSplitA, globalA, strategy, strategy.AB_prefetchL3.accessType, Ta_ext);
+    if (doB) coopSplit(false, kb_prefetchL3, nb_prefetchL3, strategy.kb_prefetchL3, strategy.unroll[LoopN], strategy.wgTile(LoopN), coopSplitB, globalB, strategy, strategy.AB_prefetchL3.accessType, Tb_ext);
 
     std::swap(state.effCoopA, coopSplitA);  /* Temporarily override A/B splitting */
     std::swap(state.effCoopB, coopSplitB);
@@ -131,16 +131,16 @@ void Generator<hw>::gemmInitL3Prefetch(bool nextWave, const GEMMProblem &problem
         state.flagL3PFA = state.raVFlag.alloc();
         state.Apl3_layout = RegisterLayout(hw, Ta_ext, ma_prefetchL3, ka_prefetchL3, globalA, strategy.AB_prefetchL3);
         for (auto &block: state.Apl3_layout)
-            block.flag[0] = state.flagL3PFA;
-        allocAddrRegs(state.Apl3_addrs, state.Apl3_layout, state);
+            block.flag[0] = VirtualFlag(state.flagL3PFA, hw);
+        allocAddrRegs(hw, state.Apl3_addrs, state.Apl3_layout, state);
     }
 
     if (doB && state.Bpl3_layout.empty()) {
         state.flagL3PFB = state.raVFlag.alloc();
         state.Bpl3_layout = RegisterLayout(hw, Tb_ext, kb_prefetchL3, nb_prefetchL3, globalB, strategy.AB_prefetchL3);
         for (auto &block: state.Bpl3_layout)
-            block.flag[0] = state.flagL3PFB;
-        allocAddrRegs(state.Bpl3_addrs, state.Bpl3_layout, state);
+            block.flag[0] = VirtualFlag(state.flagL3PFB, hw);
+        allocAddrRegs(hw, state.Bpl3_addrs, state.Bpl3_layout, state);
     }
 
     if (doA) setupAddr(state.Apl3_addrs, effApL3, state.Apl3_layout, state.inputs.lda, strategy, state, Apl3_params);

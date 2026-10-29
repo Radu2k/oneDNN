@@ -80,9 +80,9 @@ void extend_binary_args_per_w(const post_ops_t &post_ops,
  * and between compute_vector_range calls.
  *
  * @param rhs_dt_helper_vmm_idx - index of vmm helper used when loading data for
- * calculations. Treated as hint from user. If inside compute_vector_range hint
- * turns out to be invalid, it will be overwriten by register preserving logic inside
- * binary injector.
+ * calculations. Treated as hint from user. If inside compute_vector_range the
+ * hint is one of the vmms the post-op is applied to, it is overwritten with a
+ * vmm outside that set.
  * @param rhs_addr_reg - gpr register, used as the currently processed address of
  * rhs tensor slice. Data of rhs(arg1) for the binary operation is loaded from address
  * stored inside rhs_addr_reg.
@@ -212,6 +212,12 @@ struct static_params_t {
 enum class tail_lode_mode_t { STATIC, DYNAMIC, DEFAULT };
 
 /*
+ * Maps rhs_arg_idx of a binary post-op to the index of the vmm that holds its
+ * scalar RHS as f32 in all lanes.
+ */
+using preloaded_rhs_t = std::map<int, int>;
+
+/*
  * Represents params passed to compute_vector_range method of
  * jit_uni_binary_injector_t that can be different for each call.
  * Contains configurable std::maps where key is vmm index and value is
@@ -233,6 +239,9 @@ enum class tail_lode_mode_t { STATIC, DYNAMIC, DEFAULT };
  * @param is_dynamic_tail_load - determines whether to load with tail in
  * runtime (based on the value from reg_tail_size or opmask) or based on given
  * integer.
+ * @param preloaded_rhs - scalar RHS values already held in vmms, as returned by
+ * jit_uni_postops_injector_t::preload_scalar_vector_range. The injector uses
+ * these registers instead of reading the RHS from memory.
  */
 
 struct rhs_arg_dynamic_params_t {
@@ -242,6 +251,7 @@ struct rhs_arg_dynamic_params_t {
 
     std::unordered_set<int> vmm_tail_idx_;
     tail_lode_mode_t tail_load_mode = tail_lode_mode_t::DEFAULT;
+    preloaded_rhs_t preloaded_rhs;
 };
 
 /*
@@ -311,6 +321,15 @@ public:
             const rhs_arg_dynamic_params_t &rhs_arg_params) const;
 
     /*
+     * Loads the scalar RHS of `post_op` into Vmm(vmm_idx) as f32 in all lanes.
+     * Returns false and emits nothing if the post-op is not eligible. On
+     * success, the host may add {rhs_arg_idx, vmm_idx} to
+     * rhs_arg_dynamic_params_t::preloaded_rhs if Vmm(vmm_idx) is free.
+     */
+    bool preload_scalar_rhs(int vmm_idx, int rhs_arg_idx,
+            const dnnl_post_ops::entry_t &post_op) const;
+
+    /*
      * Reads a value from `base + byte_off` into vmm `dst` as f32, reusing the
      * RHS load path (`load_rhs` and its helpers). The sum post-op uses it to
      * read the accumulator's previous value, so the RHS infrastructure
@@ -324,12 +343,33 @@ public:
 
 private:
     /*
-     * Determines if hint passed by user is valid (is inside range
-     * <start_idx, end_idx>). If not it returns new vmm idx value that will be
-     * used as temporary vmm in future computations.
+     * Like the set-based `compute_vector_range()`, but every output base
+     * register must differ from the helper gprs.
      */
-    int adjust_temp_vmm_hint(
-            int user_hint, int start_idx, int end_idx, int max_vmm_idx) const;
+    void compute_vector_range_impl(
+            const injector_utils::vmm_index_set_t &vmm_idxs, int rhs_arg_idx,
+            const dnnl_post_ops::entry_t &post_op,
+            const rhs_arg_dynamic_params_t &rhs_arg_params) const;
+    /*
+     * Checks if the RHS of `post_op` is a single value that one vmm can hold
+     * for all vectors, see preload_scalar_rhs.
+     */
+    bool is_scalar_rhs_preloadable(const dnnl_post_ops::entry_t &post_op) const;
+    /*
+     * Returns the temporary vmm index for one `compute_vector_range()` call.
+     *
+     * Tries these candidates in order and returns the first that qualifies:
+     *   1. `user_hint`, if it is at most `max_vmm_idx` and not in `vmm_idxs`.
+     *   2. `max_vmm_idx`, if it is not in `vmm_idxs` and `user_hint` is at
+     *      most `max_vmm_idx`.
+     *   3. Register 0, if it is not in `vmm_idxs`.
+     *   4. The highest register up to `max_vmm_idx` that is not in
+     *      `vmm_idxs`.
+     * Returns -1 when every register up to `max_vmm_idx` is in `vmm_idxs`.
+     */
+    int adjust_temp_vmm_hint(int user_hint,
+            const injector_utils::vmm_index_set_t &vmm_idxs,
+            int max_vmm_idx) const;
     /*
      * Taking into account rhs_broadcasting_strategy and information from user
      * about tensor slice (rhs_arg_params) stored in Vmm(vmm_idx) calculates
@@ -597,13 +637,6 @@ private:
             const Xbyak::Address &rhs_addr) const;
     void cvt_to_f32(const Vmm &tmp_reg) const;
     /*
-     * Returns pair consisting of flag indication preservation is needed for vmm
-     * index in second member that should be used as temporary vmm inside inject
-     * binary.
-     */
-    std::pair<bool, int> should_preserve_vmm(int curr_idx, int vmm_hint,
-            int max_vmm_idx, bool dt_helper_vmm_needed) const;
-    /*
      * Used in isa != avx512 where m32bcst is not supported, replaces ptr_b
      * with ptr.
      */
@@ -621,6 +654,9 @@ private:
     fp8_conversion_e4m3_t *f8_e4m3_cvt_ {nullptr};
 
     const rhs_arg_static_params_t rhs_arg_static_params_;
+    // The hint the caller passed. `rhs_dt_helper_vmm_idx` starts equal to it,
+    // but `compute_vector_range_impl()` overwrites it with the helper it picks.
+    const int user_vmm_hint_;
     const Xbyak::Reg64 param1_;
     const bcast_set_t supported_strategy_set_;
     const cpu_isa_t isa_ = host_->max_cpu_isa();

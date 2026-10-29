@@ -159,7 +159,7 @@ void Generator<hw>::gemmMicrokernel(GEMMProblem problem, GEMMStrategy strategy, 
             state.fullK = state.ra.alloc_sub<uint32_t>(getHint(HintType::LongTerm, strategy));
             mov(1, state.fullK, state.inputs.k);
         }
-        
+
         if (strategy.kInterleave) {
             emad(1, state.h0, state.h0, state.lidK, strategy.kInterleaveChunk, strategy, state);
         } else {
@@ -264,8 +264,8 @@ microkernel::Package Generator<hw>::gemmMicrokernelPackage(const GEMMProblem &pr
         if (iname == "a")             iname = "A";
         else if (iname == "b")        iname = "B";
         else if (iname == "slm")      iname = "slm_base";
-        else if (iname == "a_offset") iname = "ao_ptr";
-        else if (iname == "b_offset") iname = "bo_ptr";
+        else if (iname == "a_offset") iname = problem.aOffsetHostScalar() ? "ao" : "ao_ptr";
+        else if (iname == "b_offset") iname = problem.bOffsetHostScalar() ? "bo" : "bo_ptr";
         else if (iname == "a_scale")  iname = "a_scale_ptr";
         else if (iname == "b_scale")  iname = "b_scale_ptr";
 
@@ -366,6 +366,7 @@ static inline microkernel::StructuredType::Type microType(Type T)
         CASE(s16)
         CASE(s8)
         CASE(s4)
+        CASE(u3)
         CASE(u32)
         CASE(u16)
         CASE(u8)

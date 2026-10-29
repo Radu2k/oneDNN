@@ -49,8 +49,9 @@ struct copy_operand_t : gemmstone::CopyOperand {
 struct copy_plan_t : gemmstone::CopyPlan {
     using gemmstone::CopyPlan::newTemp;
 
-    copy_plan_t(reg_allocator_t &ra, bool systolic_support)
-        : CopyPlan(ra.hardware(), systolic_support), ra_(ra) {}
+    copy_plan_t(ngen::ProductFamily product_family, reg_allocator_t &ra,
+            bool systolic_support)
+        : CopyPlan(product_family, systolic_support), ra_(ra) {}
 
     ngen::HW hw() const { return CopyPlan::hw; }
 
@@ -96,7 +97,7 @@ template <typename GeneratorT>
 void emit_reorder_1d_tile(GeneratorT *host, reg_allocator_t &ra,
         bool systolic_support, int width, const reg_buf_data_t &src,
         int src_stride, const reg_buf_data_t &dst, int dst_stride) {
-    copy_plan_t plan(ra, systolic_support);
+    copy_plan_t plan(host->getProductFamily(), ra, systolic_support);
     copy_operand_t dst_op = dst;
     copy_operand_t src_op = src;
     dst_op.stride = (uint8_t)dst_stride;
@@ -360,7 +361,8 @@ public:
         };
 
         for (const auto &tile : tiles()) {
-            copy_plan_t plan(scope.register_allocator(),
+            copy_plan_t plan(host->getProductFamily(),
+                    scope.register_allocator(),
                     host->hw_info().systolic_support());
             const auto base_phase = plan.phase;
             auto src_sub = src_layout_.sub(tile).with_offset(0);
@@ -420,7 +422,8 @@ private:
         // int4 -> fp16 has special conversion paths
         if (s.is_x4() && (d.is_f16() || d.is_bf16())) return d;
         if (d.is_x4() && (s.is_f16() || s.is_bf16())) return s;
-        if (s.is_u4() || d.is_u4()) return type_t::u16();
+        if (s.is_u4() || d.is_u4() || s.is_u2() || d.is_u2())
+            return type_t::u16();
         if (s.is_s4() || d.is_s4()) return type_t::s16();
 
         if (s == d) return d; // Swizzle only

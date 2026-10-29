@@ -136,9 +136,6 @@ MultishiftSubregister Generator<hw>::multishift(const Subregister &reg, unsigned
     return ms;
 }
 
-
-
-
 template <HW hw>
 FlagRegister Generator<hw>::getPhysicalFlag(VirtualFlag vflag, CommonState &state)
 {
@@ -171,7 +168,7 @@ FlagRegister Generator<hw>::getPhysicalFlag(VirtualFlag vflag, CommonState &stat
         pflag = vflag;
     }
 
-    return pflag.toPhysical();
+    return pflag.toPhysical(hw);
 }
 
 template <HW hw>
@@ -204,7 +201,6 @@ void Generator<hw>::deallocVFlagStorage(CommonState &state, bool saveCurrent)
 
     safeReleaseRanges(state.vflagStorage, state);
 }
-
 
 // Get ID of fused thread (0/1), multiplied by a scaling factor. Assumes r1 has not been overwritten,
 //  or state.lid0 is set to a subregister containing local ID 0 (divided by the subgroup size).
@@ -387,24 +383,26 @@ GRF Generator<hw>::loadScalars(Type T, const std::vector<Subregister> &src, cons
 
 // Load a contiguous vector from memory, with optional remainder handling.
 template <HW hw>
-GRFRange Generator<hw>::loadVector(Type Tsrc, Type Tdst, Subregister ptr, int n, Subregister rem, const CommonStrategy &strategy, CommonState &state)
+RegisterRange Generator<hw>::loadVector(Type Tsrc, Type Tdst, Subregister ptr, int n, Subregister rem, const CommonStrategy &strategy, CommonState &state)
 {
     MatrixAddressing atype;
     MatrixAddressingStrategy astrategy;
-    vector<GRFRange> addrs;
+    vector<RegisterRange> addrs;
     vector<MaskAssignment> masks;
     Subregister rems[3] = {rem};
     Subregister remTemp;
 
-    if (Tsrc.isInt4() && Tdst.isInt4()) {
-        // Temporary int4 path until copyRegisters supports int4->int4 copies.
+    if (Tsrc.isSubByteInt() && Tdst.isSubByteInt()) {
+        // Temporary int4/2 path until copyRegisters supports sub-byte int copies.
+        if (Tsrc.bits() != Tdst.bits()) stub();
         if (rem.isValid()) {
             remTemp = state.ra.alloc_sub<int32_t>();
             avg(1, remTemp, rem, 0);
             rems[0] = remTemp;
         }
+        int bits = Tsrc.bits();
         Tsrc = Tdst = Type::u8;
-        n = (n + 1) >> 1;
+        n = (n * bits + 7) >> 3;
     }
 
     atype.layout = MatrixLayout::N;
@@ -420,7 +418,7 @@ GRFRange Generator<hw>::loadVector(Type Tsrc, Type Tdst, Subregister ptr, int n,
 
     auto regs = state.ra.alloc_range(layout.regs());
 
-    allocAddrRegs(addrs, layout, state);
+    allocAddrRegs(hw, addrs, layout, state);
     setupAddr(addrs, ptr, layout, Subregister(), strategy, state);
     if (!assignMasks(layout, LoopM, LoopN, masks, strategy, state, true)) stub();
     loadMasks(masks, rems, strategy, state);
@@ -467,11 +465,11 @@ void Generator<hw>::extendIndexVec(int n, CommonState &state)
         if (nregs > cregs)
             indexVec.ranges.push_back(state.ra.alloc_range(nregs - cregs));
         if (ivEntries == 0) {
-            mov<uint16_t>(8, indexVec[0][0](1), Immediate::uv(0,1,2,3,4,5,6,7));
+            mov<uint16_t>(8, indexVec[0][0](1), Immediate::uv(0, 1, 2, 3, 4, 5, 6, 7));
             ivEntries = 8;
         }
         if (n > 8 && ivEntries < 16) {
-            mov<uint16_t>(8, indexVec[0][8](1), Immediate::uv(8,9,10,11,12,13,14,15));
+            mov<uint16_t>(8, indexVec[0][8](1), Immediate::uv(8, 9, 10, 11, 12, 13, 14, 15));
             ivEntries = 16;
         }
         if (GRF::bytes(hw) > 32 && n > 16 && ivEntries < 32) {
@@ -580,7 +578,7 @@ void Generator<hw>::calcIncrement(LDIncrements &increments, SubregisterPair &bas
 
     // Copy base for scale = 1.
     if (scale == 1) {
-        if(strategy.avoidIncConflicts)
+        if (strategy.avoidIncConflicts)
             duplicateScalar(base, state);
         increments.push_back(std::make_pair(1, base));
         return;
@@ -595,7 +593,7 @@ void Generator<hw>::calcIncrement(LDIncrements &increments, SubregisterPair &bas
         scaled = SubregisterPair(state.ra.alloc_sub(increments.type, getHint(HintType::LongTerm, strategy)));
 
     emulConstant(1, scaled.getReg(0), base, scale, strategy, state);
-    if(scaled.isDuplicated()) emov(1, scaled.getReg(1), scaled.getReg(0), strategy, state);
+    if (scaled.isDuplicated()) emov(1, scaled.getReg(1), scaled.getReg(0), strategy, state);
 
     increments.push_back(std::make_pair(scale, scaled));
 }
@@ -678,6 +676,5 @@ void Generator<hw>::initState(const CommonProblem &problem, const CommonStrategy
     for (int i = 0; i < FlagRegister::subcount(hw); i++)
         state.activeVFlags[i].clear();
 }
-
 
 GEMMSTONE_NAMESPACE_END

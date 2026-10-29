@@ -106,7 +106,7 @@ status_t get_ze_kernel_binary(
             ocl_program, ocl_engine->device(), ocl_engine->context(), binary));
 
     cl_int err;
-    auto name = kernel.get_info<::sycl::info::kernel::function_name>();
+    auto name = get_kernel_name(kernel);
     auto ocl_kernel = xpu::ocl::make_wrapper(
             xpu::ocl::clCreateKernel(ocl_program, name.c_str(), &err));
     OCL_CHECK(err);
@@ -300,16 +300,14 @@ status_t create_ocl_engine(
 
 status_t get_kernel_binary(
         const ::sycl::kernel &kernel, xpu::binary_t &binary) {
-    auto devs = kernel.get_context().get_devices();
-    assert(!devs.empty());
-    switch (xpu::sycl::get_backend(devs[0])) {
+    switch (xpu::sycl::get_backend(kernel)) {
         case xpu::sycl::backend_t::ze: {
             CHECK(get_ze_kernel_binary(kernel, binary));
             break;
         }
         case xpu::sycl::backend_t::opencl: {
-            auto ocl_kernel
-                    = ::sycl::get_native<::sycl::backend::opencl>(kernel);
+            auto ocl_kernel = xpu::ocl::make_wrapper(
+                    ::sycl::get_native<::sycl::backend::opencl>(kernel));
             CHECK(gpu::intel::ocl::get_ocl_kernel_binary(ocl_kernel, binary));
             break;
         }
@@ -317,6 +315,21 @@ status_t get_kernel_binary(
     }
 
     return status::success;
+}
+
+std::string get_kernel_name(const ::sycl::kernel &kernel) {
+    switch (xpu::sycl::get_backend(kernel)) {
+        case xpu::sycl::backend_t::ze:
+            return xpu::ze::get_kernel_name(
+                    ::sycl::get_native<::sycl::backend::ext_oneapi_level_zero>(
+                            kernel));
+        case xpu::sycl::backend_t::opencl: {
+            auto ocl_kernel = xpu::ocl::make_wrapper(
+                    ::sycl::get_native<::sycl::backend::opencl>(kernel));
+            return xpu::ocl::get_kernel_name(ocl_kernel);
+        }
+        default: assert(!"unexpected backend"); return {};
+    }
 }
 
 status_t get_kernel_bundle_binary(const gpu::intel::sycl::engine_t *engine,

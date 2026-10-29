@@ -17,8 +17,6 @@
 #ifndef GEMMSTONE_INCLUDE_GEMMSTONE_GENERATOR_HPP
 #define GEMMSTONE_INCLUDE_GEMMSTONE_GENERATOR_HPP
 
-#define BINARY_OUTPUT
-
 #include <array>
 #include <bitset>
 #include <complex>
@@ -34,29 +32,36 @@
 #include "gemmstone/type.hpp"
 #include "gemmstone/problem.hpp"
 #include "gemmstone/strategy.hpp"
-#include "gemmstone/microkernel_selector.hpp"
-#include "generator/pieces/copy_plan.hpp"
-#include "generator/pieces/register_layout.hpp"
-#include "generator/pieces/state.hpp"
+#include "gemmstone/../../generator/pieces/copy_plan.hpp"
+#include "gemmstone/../../generator/pieces/register_layout.hpp"
+#include "gemmstone/../../generator/pieces/state.hpp"
 #include "ngen_emulation.hpp"
 
+#include "gemmstone/microkernel/package.hpp"
+#include "gemmstone/microkernel/protocol.hpp"
+
+#if defined(BINARY_OUTPUT) || defined(ZEBIN_OUTPUT) || defined(OPENCL_OUTPUT)
+#include "internal/ngen_elf_hw_list.hpp"
+#endif
 
 GEMMSTONE_NAMESPACE_START
 
 // Macro configuration
 #ifndef GENERATOR_BASE
 
+#if defined(OPENCL_OUTPUT)
 #define GENERATOR_SUPER(hw) ngen::OpenCLCodeGenerator<hw>
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
-#define FORWARD(hw) NGEN_FORWARD_SYCL(hw)
-#endif
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
 #define FORWARD(hw) NGEN_FORWARD_OPENCL(hw)
-#endif
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_ZE
-#define FORWARD(hw) NGEN_FORWARD_LEVEL_ZERO(hw)
-#endif
 #define GENERATOR_DEBUGINFO {__FILE__, __LINE__}
+#elif defined(BINARY_OUTPUT)
+#define GENERATOR_SUPER(hw) ngen::BinaryCodeGenerator<hw>
+#define FORWARD(hw) NGEN_FORWARD(hw)
+#define GENERATOR_DEBUGINFO {}
+#elif defined(ZEBIN_OUTPUT)
+#define GENERATOR_SUPER(hw) ngen::ELFCodeGenerator<hw>
+#define FORWARD(hw) NGEN_FORWARD_ELF(hw)
+#define GENERATOR_DEBUGINFO {__FILE__, __LINE__}
+#endif
 
 #define GENERATOR_BASE(hw) GENERATOR_SUPER(hw)
 #endif
@@ -78,7 +83,11 @@ public:
     static CommonDriverInfo driverInfo(GEMMProblem problem, const GEMMStrategy &strategy);
 
 protected:
+#if defined(OPENCL_OUTPUT) || defined(ZEBIN_OUTPUT)
     ngen::InterfaceHandler &interface = super::interface_;
+#else
+    ngen::InterfaceHandler interface{hw};
+#endif
 
     std::exception_ptr lastException;
     GRFMultirange outputCRange;
@@ -130,25 +139,25 @@ protected:
     //   in the generator/pieces folder.
 
     // address_setup.cxx
-    template <typename BO> void setupAddr(Type T, const ngen::GRFRange &addr, const BO &ptr, const RegisterBlock &block, const ngen::Subregister &ld, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state, const Address2DParams &params = {}, LDMultiples ldMultiples = {});
-    template <typename BO> void setupAddr(const std::vector<ngen::GRFRange> &addr, const BO &ptr, const RegisterLayout &layout, const ngen::Subregister &ld, const CommonStrategy &strategy, CommonState &state, const Address2DParams &params = {}, const LDMultiples &ldMultiples = {}, int start = 0);
+    template <typename BO> void setupAddr(Type T, const ngen::RegisterRange &addr, const BO &ptr, const RegisterBlock &block, const ngen::Subregister &ld, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state, const Address2DParams &params = {}, LDMultiples ldMultiples = {});
+    template <typename BO> void setupAddr(const std::vector<ngen::RegisterRange> &addr, const BO &ptr, const RegisterLayout &layout, const ngen::Subregister &ld, const CommonStrategy &strategy, CommonState &state, const Address2DParams &params = {}, const LDMultiples &ldMultiples = {}, int start = 0);
 
-    void offsetAddr(const ngen::GRFRange &addrDst, const ngen::GRFRange &addrSrc, const RegisterBlock &blockDst, const RegisterBlock &blockSrc, int offsetFixed, int offsetLD, const ngen::Subregister &ld, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state, const LDMultiples &ldMultiples = {});
-    void setupAddrRel(const ngen::GRFRange &addrDst, const ngen::GRFRange &addrSrc, const RegisterBlock &blockDst, const RegisterBlock &blockSrc, const RegisterLayout &layout, const ngen::Subregister &ld, const CommonStrategy &strategy, CommonState &state, const LDMultiples &ldMultiples = {});
+    void offsetAddr(const ngen::RegisterRange &addrDst, const ngen::RegisterRange &addrSrc, const RegisterBlock &blockDst, const RegisterBlock &blockSrc, int offsetFixed, int offsetLD, const ngen::Subregister &ld, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state, const LDMultiples &ldMultiples = {});
+    void setupAddrRel(const ngen::RegisterRange &addrDst, const ngen::RegisterRange &addrSrc, const RegisterBlock &blockDst, const RegisterBlock &blockSrc, const RegisterLayout &layout, const ngen::Subregister &ld, const CommonStrategy &strategy, CommonState &state, const LDMultiples &ldMultiples = {});
 
-    template <typename I, typename Ir, typename Ic> void incAddrShifted(const ngen::GRFRange &addrDst, const ngen::GRFRange &addrSrc, I inc, Ir incR, Ic incC, const RegisterBlock &layoutDst, const RegisterBlock &layoutSrc, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state);
-    template <typename I, typename Ir, typename Ic> void incAddrShifted(const std::vector<ngen::GRFRange> &addr, I inc, Ir incR, Ic incC, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state);
-    template <typename I> void incAddrShifted(const std::vector<ngen::GRFRange> &addr, I inc, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state);
-    template <typename I, typename Ir, typename Ic> void incAddr(const ngen::GRFRange &addrDst, const ngen::GRFRange &addrSrc, I inc, Ir incR, Ic incC, const RegisterBlock &layoutDst, const RegisterBlock &layoutSrc, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state);
-    template <typename I, typename Ir, typename Ic> void incAddr(const std::vector<ngen::GRFRange> &addr, I inc, Ir incR, Ic incC, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state);
-    template <typename I> void incAddr(const ngen::GRFRange &addrDst, const ngen::GRFRange &addrSrc, I inc, const RegisterBlock &blockDst, const RegisterBlock &blockSrc, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state);
-    template <typename I> void incAddr(const std::vector<ngen::GRFRange> &addr, I inc, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state);
+    template <typename I, typename Ir, typename Ic> void incAddrShifted(const ngen::RegisterRange &addrDst, const ngen::RegisterRange &addrSrc, I inc, Ir incR, Ic incC, const RegisterBlock &layoutDst, const RegisterBlock &layoutSrc, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state);
+    template <typename I, typename Ir, typename Ic> void incAddrShifted(const std::vector<ngen::RegisterRange> &addr, I inc, Ir incR, Ic incC, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state);
+    template <typename I> void incAddrShifted(const std::vector<ngen::RegisterRange> &addr, I inc, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state);
+    template <typename I, typename Ir, typename Ic> void incAddr(const ngen::RegisterRange &addrDst, const ngen::RegisterRange &addrSrc, I inc, Ir incR, Ic incC, const RegisterBlock &layoutDst, const RegisterBlock &layoutSrc, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state);
+    template <typename I, typename Ir, typename Ic> void incAddr(const std::vector<ngen::RegisterRange> &addr, I inc, Ir incR, Ic incC, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state);
+    template <typename I> void incAddr(const ngen::RegisterRange &addrDst, const ngen::RegisterRange &addrSrc, I inc, const RegisterBlock &blockDst, const RegisterBlock &blockSrc, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state);
+    template <typename I> void incAddr(const std::vector<ngen::RegisterRange> &addr, I inc, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state);
     template <typename A, typename I, typename Ir, typename Ic> void incDecAddr(const A &addr, I inc, Ir incR, Ic incC, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state, bool decrement);
     template <typename A, typename I> void incDecAddr(const A &addr, I inc, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state, bool decrement);
-    void incAddrK(const std::vector<ngen::GRFRange> &addr, bool column, int k, const SubregisterPair &ld, const LDIncrements &incs, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state);
+    void incAddrK(const std::vector<ngen::RegisterRange> &addr, bool column, int k, const SubregisterPair &ld, const LDIncrements &incs, const RegisterLayout &layout, const CommonStrategy &strategy, CommonState &state);
 
-    void setAddrRemainder(Type T, const ngen::GRFRange &addr, const RegisterBlock &block, const ngen::Subregister &remR, const ngen::Subregister &remC, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state);
-    void setAddrRemainder(const std::vector<ngen::GRFRange> &addr, const RegisterLayout &layout, const ngen::Subregister &remR, const ngen::Subregister &remC, const CommonStrategy &strategy, CommonState &state);
+    void setAddrRemainder(Type T, const ngen::RegisterRange &addr, const RegisterBlock &block, const ngen::Subregister &remR, const ngen::Subregister &remC, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const CommonStrategy &strategy, CommonState &state);
+    void setAddrRemainder(const std::vector<ngen::RegisterRange> &addr, const RegisterLayout &layout, const ngen::Subregister &remR, const ngen::Subregister &remC, const CommonStrategy &strategy, CommonState &state);
 
     ngen::Subregister startShift(const MultishiftSubregister &ptr, int shift, CommonState &state);
     SubregisterPair startShift(const SubregisterPair &ptr, int shift, CommonState &state);
@@ -161,6 +170,11 @@ protected:
     template <typename BO, typename BI> typename std::enable_if<std::is_base_of<ngen::RegData, BO>::value>::type
     doneShift(const BO &ptr, const BI &ptrShifted, int shift, CommonState &state);
     void doneShift(const SubregisterPair &ptr, const SubregisterPair &ptrShifted, int shift, CommonState &state);
+
+    template <typename DT = void> void emin_(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, const ngen::Immediate &src1, CommonState &state, ngen::SourceLocation loc = {});
+    template <typename DT = void> void emin_(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, const ngen::RegData &src1, CommonState &state, ngen::SourceLocation loc = {});
+    template <typename DT = void> void emax_(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, const ngen::Immediate &src1, CommonState &state, ngen::SourceLocation loc = {});
+    template <typename DT = void> void emax_(const ngen::InstructionModifier &mod, const ngen::RegData &dst, const ngen::RegData &src0, const ngen::RegData &src1, CommonState &state, ngen::SourceLocation loc = {});
 
     // asm_helpers.cxx
     void goto12(const ngen::InstructionModifier &mod, ngen::Label &jip) { goto12(mod, jip, jip); }
@@ -203,8 +217,8 @@ protected:
     void gemmAccessSums(COperation op, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
 
     void updateC(const GRFMultirange &C_acc, const GRFMultirange &C_accSwap, const GRFMultirange &C_load, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
-    void updateCLayout(const RegisterLayout &layoutExt, const ngen::GRFRange (&C_addr0)[2], const RegisterBlock &C_block0, COperation op, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
-    bool doStdCRemainder(RegisterLayout &layoutExt, RegisterLayout &layoutExtUnmasked, bool inside, bool columns[2], StdCRemType remTypes[2], bool fragments[2], bool fragPositives[2], int fragSizes[2], const ngen::GRFRange (&C_addr0)[2], const ngen::GRFRange (&C_addr0Unmasked)[2], COperation op, std::vector<MaskAssignment> &masks, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState state, RegisterBlock *C_block0 = nullptr, RegisterBlock *C_blockUnmasked0 = nullptr);
+    void updateCLayout(const RegisterLayout &layoutExt, const ngen::RegisterRange (&C_addr0)[2], const RegisterBlock &C_block0, COperation op, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+    bool doStdCRemainder(RegisterLayout &layoutExt, RegisterLayout &layoutExtUnmasked, bool inside, bool columns[2], StdCRemType remTypes[2], bool fragments[2], bool fragPositives[2], int fragSizes[2], const ngen::RegisterRange (&C_addr0)[2], const ngen::RegisterRange (&C_addr0Unmasked)[2], COperation op, std::vector<MaskAssignment> &masks, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState state, RegisterBlock *C_block0 = nullptr, RegisterBlock *C_blockUnmasked0 = nullptr);
     void doAlternateCRemainder(COperation op, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void convert(const GRFMultirange &range, Type Told, Type Tnew, const CommonStrategy &strategy, CommonState &state);
     bool gemmConvertC(Type Tnew, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
@@ -213,7 +227,7 @@ protected:
     void gemmKReduce(const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void gemmPrefetchC(const GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state);
 
-    void setupCAddr0(ngen::GRFRange (&C_addr0)[2], ngen::GRFRange (&C_addr0Unmasked)[2], const RegisterLayout &C_layout, const RegisterLayout &C_layoutUnmasked, int C_count, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, const Address2DParams *params = nullptr);
+    void setupCAddr0(ngen::RegisterRange (&C_addr0)[2], ngen::RegisterRange (&C_addr0Unmasked)[2], const RegisterLayout &C_layout, const RegisterLayout &C_layoutUnmasked, int C_count, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, const Address2DParams *params = nullptr);
 
     // common.cxx
     void initInterface(const CommonProblem &problem, const CommonStrategy &strategy, CommonState &state);
@@ -247,7 +261,7 @@ protected:
     void zeroMatrix(const GRFMultirange &r, const CommonStrategy &strategy);
 
     ngen::GRF loadScalars(Type T, const std::vector<ngen::Subregister> &src, const CommonStrategy &strategy, CommonState &state);
-    ngen::GRFRange loadVector(Type Tsrc, Type Tdst, ngen::Subregister ptr, int n, ngen::Subregister rem, const CommonStrategy &strategy, CommonState &state);
+    ngen::RegisterRange loadVector(Type Tsrc, Type Tdst, ngen::Subregister ptr, int n, ngen::Subregister rem, const CommonStrategy &strategy, CommonState &state);
 
     void broadcastToWG(ngen::FlagRegister leaderFlag, ngen::GRF value, const CommonStrategy &strategy, CommonState &state, int slmOffset = 0);
 
@@ -369,21 +383,21 @@ protected:
     void gemmCalcWorkshareBOffset(ngen::Subregister &off, ngen::Subregister &offR, ngen::Subregister &offC, const MatrixAddressing &B, const MatrixAddressingStrategy &B_strategy, int kb, int nb, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
 
     // k_loop.cxx
-    void gemmAIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, int ka_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int ha = 0);
-    void gemmAIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const MultishiftSubregister &ka_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int ha = 0);
-    void gemmAIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const ngen::Subregister &ka_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int ha = 0);
-    template <typename I> void gemmAIncrement(const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, I ka_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int ha = 0, int h = 0);
-    void gemmALoad(const GRFMultirange &regs, const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
-    template <typename I> void gemmALoadInc(const GRFMultirange &regs, const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, I ka_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+    void gemmAIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, int ka_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int ha = 0);
+    void gemmAIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const MultishiftSubregister &ka_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int ha = 0);
+    void gemmAIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const ngen::Subregister &ka_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int ha = 0);
+    template <typename I> void gemmAIncrement(const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, I ka_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int ha = 0, int h = 0);
+    void gemmALoad(const GRFMultirange &regs, const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+    template <typename I> void gemmALoadInc(const GRFMultirange &regs, const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, I ka_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
 
-    void gemmBIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, int kb_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int hb = 0);
-    void gemmBIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const MultishiftSubregister &kb_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int hb = 0);
-    void gemmBIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const ngen::Subregister &kb_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int hb = 0);
-    template <typename I> void gemmBIncrement(const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, I kb_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int hb = 0, int h = 0);
-    void gemmBLoad(const GRFMultirange &regs, const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
-    template <typename I> void gemmBLoadInc(const GRFMultirange &regs, const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, I kb_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+    void gemmBIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, int kb_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int hb = 0);
+    void gemmBIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const MultishiftSubregister &kb_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int hb = 0);
+    void gemmBIncrementInternal(const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const ngen::Subregister &kb_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int hb = 0);
+    template <typename I> void gemmBIncrement(const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, I kb_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int hb = 0, int h = 0);
+    void gemmBLoad(const GRFMultirange &regs, const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+    template <typename I> void gemmBLoadInc(const GRFMultirange &regs, const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, I kb_inc, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
 
-    template <bool doA> void gemmAiBiRemLoadInc(int h, bool incremental, bool incrementalCopy, bool keepAddrTogether, bool willRemask, const ngen::Subregister &kSLMX, const GRFMultirange &Xi_regs, const RegisterLayout &Xi_layout, const std::vector<ngen::GRFRange> &Xi_addrs, const std::vector<RegisterLayout> &Xi_layoutK, const std::vector<std::vector<ngen::GRFRange>> &Xi_addrsK, const GRFMultirange &Xo_regs, const RegisterLayout &Xo_layout, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+    template <bool doA> void gemmAiBiRemLoadInc(int h, bool incremental, bool incrementalCopy, bool keepAddrTogether, bool willRemask, const ngen::Subregister &kSLMX, const GRFMultirange &Xi_regs, const RegisterLayout &Xi_layout, const std::vector<ngen::RegisterRange> &Xi_addrs, const std::vector<RegisterLayout> &Xi_layoutK, const std::vector<std::vector<ngen::RegisterRange>> &Xi_addrsK, const GRFMultirange &Xo_regs, const RegisterLayout &Xo_layout, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
 
     void gemmSLMRemask(bool remaskA, bool remaskB, GRFMultirange &Ao_regs, GRFMultirange &Bo_regs, int kOffset, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
 
@@ -418,9 +432,9 @@ protected:
     bool tryAddRemainder(Type T, RegisterBlock &block, bool remainderR, bool remainderC, RemainderOptions remOpts, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy);
     bool tryAddRemainder(RegisterLayout &layout, bool remainderR, bool remainderC, RemainderOptions remOpts);
     void addRemainder(RegisterLayout &layout, bool remainderR, bool remainderC, RemainderOptions remOpts);
-    void addRemainder(RegisterLayout &layout, std::vector<ngen::GRFRange> &addrs, const ngen::Subregister &ld, bool remainderR, bool remainderC, RemainderOptions remOpts, const CommonStrategy &strategy, CommonState &state, int dataRegs = -1);
+    void addRemainder(RegisterLayout &layout, std::vector<ngen::RegisterRange> &addrs, const ngen::Subregister &ld, bool remainderR, bool remainderC, RemainderOptions remOpts, const CommonStrategy &strategy, CommonState &state, int dataRegs = -1);
     void updateBlock2DSizes(ngen::GRF addr, const RegisterBlock &dst, const RegisterBlock &src, const MatrixAddressing &atype, bool prefetch);
-    void adjustSubblockAddrs(const RegisterLayout &sublayout, const std::vector<ngen::GRFRange> &subaddrs, const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const CommonStrategy &strategy, const CommonState &state);
+    void adjustSubblockAddrs(const RegisterLayout &sublayout, const std::vector<ngen::RegisterRange> &subaddrs, const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const CommonStrategy &strategy, const CommonState &state);
 
     // masks.cxx
     bool assignMasks(RegisterLayout &layout, LoopType rloop, LoopType cloop, std::vector<MaskAssignment> &assignments, const CommonStrategy &strategy, CommonState &state, bool retryVirtual = false, const std::vector<MaskAssignment> *existing = nullptr);
@@ -455,20 +469,20 @@ protected:
     ngen::InstructionModifier registerBlockMasking(const RegisterBlock &block, CommonState &state, ngen::FlagRegister *outFlag = nullptr);
     void finishRegisterBlockMasking(CommonState &state);
 
-    void loadMatrixBlock(const ngen::Register &dest, const RegisterBlock &layout, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const ngen::GRFRange &addr, const CommonStrategy &strategy, CommonState &state, bool readCheck = false, bool series = false);
-    void loadMatrix(const GRFMultirange &dest, const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const CommonStrategy &strategy, CommonState &state, bool readCheck = false);
-    void prefetchMatrix(const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const CommonStrategy &strategy, CommonState &state);
-    void storeMatrixBlock(const ngen::GRF &src, const RegisterBlock &layout, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const ngen::GRFRange &addr, const CommonStrategy &strategy, CommonState &state, bool series = false);
-    void storeMatrix(const GRFMultirange &src, const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const CommonStrategy &strategy, CommonState &state);
-    void atomicAddMatrixBlock(Type T, const ngen::GRF &src, const RegisterBlock &layout, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const ngen::GRFRange &addr, const CommonProblem &problem, const CommonStrategy &strategy, CommonState &state, bool series = false);
-    void atomicAddMatrix(const GRFMultirange &src, const RegisterLayout &layout, const std::vector<ngen::GRFRange> &addrs, const CommonProblem &problem, const CommonStrategy &strategy, CommonState &state);
+    void loadMatrixBlock(const ngen::Register &dest, const RegisterBlock &layout, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const ngen::RegisterRange &addr, const CommonStrategy &strategy, CommonState &state, ngen::DataType T, bool readCheck = false, bool series = false, bool chain = false);
+    void loadMatrix(const GRFMultirange &dest, const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const CommonStrategy &strategy, CommonState &state, bool readCheck = false);
+    void prefetchMatrix(const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const CommonStrategy &strategy, CommonState &state);
+    void storeMatrixBlock(const ngen::GRF &src, const RegisterBlock &layout, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const ngen::RegisterRange &addr, const CommonStrategy &strategy, CommonState &state, bool series = false);
+    void storeMatrix(const GRFMultirange &src, const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const CommonStrategy &strategy, CommonState &state);
+    void atomicAddMatrixBlock(Type T, const ngen::GRF &src, const RegisterBlock &layout, const MatrixAddressing &atype, const MatrixAddressingStrategy &astrategy, const ngen::RegisterRange &addr, const CommonProblem &problem, const CommonStrategy &strategy, CommonState &state, bool series = false);
+    void atomicAddMatrix(const GRFMultirange &src, const RegisterLayout &layout, const std::vector<ngen::RegisterRange> &addrs, const CommonProblem &problem, const CommonStrategy &strategy, CommonState &state);
 
     // matrix_multiply.cxx
     void innerProductFMA(int h, int ha, int hb, int opCount, bool rem, const RegisterLayout &A_layout, const RegisterLayout &B_layout, const GRFMultirange &A_regs, const GRFMultirange &B_regs, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void outerProductFMA(int h, int ha, int hb, int opCount, bool rem, const RegisterLayout &A_layout, const RegisterLayout &B_layout, const GRFMultirange &A_regs, const GRFMultirange &B_regs, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void outerProductSystolic(int h, int ha, int hb, int opCount, bool rem, const RegisterLayout &A_layout, const RegisterLayout &B_layout, const GRFMultirange &A_regs, const GRFMultirange &B_regs, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void outerProduct(int h, int ha, int hb, int opCount, bool rem, const RegisterLayout &A_layout, const RegisterLayout &B_layout, const GRFMultirange &A_regs, const GRFMultirange &B_regs, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
-    void setupTeardownAccumulateSumSystolic(bool setup, Type Tother, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+    void setupTeardownAccumulateSum(bool setup, Type Tother, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void outerProductRepackC(int x0, int xr0, int nx, int h, bool rem, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void applyLateABOffset(bool isA, int h, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, int x0 = 0, int xr0 = 0, int nx = -1);
 
@@ -519,10 +533,11 @@ protected:
     void gemmRepack2DQuantizationData(Type Ts, Type Td, const RegisterLayout &layoutSrc, const RegisterLayout &layoutDst, const GRFMultirange &src, const GRFMultirange &dst, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void gemmRepack2DQuantizationData(const RegisterLayout &layoutSrc, const RegisterLayout &layoutDst, const GRFMultirange &src, const GRFMultirange &dst, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void gemmRepack2DOffsetData(Type Text, const RegisterLayout &layoutSrc, const RegisterLayout &layoutDst, const GRFMultirange &src, const GRFMultirange &dst, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
-    void dequantizeInt4Shift(Type Tsrc, GRFMultirange src, const CommonStrategy &strategy);
-    void dequantizeInt4(bool doA, const RegisterLayout &layoutSrc, const RegisterLayout &layoutDst, const RegisterLayout &layoutOffset, const RegisterLayout &layoutScale, const GRFMultirange &src, const GRFMultirange &dst, const GRFMultirange &offset, const GRFMultirange &scale, int offR, int offC, int h, int kab_load, int kq_load, const GEMMProblem *problem, const CommonStrategy &strategy, CommonState &state, bool s4Shift = true);
+    void dequantizeSubByteIntShift(Type Tsrc, GRFMultirange src, const CommonStrategy &strategy);
+    void dequantizeSubByteInt(bool doA, const RegisterLayout &layoutSrc, const RegisterLayout &layoutDst, const RegisterLayout &layoutOffset, const RegisterLayout &layoutScale, const GRFMultirange &src, const GRFMultirange &dst, const GRFMultirange &offset, const GRFMultirange &scale, int offR, int offC, int h, int kab_load, int kq_load, const GEMMProblem *problem, const CommonStrategy &strategy, CommonState &state, bool signedShift = true);
     void gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp op, const RegisterLayout &layout, const RegisterLayout &qlayout, const GRFMultirange &regs, const GRFMultirange &qregs, int h, int kab_load, int kq_load, const GEMMProblem &problem, const CommonStrategy &strategy, CommonState &state);
     void gemmDequantizeAB(bool doA, const RegisterLayout &layoutSrc, const RegisterLayout &layoutDst, const GRFMultirange &src, const GRFMultirange &dst, int h, int kab_load, int kab_repack, int kq_load, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, bool s4Shift = true);
+
     // register_allocation.cxx
     ngen::Bundle getHint(HintType type);
     ngen::Bundle getHint(HintType type, const CommonStrategy &strategy);

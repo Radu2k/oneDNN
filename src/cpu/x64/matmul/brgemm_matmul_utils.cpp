@@ -153,9 +153,9 @@ bool post_ops_ok(brgemm_matmul_conf_t &bgmmc, const primitive_attr_t &attr,
     bool is_binary_po_per_hw_bcast {};
     bool is_binary_po_batch_bcast {};
     std::tie(is_binary_po_per_oc_sp_bcast, is_binary_po_per_oc_d_bcast,
-            is_binary_po_channel_bcast, is_binary_po_per_mb_bcast,
-            is_binary_po_per_mb_w_bcast, is_binary_po_per_w_bcast,
-            is_binary_po_per_hw_bcast, is_binary_po_batch_bcast)
+            is_binary_po_per_mb_bcast, is_binary_po_channel_bcast,
+            is_binary_po_per_mb_w_bcast, is_binary_po_per_hw_bcast,
+            is_binary_po_per_w_bcast, is_binary_po_batch_bcast)
             = binary_injector_utils::bcast_strategies_present_tup(
                     post_ops.entry_, dst_d,
                     broadcasting_strategy_t::per_oc_spatial,
@@ -244,6 +244,8 @@ bool dims_adjacent(const memory_desc_wrapper &mdw, const int outer_dim,
     return strides[outer_dim] == dims[inner_dim] * inner_stride;
 }
 
+// Keep the per data type ISA lists below in sync with `set_isa_impl()` in
+// `brgemm/brgemm_utils.cpp`, which matches `brg->isa_user` by equality.
 status_t check_isa_with_datatype(
         const cpu_isa_t isa, const brgemm_matmul_conf_utils_t &bm_conf_utils) {
     const bool ok
@@ -255,7 +257,7 @@ status_t check_isa_with_datatype(
                             || is_superset(isa, avx2_vnni))
             && IMPLICATION(bm_conf_utils.is_bf16(),
                     one_of(isa, avx512_core_amx, avx512_core_bf16, avx2_vnni_2,
-                            avx10_2, avx10_2_ace))
+                            avx10_2, avx10_2_ace, avx10_2_amx_2))
             && IMPLICATION(bm_conf_utils.is_f16(),
                     one_of(isa, avx10_2, avx10_2_amx_2, avx512_core_amx_fp16,
                             avx512_core_fp16, avx2_vnni_2))
@@ -278,9 +280,10 @@ status_t check_isa_with_datatype(
             && IMPLICATION(bm_conf_utils.is_f32_with_int_wei(),
                     one_of(isa, avx512_core, avx2))
             && IMPLICATION(bm_conf_utils.is_bf16_fp8(),
-                    one_of(isa, avx512_core_amx, avx512_core_amx_fp16, avx10_2))
+                    one_of(isa, avx512_core_amx, avx10_2_amx_2,
+                            avx512_core_amx_fp16, avx10_2))
             && IMPLICATION(bm_conf_utils.is_f16_fp8(),
-                    one_of(isa, avx512_core_amx_fp16, avx10_2))
+                    one_of(isa, avx10_2_amx_2, avx512_core_amx_fp16, avx10_2))
             && IMPLICATION(bm_conf_utils.is_f8(),
                     is_superset(isa, avx512_core_amx_fp16)
                             || is_superset(isa, avx10_2))
@@ -560,6 +563,7 @@ format_tag_t brgemm_matmul_conf_utils_t::get_gemv_B_tag(
  *   - data type is f32, bf16, or f16
  *   - A and B formats can be resolved to supported GEMV layouts
  *   - output layout satisfies GEMV requirements
+ *   - binary post-ops are supported by the GEMV kernel
  */
 bool is_gemv_applicable(const brgemm_matmul_conf_t &bgmmc,
         const brgemm_matmul_conf_utils_t &bm_conf_utils,
@@ -606,6 +610,24 @@ bool is_gemv_applicable(const brgemm_matmul_conf_t &bgmmc,
         if (C_md.format_kind != format_kind::any
                 && !dims_adjacent(C_md, bgmmc.ndims - 2, bgmmc.ndims - 1))
             return false;
+
+        // The kernel vectorizes `y` along M. The binary injector supports rhs
+        // in non-dense layouts only for `per_mb_spatial` broadcast, loading
+        // rhs vectors along the spatial dimensions, so such rhs require M to
+        // be a spatial dimension (ndims > 3) with unit stride.
+        const int m = bgmmc.ndims - 2;
+        const auto rhs_ok = [&](const memory_desc_t &md) {
+            const memory_desc_wrapper mdw(md);
+            if (mdw.format_any() || mdw.is_dense(true)) return true;
+            return bgmmc.ndims > 3 && mdw.is_plain()
+                    && (mdw.dims()[m] == 1
+                            || mdw.blocking_desc().strides[m] == 1);
+        };
+        const auto &po = attr.post_ops_;
+        for (int i = 0; i < po.len(); i++) {
+            const auto &e = po.entry_[i];
+            if (e.is_binary() && !rhs_ok(e.binary.src1_desc)) return false;
+        }
     }
 
     return true;
@@ -1255,10 +1277,12 @@ float compute_blocking_heuristic_avx512(brgemm_matmul_conf_t &bgmmc,
         }
 
         // Enable k-partitioning for huge k and small m/n dimensions.
-        // Disabled for GEMV (same reason: keep nthr_k == 1).
+        // Disabled for GEMV (same reason: keep nthr_k == 1) and for batched
+        // problems (parallel reduction supports batch == 1 only).
         bool is_huge_k = matmul.K >= 20000;
         bool is_small_mn = matmul.M <= 512 && matmul.N <= 512;
-        bool use_k_partitioning = !bgmmc.is_gemv && is_huge_k && is_small_mn;
+        bool use_k_partitioning = !bgmmc.is_gemv && bgmmc.batch == 1
+                && is_huge_k && is_small_mn;
 
         // TODO: expand to other data types.
         use_k_partitioning = use_k_partitioning && bm_conf_utils.is_f32();
@@ -1594,6 +1618,63 @@ bool prefer_copy_a_heuristic(const brgemm_matmul_conf_t &bgmmc,
     return prefer_copy_a;
 }
 
+// Returns true when a single thread is faster for small f32 problems on avx2,
+// where the threading overhead exceeds the compute time. The rule follows
+// gemm:jit:
+// - Only f32 on avx2 with batch == 1 and dimensions known at creation time.
+// - The output size is limited to max_dst_size because the cost per output
+//   dominates for small K.
+// - GEMV (M == 1 or N == 1) follows thread_checker() of gemv. The
+//   gemv_outer_loop_overhead term is added to K or to the output size
+//   depending on the loop order of the kernel.
+// - GEMM compares gemm_cycles = 2 * M * N * K / (4 * simd_w) with the
+//   threading overhead. N is rounded up to simd_w to account for inactive
+//   SIMD lanes.
+// Unlike adjust_thread_count() of gemm:jit, the thread count is not reduced
+// step by step: the caller uses either 1 thread or the unchanged count.
+bool prefer_single_thread_avx2_f32(const brgemm_matmul_conf_t &bgmmc,
+        const brgemm_matmul_conf_utils_t &bm_conf_utils) {
+    if (!bm_conf_utils.is_f32() || bgmmc.isa != avx2 || bgmmc.batch != 1
+            || bgmmc.is_runtime_M || bgmmc.is_runtime_N || bgmmc.is_runtime_K
+            || bgmmc.M <= 0 || bgmmc.N <= 0)
+        return false;
+
+    constexpr dim_t max_dst_size = 1024;
+    if (bgmmc.M > max_dst_size / bgmmc.N) return false;
+    const dim_t dst_size = bgmmc.M * bgmmc.N;
+
+    if (bgmmc.M == 1 || bgmmc.N == 1) {
+        constexpr dim_t gemv_outer_loop_overhead = 288;
+        constexpr dim_t gemv_seq_work_threshold = 41700;
+        const bool is_trans_a_kernel = bgmmc.is_gemv
+                && utils::one_of(bgmmc.gemv_strategy,
+                        gemv_strategy_t::n1_A_trans,
+                        gemv_strategy_t::m1_B_plain);
+        const double gemv_work = is_trans_a_kernel
+                ? static_cast<double>(bgmmc.K)
+                        * (dst_size + gemv_outer_loop_overhead)
+                : static_cast<double>(dst_size)
+                        * (static_cast<double>(bgmmc.K)
+                                + gemv_outer_loop_overhead);
+        return gemv_work < gemv_seq_work_threshold;
+    }
+
+    constexpr int avx2_f32_simd_w = 8;
+    constexpr int fma_units = 2;
+    constexpr int flops_per_fma = 2;
+    constexpr int small_nthr_max = 4;
+    constexpr double overhead_small_nthr = 3.0e3;
+    constexpr double overhead_large_nthr = 5.0e3;
+    constexpr double avx2_f32_fp_per_cycle
+            = fma_units * flops_per_fma * avx2_f32_simd_w;
+    const double gemm_cycles = 2.0 * bgmmc.M * rnd_up(bgmmc.N, avx2_f32_simd_w)
+            * bgmmc.K / avx2_f32_fp_per_cycle;
+    const double threading_overhead = bgmmc.nthr <= small_nthr_max
+            ? overhead_small_nthr
+            : overhead_large_nthr;
+    return gemm_cycles < threading_overhead;
+}
+
 // Run one AMX blocking search (macro grid heuristic first, micro heuristic as
 // a fallback) and apply the per-K constraints to the resulting blocking.
 status_t compute_amx_blocking_candidate(brgemm_matmul_conf_t &bgmmc,
@@ -1702,8 +1783,10 @@ status_t compute_blocking_heuristic_amx(brgemm_matmul_conf_t &bgmmc,
     // Not write-once: the bypass-viability retry below may toggle it.
     const bool is_relaxed_acc = utils::one_of(
             attr.acc_mode_, accumulation_mode::relaxed, accumulation_mode::any);
-    const bool dst_dt_eligible
-            = utils::one_of(bgmmc.dst_dt, data_type::bf16, data_type::f16);
+    // The uker accumulates int8 in s32 but stores a narrow dt_c as f32.
+    const bool dst_dt_eligible = !bm_conf_utils.is_int8()
+            && !bm_conf_utils.with_int8_grouped_quantization()
+            && utils::one_of(bgmmc.dst_dt, data_type::bf16, data_type::f16);
     // Narrow dt_c is an AMX uker feature, but runtime M falls back to a
     // non-AMX ISA for the smallest M tail and runtime N leaves LDC/LDD as
     // runtime values; either way can_dispatch_uker() picks the generic kernel.
@@ -2005,7 +2088,6 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     }
     if (bgmmc.with_wei_scales) {
         const auto &wei_scale_mask = wei_scales.get_mask();
-        bgmmc.is_wei_scale_common = wei_scale_mask == 0;
         bgmmc.is_wei_scale_per_k = wei_scale_mask & 1 << (bgmmc.ndims - 2);
         bgmmc.is_wei_scale_per_n = wei_scale_mask & 1 << (bgmmc.ndims - 1);
         bgmmc.apply_scales_in_buffer_b = bgmmc.is_wei_scale_per_k
@@ -2016,7 +2098,7 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
 
         // only common and per-oc-channel scales are supported
         // only per-ic-channel scales is supprted with weight decompression
-        VCONDCHECK_BG(bgmmc.is_wei_scale_common || bgmmc.is_wei_scale_per_n
+        VCONDCHECK_BG(bgmmc.is_single_wei_scale() || bgmmc.is_wei_scale_per_n
                         || IMPLICATION(bgmmc.is_wei_scale_per_k,
                                 bgmmc.with_wei_decompression),
                 VERBOSE_UNSUPPORTED_SCALES_CFG);
@@ -2028,10 +2110,10 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
                 VERBOSE_UNSUPPORTED_SCALES_CFG);
     }
 
-    // AMX is not supported src scales with common non-f32 weights scales
-    // combination.
+    // AMX is not supported src scales with a single (scalar) non-f32
+    // weights scale combination.
     VCONDCHECK_BG(IMPLICATION(bgmmc.is_amx && bgmmc.with_src_scales
-                                  && bgmmc.is_wei_scale_common,
+                                  && bgmmc.is_single_wei_scale(),
                           bgmmc.wei_scales_dt == f32),
             VERBOSE_UNSUPPORTED_SCALES_CFG);
 
@@ -2134,8 +2216,9 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     bgmmc.is_runtime_N = is_runtime_value(bgmmc.N);
     bgmmc.is_runtime_K = is_runtime_value(bgmmc.K);
 
-    // Downgrade to per-N to avoid the expensive K-scales JIT path which
-    // is not needed for this case.
+    // A per-K group spanning all of K is really just a single group, so the per-K JIT path is
+    // redundant; clear per-K here. If is_wei_scale_per_n is true this downgrades to per-N;
+    // otherwise it uses per-batch or common scales.
     if (bgmmc.is_wei_scale_per_k && !bgmmc.is_runtime_K
             && bgmmc.wei_scales_k_gsize >= bgmmc.K) {
         bgmmc.is_wei_scale_per_k = false;
@@ -2145,7 +2228,7 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     // brgemm epilogue, which requires an f32 accumulator. Plain int8 (s32
     // accumulator) is therefore only supported through the grouped
     // quantization path. A per-K group spanning all of K was already
-    // downgraded to per-N above.
+    // folded away above.
     const bool is_wei_scale_per_k_grouped
             = bgmmc.is_wei_scale_per_k && !wei_scales.has_default_groups();
     VCONDCHECK_BG(IMPLICATION(bgmmc.is_wei_scale_per_k,
@@ -2168,7 +2251,8 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
                                 && bgmmc.src_scales_k_gsize > 0
                         ? utils::div_up(bgmmc.K, bgmmc.src_scales_k_gsize)
                         : 1;
-                bgmmc.src_scales_batch_stride = num_k_groups * bgmmc.M;
+                const dim_t m_factor = bgmmc.is_src_scale_per_m ? bgmmc.M : 1;
+                bgmmc.src_scales_batch_stride = num_k_groups * m_factor;
             }
         }
         if (bgmmc.with_wei_scales) {
@@ -2177,7 +2261,8 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
                 const dim_t num_k_groups = bgmmc.is_wei_scale_per_k
                         ? utils::div_up(bgmmc.K, bgmmc.wei_scales_k_gsize)
                         : 1;
-                bgmmc.wei_scales_batch_stride = num_k_groups * bgmmc.N;
+                const dim_t n_factor = bgmmc.is_wei_scale_per_n ? bgmmc.N : 1;
+                bgmmc.wei_scales_batch_stride = num_k_groups * n_factor;
             }
         }
         if (has_src_zp) {
@@ -2187,7 +2272,8 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
                         = bgmmc.is_src_zp_per_k && bgmmc.src_zp_k_gsize > 0
                         ? utils::div_up(bgmmc.K, bgmmc.src_zp_k_gsize)
                         : 1;
-                bgmmc.src_zp_batch_stride = num_k_groups * bgmmc.M;
+                const dim_t m_factor = bgmmc.is_src_zp_per_m ? bgmmc.M : 1;
+                bgmmc.src_zp_batch_stride = num_k_groups * m_factor;
             }
         }
         if (has_wei_zp) {
@@ -2196,7 +2282,8 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
                 const dim_t num_k_groups = bgmmc.is_wei_zp_per_k
                         ? utils::div_up(bgmmc.K, bgmmc.wei_zp_k_gsize)
                         : 1;
-                bgmmc.wei_zp_batch_stride = num_k_groups * bgmmc.N;
+                const dim_t n_factor = bgmmc.is_wei_zp_per_n ? bgmmc.N : 1;
+                bgmmc.wei_zp_batch_stride = num_k_groups * n_factor;
             }
         }
     }
@@ -2478,6 +2565,10 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
             bgmmc.postops_inst_count = 0;
         }
 
+    // Set the thread count before the blocking heuristic so blocking is tuned
+    // for sequential execution when a single thread is selected.
+    if (prefer_single_thread_avx2_f32(bgmmc, bm_conf_utils)) bgmmc.nthr = 1;
+
     // Heuristic tries to optimize the following parameters:
     // - M_blk, M_Chunk
     // - N_blk, N_Chunk
@@ -2485,6 +2576,11 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     // - nthr_K
     VCHECK_BG(compute_blocking_heuristic(bgmmc, bm_conf_utils, dst_d, attr),
             VERBOSE_BLOCKING_FAIL, "");
+
+    // Parallel reduction (nthr_k > 1) keeps one C buffer per K-thread without
+    // a batch dimension, so it supports non-batched problems only.
+    VCONDCHECK_BG(IMPLICATION(bgmmc.nthr_k > 1, bgmmc.batch == 1),
+            VERBOSE_BLOCKING_FAIL, "parallel reduction requires batch == 1");
 
     if (bgmmc.wei_n_blk > bgmmc.N_blk && bgmmc.N != bgmmc.N_blk) {
         assert(!bgmmc.is_runtime_N
@@ -3006,9 +3102,17 @@ void init_scratchpad(memory_tracking::registrar_t &scratchpad,
                     types::data_type_size(f32));
     }
 
-    if (bgmmc.use_buffer_c)
+    if (bgmmc.use_buffer_c) {
+        // With parallel reduction the buffers are per K-thread, not per
+        // thread. When post_ops_applicable is false, K-thread 0 accumulates
+        // directly in dst.
+        const int num_buffers_c = bgmmc.nthr_k > 1
+                ? bgmmc.nthr_k - !bgmmc.post_ops_applicable
+                : bgmmc.nthr;
         scratchpad.book(key_brgemm_primitive_buffer,
-                bgmmc.nthr * bgmmc.buffer_c_per_thread_sz, default_data_align);
+                num_buffers_c * bgmmc.buffer_c_per_thread_sz,
+                default_data_align);
+    }
 
     if (bgmmc.use_buffer_reduce) {
         const bool is_reduce_f32 = bgmmc.reduce_dt == f32;

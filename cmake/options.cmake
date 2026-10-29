@@ -167,7 +167,7 @@ onednn_option(ENABLE_PRIMITIVE "ALL"
     - ALL (the default). Includes all primitives to be enabled.
     - <PRIMITIVE_NAME>. Includes only the selected primitive to be enabled.
       Possible values are: BATCH_NORMALIZATION, BINARY, CONCAT, CONVOLUTION,
-      DECONVOLUTION, ELTWISE, GATED_MLP, GROUP_NORMALIZATION, INNER_PRODUCT,
+      DECONVOLUTION, ELTWISE, GROUP_NORMALIZATION, INNER_PRODUCT,
       LAYER_NORMALIZATION, LRN, MATMUL, POOLING, PRELU, REDUCTION, REORDER,
       RESAMPLING, RNN, SDPA, SHUFFLE, SOFTMAX, SUM.
     - <PRIMITIVE_NAME>;<PRIMITIVE_NAME>;... Includes only selected primitives to
@@ -373,9 +373,19 @@ onednn_option(SAFE_RBP OFF
     runtime profiling with tools like Flame Graph.")
 
 onednn_option(X64_USE_ZEN OFF
-    "Enable ZenDNN integration. When ON, configuration requires a discoverable
-    ZenDNN package (>= 6.0.0) and ONEDNN_CPU_RUNTIME=OMP, and fails otherwise.")
+    "Enable ZenDNN integration. When ON, uses a discoverable ZenDNN package
+    if present, otherwise builds ZenDNN from source. Requires ZenDNN >= 6.1.2
+    and ONEDNN_CPU_RUNTIME=OMP, and fails otherwise.")
 set(ZENDNNROOT "" CACHE STRING "Path to ZenDNN installation root")
+
+if(DNNL_X64_USE_ZEN)
+    set(ZENDNN_RELEASE_URL "https://github.com/amd/ZenDNN.git")
+    set(ZENDNN_RELEASE_TAG "v6.1.2")
+    onednn_option(ZENDNN_SOURCE "${ZENDNN_RELEASE_URL}@${ZENDNN_RELEASE_TAG}"
+        "ZenDNN source to build when no ZenDNN package is found: an absolute
+        path to a ZenDNN source tree, or <git url>@<tag or commit> to fetch
+        into the build directory.")
+endif()
 
 # -------------------
 # AArch64 CPU options
@@ -386,6 +396,24 @@ onednn_option(AARCH64_USE_ACL OFF "Enables use of AArch64 optimised functions
     This is only supported on AArch64 builds and assumes there is a
     functioning Compute Library build available at the location specified by the
     environment variable ACL_ROOT_DIR.")
+
+# KleidiAI defaults to ON on supported platforms/configurations
+set(_dnnl_aarch64_use_kai_supported ON)
+if(NOT DNNL_TARGET_ARCH STREQUAL "AARCH64"
+        OR DNNL_CPU_RUNTIME STREQUAL "THREADPOOL"
+        OR MSVC)
+    set(_dnnl_aarch64_use_kai_supported OFF)
+endif()
+onednn_option(AARCH64_USE_KAI ${_dnnl_aarch64_use_kai_supported}
+    "Enables AArch64 KleidiAI-based implementations.")
+
+if(NOT _dnnl_aarch64_use_kai_supported AND DNNL_AARCH64_USE_KAI)
+    # Force users to rethink and reconfigure if the cached value was
+    # previously ON or user explicitly requested KAI for unsupported configuration.
+    message(FATAL_ERROR
+        "KleidiAI is not supported for non-AArch64 targets and is not "
+        "yet supported for threadpool runtime or MSVC")
+endif()
 
 # ===========
 # GPU options

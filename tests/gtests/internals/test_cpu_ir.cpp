@@ -15,16 +15,24 @@
 *******************************************************************************/
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <memory>
+#include <regex>
+#include <set>
+#include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
 
 #include "oneapi/dnnl/dnnl.hpp"
+#include "oneapi/dnnl/dnnl_debug.h"
 
 #include "common/c_types_map.hpp"
 
+#include "cpu/x64/ir/dump.hpp"
 #include "cpu/x64/ir/emitter/emitter.hpp"
 #include "cpu/x64/ir/ir.hpp"
 #include "cpu/x64/ir/postops_injector.hpp"
@@ -46,12 +54,8 @@ using namespace impl::cpu::x64::ir;
 
 // Helpers shared by the tests
 
-// Scratch registers the emitter reserves for spill handling, and the opmasks
-// the post-ops injector writes without restoring. None of them is part of the
-// register pool. The indices are otherwise arbitrary and work for AVX2 and
-// AVX-512 alike.
-constexpr int gpr_scratch0 = 10, gpr_scratch1 = 11;
-constexpr int vec_scratch0 = 13, vec_scratch1 = 14, vec_scratch2 = 15;
+// The opmasks the post-ops injector writes without restoring. They are not
+// part of the register pool.
 constexpr int eltwise_opmask = 6, binary_tail_opmask = 7;
 
 // ISA the kernel tests generate for. The emitter needs AVX2 as a floor, so the
@@ -73,8 +77,7 @@ int simd_w() {
 // pressure under the test's control.
 reg_pools_t make_pools(int n_gpr) {
     reg_config_t rc = make_reg_config(test_isa(), /*param_reg=*/0,
-            /*rsp_reg=*/Xbyak::Operand::RSP, /*gpr_scratch=*/ {},
-            /*vec_scratch=*/ {}, /*mask_scratch=*/ {});
+            /*rsp_reg=*/Xbyak::Operand::RSP, /*reserved_masks=*/ {});
 
     reg_file_t &gpr_file = rc.pools.files[0];
     gpr_file.regs.clear();
@@ -153,6 +156,41 @@ void expect_no_reg_conflicts(const ir_t &ir, const reg_pools_t &pools,
     }
 }
 
+// Check the allocator rule for spilled values. At every operation, the temps
+// and the registers of the values live there are all distinct, and each
+// spilled operand has exactly one temp.
+void expect_valid_temps(const ir_t &ir, const reg_pools_t &pools,
+        const reg_alloc_result_t &res) {
+    const auto iv = linear_code_intervals(ir);
+    std::vector<int> defs, uses;
+    for (int i = 0; i < ir.n_ops(); i++) {
+        std::set<std::pair<int, int>> held; // (file, physical register)
+        auto hold = [&](int v, int phys) {
+            const int file = pools.kind_to_file[(int)ir.vreg_info()[v].kind];
+            EXPECT_TRUE(held.insert({file, phys}).second)
+                    << "op " << i << ": register " << phys << " held twice";
+        };
+
+        std::set<int> spilled_operands, temp_vregs;
+        ir.def_use(ir.ops()[i], defs, uses);
+        for (int v : defs)
+            if (res.assignments[v].spilled) spilled_operands.insert(v);
+        for (int v : uses)
+            if (res.assignments[v].spilled) spilled_operands.insert(v);
+        for (const temp_reg_t &t : res.temps[i]) {
+            temp_vregs.insert((int)t.vreg);
+            hold((int)t.vreg, t.phys);
+        }
+        EXPECT_EQ(temp_vregs, spilled_operands) << "op " << i;
+        EXPECT_EQ(temp_vregs.size(), res.temps[i].size()) << "op " << i;
+
+        for (int v = 0; v < ir.n_vregs(); v++)
+            if (iv[v].start <= i && i <= iv[v].end
+                    && !res.assignments[v].spilled)
+                hold(v, res.assignments[v].phys);
+    }
+}
+
 // Build an IR where all GPRs in the live set are live at the same time.
 // Each register is initialized first, then they are all used together by adding
 // them into an accumulator. The live set size controls the register pressure to
@@ -192,10 +230,12 @@ float ref_dot(const float *a, const float *b, int n) {
 // IR-based kernel.
 class ir_kernel_t : public impl::cpu::x64::jit_generator_t {
 public:
-    ir_kernel_t(ir_t ir, int vec_regs_limit = -1)
-        : jit_generator_t("ir_run_kernel", test_isa())
+    ir_kernel_t(ir_t ir, int vec_regs_limit = -1, int gpr_regs_limit = -1,
+            cpu_isa_t isa = test_isa())
+        : jit_generator_t("ir_run_kernel", isa)
         , ir_(std::move(ir))
-        , vec_regs_limit_(vec_regs_limit) {}
+        , vec_regs_limit_(vec_regs_limit)
+        , gpr_regs_limit_(gpr_regs_limit) {}
 
     const char *name() const override { return "ir_kernel"; }
     const char *source_file() const override { return __FILE__; }
@@ -237,6 +277,10 @@ public:
     };
     void set_postops(const postops_cfg_t &cfg) { postops_cfg_ = cfg; }
 
+    // Replaces the gpr pool with `regs`. The allocator hands out a pool front
+    // to back, so the first gprs the IR defines get them in order.
+    void set_gpr_pool(const std::vector<int> &regs) { gpr_pool_ = regs; }
+
     // Allocation outcome. Becomes valid after `run_ir_pipeline()`.
     //
     // True if the generated kernel has any spills.
@@ -250,17 +294,16 @@ protected:
         const int param_idx = abi_param1.getIdx();
 
         reg_config_t reg_cfg = make_reg_config(max_cpu_isa(), param_idx,
-                rsp_idx, {gpr_scratch0, gpr_scratch1},
-                {vec_scratch0, vec_scratch1, vec_scratch2},
-                {eltwise_opmask, binary_tail_opmask});
+                rsp_idx, {eltwise_opmask, binary_tail_opmask});
+        if (!gpr_pool_.empty()) reg_cfg.pools.files[0].regs = gpr_pool_;
 
-        // Shrink the vector register pool to force spills when requested.
-        if (vec_regs_limit_ >= 0) {
-            const int vec_reg_pool_idx = 1;
-            auto &vec_regs = reg_cfg.pools.files[vec_reg_pool_idx].regs;
-            if ((int)vec_regs.size() > vec_regs_limit_)
-                vec_regs.resize(vec_regs_limit_);
-        }
+        // Shrink the register pools to force spills when requested.
+        const auto limit = [&](int file, int n) {
+            auto &regs = reg_cfg.pools.files[file].regs;
+            if (n >= 0 && (int)regs.size() > n) regs.resize(n);
+        };
+        limit(0, gpr_regs_limit_);
+        limit(1, vec_regs_limit_);
 
         // Run allocator.
         const reg_alloc_result_t alloc = allocate_registers(ir_, reg_cfg.pools);
@@ -302,6 +345,8 @@ protected:
 private:
     ir_t ir_ {};
     int vec_regs_limit_ = 0;
+    int gpr_regs_limit_ = 0;
+    std::vector<int> gpr_pool_;
     bool spilled_ = false;
     size_t stack_size_ = 0;
     postops_cfg_t postops_cfg_ {};
@@ -413,9 +458,8 @@ TEST(IRBuilderTests, LoopLinkageAndSingleIterationInlining) {
     }
 }
 
-// Validates that an if/else is well-formed. Labels are distinct and bound, and
-// each jump targets the right label. This proves the forward-edge control flow
-// is constructed correctly.
+// Validates that an if/else is well-formed. This proves the forward-edge
+// control flow is constructed correctly.
 TEST(IRBuilderTests, ForwardEdgeControlFlow) {
     ir_t ir;
 
@@ -430,9 +474,6 @@ TEST(IRBuilderTests, ForwardEdgeControlFlow) {
     ir.load_param(base, sizeof(int));
     ir.vload(a, base, 0, data_type::f32);
 
-    const label_t lbl_else = ir.new_label();
-    const label_t lbl_end = ir.new_label();
-
     // Build an IR for the following control flow:
     //
     //     if (cond != 0) { acc += a * a; }  // then block
@@ -440,7 +481,8 @@ TEST(IRBuilderTests, ForwardEdgeControlFlow) {
     //
     // which lowers to a forward-branch skeleton:
     //
-    //     jz cond -> else      ; fall through to 'then' when cond != 0
+    //     test cond, cond
+    //     je -> else           ; fall through to 'then' when cond != 0
     //   then:
     //     ...work...
     //     jmp -> end           ; skip the else block
@@ -448,49 +490,33 @@ TEST(IRBuilderTests, ForwardEdgeControlFlow) {
     //     ...
     //   end:
 
-    ir.jz(cond, lbl_else);
+    const int if_idx = ir.if_begin(cond, cmp_t::ne, 0);
 
     // then:
     ir.vzero(acc);
     ir.vdot(acc, a, a); // arbitrary work, just to populate the block
-    ir.jmp(lbl_end);
 
     // else:
-    ir.label(lbl_else);
+    ir._else(if_idx);
     ir.vzero(acc);
 
     // end:
-    ir.label(lbl_end);
+    ir.if_end(if_idx);
 
-    // The two labels have distinct ids.
-    EXPECT_NE(lbl_else, lbl_end);
-    EXPECT_EQ(ir.n_labels(), 2);
+    const int else_idx = find_op(ir, op_kind_t::_else);
+    const int end_idx = find_op(ir, op_kind_t::if_end);
+    ASSERT_NE(else_idx, -1);
+    ASSERT_NE(end_idx, -1);
 
-    // Every branch target points to a label that exists in the IR.
-    std::vector<int> bound(ir.n_labels(), -1);
-    for (int i = 0; i < ir.n_ops(); i++) {
-        if (ir.ops()[i].kind == op_kind_t::label) {
-            // Save the position of the label (`i`).
-            bound[(int)ir.ops()[i].label_id] = i;
-        }
-    }
+    // The returned index is the if_begin, and the _else and the if_end link
+    // back to it.
+    EXPECT_EQ(ir.ops()[if_idx].kind, op_kind_t::if_begin);
+    EXPECT_EQ(ir.ops()[else_idx].match, if_idx);
+    EXPECT_EQ(ir.ops()[end_idx].match, if_idx);
 
-    // != -1 means it's bound.
-    EXPECT_NE(bound[(int)lbl_else], -1);
-    EXPECT_NE(bound[(int)lbl_end], -1);
-
-    const int jz_idx = find_op(ir, op_kind_t::jz);
-    const int jmp_idx = find_op(ir, op_kind_t::jmp);
-    ASSERT_NE(jz_idx, -1);
-    ASSERT_NE(jmp_idx, -1);
-
-    // The conditional jump targets the else label. The unconditional jump jumps
-    // over the else block to the end label.
-    EXPECT_EQ(ir.ops()[jz_idx].label_id, lbl_else);
-    EXPECT_EQ(ir.ops()[jmp_idx].label_id, lbl_end);
-
-    // The then block's jmp precedes the else label it jumps over.
-    EXPECT_LT(jmp_idx, bound[(int)lbl_else]);
+    // The then block precedes the _else, which precedes the if_end.
+    EXPECT_LT(if_idx, else_idx);
+    EXPECT_LT(else_idx, end_idx);
 
     // The IR that contains branches can be handled by the allocator.
     // It assigns a location to every value that is read somewhere.
@@ -505,6 +531,43 @@ TEST(IRBuilderTests, ForwardEdgeControlFlow) {
         EXPECT_TRUE(as.spilled || as.phys >= 0);
     }
 }
+
+#ifndef NDEBUG
+// Validates that malformed loops and conditionals are rejected. The checks are
+// asserts, so the test runs only in a debug build.
+TEST(IRBuilderTests, RejectsMalformedControlFlow) {
+    // A conditional that is never closed.
+    {
+        ir_t ir;
+        ir.if_begin(ir.new_gpr(), cmp_t::ne, 0);
+        EXPECT_DEATH(allocate_registers(ir, make_pools(/*n_gpr=*/8)),
+                "if_begin without if_end");
+    }
+    // A second else.
+    {
+        ir_t ir;
+        const int if_idx = ir.if_begin(ir.new_gpr(), cmp_t::ne, 0);
+        ir._else(if_idx);
+        EXPECT_DEATH(ir._else(if_idx), "already has an else");
+    }
+    // A conditional that overlaps another conditional.
+    {
+        ir_t ir;
+        const int outer = ir.if_begin(ir.new_gpr(), cmp_t::ne, 0);
+        ir.if_begin(ir.new_gpr(), cmp_t::ne, 0);
+        EXPECT_DEATH(ir.if_end(outer), "not the innermost open conditional");
+    }
+    // A conditional that overlaps a loop.
+    {
+        ir_t ir;
+        const vreg_t counter = ir.new_gpr();
+        const int begin = ir.loop_begin_imm(counter, 2);
+        ir.if_begin(ir.new_gpr(), cmp_t::ne, 0);
+        EXPECT_DEATH(
+                ir.loop_end(counter, begin), "not the innermost open loop");
+    }
+}
+#endif
 
 // Validates the inject_postops builder and its liveness. The operation stores
 // its variable-length operands in a side table and keeps only the table index,
@@ -562,33 +625,37 @@ TEST(IRBuilderTests, InjectPostopsRecordsArgsAndDefUse) {
 // a vector register on AVX2*, so the mask and vec kinds share one file. AVX-512
 // masks with k-registers, so the mask kind gets a file of its own.
 //
-// No `mayiuse` guard is needed. `make_reg_config()` reads the ISA through the
-// `cpu_isa_traits_t` tables only and generates no code, so both layouts are
-// checkable on any machine.
+// `make_reg_config()` generates no code, so both layouts are checkable on any
+// machine.
 TEST(RegConfigTests, MapsMaskKindToFilePerIsa) {
     const int param_reg = 0, rsp_reg = 4;
-    const std::vector<int> gpr_scratch {10, 11};
-    const std::vector<int> vec_scratch {13, 14, 15};
-    const std::vector<int> mask_scratch {6, 7};
+    const std::vector<int> reserved_masks {6, 7};
+    // The GPR file excludes `rsp` and `param_reg`, plus `rbp` where the build
+    // reserves it (see `jit_generator_t::may_use_rbp()`).
+    const size_t n_reserved_gprs = jit_generator_t::may_use_rbp() ? 2 : 3;
 
     {
-        const reg_config_t rc = make_reg_config(avx2, param_reg, rsp_reg,
-                gpr_scratch, vec_scratch, mask_scratch);
+        const reg_config_t rc
+                = make_reg_config(avx2, param_reg, rsp_reg, reserved_masks);
 
         ASSERT_EQ(rc.pools.files.size(), 2u);
         EXPECT_EQ(rc.pools.kind_to_file, std::vector<int>({0, 1, 1}));
         EXPECT_EQ(rc.pools.files[1].slot_size, 32u);
-        EXPECT_EQ(rc.pools.files[1].regs.size(), 16u - vec_scratch.size());
+        EXPECT_EQ(rc.pools.files[0].regs.size(), 16u - n_reserved_gprs);
+        EXPECT_EQ(rc.pools.files[1].regs.size(), 16u);
     }
 
     {
-        const reg_config_t rc = make_reg_config(avx512_core, param_reg, rsp_reg,
-                gpr_scratch, vec_scratch, mask_scratch);
+        const reg_config_t rc = make_reg_config(
+                avx512_core, param_reg, rsp_reg, reserved_masks);
 
         ASSERT_EQ(rc.pools.files.size(), 3u);
         EXPECT_EQ(rc.pools.kind_to_file, std::vector<int>({0, 1, 2}));
         EXPECT_EQ(rc.pools.files[1].slot_size, 64u);
-        EXPECT_EQ(rc.pools.files[1].regs.size(), 32u - vec_scratch.size());
+        // `r16` to `r31` are added where the machine has Intel APX enabled.
+        EXPECT_EQ(rc.pools.files[0].regs.size(),
+                (mayiuse(avx10_2) ? 32u : 16u) - n_reserved_gprs);
+        EXPECT_EQ(rc.pools.files[1].regs.size(), 32u);
         // The mask file is k1..k7 less the reserved ones. k0 cannot encode a
         // write mask.
         EXPECT_EQ(rc.pools.files[2].regs, std::vector<int>({1, 2, 3, 4, 5}));
@@ -667,8 +734,10 @@ TEST(AllocatorTests, SpillsUnderRegisterPressure) {
     EXPECT_TRUE(res.any_spill);
     EXPECT_GT(res.frame_bytes, 0u);
 
-    // Check that non-spilled registers do not share the same register.
+    // Check that non-spilled registers do not share the same register, and that
+    // every spilled operand gets a temp that clobbers nothing.
     expect_no_reg_conflicts(ir, pools, res);
+    expect_valid_temps(ir, pools, res);
 
     // Collect spill slots and check that they are unique, slot-aligned, and
     // inside the reserved frame.
@@ -742,6 +811,70 @@ TEST(AllocatorTests, SpillsByWeightAndBreaksTiesByEnd) {
         EXPECT_FALSE(res.assignments[(int)early].spilled);
         EXPECT_FALSE(res.assignments[(int)acc].spilled);
     }
+}
+
+// Checks that a mask spills like a vector on AVX2*, where it is a vector
+// register. Masks share the vector file there, cut here to 3 registers. When
+// the vectors run out of registers, the mask and the vectors each have one def
+// and one use, so they weigh the same, and the mask ends last. The mask is
+// therefore the one spilled, and it gets a temp at its def and its use.
+TEST(AllocatorTests, SpillsMasksOnAvx2) {
+    ir_t ir;
+    const vreg_t ptr = ir.new_gpr();
+    ir.load_param(ptr, 0);
+
+    const vreg_t mask = ir.new_mask();
+    ir.set_mask_imm(mask, 3);
+
+    std::vector<vreg_t> v(4, vreg_t::none);
+    for (int r = 0; r < 4; r++) {
+        v[r] = ir.new_vec(data_type::f32);
+        ir.vload(v[r], ptr, 32 * r, data_type::f32);
+    }
+    for (int r = 0; r < 4; r++)
+        ir.vstore(ptr, 32 * r, v[r], data_type::f32);
+
+    const vreg_t x = ir.new_vec(data_type::f32);
+    ir.vload_masked(x, ptr, 0, mask, data_type::f32);
+    ir.vstore(ptr, 0, x, data_type::f32);
+
+    reg_pools_t pools = make_reg_config(avx2, /*param_reg=*/0,
+            /*rsp_reg=*/Xbyak::Operand::RSP, /*reserved_masks=*/ {})
+                                .pools;
+    pools.files[1].regs.resize(3);
+    const reg_alloc_result_t res = allocate_registers(ir, pools);
+
+    EXPECT_TRUE(res.assignments[(int)mask].spilled);
+    expect_valid_temps(ir, pools, res);
+}
+
+// Checks that a k-register is never spilled on AVX-512. The mask file is cut
+// to 1 register, and `m1` needs it while `m0` is still live. Spilling `m0`
+// is required, but the file is not spillable, so `m0` keeps its register and
+// `m1` is left without one.
+TEST(AllocatorTests, NeverSpillsAvx512Masks) {
+    ir_t ir;
+    const vreg_t ptr = ir.new_gpr();
+    ir.load_param(ptr, 0);
+
+    const vreg_t m0 = ir.new_mask();
+    ir.set_mask_imm(m0, 3);
+    const vreg_t m1 = ir.new_mask();
+    ir.set_mask_imm(m1, 5);
+
+    const vreg_t x = ir.new_vec(data_type::f32);
+    ir.vload_masked(x, ptr, 0, m1, data_type::f32);
+    ir.vload_masked(x, ptr, 0, m0, data_type::f32);
+    ir.vstore(ptr, 0, x, data_type::f32);
+
+    reg_pools_t pools = make_reg_config(avx512_core, /*param_reg=*/0,
+            /*rsp_reg=*/Xbyak::Operand::RSP, /*reserved_masks=*/ {})
+                                .pools;
+    pools.files[2].regs.resize(1);
+    const reg_alloc_result_t res = allocate_registers(ir, pools);
+
+    EXPECT_FALSE(res.assignments[(int)m0].spilled);
+    EXPECT_TRUE(res.assignments[(int)m1].spilled);
 }
 
 // Checks that allocation depends only on its inputs. The same IR and register
@@ -1029,15 +1162,17 @@ ir_t build_shared_vector_dot_ir(int n) {
 }
 
 // Validates that register allocator decisions never change results. The same
-// computation is run with a full register file and with one too small to avoid
-// spills. Both must produce identical results.
+// computation is run with full register files and with files only as large as
+// its widest operations (3 vec for `vdot`, 1 gpr). Spilled values need no
+// reserved registers, so both must produce identical results.
 TEST(IntegrationTests, SpillProducesEquivalentResults) {
     SKIP_IF_NO_AVX2();
 
     constexpr int n = 6;
 
     ir_kernel_t full(build_shared_vector_dot_ir(n));
-    ir_kernel_t limited(build_shared_vector_dot_ir(n), /*vec_regs_cap=*/4);
+    ir_kernel_t limited(build_shared_vector_dot_ir(n), /*vec_regs_limit=*/3,
+            /*gpr_regs_limit=*/1);
 
     ASSERT_TRUE(full.run_ir_pipeline());
     ASSERT_TRUE(limited.run_ir_pipeline());
@@ -1104,27 +1239,24 @@ TEST(IntegrationTests, BranchSelectsCorrectValue) {
     const vreg_t b = ir.new_vec(data_type::f32);
     ir.vload(b, b_ptr, 0, data_type::f32);
 
-    const label_t lbl_else = ir.new_label();
-    const label_t lbl_end = ir.new_label();
-
     //     if (cond != 0) { c = a; }  // then block
     //     else           { c = b; }  // else block
     //
     // which lowers to a forward-branch skeleton:
     //
-    //     jz cond -> else      ; fall through to 'then' when cond != 0
+    //     test cond, cond
+    //     je -> else           ; fall through to 'then' when cond != 0
     //   then:
     //     store a -> c
     //     jmp -> end           ; skip the else block
     //   else:
     //     store b -> c
     //   end:
-    ir.jz(cond, lbl_else);
+    const int if_idx = ir.if_begin(cond, cmp_t::ne, 0);
     ir.vstore(c_ptr, 0, a, data_type::f32); // then: c = a
-    ir.jmp(lbl_end);
-    ir.label(lbl_else);
+    ir._else(if_idx);
     ir.vstore(c_ptr, 0, b, data_type::f32); // else: c = b
-    ir.label(lbl_end);
+    ir.if_end(if_idx);
 
     ir_kernel_t kernel(ir);
     ASSERT_TRUE(kernel.run_ir_pipeline());
@@ -1148,6 +1280,94 @@ TEST(IntegrationTests, BranchSelectsCorrectValue) {
     kernel.run(&args_b);
     for (int i = 0; i < simd_w(); i++)
         EXPECT_FLOAT_EQ(c_data[i], b_data[i]) << "lane " << i;
+}
+
+// Arguments for the conditional kernel. The branch that runs writes 0 to its
+// own element of `out`.
+struct cmp_args_t {
+    int64_t lhs;
+    int64_t rhs;
+    float *out;
+};
+
+// Returns `a cmp b` computed in C++.
+bool ref_cmp(cmp_t cmp, int64_t a, int64_t b) {
+    switch (cmp) {
+        case cmp_t::eq: return a == b;
+        case cmp_t::ne: return a != b;
+        case cmp_t::lt: return a < b;
+        case cmp_t::le: return a <= b;
+        case cmp_t::gt: return a > b;
+        case cmp_t::ge: return a >= b;
+    }
+    return false;
+}
+
+// Validates every comparison and an else_if chain end to end. For each
+// comparison the kernel runs
+//
+//     if (lhs cmp imm)      { out[0] = 0; }
+//     else if (lhs cmp rhs) { out[1] = 0; }
+//     else                  { out[2] = 0; }
+//
+// and must take the same branch as C++. The if compares with an immediate and
+// the else_if with a gpr. A zero immediate lowers to `test` and a non-zero one
+// to `cmp`, so both are used. The negative values check that the comparison is
+// signed.
+TEST(IntegrationTests, ConditionalTakesSameBranchAsCpp) {
+    SKIP_IF_NO_AVX2();
+
+    for (cmp_t cmp : {cmp_t::eq, cmp_t::ne, cmp_t::lt, cmp_t::le, cmp_t::gt,
+                 cmp_t::ge}) {
+        for (dim_t imm : {0, 1}) {
+            ir_t ir;
+            const vreg_t lhs = ir.new_gpr();
+            ir.load_param(lhs, offsetof(cmp_args_t, lhs));
+
+            const vreg_t rhs = ir.new_gpr();
+            ir.load_param(rhs, offsetof(cmp_args_t, rhs));
+
+            const vreg_t out_ptr = ir.new_gpr();
+            ir.load_param(out_ptr, offsetof(cmp_args_t, out));
+
+            const vreg_t zero = ir.new_vec(data_type::f32);
+            ir.vzero(zero);
+
+            const auto mark = [&](int branch) {
+                ir.vstore_scalar(out_ptr, branch * (dim_t)sizeof(float), zero,
+                        data_type::f32);
+            };
+
+            const int if_idx = ir.if_begin(lhs, cmp, imm);
+            mark(0);
+            ir.else_if(if_idx, lhs, cmp, rhs);
+            mark(1);
+            ir._else(if_idx);
+            mark(2);
+            ir.if_end(if_idx);
+
+            ir_kernel_t kernel(ir);
+            ASSERT_TRUE(kernel.run_ir_pipeline());
+
+            for (int64_t l = -1; l <= 2; l++) {
+                for (int64_t r = -1; r <= 2; r++) {
+                    float out[3] = {-1.f, -1.f, -1.f};
+                    cmp_args_t args {l, r, out};
+                    kernel.run(&args);
+
+                    const int taken = ref_cmp(cmp, l, imm) ? 0
+                            : ref_cmp(cmp, l, r)           ? 1
+                                                           : 2;
+                    for (int b = 0; b < 3; b++) {
+                        EXPECT_EQ(out[b], b == taken ? 0.f : -1.f)
+                                << "cmp " << (int)cmp << ", imm " << imm
+                                << ", lhs " << l << ", rhs " << r << ", branch "
+                                << b;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Arguments for the binary post-op kernel. `binary_rhs` points to the array of
@@ -1255,6 +1475,187 @@ TEST(IntegrationTests, BinaryPostOpAddsPerElementRhs) {
         const float expected
                 = ref_dot(&a[r * simd_w()], b_data.data(), simd_w()) + rhs[r];
         EXPECT_FLOAT_EQ(c[r], expected) << "row " << r;
+    }
+}
+
+// Validates that the post-ops injector works with any register layout the
+// allocator produces and leaves the other values intact. The two accumulators
+// take the first and the last vec register, a live value fills every register
+// between them, and the output pointer sits in r14, a gpr the binary injector
+// borrows. The chain goes through the eltwise, binary, and sum injectors. A
+// second run with a vec file of two spills the live values, so they stay in
+// their stack slots while the injector runs and come back through temps. The
+// accumulators outweigh them and keep their registers.
+TEST(IntegrationTests, InjectPostopsWorksWithAnyRegisterLayout) {
+    SKIP_IF_NO_AVX2();
+
+    const int n_live = isa_num_vregs(test_isa()) - 2;
+    const dim_t vlen = simd_w() * (dim_t)sizeof(float);
+    const auto f32 = data_type::f32;
+
+    // The allocator hands out vec registers in index order, so defining the
+    // vectors in this order produces the layout.
+    ir_t ir;
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(binary_args_t, c));
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(binary_args_t, a));
+    const vreg_t live_ptr = ir.new_gpr();
+    ir.load_param(live_ptr, offsetof(binary_args_t, b));
+
+    std::vector<vreg_t> acc(2, vreg_t::none), live(n_live, vreg_t::none);
+    acc[0] = ir.new_vec(f32);
+    ir.vload(acc[0], a_ptr, 0, f32);
+    for (int i = 0; i < n_live; i++) {
+        live[i] = ir.new_vec(f32);
+        ir.vload(live[i], live_ptr, i * vlen, f32);
+    }
+    acc[1] = ir.new_vec(f32);
+    ir.vload(acc[1], a_ptr, vlen, f32);
+
+    ir.inject_postops(acc, c_ptr, {0, vlen});
+    for (int r = 0; r < 2; r++)
+        ir.vstore(c_ptr, r * vlen, acc[r], f32);
+    for (int i = 0; i < n_live; i++)
+        ir.vstore(c_ptr, (2 + i) * vlen, live[i], f32);
+
+    using dt = dnnl::memory::data_type;
+    using tag = dnnl::memory::format_tag;
+    const dnnl::memory::desc dst_desc({2, simd_w()}, dt::f32, tag::ab);
+    const dnnl::memory::desc s8_desc({2, simd_w()}, dt::s8, tag::ab);
+    dnnl::post_ops po;
+    po.append_eltwise(dnnl::algorithm::eltwise_tanh, 0.f, 0.f);
+    po.append_binary(dnnl::algorithm::binary_ge, dst_desc);
+    po.append_binary(dnnl::algorithm::binary_add, s8_desc);
+    po.append_sum();
+
+    ir_kernel_t::postops_cfg_t cfg;
+    cfg.post_ops = po.get();
+    cfg.dst_md = dst_desc.get();
+    cfg.rhs_arg_offset = offsetof(binary_args_t, binary_rhs);
+    cfg.dst_orig_offset = offsetof(binary_args_t, dst_orig);
+
+    const int n = 2 * simd_w();
+    std::vector<float> a(n), ge_rhs(n), live_data(n_live * simd_w());
+    std::vector<int8_t> add_rhs(n);
+    for (int i = 0; i < n; i++) {
+        a[i] = (float)(i % 9) * 0.5f - 2.f;
+        ge_rhs[i] = i % 2 ? 0.5f : -0.5f;
+        add_rhs[i] = (int8_t)(i % 7 - 3);
+    }
+    for (size_t i = 0; i < live_data.size(); i++)
+        live_data[i] = (float)i;
+    const void *rhs[2] = {ge_rhs.data(), add_rhs.data()};
+
+    ir_kernel_t full(ir), spilling(ir, /*vec_regs_limit=*/2);
+    for (ir_kernel_t *kern : {&full, &spilling}) {
+        SCOPED_TRACE(kern == &full ? "full vec file" : "vec file of two");
+        kern->set_gpr_pool({Xbyak::Operand::R14, Xbyak::Operand::RAX,
+                Xbyak::Operand::RDX, Xbyak::Operand::RBX});
+        kern->set_postops(cfg);
+        ASSERT_TRUE(kern->run_ir_pipeline());
+
+        // `c` starts at 1 in the accumulator rows, which the sum adds.
+        std::vector<float> c(n + live_data.size(), 1.f);
+        binary_args_t args {
+                a.data(), live_data.data(), c.data(), rhs, c.data()};
+        kern->run(&args);
+
+        for (int i = 0; i < n; i++) {
+            const float ref = (std::tanh(a[i]) >= ge_rhs[i] ? 1.f : 0.f)
+                    + add_rhs[i] + 1.f;
+            EXPECT_EQ(c[i], ref) << "element " << i;
+        }
+        for (size_t i = 0; i < live_data.size(); i++)
+            EXPECT_EQ(c[n + i], live_data[i]) << "live value " << i;
+    }
+    EXPECT_FALSE(full.spilled());
+    EXPECT_TRUE(spilling.spilled());
+}
+
+// Debug output tests
+//
+// The output is off unless the `x64ir` token asks for it. `all` and
+// `debuginfo=` must not enable it.
+TEST(DumpTests, OutputIsOffUnlessRequested) {
+    EXPECT_FALSE(has_x64ir_token(""));
+    EXPECT_FALSE(has_x64ir_token("all"));
+    EXPECT_FALSE(has_x64ir_token("debuginfo=255"));
+    EXPECT_FALSE(has_x64ir_token("dispatch,profile"));
+
+    EXPECT_TRUE(has_x64ir_token("x64ir"));
+    EXPECT_TRUE(has_x64ir_token("dispatch,x64ir,debuginfo=1"));
+}
+
+// Checks the whole output for a small IR with a loop and gpr, vec, and mask
+// vregs, on AVX2 and AVX-512. The gpr pool has 2 registers, so 2 of the 3
+// gprs spill, and the operations that access them show their temps.
+TEST(DumpTests, KernelDumpShowsAllocation) {
+    using namespace data_type;
+    ir_t ir;
+    const vreg_t ptr = ir.new_gpr();
+    const vreg_t step = ir.new_gpr();
+    const vreg_t cnt = ir.new_gpr();
+    const vreg_t x = ir.new_vec(f32);
+    const vreg_t mask = ir.new_mask();
+    ir.load_param(ptr, 0);
+    ir.load_param(step, 8);
+    ir.set_mask_imm(mask, 3);
+    const int begin = ir.loop_begin_imm(cnt, 2);
+    ir.vload_masked(x, ptr, 0, mask, f32);
+    ir.add_reg(ptr, step);
+    ir.loop_end(cnt, begin);
+
+    const std::pair<cpu_isa_t, const char *> cases[] = {
+            {avx2, R"(begin x64ir ir_kernel isa=avx2
+code: 0 bytes (instructions 0 bytes, static data 0 bytes)
+alloc gpr: pool 2, peak 3 at op 3, spilled 2
+alloc vec: pool 16, peak 2 at op 4, spilled 0
+spill g1@[rsp+0]: ops 1, 5
+spill g2@[rsp+8]: ops 3, 6
+
+index | gpr vec | operation
+    0 |   1   0 | load g0@rax, [param+0]
+    1 |   2   0 | load g1@[rsp+0](temp rcx), [param+8]
+    2 |   2   1 | set_mask_imm m4@ymm0, 3
+    3 |   3   1 | loop g2@[rsp+8](temp rcx) = 2 {
+    4 |   3   2 |   vload_masked f32:v3@ymm1, f32:[g0@rax+0], m4@ymm0
+    5 |   3   1 |   add_reg g0@rax, g1@[rsp+0](temp rcx)
+    6 |   3   1 | } // g2@[rsp+8](temp rcx) -= 1, repeat while > 0
+end x64ir
+)"},
+            {avx512_core, R"(begin x64ir ir_kernel isa=avx512_core
+code: 0 bytes (instructions 0 bytes, static data 0 bytes)
+alloc gpr: pool 2, peak 3 at op 3, spilled 2
+alloc vec: pool 32, peak 1 at op 4, spilled 0
+alloc mask: pool 7, peak 1 at op 2, spilled 0
+spill g1@[rsp+0]: ops 1, 5
+spill g2@[rsp+8]: ops 3, 6
+
+index | gpr vec mask | operation
+    0 |   1   0    0 | load g0@rax, [param+0]
+    1 |   2   0    0 | load g1@[rsp+0](temp rcx), [param+8]
+    2 |   2   0    1 | set_mask_imm m4@k1, 3
+    3 |   3   0    1 | loop g2@[rsp+8](temp rcx) = 2 {
+    4 |   3   1    1 |   vload_masked f32:v3@zmm0, f32:[g0@rax+0], m4@k1
+    5 |   3   0    1 |   add_reg g0@rax, g1@[rsp+0](temp rcx)
+    6 |   3   0    1 | } // g2@[rsp+8](temp rcx) -= 1, repeat while > 0
+end x64ir
+)"},
+    };
+
+    for (const auto &c : cases) {
+        const ir_kernel_t gen(
+                ir, /*vec_regs_limit=*/-1, /*gpr_regs_limit=*/-1, c.first);
+
+        reg_config_t reg_cfg = make_reg_config(
+                c.first, abi_param1.getIdx(), Xbyak::Operand::RSP, {});
+        reg_cfg.pools.files[0].regs
+                = {Xbyak::Operand::RAX, Xbyak::Operand::RCX};
+        const reg_alloc_result_t alloc = allocate_registers(ir, reg_cfg.pools);
+
+        EXPECT_EQ(kernel_dump_str(gen, ir, data_section_t(), reg_cfg, alloc),
+                c.second);
     }
 }
 

@@ -43,21 +43,41 @@ static bcast_set_t get_all_strategies_supported_by_injector() {
             broadcasting_strategy_t::no_broadcast};
 }
 
-bool is_data_supported(cpu_isa_t isa, data_type_t data_type) {
-    UNUSED(isa);
-    return !(data_type == data_type::bf16);
+bool is_data_supported(data_type_t data_type) {
+    using namespace data_type;
+
+    return utils::one_of(data_type, f32, s32, s8, u8);
 }
 
-bool is_supported(cpu_isa_t isa, const dnnl::impl::memory_desc_t &src1_desc,
+bool is_alg_supported(alg_kind_t alg) {
+    return utils::one_of(alg, alg_kind::binary_add, alg_kind::binary_mul,
+            alg_kind::binary_max, alg_kind::binary_min, alg_kind::binary_div,
+            alg_kind::binary_sub, alg_kind::binary_ge, alg_kind::binary_gt,
+            alg_kind::binary_le, alg_kind::binary_lt, alg_kind::binary_eq,
+            alg_kind::binary_ne);
+}
+
+bool is_supported(cpu_isa_t isa, alg_kind_t alg,
+        const dnnl::impl::memory_desc_t &src1_desc,
         const memory_desc_wrapper &dst_d,
         const bcast_set_t &supported_strategy_set) {
-    VCHECK_BIN_INJ_BOOL(is_data_supported(isa, src1_desc.data_type),
-            VERBOSE_ISA_DT_MISMATCH);
+    VCHECK_BIN_INJ_BOOL(utils::one_of(isa, sve, asimd), VERBOSE_UNSUPPORTED_ISA)
 
-    VCHECK_BIN_INJ_BOOL(memory_desc_wrapper(src1_desc).is_dense(true),
-            VERBOSE_NONTRIVIAL_STRIDE);
+    VCHECK_BIN_INJ_BOOL(
+            is_data_supported(src1_desc.data_type), VERBOSE_ISA_DT_MISMATCH);
 
-    return is_bcast_supported(src1_desc, dst_d, supported_strategy_set);
+    VCHECK_BIN_INJ_BOOL(is_alg_supported(alg), VERBOSE_BAD_ALGORITHM);
+
+    const memory_desc_wrapper src1_mdw(src1_desc);
+    VCHECK_BIN_INJ_BOOL(!src1_mdw.format_any(),
+            "set the rhs format before checking for support");
+    VCHECK_BIN_INJ_BOOL(src1_mdw.is_dense(true), VERBOSE_NONTRIVIAL_STRIDE);
+
+    VCHECK_BIN_INJ_BOOL(
+            is_bcast_supported(src1_desc, dst_d, supported_strategy_set),
+            "unsupported broadcast");
+
+    return true;
 }
 
 static bool src1_desc_layout_same_as_dst_d(
@@ -95,21 +115,6 @@ bool is_bcast_supported(const dnnl::impl::memory_desc_t &src1_desc,
             "src1 and dst must have the same layout if not broadcasting");
 
     return bcast_type != broadcasting_strategy_t::unsupported;
-}
-
-bool binary_args_broadcast_supported(const post_ops_t &post_ops,
-        const memory_desc_wrapper &dst_d,
-        const bcast_set_t &supported_strategy_set) {
-
-    return std::none_of(post_ops.entry_.cbegin(), post_ops.entry_.cend(),
-            [&](const post_ops_t::entry_t &entry) -> bool {
-        if (entry.is_binary()) {
-            const auto bcast_type = get_rhs_arg_broadcasting_strategy(
-                    entry.binary.src1_desc, dst_d, supported_strategy_set);
-            return bcast_type == broadcasting_strategy_t::unsupported;
-        }
-        return false;
-    });
 }
 
 bool any_binary_postop_rhs_non_scalar_broadcast(
@@ -484,8 +489,10 @@ void jit_uni_binary_injector_t<isa>::compute_vector_range(
         const injector_utils::vmm_index_set_t &vmm_idxs,
         std::size_t rhs_arg_idx, const dnnl_post_ops::entry_t &post_op,
         const rhs_arg_dynamic_params_t &rhs_arg_params) const {
-
     if (vmm_idxs.empty()) return;
+
+    assert(post_op.is_binary() && is_alg_supported(post_op.binary.alg));
+
     const auto start_idx = *(vmm_idxs.begin());
     const auto end_idx = *(vmm_idxs.rbegin());
 
@@ -505,10 +512,16 @@ void jit_uni_binary_injector_t<isa>::compute_vector_range(
                         broadcasting_strategy_t::scalar,
                         broadcasting_strategy_t::per_oc_spatial)
                     || rhs_arg_data_type != data_type::f32);
-    const bool dt_helper_vmm_needed
-            = !binary_op_with_unaligned_mem_operand_allowed_
-            || rhs_arg_data_type != data_type::f32 || should_preserve_vmm_tail;
-    const auto tail_load_mode = rhs_arg_params.tail_load_mode;
+
+    const bool need_tail_handling_in_range = rhs_arg_static_params_.is_tail
+            && tail_exists_in_range
+            && rhs_arg_static_params_.use_exact_tail_scalar_bcast;
+
+    // When these conditions are met we can avoid repeatedly loading the
+    // an unchanging scalar RHS
+    const bool can_load_scalar_once
+            = rhs_broadcasting_strategy == broadcasting_strategy_t::scalar
+            && !need_tail_handling_in_range && vmm_idxs.count(vmm_hint) == 0;
 
     const std::initializer_list<Xbyak_aarch64::XReg> gpr_maybe_preserve_list {
             rhs_arg_static_params_.rhs_addr_reg,
@@ -516,6 +529,11 @@ void jit_uni_binary_injector_t<isa>::compute_vector_range(
 
     const std::initializer_list<Xbyak_aarch64::VReg> vmm_maybe_preserve_list {
             Xbyak_aarch64::VReg(vmm_hint)};
+
+    const bool dt_helper_vmm_needed = can_load_scalar_once
+            || !binary_op_with_unaligned_mem_operand_allowed_
+            || rhs_arg_data_type != data_type::f32 || should_preserve_vmm_tail;
+    const auto tail_load_mode = rhs_arg_params.tail_load_mode;
 
     // Phase 2 Protect temporary registers content.
     const injector_utils::register_preserve_guard_t<to_vla_sve(isa)>
@@ -537,6 +555,31 @@ void jit_uni_binary_injector_t<isa>::compute_vector_range(
     rhs_address_t rhs_arg_addr(Xbyak_aarch64::XReg(0));
 
     // Phase 3 Apply binary post-op over all vmms.
+    // Phase 3.a: fast path:
+    if (can_load_scalar_once) {
+        const Vmm rhs_vmm(vmm_hint);
+        rhs_arg_addr = prepare_rhs_arg_addr(start_idx, rhs_arg_idx, post_op,
+                rhs_arg_params, rhs_broadcasting_strategy);
+        execute_broadcast_no_tail(
+                rhs_arg_data_type, rhs_vmm, remove_bcast_bit(rhs_arg_addr));
+
+        // The integral types would have been converted to s32 by the broadcast
+        // load, so convert them to f32 here.
+        if (utils::one_of(rhs_arg_data_type, data_type::s32, data_type::s8,
+                    data_type::u8)) {
+            host_->uni_scvtf(rhs_vmm.s, rhs_vmm.s);
+        }
+
+        for (const auto vmm_idx : vmm_idxs) {
+            const Vmm dst_vmm(vmm_idx);
+            execute_binary(post_op.binary.alg, dst_vmm, host_->P_ALL_ONE,
+                    dst_vmm, rhs_vmm);
+        }
+
+        return;
+    }
+
+    // Phase 3.b: general path:
     for (const auto vmm_idx : vmm_idxs) {
         if (vmm_idx == start_idx
                 || rhs_arg_params_differ(vmm_idx, vmm_idx - 1, rhs_arg_params,
@@ -1408,8 +1451,12 @@ void jit_uni_binary_injector_t<isa>::inject_binary(
             load_rhs(rhs_arg_data_type, tmp_vmm, rhs_addr, tail_load_mode,
                     with_tail);
 
-        if (rhs_arg_data_type != data_type::f32)
+        // The integral types would have been converted to s32 by the
+        // broadcast/load, so convert them to f32 here.
+        if (utils::one_of(rhs_arg_data_type, data_type::s32, data_type::s8,
+                    data_type::u8)) {
             host_->uni_scvtf(tmp_vmm.s, tmp_vmm.s);
+        }
 
         execute_binary(alg, dst, host_->P_ALL_ONE, dst, tmp_vmm);
     } else {
@@ -1869,30 +1916,31 @@ template <cpu_isa_t isa>
 void jit_uni_binary_injector_t<isa>::compute_cmp_mask(
         const Xbyak_aarch64::PReg &cmp_dst, const Xbyak_aarch64::PReg &mask,
         const Xbyak_aarch64::ZReg &cmp_src, const Xbyak_aarch64::ZReg &cmp_src2,
-        const unsigned int cmp) const {
+        alg_kind_t cmp_predicate) const {
 
-    switch (cmp) {
-        case jit_generator_t::_cmp_nlt_us:
+    using namespace alg_kind;
+    switch (cmp_predicate) {
+        case binary_ge:
             host_->fcmge(cmp_dst.s, mask / Xbyak_aarch64::T_z, cmp_src.s,
                     cmp_src2.s);
             break;
-        case jit_generator_t::_cmp_nle_us:
+        case binary_gt:
             host_->fcmgt(cmp_dst.s, mask / Xbyak_aarch64::T_z, cmp_src.s,
                     cmp_src2.s);
             break;
-        case jit_generator_t::_cmp_le_os:
+        case binary_le:
             host_->fcmle(cmp_dst.s, mask / Xbyak_aarch64::T_z, cmp_src.s,
                     cmp_src2.s);
             break;
-        case jit_generator_t::_cmp_lt_os:
+        case binary_lt:
             host_->fcmlt(cmp_dst.s, mask / Xbyak_aarch64::T_z, cmp_src.s,
                     cmp_src2.s);
             break;
-        case jit_generator_t::_cmp_eq_oq:
+        case binary_eq:
             host_->fcmeq(cmp_dst.s, mask / Xbyak_aarch64::T_z, cmp_src.s,
                     cmp_src2.s);
             break;
-        case jit_generator_t::_cmp_neq_uq:
+        case binary_ne:
             host_->fcmne(cmp_dst.s, mask / Xbyak_aarch64::T_z, cmp_src.s,
                     cmp_src2.s);
             break;
@@ -1936,26 +1984,17 @@ template <>
 void jit_uni_binary_injector_t<asimd>::execute_cmp_binary(
         const Xbyak_aarch64::VReg &dst, const Xbyak_aarch64::PReg &mask,
         const Xbyak_aarch64::VReg &lhs, const Xbyak_aarch64::VReg &rhs,
-        const unsigned int cmp_predicate) const {
+        alg_kind_t cmp_predicate) const {
     UNUSED(mask);
 
+    using namespace alg_kind;
     switch (cmp_predicate) {
-        case jit_generator_t::_cmp_nlt_us:
-            host_->fcmge(dst.s, lhs.s, rhs.s);
-            break;
-        case jit_generator_t::_cmp_nle_us:
-            host_->fcmgt(dst.s, lhs.s, rhs.s);
-            break;
-        case jit_generator_t::_cmp_le_os:
-            host_->fcmge(dst.s, rhs.s, lhs.s);
-            break;
-        case jit_generator_t::_cmp_lt_os:
-            host_->fcmgt(dst.s, rhs.s, lhs.s);
-            break;
-        case jit_generator_t::_cmp_eq_oq:
-            host_->fcmeq(dst.s, lhs.s, rhs.s);
-            break;
-        case jit_generator_t::_cmp_neq_uq:
+        case binary_ge: host_->fcmge(dst.s, lhs.s, rhs.s); break;
+        case binary_gt: host_->fcmgt(dst.s, lhs.s, rhs.s); break;
+        case binary_le: host_->fcmge(dst.s, rhs.s, lhs.s); break;
+        case binary_lt: host_->fcmgt(dst.s, rhs.s, lhs.s); break;
+        case binary_eq: host_->fcmeq(dst.s, lhs.s, rhs.s); break;
+        case binary_ne:
             host_->fcmeq(dst.s, lhs.s, rhs.s);
             host_->not_(dst.b, dst.b);
             break;
@@ -1971,7 +2010,7 @@ void jit_uni_binary_injector_t<asimd>::execute_cmp_binary(
 template <cpu_isa_t isa>
 void jit_uni_binary_injector_t<isa>::execute_cmp_binary(const Vmm &dst,
         const Xbyak_aarch64::PReg &mask, const Vmm &lhs, const Vmm &rhs,
-        const unsigned int cmp_predicate) const {
+        alg_kind_t cmp_predicate) const {
     // For GreaterEqual op, replace 0xFFFFFFFF by 1
     // which was returned by vcmpps.
     const auto &cmp_mask = rhs_arg_static_params_.tail_opmask;
@@ -2044,28 +2083,12 @@ void jit_uni_binary_injector_t<asimd>::execute_binary(alg_kind_t binary_alg,
             host_->uni_fsub(dst.s, lhs.s, v_rhs.s);
             break;
         case alg_kind::binary_ge:
-            execute_cmp_binary(
-                    dst, mask, lhs, v_rhs, jit_generator_t::_cmp_nlt_us);
-            break;
         case alg_kind::binary_gt:
-            execute_cmp_binary(
-                    dst, mask, lhs, v_rhs, jit_generator_t::_cmp_nle_us);
-            break;
         case alg_kind::binary_le:
-            execute_cmp_binary(
-                    dst, mask, lhs, v_rhs, jit_generator_t::_cmp_le_os);
-            break;
         case alg_kind::binary_lt:
-            execute_cmp_binary(
-                    dst, mask, lhs, v_rhs, jit_generator_t::_cmp_lt_os);
-            break;
         case alg_kind::binary_eq:
-            execute_cmp_binary(
-                    dst, mask, lhs, v_rhs, jit_generator_t::_cmp_eq_oq);
-            break;
         case alg_kind::binary_ne:
-            execute_cmp_binary(
-                    dst, mask, lhs, v_rhs, jit_generator_t::_cmp_neq_uq);
+            execute_cmp_binary(dst, mask, lhs, v_rhs, binary_alg);
             break;
         default: assert(!"unsupported algorithm");
     }
@@ -2136,28 +2159,12 @@ void jit_uni_binary_injector_t<isa>::execute_binary(alg_kind_t binary_alg,
             host_->uni_fsub(dst.s, lhs.s, z_rhs.s);
             break;
         case alg_kind::binary_ge:
-            execute_cmp_binary(
-                    dst, mask, lhs, z_rhs, jit_generator_t::_cmp_nlt_us);
-            break;
         case alg_kind::binary_gt:
-            execute_cmp_binary(
-                    dst, mask, lhs, z_rhs, jit_generator_t::_cmp_nle_us);
-            break;
         case alg_kind::binary_le:
-            execute_cmp_binary(
-                    dst, mask, lhs, z_rhs, jit_generator_t::_cmp_le_os);
-            break;
         case alg_kind::binary_lt:
-            execute_cmp_binary(
-                    dst, mask, lhs, z_rhs, jit_generator_t::_cmp_lt_os);
-            break;
         case alg_kind::binary_eq:
-            execute_cmp_binary(
-                    dst, mask, lhs, z_rhs, jit_generator_t::_cmp_eq_oq);
-            break;
         case alg_kind::binary_ne:
-            execute_cmp_binary(
-                    dst, mask, lhs, z_rhs, jit_generator_t::_cmp_neq_uq);
+            execute_cmp_binary(dst, mask, lhs, z_rhs, binary_alg);
             break;
         default: assert(!"unsupported algorithm");
     }

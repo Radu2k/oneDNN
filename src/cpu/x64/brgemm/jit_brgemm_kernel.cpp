@@ -123,8 +123,25 @@ struct jit_brgemm_kernel_t : public brgemm_kernel_t {
                     dst_md_wrapper, tail_size, k_mask,
                     use_exact_tail_scalar_bcast};
 
-            const binary_injector::static_params_t bsp {this->param1,
-                    binary_injector::get_all_strategies_supported_by_injector(),
+            // The transA GEMV kernel with `y` as a column vectorizes the
+            // accumulators along M. For 3D dst {B, M, 1}, M is the channel
+            // dimension for the injector, and rhs can only be {1, 1, 1},
+            // {1, M, 1}, {B, 1, 1} or {B, M, 1}. The strategies below cover
+            // these shapes without assuming vectorization along a spatial
+            // dimension, unlike per_oc_spatial and per_mb_spatial. Other dst
+            // need no changes, as M is the minibatch dimension for the
+            // injector in 2D dst and a spatial one in 4D and higher dst.
+            const bool is_transa_gemv_3d = brg.is_gemv
+                    && brg.gemv_acc_is_vector() && !brg.treat_y_as_row
+                    && brg.dst_md()->ndims == 3;
+            const auto bcast_set = is_transa_gemv_3d
+                    ? bcast_set_t {broadcasting_strategy_t::scalar,
+                              broadcasting_strategy_t::per_oc,
+                              broadcasting_strategy_t::per_mb,
+                              broadcasting_strategy_t::no_broadcast}
+                    : binary_injector::
+                              get_all_strategies_supported_by_injector();
+            const binary_injector::static_params_t bsp {this->param1, bcast_set,
                     rhs_sp, f8_e5m2_cvt_.get(), f8_e4m3_cvt_.get()};
 
             postops_injector_ = utils::make_unique<po_injector_t>(this,
@@ -305,7 +322,7 @@ private:
     Xbyak::Opmask kmask_fp8_aux = Xbyak::Opmask(5);
     // Used for both AMX GEMM and GEMV code paths.
     Xbyak::Opmask rd_tail_mask = Xbyak::Opmask(6);
-    Xbyak::Opmask fp8_tail_mask = Xbyak::Opmask(7);
+    Xbyak::Opmask fp8_tail_mask = Xbyak::Opmask(4);
 
     // Aliases gemv_full_mask. That is only safe because ACE implements GEMM
     // only, so the gemv path is never generated together with it.
@@ -2509,7 +2526,8 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators(int bd_block2,
                             for (int bd = 0; bd < adj_bd_block; bd++) {
                                 const auto vreg_idx = accm(1, bd, 0).getIdx();
                                 const auto vreg_zmm = Zmm(vreg_idx);
-                                tilemovrow(vreg_zmm, Tmm(c_tensor), bd);
+                                tilemovrow(vreg_zmm, Tmm(c_tensor),
+                                        static_cast<uint8_t>(bd));
                             }
                         } else {
                             tilestored(ptr[reg_buf + reg_stride_ld_block],
@@ -2566,7 +2584,8 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators(int bd_block2,
                                         + (bd * brg.LDC) * brg.typesize_C;
                                 const auto vreg_zmm
                                         = Zmm(31); // Use temp register
-                                tilemovrow(vreg_zmm, tmm, bd);
+                                tilemovrow(vreg_zmm, tmm,
+                                        static_cast<uint8_t>(bd));
                                 if (is_ld_tail) {
                                     uni_vmovups(ptr[reg_aux_C + c_offset]
                                                     | ld_tail_mask | T_z,
@@ -3060,7 +3079,7 @@ void jit_brgemm_kernel_t<Wmm>::ace_load_A_4x16bytes(
         mov(reg_tmp_gpr, cur_mask);
         kmovq(ace_load_A_mask, reg_tmp_gpr);
         vmovdqu8(xmm_tmp | ace_load_A_mask | T_z, ptr[reg_A + cur_offset]);
-        vinserti64x2(zmm, zmm, xmm_tmp, i);
+        vinserti64x2(zmm, zmm, xmm_tmp, static_cast<uint8_t>(i));
     }
 }
 

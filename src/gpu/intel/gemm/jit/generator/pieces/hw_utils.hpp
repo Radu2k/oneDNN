@@ -38,7 +38,11 @@ static inline constexpr int elementsPerGRF(ngen::HW hw, Type T)
 
 static inline constexpr int elementsPerGRF(ngen::HW hw, ngen::DataType dt)
 {
-    return (ngen::GRF::bytes(hw) << 3) >> getLog2Bits(dt);
+    // u3 (Type::ngen_u3()) has a 3-bit element width, which is not a power of
+    // two and thus has no valid getLog2Bits() encoding; compute directly via
+    // division instead (mirroring Type::operator/ for sub-byte types).
+    return (dt == Type::ngen_u3()) ? (ngen::GRF::bytes(hw) << 3) / 3
+                                   : (ngen::GRF::bytes(hw) << 3) >> getLog2Bits(dt);
 }
 
 static inline bool canSwizzle(ngen::HW hw, ngen::DataType dt)
@@ -75,16 +79,16 @@ static inline bool hasNativeAtomicAdd(ngen::HW hw, Type T, const MatrixAddressin
         floatAtomics |= (astrategy.base.getModel() != ModelSLM);
     if (hw >= HW::Xe3p) floatAtomics = true;
 
-    if (T.isInt4())
+    if (T.isSubByteInt())
         return false;
     if (T.isInteger() && T.size() >= (astrategy.newDP ? 2 : 4))
         return true;
     else if (T == Type::f32)
         return floatAtomics && (hw >= HW::XeHP);
-    else if (T == Type::f16 || T == Type::bf16)
-        return (hw >= HW::Xe3p);
     else if (T == Type::f64)
         return floatAtomics && (hw >= HW::XeHPC);
+    else if (T == Type::f16 || T == Type::bf16)
+        return (hw >= HW::Xe3p);
     else
         return false;
 }
@@ -115,32 +119,9 @@ static inline size_t maxSLMPerWG(ngen::Product p, int grfCount)
     return slmMax;
 }
 
-static inline int GRFPerEU(const ngen::Product &product)
+static inline int threadsPerEU(ngen::Product p, const CommonStrategy &strategy)
 {
-    ngen::HW hw = ngen::getCore(product.family);
-    switch (hw) {
-        case ngen::HW::XeLP:  return 896; // Equivalent for 128 GRF/thread, 7 threads/EU.
-        case ngen::HW::XeHP:
-        case ngen::HW::XeHPG:
-        case ngen::HW::XeHPC:
-        case ngen::HW::Xe2:
-        case ngen::HW::Xe3:
-        case ngen::HW::Xe3p:
-            return product.family == ngen::ProductFamily::CRI ? 2048 : 1024;
-        default:              return 0;
-    }
-}
-
-static inline int threadsPerEU(const ngen::Product &product, const CommonStrategy &strategy)
-{
-    // CRI has an exception: 256 GRF/thread is restricted to 4 threads/EU due to lack of accumulators
-    if (product.family == ngen::ProductFamily::CRI && strategy.GRFs == 256)
-        return 4;
-
-    if (product.family <= ngen::ProductFamily::GenericXeLP)
-        return 7;
-
-    return GRFPerEU(product) / strategy.GRFs;
+    return p.threadsPerEU(strategy.GRFs);
 }
 
 static inline int eusPerSubslice(ngen::HW hw)
@@ -149,8 +130,8 @@ static inline int eusPerSubslice(ngen::HW hw)
     switch (hw) {
         case HW::XeHPC:
         case HW::Xe2:
-        case HW::Xe3p:
         case HW::Xe3:
+        case HW::Xe3p:
             return 8;
         case HW::Gen12LP:
         case HW::XeHP:

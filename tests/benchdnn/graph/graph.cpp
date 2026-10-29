@@ -526,6 +526,10 @@ int skip_unimplemented_partitions(const std::vector<partition> &partitions,
     const bool partition_num_mismatch = (prb->expected_n_partition > 0
             && partitions.size() != prb->expected_n_partition);
 
+    // If there are multiple partitions, check all of them for skip conditions
+    // before reporting a failure, as an unsupported data type in any partition
+    // may cause the mismatch.
+    int first_unsupported = -1;
     for (size_t i = 0; i < partitions.size(); ++i) {
         // Skip the partition contains op with unimplemented accumulation_mode
         skip_unimplemented_accumulation_mode(partitions[i], dg, res);
@@ -533,7 +537,10 @@ int skip_unimplemented_partitions(const std::vector<partition> &partitions,
 
         // If the partition number mismatches the requirement, check whether
         // there are unsupported data types.
-        if (partitions[i].is_supported() && !partition_num_mismatch) continue;
+        const bool is_supported = partitions[i].is_supported();
+        if (is_supported && !partition_num_mismatch) continue;
+        if (!is_supported && first_unsupported < 0)
+            first_unsupported = static_cast<int>(i);
 
         skip_unimplemented_ops(partitions[i], dg, res);
         if (res->state == SKIPPED) return OK;
@@ -584,8 +591,11 @@ int skip_unimplemented_partitions(const std::vector<partition> &partitions,
         if (in_out_dt.empty()) continue;
         skip_unimplemented_data_type(in_out_dt, dir, res);
         if (res->state == SKIPPED) return OK;
+    }
 
-        BENCHDNN_PRINT(3, "[INFO]: partition #%zd is unsupported!\n", i);
+    if (first_unsupported >= 0) {
+        BENCHDNN_PRINT(3, "[INFO]: partition #%d is unsupported!\n",
+                first_unsupported);
         return res->state = UNIMPLEMENTED, FAIL;
     }
 
@@ -697,6 +707,25 @@ int doit(const prb_t *prb, res_t *res) {
         record_queried_logical_tensors(
                 outputs, c_partitions.back(), id_to_queried_logical_tensors);
     }
+
+    res->impl_name.clear();
+    for (size_t i = 0; i < c_partitions.size(); ++i) {
+        const char *impl_info = nullptr;
+        DNN_GRAPH_SAFE(impl_info = c_partitions[i].impl_info_str(), WARN, res);
+        if (!impl_info || impl_info[0] == '\0') {
+            BENCHDNN_PRINT(0,
+                    "Error: empty implementation info for compiled partition "
+                    "#%zu.\n",
+                    i);
+            return res->state = FAILED, FAIL;
+        }
+        // For case containing multiple compiled partitions, concatenate their
+        // implementation info with '+'.
+        if (!res->impl_name.empty()) res->impl_name += "+";
+        res->impl_name += impl_info;
+    }
+    BENCHDNN_PRINT(
+            5, "oneDNN graph implementation: %s\n", res->impl_name.c_str());
 
     scratchpad_ts_all.reserve(c_partitions.size());
     auto &graph_mem_mgr = graph_mem_manager_t::get_instance();

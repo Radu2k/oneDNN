@@ -883,6 +883,59 @@ static inline bool checkSrc1Scalar(Opcode op, ExtendedReg r, ExtendedReg dst, Ta
     return checkSrc1Scalar(op, r.getBase(), dst.getBase(), tag);
 }
 
+// Xe3p: a non-scalar FP source must occupy the same byte positions within a GRF as the destination.
+static inline bool isXe3pFPPipeType(DataType dt)
+{
+    switch (dt) {
+        case DataType::df:
+        case DataType::f:
+        case DataType::hf:
+        case DataType::bf: return true;
+        default: return false;
+    }
+}
+
+static inline void checkXe3pFPRegionSrc(HW hw, Opcode op, const RegData &dst, const RegData &src)
+{
+#ifdef NGEN_SAFE
+    if (hw < HW::Xe3p) return;
+    switch (op) {
+        case Opcode::bdpas:
+        case Opcode::dpas:
+        case Opcode::shfl:
+        case Opcode::send:
+        case Opcode::sendc:
+        case Opcode::sends:
+        case Opcode::sendsc: return;
+        default: break;
+    }
+    if (dst.isNull() || dst.isIndirect() || dst.isARF()) return;
+    if (src.isNull() || src.isIndirect() || src.isARF() || src.isScalar()) return;
+    if (!isXe3pFPPipeType(dst.getType()) || !isXe3pFPPipeType(src.getType())) return;
+    if (dst.getBytes() != src.getBytes()) return;      /* mixed-width rule not covered */
+
+    int grfBytes = GRF::bytes(hw);
+    if ((dst.getByteOffset() % grfBytes) != (src.getByteOffset() % grfBytes))
+        throw invalid_region_exception();
+#else
+    (void) hw; (void) op; (void) dst; (void) src;
+#endif
+}
+
+// Other operand types (ExtendedReg math-macro operands, Immediate, NoOperand): nothing to check.
+template <typename D, typename S>
+static inline void checkXe3pFPRegionSrc(HW, Opcode, const D &, const S &) {}
+
+template <typename D>
+static inline void checkXe3pFPRegion(HW, Opcode, const D &) {}
+
+template <typename D, typename S, typename... Srcs>
+static inline void checkXe3pFPRegion(HW hw, Opcode op, const D &dst, const S &src, const Srcs &... srcs)
+{
+    checkXe3pFPRegionSrc(hw, op, dst, src);
+    checkXe3pFPRegion(hw, op, dst, srcs...);
+}
+
 static inline void encodeCommon12(Instruction12 &i, Opcode opcode, const InstructionModifier &mod, const RegData &dst, EncodingTag12 tag)
 {
     Instruction12 i2;   /* separate variable to avoid gcc13 bug */
@@ -1170,7 +1223,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
         case Opcode::directive:
             switch (opNum) {
                 case -1: {
-                    BinaryOperand12 o;
+                    BinaryOperand12 o{0};
                     o.bits = binary.dst;
                     unsigned regNum = o.direct.regNum;
                     if (xe3p) regNum |= (binaryXe3p.dstReg8 << 8);
@@ -1178,7 +1231,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                     return true;
                 }
                 case 0: {
-                    BinaryOperand12 o0, o1;
+                    BinaryOperand12 o0{0}, o1{0};
                     o0.bits = binary.src0;
                     o1.bits = binary.src1;
                     unsigned rn0 = o0.direct.regNum, rn1 = o1.direct.regNum;
@@ -1197,7 +1250,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
             unsigned sdepth = 1 << dpas.sdepth;
             unsigned rcount = 1 + dpas.rcount;
             unsigned len;
-            TernaryOperand12 o;
+            TernaryOperand12 o{0};
             unsigned regNum8 = 0;
 
             switch (opNum) {
@@ -1241,6 +1294,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                     reg |= bdpas.src3Reg1_2 << 1;
                     reg |= bdpas.src3Reg3_6 << 3;
                     reg |= bdpas.src3Reg7_8 << 7;
+                    o.direct.regFile = bdpas.src3RegFile;
                     o.direct.regNum = reg;      // low 8 bits
                     regNum8 = reg >> 8;         // bit 8 routed separately
                     len = 1;
@@ -1250,6 +1304,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                     if (op != Opcode::bdpas) return false;
                     unsigned reg = bdpas.src4Reg0_3;
                     reg |= bdpas.src4Reg4_8 << 4;
+                    o.direct.regFile = bdpas.src4RegFile;
                     o.direct.regNum = reg;      // low 8 bits
                     regNum8 = reg >> 8;         // bit 8 routed separately
                     len = 1;
@@ -1257,6 +1312,8 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                 }
                 default: return false;
             }
+
+            if (o.direct.regFile == RegFileARF) return false;    // null operand
 
             unsigned regNum = o.direct.regNum;
             if (xe3p) regNum |= (regNum8 << 8);
@@ -1401,7 +1458,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
         case Opcode::dnscl:
         case Opcode::mad:
         case Opcode::madm: {  // ternary
-            TernaryOperand12 o;
+            TernaryOperand12 o{0};
             unsigned dt = 0, vs = 0;
             unsigned regNum8 = 0;
             switch (opNum) {
@@ -1445,7 +1502,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                 hs = 0;
                 if (!ternaryXe3p.src1Scalar) {
                     auto dbytes = getBytes(decodeRegTypecode12((ternary.execType << 3) | ternary.dstType));
-                    TernaryOperand12 odst;
+                    TernaryOperand12 odst{0};
                     odst.bits = ternary.dst;
                     hs = std::max(1, (dbytes << odst.direct.hs) / base.getBytes());
                 }
@@ -1480,7 +1537,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
             unaryXe3p = true;
             /* fall through */
         default: {    // unary/binary
-            BinaryOperand12 o;
+            BinaryOperand12 o{0};
             unsigned dt;
             unsigned regNum8 = 0;
 
@@ -1531,7 +1588,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                 hs = 0;
                 if (!binaryXe3p.src1Scalar) {
                     auto dbytes = getBytes(decodeRegTypecode12(binary.dstType));
-                    BinaryOperand12 odst;
+                    BinaryOperand12 odst{0};
                     odst.bits = binary.dst;
                     hs = std::max(1, (dbytes << (odst.direct.hs - 1)) / base.getBytes());
                 }
@@ -1699,7 +1756,7 @@ bool Instruction12::getARFType(ARFType &arfType, int opNum, HW hw) const
         case Opcode::dpasw:
             return false;
         default: {
-            BinaryOperand12 o;
+            BinaryOperand12 o{0};
             switch (opNum) {
                 case -1:
                     o.bits = binary.dst;

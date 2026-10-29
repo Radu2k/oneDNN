@@ -17,6 +17,8 @@
 #ifndef GPU_INTEL_GEMM_JIT_GEN_KERNEL_HPP
 #define GPU_INTEL_GEMM_JIT_GEN_KERNEL_HPP
 
+#include <string>
+
 #include "common/c_types_map.hpp"
 #include "gemmstone/driver_info.hpp"
 #include "gemmstone/kernel_catalog.hpp"
@@ -54,8 +56,10 @@ static inline gemmstone::Type convert_dnnl_to_kernel_type(data_type_t type) {
         case data_type::s32: return Type::s32;
         case data_type::u8: return Type::u8;
         case data_type::s8: return Type::s8;
+        case data_type::u3: return Type::u3;
         case data_type::u4: return Type::u4;
         case data_type::s4: return Type::s4;
+        case data_type::u2: return Type::u2;
         case data_type::undef: return Type::invalid;
     }
 }
@@ -65,6 +69,7 @@ struct gen_desc_t {
 
     const gemmstone::GEMMProblem *problem() const { return &problem_; }
     const gemmstone::GEMMStrategy *strategy() const { return &strategy_; }
+    std::string str() const;
 
     const gemmstone::CommonDriverInfo *driver_info() const {
         return &driver_info_;
@@ -99,11 +104,16 @@ struct gen_desc_t {
         efficient_64b_ = efficient_64b;
     }
 
+    void set_kernel_override(const std::string &kernel) {
+        kernel_override_ = kernel;
+    }
+
 protected:
     compute::gpu_arch_t arch_;
     ngen::HW hw_ = ngen::HW::Unknown;
     ngen::Product product_;
     int stepping_ = 0;
+    bool l1_flush_wa_ = false;
     gemmstone::GEMMProblem problem_ = {};
     gemmstone::GEMMStrategy strategy_;
     const gemmstone::kcatalog::Entry *entry_ = nullptr;
@@ -112,6 +122,8 @@ protected:
 
     bool efficient_64b_ = false;
 
+    std::string kernel_override_;
+
     /* optional information to fine-tune kernel */
     int m_ = -1, n_ = -1, k_ = -1;
     int eu_count_ = -1;
@@ -119,6 +131,8 @@ protected:
     bool relaxed_acc_ = false;
 
     status_t finalize(const char *tags);
+    status_t apply_kernel_override(
+            const std::string &ovr_strategy, const char *tags);
     void update_driver_info();
 };
 
@@ -169,6 +183,9 @@ struct gen_xe_systolic_kernel_desc_t : public gen_desc_t {
 
     static int min_block_k(data_type_t a_type) { return 2048; }
 };
+
+std::string dump_kernel(ngen::HW hw, const gemmstone::GEMMProblem &problem,
+        const gemmstone::GEMMStrategy &strategy);
 
 struct gen_kernel_t : public intel::jit::generator_base_t {
 

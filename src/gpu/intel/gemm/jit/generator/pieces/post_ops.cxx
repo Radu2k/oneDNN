@@ -160,7 +160,7 @@ void Generator<hw>::gemmScalarBinaryOpC(BinaryOp op, Type Tco, const Subregister
 
     if (Tco != Tacc) {
         offsetTc = state.ra.alloc_sub(Tacc.ngen());
-        CopyPlan plan(hw, strategy.systolicAvailable);
+        CopyPlan plan(getProductFamily(), strategy.systolicAvailable);
         plan.append(Opcode::mov, 1, offsetTc, scalar);
         copyExecute(std::move(plan), state);
     }
@@ -271,7 +271,7 @@ bool Generator<hw>::gemmBinaryOpC(BinaryOp op, bool row, bool column,
                                   Subregister base, Subregister ld,
                                   const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state)
 {
-    std::vector<GRFRange> CO_addrs;
+    std::vector<RegisterRange> CO_addrs;
     std::vector<MaskAssignment> masks;
     auto globalCM = state.C_layout.colMajor();
 
@@ -304,7 +304,7 @@ bool Generator<hw>::gemmBinaryOpC(BinaryOp op, bool row, bool column,
 
     RegisterLayout CO_layout(hw, Tco, cor, coc, CO, CO_strategy, remR, remC, false);
 
-    allocAddrRegs(CO_addrs, CO_layout, state);
+    allocAddrRegs(hw, CO_addrs, CO_layout, state);
     setupAddr(CO_addrs, base, CO_layout, ld, strategy, state);
 
     if (!assignMasks(CO_layout, LoopM, LoopN, masks, strategy, state, true)) return false;
@@ -330,11 +330,11 @@ bool Generator<hw>::gemmBinaryOpC(BinaryOp op, bool row, bool column,
             auto repackLayout = RegisterLayout(hw, state.Tacc, cor, coc, !column);
             nreserve += repackLayout.regs();
         }
-        ngen::GRFRange reserve;
+        ngen::RegisterRange reserve;
         reserve = state.ra.alloc_range(nreserve);
 
         constexpr int max_grouped_ops = 16;
-        std::array<ngen::GRFRange, max_grouped_ops> allCORegs;
+        std::array<ngen::RegisterRange, max_grouped_ops> allCORegs;
 
         int grouped_ops = 0;
         for (auto &r : allCORegs) {
@@ -674,8 +674,25 @@ void Generator<hw>::gemmApplyMXScale(const GEMMProblem &problem, const GEMMStrat
     int n_regs = std::max(1, (n_elems * m_stride) / GRF::bytes(hw));
     auto tmpCScales = state.ra.alloc_range(n_regs);
     vector<MaskAssignment> masks;
-    assignMasks(state.C_scaleLayout, LoopNone, LoopN, masks, strategy, state);
-    loadMasks(masks, state.remainders, strategy, state);
+    // Without a row mask, an M-remainder tile may store its out-of-range group
+    // rows past the end of the scale row, corrupting the next column's
+    // first scale entries. Mask rows using the M remainder converted to group units.
+    bool maskM = state.remainders[LoopM].isValid()
+            && (unrollM > problem.cqGroupM);
+    if (maskM && !ngen::utils::is_zero_or_pow2(problem.cqGroupM)) stub();
+    if (problem.cqGroupN > 1) stub("MX C scale groups along N are not supported");
+    assignMasks(state.C_scaleLayout, maskM ? LoopM : LoopNone, LoopN, masks, strategy, state);
+    if (maskM) {
+        Subregister remInd[3];
+        for (int i = 0; i < 3; i++) remInd[i] = state.remainders[i];
+        auto qremM = state.ra.alloc_sub<uint32_t>();
+        add(1 | sat, qremM, state.remainders[LoopM], problem.cqGroupM - 1);
+        shr(1, qremM, qremM, ilog2(problem.cqGroupM));
+        remInd[LoopM] = qremM;
+        loadMasks(masks, remInd, strategy, state);
+        state.ra.safeRelease(qremM);
+    } else
+        loadMasks(masks, state.remainders, strategy, state);
 
     problem.postOps.injectMXScale(this, state.ra, C_grfs, C_ngrf, tmpCScales.sub(hw, 0, ngen::DataType::ub), problem.Tc_ext.ngen(), unrollN);
     storeMatrix(tmpCScales, state.C_scaleLayout, state.C_scaleAddrs, strategy, state);
@@ -690,8 +707,8 @@ void Generator<hw>::gemmApplyMXScale(const GEMMProblem &problem, const GEMMStrat
 template <HW hw>
 void Generator<hw>::gemmCalcABOffsetAddrs(const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state)
 {
-    bool doA = (problem.bOffset == ABOffset::Load);
-    bool doB = (problem.aOffset == ABOffset::Load);
+    bool doA = (problem.bOffset == ABOffset::Load) && isPacked(problem.A.layout);
+    bool doB = (problem.aOffset == ABOffset::Load) && isPacked(problem.B.layout);
 
     auto &effAs = state.effAs;
     auto &effBs = state.effBs;
@@ -730,6 +747,15 @@ bool Generator<hw>::gemmLoadABOffset(const GEMMProblem &problem, const GEMMStrat
     As.tileR = As.tileC = 0;
     Bs.tileR = Bs.tileC = 0;
 
+    if (!isPacked(As.layout)) {
+        As.layout = MatrixLayout::N;
+        As.setAlignment(Tc.size());
+    }
+    if (!isPacked(Bs.layout)) {
+        Bs.layout = MatrixLayout::T;
+        Bs.setAlignment(Tc.size());
+    }
+
     MatrixAddressingStrategy As_strategy = strategy.A, Bs_strategy = strategy.B;
     As_strategy.accessType = AccessType::Block;
     Bs_strategy.accessType = AccessType::Block;
@@ -737,29 +763,29 @@ bool Generator<hw>::gemmLoadABOffset(const GEMMProblem &problem, const GEMMStrat
     Bs_strategy.tileR = Bs_strategy.tileC = 0;
     As_strategy.dpasw = Bs_strategy.dpasw = false;
 
-    state.As_layout.clear();
-    state.Bs_layout.clear();
+    if (doA) state.As_layout.clear();
+    if (doB) state.Bs_layout.clear();
 
     bool ok = true;
     if (doA) ok = ok && (state.As_layout = RegisterLayout::tryCreate(hw, Tc, unrollM, 1, As, As_strategy));
     if (doB) ok = ok && (state.Bs_layout = RegisterLayout::tryCreate(hw, Tc, 1, unrollN, Bs, Bs_strategy));
     if (!ok) return false;
 
-    state.As_regs = state.ra.allocRange(state.As_layout.regs());
-    state.Bs_regs = state.ra.allocRange(state.Bs_layout.regs());
+    if (doA) state.As_regs = state.ra.allocRange(state.As_layout.regs());
+    if (doB) state.Bs_regs = state.ra.allocRange(state.Bs_layout.regs());
 
-    vector<GRFRange> As_addrs, Bs_addrs;
-    allocAddrRegs(As_addrs, state.As_layout, state);
-    allocAddrRegs(Bs_addrs, state.Bs_layout, state);
+    vector<RegisterRange> As_addrs, Bs_addrs;
+    if (doA) allocAddrRegs(hw, As_addrs, state.As_layout, state);
+    if (doB) allocAddrRegs(hw, Bs_addrs, state.Bs_layout, state);
 
     if (state.effAs.isInvalid() && state.effBs.isInvalid())
         gemmCalcABOffsetAddrs(problem, strategy, state);
 
-    setupAddr(As_addrs, state.effAs, state.As_layout, Subregister(), strategy, state);
-    setupAddr(Bs_addrs, state.effBs, state.Bs_layout, Subregister(), strategy, state);
+    if (doA) setupAddr(As_addrs, state.effAs, state.As_layout, Subregister(), strategy, state);
+    if (doB) setupAddr(Bs_addrs, state.effBs, state.Bs_layout, Subregister(), strategy, state);
 
-    loadMatrix(state.As_regs, state.As_layout, As_addrs, strategy, state);
-    loadMatrix(state.Bs_regs, state.Bs_layout, Bs_addrs, strategy, state);
+    if (doA) loadMatrix(state.As_regs, state.As_layout, As_addrs, strategy, state);
+    if (doB) loadMatrix(state.Bs_regs, state.Bs_layout, Bs_addrs, strategy, state);
 
     state.ra.safeRelease(state.effAs);
     state.ra.safeRelease(state.effBs);
@@ -815,14 +841,20 @@ void Generator<hw>::gemmApplyABOffset(const GEMMProblem &problem, const GEMMStra
 
     bool aoVector = aOffset && (problem.aoPtrDims == 1);
     bool boVector = bOffset && (problem.boPtrDims == 1);
-    GRFRange aoData, boData;
+    // Host-scalar ao/bo are raw (non-negated), unlike vector/device-memory
+    // scalars which are pre-negated on load.
+    bool a_host_scalar = problem.aOffsetHostScalar();
+    bool b_host_scalar = problem.bOffsetHostScalar();
+    RegisterRange aoData, boData;
 
     auto temp = [&]() {
         if (!(aOffset && bOffset)) return Subregister{};
 
         auto ret = state.ra.alloc_sub(problem.Tc.ngen());
         if (!boVector)
-            mul(1, ret, state.k, state.inputs.bo);
+            mul(1, ret, state.k,
+                    (aoVector && b_host_scalar) ? -state.inputs.bo
+                                                 : state.inputs.bo);
         else
             mov(1, ret, state.k);
 
@@ -865,7 +897,8 @@ void Generator<hw>::gemmApplyABOffset(const GEMMProblem &problem, const GEMMStra
 
         if (bOffset) {
             boVector ? gemmRank1UpdateC(state.As_regs, boData, problem, strategy, state)
-                     : gemmVectorBinaryOpC(BinaryOp::Add, false, state.As_regs, state.inputs.bo,
+                     : gemmVectorBinaryOpC(b_host_scalar ? BinaryOp::Sub : BinaryOp::Add, false,
+                                           state.As_regs, state.inputs.bo,
                                            problem, strategy, state, problem.Tc, state.As_layout);
         }
 
@@ -880,14 +913,13 @@ void Generator<hw>::gemmApplyABOffset(const GEMMProblem &problem, const GEMMStra
 
         if (aOffset) {
             aoVector ? gemmRank1UpdateC(aoData, state.Bs_regs, problem, strategy, state)
-                     : gemmVectorBinaryOpC(BinaryOp::Add, true,  state.Bs_regs, state.inputs.ao,
+                     : gemmVectorBinaryOpC(a_host_scalar ? BinaryOp::Sub : BinaryOp::Add, true,
+                                           state.Bs_regs, state.inputs.ao,
                                            problem, strategy, state, problem.Tc, state.Bs_layout);
         }
     } else {
         // Scalar offset path.
         // TODO: combine C adds into add3 on XeHP+.
-        bool a_host_scalar = problem.aOffsetHostScalar();
-        bool b_host_scalar = problem.bOffsetHostScalar();
         if (aOffset && bOffset) {
             mul(1, temp, temp, b_host_scalar ? -state.inputs.ao : state.inputs.ao);
             map(hw, Tc, state.Bs_regs, state.Bs_layout, strategy, [&](int ne, RegData r) {

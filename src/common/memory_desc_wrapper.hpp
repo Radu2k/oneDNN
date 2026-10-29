@@ -203,12 +203,15 @@ struct memory_desc_wrapper {
     /* some useful function */
 
     /** returns the number of elements including padding if \param with_padding
-     * is true, and the number of data elements otherwise */
-    dim_t nelems(bool with_padding = false) const {
+     * is true, and the number of data elements otherwise. Counting starts from
+     * \param start_dim, so a non-zero value skips the outer dimensions and
+     * returns the product over dimensions `[start_dim, ndims())`. */
+    dim_t nelems(bool with_padding = false, int start_dim = 0) const {
         if (is_zero()) return 0;
         if (has_runtime_dims()) return runtime_value_for<dim_t>();
         return utils::array_product(
-                with_padding ? padded_dims() : dims(), ndims());
+                (with_padding ? padded_dims() : dims()) + start_dim,
+                nstl::max(0, ndims() - start_dim));
     }
 
     /** returns true if memory descriptor is zero */
@@ -226,16 +229,6 @@ struct memory_desc_wrapper {
 
     /** return the size of data type (a shortcut) */
     size_t data_type_size() const { return types::data_type_size(data_type()); }
-
-    /** For sub-byte data types returns number of elements per byte.
-     * For the rest data types returns 1. */
-    size_t sub_byte_data_type_multiplier() const {
-        if (utils::one_of(data_type(), data_type::s4, data_type::u4,
-                    data_type::f4_e2m1))
-            return 2;
-        if (data_type() == data_type::u2) return 4;
-        return 1;
-    }
 
     /** return the size of data type of additional buffer */
     size_t additional_buffer_data_size(uint64_t flag_select) const {
@@ -315,10 +308,14 @@ struct memory_desc_wrapper {
         return buff_size;
     }
 
-    /** returns the number of elements spanned by the descriptor, i.e. one past
-     * the largest linear offset `off_v()` may return. Exceeds `nelems(true)`
-     * for strided descriptors. */
-    size_t span() const {
+    /** returns the number of elements spanned by the descriptor starting from
+     * `start_dim`, i.e. one past the largest linear offset `off_v()` may return
+     * when only dimensions `[start_dim, ndims())` are traversed. With the
+     * default `start_dim == 0` it accounts for every dimension and exceeds
+     * `nelems(true)` for strided descriptors. A non-zero `start_dim` ignores
+     * the span contributed by the outer dimensions, which is useful to check
+     * whether everything past those dimensions is dense. */
+    size_t span(int start_dim = 0) const {
         if (utils::one_of(format_kind(), format_kind::undef, format_kind::any)
                 || is_zero() || has_zero_dim())
             return 0;
@@ -332,7 +329,7 @@ struct memory_desc_wrapper {
             const auto &bd = blocking_desc();
 
             dim_t max_size = 0;
-            for (int d = 0; d < ndims(); ++d) {
+            for (int d = start_dim; d < ndims(); ++d) {
                 dim_t strided_pdim = padded_dims()[d] / blocks[d];
                 dim_t effective_stride = strided_pdim == 1 ? 1 : bd.strides[d];
                 max_size = nstl::max(max_size, strided_pdim * effective_stride);
@@ -439,8 +436,7 @@ struct memory_desc_wrapper {
                 switch (index) {
                     case 0:
                         // Return size for values.
-                        return utils::div_up(nnz() * data_type_size(),
-                                sub_byte_data_type_multiplier());
+                        return types::elements_to_bytes(data_type(), nnz());
                     case 1: {
                         // Return size for offsets (group_count offsets).
                         const auto offsets_dt = metadata_type(0);
@@ -478,6 +474,30 @@ struct memory_desc_wrapper {
             if (dims()[d] != 1) non_unit_dims++;
         }
         return non_unit_dims <= n;
+    }
+
+    /** returns the index of the innermost (most densely packed) logical
+     * dimension, i.e. the one that varies fastest in memory. When the format
+     * has inner blocks, it is the dimension of the last block; otherwise it is
+     * the dimension with the smallest stride, excluding unit and broadcast dims
+     * whose strides would otherwise tie with and mask the real packed axis
+     * (e.g. dims [1, N] with a `ba` layout has strides [1, 1], yet dim 1 is the
+     * packed axis). */
+    int innermost_dim() const {
+        const auto &bd = blocking_desc();
+        if (bd.inner_nblks > 0)
+            return static_cast<int>(bd.inner_idxs[bd.inner_nblks - 1]);
+
+        int inner_dim = ndims() - 1;
+        dim_t min_stride = 0;
+        for (int d = 0; d < ndims(); d++) {
+            if (dims()[d] == 1 || bd.strides[d] == 0) continue;
+            if (min_stride == 0 || bd.strides[d] < min_stride) {
+                min_stride = bd.strides[d];
+                inner_dim = d;
+            }
+        }
+        return inner_dim;
     }
 
     /** returns true if data is dense in memory */

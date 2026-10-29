@@ -188,6 +188,7 @@ public:
     int stepping_id() const;
     uint64_t native_extensions() const { return native_extensions_; }
     bool is_integrated() const;
+    bool has_l1_flush_bug() const;
     uint32_t ip_version() const { return ip_version_; }
     int max_eus_per_wg() const { return max_eus_per_wg_; }
     static int max_eus_per_wg(gpu_arch_t gpu_arch);
@@ -203,6 +204,7 @@ public:
     size_t max_wg_size(
             int grf_per_thread = 128, size_t subgroup_size = 0) const;
     int eu_count() const { return eu_count_; }
+    int max_clock_mhz() const { return max_clock_mhz_; }
     int hw_threads(int grf_per_thread = 128) const {
         return eu_count_ * threads_per_eu(*product_, grf_per_thread);
     }
@@ -283,6 +285,7 @@ protected:
     xpu::runtime_version_t runtime_version_;
 
     int32_t eu_count_ = 0;
+    int32_t max_clock_mhz_ = 0;
     int32_t max_eus_per_wg_ = 0;
     int32_t max_subgroup_size_ = 16;
     int max_exec_size_ = 0;

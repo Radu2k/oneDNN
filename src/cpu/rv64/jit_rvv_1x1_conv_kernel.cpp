@@ -59,6 +59,7 @@ status_t jit_rvv_1x1_conv_kernel_t::init_conf(jit_1x1_conv_conf_t &jcp,
     // plain f32 FMA is used; only the weight element size differs from f32.
     jcp.src_dt = src_d.data_type();
     jcp.wei_dt = weights_d.data_type();
+    jcp.dst_dt = dst_d.data_type();
 
     jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
     jcp.bia_dt = jcp.with_bias ? cd.bias_desc.data_type : data_type::undef;
@@ -200,6 +201,11 @@ status_t jit_rvv_1x1_conv_kernel_t::init_conf(jit_1x1_conv_conf_t &jcp,
     jcp.nb_load_blocking = jcp.nb_load;
     jcp.nb_load_blocking_max = jcp.nb_load;
 
+    // A low-precision destination cannot hold an intermediate f32 partial
+    // sum. Keep the complete reduction in one kernel invocation so narrowing
+    // happens only after the final accumulation.
+    assert(jcp.nb_reduce_blocking == jcp.nb_reduce);
+
     // Spatial dimension blocking (in ur units)
     int target_bcast_blocking = 735;
     jcp.nb_bcast_blocking
@@ -215,12 +221,13 @@ status_t jit_rvv_1x1_conv_kernel_t::init_conf(jit_1x1_conv_conf_t &jcp,
     }
 
     // Layout-dependent stride parameters (for NHWC). Inputs (src/weights) may
-    // be 2-byte (bf16/f16); the destination accumulates/stores in f32.
+    // be 2-byte (bf16/f16); the destination accumulates in f32 and stores f32,
+    // or f16 narrowed from the f32 accumulators (Zvfh).
     jcp.typesize_in = static_cast<int>(types::data_type_size(jcp.src_dt));
     // Weight element size. Equals typesize_in for f32/f32 and symmetric
     // bf16/f16; for weight compression the weights are 2 bytes while src is 4.
     jcp.typesize_wei = static_cast<int>(types::data_type_size(jcp.wei_dt));
-    jcp.typesize_out = sizeof(float);
+    jcp.typesize_out = static_cast<int>(types::data_type_size(jcp.dst_dt));
     // bias element size (f32, or 2 bytes for a bf16/f16 bias widened to f32).
     jcp.typesize_bia = jcp.with_bias
             ? static_cast<int>(types::data_type_size(jcp.bia_dt))
@@ -476,9 +483,11 @@ void jit_rvv_1x1_conv_kernel_t::reduce_loop(int load_loop_blk, int ur) {
                     VMA::ma);
     };
     auto sew_accum = [=]() {
-        if (is_lowp)
-            vsetvli(reg_tmp_imm, reg_blk_vl, SEW::e32, LMUL::m2, VTA::ta,
+        if (is_lowp || jcp.dst_dt == data_type::f16) {
+            const auto accum_lmul = is_lowp ? LMUL::m2 : LMUL::m1;
+            vsetvli(reg_tmp_imm, reg_blk_vl, SEW::e32, accum_lmul, VTA::ta,
                     VMA::ma);
+        }
     };
 
     auto init = [=]() {
@@ -548,10 +557,25 @@ void jit_rvv_1x1_conv_kernel_t::reduce_loop(int load_loop_blk, int ur) {
     };
 
     auto store = [=]() {
+        // f16 dst narrows the f32 accumulators on store: e32/m2 -> e16/m1 for
+        // the low-precision paths, e32/m1 -> e16/mf2 for f32. The narrowing
+        // destination LMUL is half the accumulator LMUL, keeping VL unchanged.
+        const bool narrow_dst = jcp.dst_dt == data_type::f16;
+        if (narrow_dst) {
+            const auto narrow_lmul
+                    = is_lowp ? Xbyak_riscv::LMUL::m1 : Xbyak_riscv::LMUL::mf2;
+            vsetvli(reg_tmp_imm, reg_blk_vl, SEW::e16, narrow_lmul, VTA::ta,
+                    VMA::ma);
+        }
         mv(reg_tmp_addr, aux_reg_output_data);
         for (int i_ur = 0; i_ur < ur; ++i_ur) {
             for (int i_load = 0; i_load < load_loop_blk; ++i_load) {
-                vse32_v(vreg_accum(i_load, i_ur), reg_tmp_addr);
+                if (narrow_dst) {
+                    vfncvt_f_f_w(vreg_load(0), vreg_accum(i_load, i_ur));
+                    vse16_v(vreg_load(0), reg_tmp_addr);
+                } else {
+                    vse32_v(vreg_accum(i_load, i_ur), reg_tmp_addr);
+                }
                 if (i_load + 1 < load_loop_blk)
                     addi(reg_tmp_addr, reg_tmp_addr,
                             jcp.load_block * jcp.typesize_out);
@@ -562,6 +586,7 @@ void jit_rvv_1x1_conv_kernel_t::reduce_loop(int load_loop_blk, int ur) {
                                     * jcp.typesize_out);
             add(reg_tmp_addr, reg_tmp_addr, reg_tmp_imm);
         }
+        if (narrow_dst) sew_accum();
     };
 
     auto fma_block = [=](int current_unroll, bool last_block) {

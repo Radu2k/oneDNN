@@ -1317,7 +1317,9 @@ DNNL_GRAPH_OP_SCHEMA(DynamicQuantize, 1,
                 .set_type_constraints("T1", {data_type::f32})
                 .set_type_constraints(
                         "T2", {data_type::u8, data_type::s8, data_type::s32})
-                .set_type_constraints("T3", {data_type::u8, data_type::s8})
+                .set_type_constraints("T3",
+                        {data_type::u8, data_type::s8, data_type::f8_e5m2,
+                                data_type::f8_e4m3})
                 .set_shape_inference_function(infer_identity_output_shape)
                 .set_op_def_constraint_function(
                         check_dyn_quant_dequant_scales_zps))
@@ -1338,7 +1340,8 @@ DNNL_GRAPH_OP_SCHEMA(DynamicDequantize, 1,
                 .set_attr(op_attr::group_shape, false, attribute_kind::is)
                 .set_type_constraints("T1",
                         {data_type::u8, data_type::s8, data_type::s4,
-                                data_type::u4})
+                                data_type::u4, data_type::f8_e5m2,
+                                data_type::f8_e4m3})
                 .set_type_constraints(
                         "T2", {data_type::bf16, data_type::f16, data_type::f32})
                 .set_type_constraints("T3",
@@ -2364,22 +2367,6 @@ DNNL_GRAPH_OP_SCHEMA(_sdpa, 1,
                 .set_attr(op_attr::qk_acc_mode, true, attribute_kind::s)
                 .set_attr(op_attr::vs_acc_mode, true, attribute_kind::s)
                 .set_shape_inference_function(infer_dnnl_sdpa_output_shape))
-
-DNNL_GRAPH_OP_SCHEMA(_gated_mlp, 1,
-        op_schema_t()
-                .set_inputs_option(op_schema_t::param_num_option::variadic)
-                .set_num_inputs(std::set<size_t>({4, 32}))
-                .set_num_outputs(2)
-                .set_input(0, "src")
-                .set_input(1, "gate_weights")
-                .set_input(2, "up_weights")
-                .set_input(3, "down_weights")
-                .set_output(0, "dst")
-                .set_output(1, "scratchpad")
-                .set_attr(op_attr::fusion_info, false,
-                        attribute_kind::fusion_info)
-                .set_attr(op_attr::alg_kind, true, attribute_kind::i)
-                .set_shape_inference_function(infer_gated_mlp_output_shape))
 
 // Backward op for SDPA
 DNNL_GRAPH_OP_SCHEMA(_sdpa_bwd, 1,

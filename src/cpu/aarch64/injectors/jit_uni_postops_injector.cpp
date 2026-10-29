@@ -157,7 +157,7 @@ void jit_uni_postops_injector_t<isa>::set_lambda_injector(
 }
 
 post_ops_ok_args_t::post_ops_ok_args_t(const cpu_isa_t isa,
-        const std::vector<post_op_type> &accepted_post_op_types,
+        const std::initializer_list<post_op_type> accepted_post_op_types,
         const post_ops_t &post_ops, const memory_desc_wrapper *dst_d,
         const bool sum_at_pos_0_only, const bool sum_requires_scale_one,
         const bool sum_requires_zp_zero, const bool sum_requires_same_params,
@@ -218,12 +218,12 @@ bool post_ops_ok(const post_ops_ok_args_t &post_ops_ok_args) {
                 case binary:
                     // TODO: support alg_kind::prelu with entry.is_like_binary()
                     if (entry.is_binary()) {
-                        //TODO: support alg_kind::select
-                        if (entry.is_binary_with_ternary_op()) return false;
+                        const auto alg = entry.binary.alg;
 
                         return binary_injector::is_supported(
-                                to_vla_sve(args.isa), entry.binary.src1_desc,
-                                *args.dst_d, args.enabled_bcast_strategy);
+                                to_vla_sve(args.isa), alg,
+                                entry.binary.src1_desc, *args.dst_d,
+                                args.enabled_bcast_strategy);
                     }
                     break;
                 default: assert(false && "Unhandled post_op type");

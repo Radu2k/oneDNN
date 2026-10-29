@@ -93,8 +93,9 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     attr_args_t attr_args;
     attr_args.prepare_post_ops_mds(
             prb->attr, prb->ndims, prb->dst_dims().data());
-    const auto dnnl_attr = make_benchdnn_dnnl_wrapper(
-            create_dnnl_attr(prb->attr, attr_args, prb->ndims));
+    benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
+    DNN_SAFE_STATUS(
+            create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims));
 
     if (prb->dir & FLAG_FWD) {
         auto prop_kind = prb->dir & FLAG_INF ? dnnl_forward_inference
@@ -286,7 +287,7 @@ int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
     const auto &prim = v_prim[0];
 
     dnn_mem_map_t mem_map, ref_mem_map;
-    init_memory_args(mem_map, prb, prim, res);
+    SAFE(init_memory_args(mem_map, prb, prim, res), WARN);
     TIME_FILL(SAFE(
             init_ref_memory_args(ref_mem_map, mem_map, prim, prb, res), WARN));
 

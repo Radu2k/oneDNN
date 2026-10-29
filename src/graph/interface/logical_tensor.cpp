@@ -44,9 +44,7 @@ size_t logical_tensor_wrapper_t::size() const {
                     static_cast<size_t>(strided_pdim * effective_stride));
         }
 
-        size_t data_size = utils::div_up(
-                max_size * data_type_size(), sub_byte_data_type_multiplier());
-        return data_size;
+        return types::elements_to_bytes(data_type(), max_size);
     } else if (is_opaque()) {
         size_t layout_id = lt->layout.layout_id;
         auto backend
@@ -211,9 +209,9 @@ std::string logical_tensor_wrapper_t::str() const {
     return ss.str();
 }
 
-status_t DNNL_API dnnl_graph_logical_tensor_init(
-        logical_tensor_t *logical_tensor, size_t tid, data_type_t dtype,
-        int32_t ndims, layout_type_t ltype, property_type_t ptype) {
+status_t dnnl_graph_logical_tensor_init(logical_tensor_t *logical_tensor,
+        size_t tid, data_type_t dtype, int32_t ndims, layout_type_t ltype,
+        property_type_t ptype) {
     VCHECK_LOGICAL_TENSOR(logical_tensor != nullptr, status::invalid_arguments,
             "%s (logical_tensor)", VERBOSE_NULL_ARG);
     VCHECK_LOGICAL_TENSOR(ndims <= DNNL_MAX_NDIMS, status::invalid_arguments,
@@ -251,7 +249,7 @@ status_t DNNL_API dnnl_graph_logical_tensor_init(
     return status::success;
 }
 
-status_t DNNL_API dnnl_graph_logical_tensor_init_with_dims(
+status_t dnnl_graph_logical_tensor_init_with_dims(
         logical_tensor_t *logical_tensor, size_t tid, data_type_t dtype,
         int32_t ndims, const dims_t dims, layout_type_t ltype,
         property_type_t ptype) {
@@ -307,7 +305,7 @@ status_t DNNL_API dnnl_graph_logical_tensor_init_with_dims(
     return status::success;
 }
 
-status_t DNNL_API dnnl_graph_logical_tensor_init_with_strides(
+status_t dnnl_graph_logical_tensor_init_with_strides(
         logical_tensor_t *logical_tensor, size_t tid, data_type_t dtype,
         int32_t ndims, const dims_t dims, const dims_t strides,
         property_type_t ptype) {
@@ -348,7 +346,7 @@ status_t DNNL_API dnnl_graph_logical_tensor_init_with_strides(
     return status::success;
 }
 
-status_t DNNL_API dnnl_graph_logical_tensor_get_mem_size(
+status_t dnnl_graph_logical_tensor_get_mem_size(
         const logical_tensor_t *logical_tensor, size_t *size) {
     if (utils::any_null(logical_tensor, size)) return status::invalid_arguments;
 
@@ -356,9 +354,8 @@ status_t DNNL_API dnnl_graph_logical_tensor_get_mem_size(
     return status::success;
 }
 
-status_t DNNL_API dnnl_graph_logical_tensor_is_equal(
-        const logical_tensor_t *lt1, const logical_tensor_t *lt2,
-        uint8_t *is_equal) {
+status_t dnnl_graph_logical_tensor_is_equal(const logical_tensor_t *lt1,
+        const logical_tensor_t *lt2, uint8_t *is_equal) {
     if (utils::any_null(lt1, lt2, is_equal)) return status::invalid_arguments;
 
     logical_tensor_wrapper_t ltw1 {lt1};

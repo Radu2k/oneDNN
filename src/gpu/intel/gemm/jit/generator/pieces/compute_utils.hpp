@@ -51,6 +51,8 @@ static inline SystolicParams systolicParams(GEMMProblem problem)
     params.rcountMax = 8;
     params.rcountMin = problem.preferBDPAS() ? 8 : 0;
 
+    if (problem.Tc_compute().real() == Type::f64)
+        params.rcountMax = 4;
     return params;
 }
 
@@ -81,6 +83,18 @@ static inline int minOuterProductCount(const GEMMProblem &problem, const GEMMStr
 static inline int outerProductCount(const GEMMProblem &problem, const GEMMStrategy &strategy)
 {
     return minOuterProductCount(problem, strategy) * strategy.kChain;
+}
+
+static inline bool usesLateScale(const GEMMProblem &problem, const GEMMStrategy &strategy, bool isA)
+{
+    return isA ? (problem.aScale2D()
+            && ((problem.Ta_scale.paddedSize() > problem.Ta.paddedSize() && problem.Ta.isInteger())
+                    || problem.forceLateQuant(minOuterProductCount(problem, strategy))
+                    || (problem.preferBDPAS() && strategy.systolic)))
+    : (problem.bScale2D()
+            && ((problem.Tb_scale.paddedSize() > problem.Tb.paddedSize() && problem.Tb.isInteger())
+                    || problem.forceLateQuant(minOuterProductCount(problem, strategy))
+                    || (problem.preferBDPAS() && strategy.systolic)));
 }
 
 // Get the A and B crosspacks needed by the kernel. 0 indicates any crosspack is OK.

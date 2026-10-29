@@ -96,9 +96,9 @@ void Generator<hw>::copyRegisters(Type Ts, Type Td, const RegisterLayout &layout
         RegisterLayout emptyLayout;
         GRFMultirange emptyRegs;
         if (Ts != layoutSrc.type() || Td != layoutDst.type()) stub("No type punning allowed on this path");
-        if (canDequantizeInt4(layoutSrc, layoutDst, emptyLayout, emptyLayout)) {
-            dequantizeInt4(true, layoutSrc, layoutDst, emptyLayout, emptyLayout,
-                           src, dst, emptyRegs, emptyRegs, dOffR, dOffC, 0, 1, 1, nullptr, strategy, state, s4Shift);
+        if (canDequantizeSubByteInt(layoutSrc, layoutDst, emptyLayout, emptyLayout)) {
+            dequantizeSubByteInt(true, layoutSrc, layoutDst, emptyLayout, emptyLayout,
+                                 src, dst, emptyRegs, emptyRegs, dOffR, dOffC, 0, 1, 1, nullptr, strategy, state, s4Shift);
             return;
         }
     }
@@ -117,10 +117,17 @@ void Generator<hw>::copyRegisters(Type Ts, Type Td, const RegisterLayout &layout
     auto RegisterBlock::*ny = sCM ? &RegisterBlock::nc : &RegisterBlock::nr;
 
     // Accumulate copy pseudo-instructions.
-    CopyPlan plan(hw, strategy.systolicAvailable);
+    CopyPlan plan(getProductFamily(), strategy.systolicAvailable);
 
     for (auto &sblock : layoutSrc) {
-    for (int eoffY = 0; eoffY < sblock.*ny; eoffY++) {
+    if (Ts.is3() && (!sblock.colMajor || sblock.byteGlue
+                || sblock.crosspack <= 1 || sblock.ebytes <= 0))
+        stub("Flat u3 copy is unsupported.");
+    bool u3ColMajorGroups = Ts.is3();
+    if (u3ColMajorGroups
+            && ((dCM ? layoutDst[0].nc : layoutDst[0].nr) % 8))
+        stub();
+    for (int eoffY = 0; eoffY < sblock.*ny; eoffY += (u3ColMajorGroups ? 8 : 1)) {
     for (int eoffX = 0; eoffX < sblock.*nx;) {
         auto eoffR = sblock.colMajor ? eoffX : eoffY;
         auto eoffC = sblock.colMajor ? eoffY : eoffX;
@@ -131,8 +138,8 @@ void Generator<hw>::copyRegisters(Type Ts, Type Td, const RegisterLayout &layout
         int cxComp = 0;
 
         // Locate source and destination registers.
-        CopyOperand sOp = sblock.findRegion(Ts,                 eoffR,                          eoffC,         src, &ns,          cxComp, 0, true);
-        CopyOperand dOp = layoutDst.findRegion(sblock.offsetR + eoffR + dOffR, sblock.offsetC + eoffC + dOffC, dst, &nd, &dblock, cxComp, 0, true);
+        CopyOperand sOp = sblock.findRegion(Ts,                 eoffR,                          eoffC,         src, &ns,          cxComp, 0,     true);
+        CopyOperand dOp = layoutDst.findRegion(sblock.offsetR + eoffR + dOffR, sblock.offsetC + eoffC + dOffC, dst, &nd, &dblock, cxComp, 0,     true);
         dOp.type = Td.real().ngen();
         int n = std::min(ns, nd);
 
@@ -160,9 +167,13 @@ void Generator<hw>::copyRegisters(Type Ts, Type Td, const RegisterLayout &layout
             stub("Unsupported scaling factor");
 
         // Issue pseudo-instructions.
-        if (alpha.fixed())
-            plan.append(Opcode::mov, n, mod, dOp, sOp);
-        else
+        if (alpha.fixed()) {
+            auto &copy = plan.append(Opcode::mov, n, mod, dOp, sOp);
+            if (Ts.is3()) {
+                copy.u3Regioning.columnPitchBytes = sblock.crosspack;
+                copy.u3Regioning.rowPitchBytes = sblock.ld * sblock.crosspack;
+            }
+        } else
             plan.append(Opcode::mul, n, mod, dOp, sOp, alpha_real.getRegAvoiding(hw, sOp.ngen()));
 
         eoffX += n;
@@ -231,7 +242,7 @@ void Generator<hw>::copyExecute(CopyPlan &&plan, CommonState &state)
             int n = bytes >> 1;
             flag = raVFlag.tryAlloc(n);
             for (int i = 0; i < n; i++)
-                usedFlags[flag.index() + i] = true;
+                usedFlags[flag.index(hw) + i] = true;
         } else
             raVFlag.release(flag);
     };

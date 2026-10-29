@@ -43,6 +43,23 @@ static inline void bn_fwd_kernel(const void *s_base, void *d_base, size_t len,
 } // namespace
 
 template <cpu_isa_t isa>
+status_t jit_uni_batch_normalization_fwd_t<isa>::init(engine_t *engine) {
+    UNUSED(engine);
+    if (!pd()->use_global_stats()) {
+        const auto dt = pd()->src_md()->data_type;
+        const auto &mean = get_jit_uni_batch_normalization_fwd_stat_kernel(
+                dt, /*calculate_variance=*/false);
+        CHECK(mean.status());
+        const auto &variance = get_jit_uni_batch_normalization_fwd_stat_kernel(
+                dt, /*calculate_variance=*/true);
+        CHECK(variance.status());
+        mean_kernel_ = &mean;
+        variance_kernel_ = &variance;
+    }
+    return status::success;
+}
+
+template <cpu_isa_t isa>
 status_t jit_uni_batch_normalization_fwd_t<isa>::execute_forward(
         const exec_ctx_t &ctx) const {
     const memory_desc_wrapper data_d(pd()->src_md());
@@ -57,11 +74,15 @@ status_t jit_uni_batch_normalization_fwd_t<isa>::execute_forward(
 
     const float eps = pd()->desc()->batch_norm_epsilon;
     const size_t data_size = types::data_type_size(dtsrc);
+    // Layouts and strides match, but submemory base offsets may differ.
+    const size_t src_offset0 = pd()->src_md()->offset0;
+    const size_t dst_offset0 = pd()->dst_md()->offset0;
+    auto dst_off = [=](size_t src_off) {
+        return src_off - src_offset0 + dst_offset0;
+    };
 
     void *dst = CTX_OUT_MEM(void *, DNNL_ARG_DST);
     const void *src = CTX_IN_MEM(const void *, DNNL_ARG_SRC);
-    const float *mean = CTX_IN_MEM(const float *, DNNL_ARG_MEAN);
-    const float *var = CTX_IN_MEM(const float *, DNNL_ARG_VARIANCE);
     const float *scale = pd()->use_scale()
             ? CTX_IN_MEM(const float *, DNNL_ARG_SCALE)
             : nullptr;
@@ -83,7 +104,89 @@ status_t jit_uni_batch_normalization_fwd_t<isa>::execute_forward(
 
     const bool channels_dense = data_d.blocking_desc().strides[1] == 1;
 
-    if (!channels_dense) {
+    // Mean/variance: either supplied by the user or computed. Computed
+    // statistics are outputs for training and scratchpad for inference.
+    const float *mean, *var;
+    if (pd()->use_global_stats()) {
+        mean = CTX_IN_MEM(const float *, DNNL_ARG_MEAN);
+        var = CTX_IN_MEM(const float *, DNNL_ARG_VARIANCE);
+    } else {
+        assert(utils::one_of(
+                       dtsrc, data_type::f32, data_type::f16, data_type::bf16)
+                && !channels_dense);
+        const dim_t SP = D * H * W;
+        const dim_t count = N * SP;
+        float *mean_out, *var_out;
+        if (pd()->is_training()) {
+            mean_out = CTX_OUT_MEM(float *, DNNL_ARG_MEAN);
+            var_out = CTX_OUT_MEM(float *, DNNL_ARG_VARIANCE);
+        } else {
+            mean_out = ctx.get_scratchpad_grantor().template get<float>(
+                    memory_tracking::names::key_bnorm_tmp_stats);
+            var_out = mean_out + C;
+        }
+        const auto &mean_kernel = *mean_kernel_;
+        const auto &variance_kernel = *variance_kernel_;
+
+        parallel_nd(C, [&](dim_t c) {
+            auto reduce
+                    = [&](const jit_uni_batch_normalization_fwd_stat_kernel_t
+                                      &kernel,
+                              float reduction_mean, float &result) {
+                for (dim_t n = 0; n < N; ++n) {
+                    const size_t base = off(n, c, 0, 0, 0);
+                    const jit_uni_batch_normalization_fwd_stat_kernel_t::
+                            call_params_t p {static_cast<const char *>(src)
+                                            + base * data_size,
+                                    SP, &result, reduction_mean};
+                    kernel(&p);
+                }
+            };
+
+            float sum = 0.f;
+            reduce(mean_kernel, 0.f, sum);
+            mean_out[c] = sum / static_cast<float>(count);
+
+            float squared_difference_sum = 0.f;
+            reduce(variance_kernel, mean_out[c], squared_difference_sum);
+            var_out[c] = squared_difference_sum / static_cast<float>(count);
+        });
+        mean = mean_out;
+        var = var_out;
+    }
+
+    if (!channels_dense && pd()->spatial_dense(data_d)) {
+        // abx data tag with contiguous spatial dims: vectorize over the D*H*W
+        // row of each (n, c) so small spatial maps fill the vector. When there
+        // are few rows, split each row into chunks so that every thread gets
+        // work; chunks stay long enough to keep the vector unit busy.
+        const dim_t SP = D * H * W;
+        const dim_t min_chunk = 1024;
+        const dim_t rows = N * C;
+        const dim_t nchunks = nstl::max(dim_t(1),
+                nstl::min(
+                        utils::div_up(dim_t(4) * dnnl_get_max_threads(), rows),
+                        SP / min_chunk));
+        const dim_t chunk = utils::div_up(SP, nchunks);
+        parallel_nd(N, C, nchunks, [&](dim_t n, dim_t c, dim_t k) {
+            const dim_t sp_start = k * chunk;
+            const dim_t len = nstl::min(chunk, SP - sp_start);
+            if (len <= 0) return;
+            const float inv_std = 1.0f / sqrtf(var[c] + eps);
+            const float vscale = scale ? scale[c] : 1.0f;
+            const float vshift = shift ? shift[c] : 0.0f;
+            const float mean_b[1] = {mean[c]};
+            const float sm_b[1] = {vscale * inv_std};
+            const float sv_b[1] = {vshift};
+            const size_t base_off = off(n, c, 0, 0, 0) + sp_start;
+            const void *s_ptr = reinterpret_cast<const void *>(
+                    reinterpret_cast<const char *>(src) + base_off * data_size);
+            void *d_ptr = reinterpret_cast<void *>(reinterpret_cast<char *>(dst)
+                    + dst_off(base_off) * data_size);
+            bn_fwd_kernel(s_ptr, d_ptr, static_cast<size_t>(len), mean_b, sm_b,
+                    sv_b, dtsrc, /*per_elem_params=*/false, with_relu);
+        });
+    } else if (!channels_dense) {
         // abx data tag: vectorize over W for fixed channel
         parallel_nd(C, N, D, H, [&](dim_t c, dim_t n, dim_t d, dim_t h) {
             const float vmean = mean[c];
@@ -96,8 +199,8 @@ status_t jit_uni_batch_normalization_fwd_t<isa>::execute_forward(
 
             const void *s_ptr = reinterpret_cast<const void *>(
                     reinterpret_cast<const char *>(src) + base_off * data_size);
-            void *d_ptr = reinterpret_cast<void *>(
-                    reinterpret_cast<char *>(dst) + base_off * data_size);
+            void *d_ptr = reinterpret_cast<void *>(reinterpret_cast<char *>(dst)
+                    + dst_off(base_off) * data_size);
             const float mean_b[1] = {vmean};
             const float sm_b[1] = {sm};
             const float sv_b[1] = {sv};
@@ -123,8 +226,8 @@ status_t jit_uni_batch_normalization_fwd_t<isa>::execute_forward(
             const size_t base_off = off(n, 0, d, h, w);
             const void *s_ptr = reinterpret_cast<const void *>(
                     reinterpret_cast<const char *>(src) + base_off * data_size);
-            void *d_ptr = reinterpret_cast<void *>(
-                    reinterpret_cast<char *>(dst) + base_off * data_size);
+            void *d_ptr = reinterpret_cast<void *>(reinterpret_cast<char *>(dst)
+                    + dst_off(base_off) * data_size);
             bn_fwd_kernel(s_ptr, d_ptr, static_cast<size_t>(C), mean, sm_arr,
                     sv_arr, dtsrc, /*per_elem_params=*/true, with_relu);
         });

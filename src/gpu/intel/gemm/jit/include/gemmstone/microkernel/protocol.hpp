@@ -18,6 +18,8 @@
 #define GEMMSTONE_INCLUDE_GEMMSTONE_MICROKERNEL_PROTOCOL_HPP
 
 #include "gemmstone/config.hpp"
+#include "gemmstone/kernel_selector.hpp"
+#include "gemmstone/kernel_evaluator.hpp"
 
 GEMMSTONE_NAMESPACE_START
 namespace microkernel {
@@ -34,7 +36,8 @@ struct StructuredType {
         u8,
         s8,
         u4,
-        s4, //    integral
+        s4,
+        u3, //    integral
         f64,
         f32,
         f16,

@@ -213,7 +213,7 @@ bool matmul_amx_blocking_params_macro_t::maybe_small_dims_heuristics(
         best_blocking.current_lda_ = best_blocking.get_actual_lda();
     };
 
-    const float core_utilization_threshold = 0.75;
+    const float core_utilization_threshold = 0.75f;
 
     const auto b_is_not_flat
             = IMPLICATION(bgmmc.use_buffer_b, bgmmc.transposed_B);
@@ -571,7 +571,7 @@ float matmul_amx_blocking_params_macro_t::calculate_strip_mid_cycles(
             c_tmp_l1_cycles = acc_dt_sz * c_elem_per_strip * k_chunk_size_
                     / bw_interpolator.l1_store_hit_bw;
             // load from wsp to zmm
-            c_tmp_l1_cycles = acc_dt_sz * c_elem_per_strip * k_chunk_size_
+            c_tmp_l1_cycles += acc_dt_sz * c_elem_per_strip * k_chunk_size_
                     / bw_interpolator.l1_load_hit_bw;
 
             assert(k_chunk_size_ > 0);
@@ -586,7 +586,7 @@ float matmul_amx_blocking_params_macro_t::calculate_strip_mid_cycles(
             c_tmp_l1_cycles = acc_dt_sz * c_elem_per_strip * k_chunk_size_
                     / bw_interpolator.l1_load_miss_bw;
             // tile stores of new partial results
-            c_tmp_l1_cycles = acc_dt_sz * c_elem_per_strip * k_chunk_size_
+            c_tmp_l1_cycles += acc_dt_sz * c_elem_per_strip * k_chunk_size_
                     / bw_interpolator.l1_store_hit_bw;
         }
     }

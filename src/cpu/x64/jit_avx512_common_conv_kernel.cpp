@@ -29,7 +29,6 @@
 #include "cpu/x64/jit_avx512_common_conv_kernel.hpp"
 
 #define GET_OFF(field) offsetof(jit_conv_args_t, field)
-#define KNx_L2_EFFECTIVE_CAPACITY ((512 - 64) * 1024)
 
 namespace dnnl {
 namespace impl {
@@ -2160,7 +2159,7 @@ status_t jit_avx512_common_conv_bwd_data_kernel_f32_t::init_conf(
 
     auto get_thr_eff = [&](int nb_ic_blocking, dim_t iw_block, int nthr) {
         // Cost heuristic for threading overhead. Determined using OMP.
-        const float iw_block_cost = 32.0;
+        const float iw_block_cost = 32.0f;
 
         const dim_t nb_iw = div_up(jcp.iw, iw_block);
         const dim_t nb_ic_chunks = div_up(jcp.nb_ic, nb_ic_blocking);
@@ -4065,7 +4064,7 @@ status_t jit_avx512_common_conv_bwd_weights_kernel_f32_t::init_conf(
      * strides for the input and filter memory access. */
     jcp.is_hw_transp = !is_data_layout_nxc && ndims == 4
             && jcp.kw >= min_filter_size && jcp.kw < max_filter_size
-            && jcp.ow == 1 && jcp.kw == jcp.iw
+            && jcp.kh <= min_filter_size && jcp.ow == 1 && jcp.kw == jcp.iw
             && everyone_is(1, jcp.stride_w, jcp.stride_h)
             && everyone_is(0, jcp.dilate_h, jcp.dilate_w)
             && everyone_is(0, jcp.l_pad, jcp.t_pad, jcp.r_pad, jcp.b_pad);

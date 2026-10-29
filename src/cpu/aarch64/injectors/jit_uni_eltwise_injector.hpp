@@ -171,17 +171,6 @@ private:
 
     const data_type_t d_type_;
 
-    // if only the injector was inherited from jit_generator...
-    enum {
-        _cmp_eq_oq = jit_generator_t::_cmp_eq_oq,
-        _cmp_lt_os = jit_generator_t::_cmp_lt_os,
-        _cmp_le_os = jit_generator_t::_cmp_le_os,
-        _cmp_ge_os = jit_generator_t::_cmp_nlt_us,
-        _cmp_gt_os = jit_generator_t::_cmp_nle_us,
-        _op_floor = jit_generator_t::_op_floor,
-        _op_mxcsr = jit_generator_t::_op_mxcsr
-    };
-
     const size_t vlen = get_vec_len();
     static constexpr size_t preserved_vecs_max = 9;
     static constexpr size_t preserved_gprs_max = 4;
@@ -218,8 +207,8 @@ private:
     void store_preserved_vec(size_t slot, size_t vmm_idx);
     void load_preserved_vec(size_t slot, size_t vmm_idx);
     void set_coef_to_regs();
-    void compute_cmp_mask(
-            const TRegS &vmm_src, const TRegS &vmm_cmpare, int cmp_predicate);
+    void compute_cmp_mask(const TRegS &vmm_src, const TRegS &vmm_cmpare,
+            alg_kind_t cmp_predicate);
     void blend_with_mask(const TRegS &vmm_dst, const TRegS &src);
     void test_mask();
 
@@ -332,6 +321,16 @@ private:
         gelu_erf_lut, // ERF LUT: [erf(r), scale(r)], 513 pairs
         gelu_erf_lut_erf, // ERF LUT: erf(r), 513 entries
         gelu_erf_lut_scale, // ERF LUT: scale(r), 513 entries
+        swish_alpha_log2e,
+        swish_fexpa_shift, // 131199.f
+        swish_polynomial_exp_c1, // fitted coefficient for t = -r
+        swish_polynomial_exp_c2, // fitted coefficient for t^2
+        swish_polynomial_exp_min, // -32 * log2(e)
+        swish_polynomial_exp_max, // 32 * log2(e)
+        swish_asimd_exp2_c1,
+        swish_asimd_exp2_c2,
+        swish_asimd_exp2_c3,
+        swish_asimd_exp2_c4,
         log_const_127, // 127
         log_ln2, // ln(2) = 0.6931471805599453
         log_inf, // +inf
@@ -356,8 +355,10 @@ private:
         // assumption: all table entries sharing the same key also
         // share their broadcast property
         // TODO: enforce through data structure
-        const auto it = entry_map_.find(key); // search an entry for a key
-        assert(it != entry_map_.end());
+        // A key can have several entries. std::multimap::find() may return
+        // any of them, so use lower_bound() to get the first one.
+        const auto it = entry_map_.lower_bound(key);
+        assert(it != entry_map_.end() && it->first == key);
         const auto &te = (*it).second;
         const auto scale = te.bcast ? vlen : sizeof(table_entry_val_t);
         return te.off + key_off_val_shift * scale;
@@ -366,8 +367,10 @@ private:
     TRegS table_val(key_t key, TRegS zreg, size_t key_off_val_shift = 0) {
         // assumption: all table entries sharing the same key also
         // share their broadcast property
-        const auto it = entry_map_.find(key);
-        assert(it != entry_map_.end());
+        // A key can have several entries. std::multimap::find() may return
+        // any of them, so use lower_bound() to get the first one.
+        const auto it = entry_map_.lower_bound(key);
+        assert(it != entry_map_.end() && it->first == key);
         const auto &te = (*it).second;
         const auto scale = te.bcast ? vlen : sizeof(table_entry_val_t);
         const auto off = te.off + key_off_val_shift * scale;

@@ -470,8 +470,16 @@ status_t insert_permute_for_matmul(std::shared_ptr<subgraph_t> &sg) {
                 if (scales_op && scales_op->has_attr(op_attr::mask)
                         && scales_op->get_attr<int64_t>(op_attr::mask) != 0
                         && !is_per_group) {
+                    const int64_t mask
+                            = scales_op->get_attr<int64_t>(op_attr::mask);
+                    const int64_t last_bit = 1LL << (ndims - 1);
+                    const int64_t second_last_bit = 1LL << (ndims - 2);
+                    const int64_t transposed_mask
+                            = (mask & ~(last_bit | second_last_bit))
+                            | ((mask & last_bit) ? second_last_bit : 0)
+                            | ((mask & second_last_bit) ? last_bit : 0);
                     scales_op->set_attr<int64_t>(
-                            op_attr::mask, 1LL << (ndims - 1));
+                            op_attr::mask, transposed_mask);
                 }
                 cur_op->set_attr<fusion_info_t>(
                         op_attr::fusion_info, fusion_info);
@@ -864,9 +872,13 @@ status_t insert_unsqueeze_and_squeeze_for_matmul(
                         = scales_op && utils::has_group_shape(scales_op);
                 if (scales_op && scales_op->has_attr(op_attr::mask)
                         && scales_op->get_attr<int64_t>(op_attr::mask) != 0
-                        && !is_per_group) {
-                    scales_op->set_attr<int64_t>(
-                            op_attr::mask, 1LL << (unsqueezed_dst_ndims - 1));
+                        && !is_per_group && !axes.empty()) {
+                    const int64_t mask
+                            = scales_op->get_attr<int64_t>(op_attr::mask);
+                    const int64_t remapped_mask = wei_ndims == 1
+                            ? 1LL << (unsqueezed_dst_ndims - 1)
+                            : mask << batch_dim_num;
+                    scales_op->set_attr<int64_t>(op_attr::mask, remapped_mask);
                 }
                 op->set_attr<fusion_info_t>(op_attr::fusion_info, fusion_info);
             }
@@ -1261,6 +1273,13 @@ status_t insert_host_scalar(std::shared_ptr<subgraph_t> &sg) {
                 val->remove_consumer(consumer.get_op(), consumer.get_offset());
                 consumer.get_op().connect_input(
                         consumer.get_offset(), host_scalar_op_out_val);
+                // Outputs may have been inferred from the 0-D scalar input,
+                // reset them so they are re-inferred from the _host_scalar
+                // output.
+                for (auto &out_val : consumer.get_op().get_output_values()) {
+                    if (!out_val->get_consumers().empty())
+                        out_val->set_ndims(-1);
+                }
             }
 
             val->add_consumer(*host_scalar_op, 0);

@@ -126,6 +126,22 @@ status_t fuse_bias_add(std::shared_ptr<subgraph_t> &sg) {
     return status::success;
 }
 
+static bool is_reciprocal(const op_t *op) {
+    if (op->get_kind() != op_kind::_eltwise
+            || static_cast<dnnl::algorithm>(
+                       op->get_attr<int64_t>(op_attr::alg_kind))
+                    != dnnl::algorithm::eltwise_pow)
+        return false;
+
+    const float alpha = op->has_attr(op_attr::alpha)
+            ? op->get_attr<float>(op_attr::alpha)
+            : 0.f;
+    const float beta = op->has_attr(op_attr::beta)
+            ? op->get_attr<float>(op_attr::beta)
+            : 0.f;
+    return alpha == 1.f && beta == -1.f;
+}
+
 // replace mul_scales and add_zps with binary_mul and binary_add respectively
 status_t replace_quant_data_with_binary_post_op(
         std::shared_ptr<subgraph_t> &sg) {
@@ -175,7 +191,20 @@ status_t replace_quant_data_with_binary_post_op(
 
             // replace quant related op with binary
             op_t *quant_data_op = next_op;
-            auto algo = (quant_data_op->get_kind() == op_kind::_mul_scales)
+            const bool runtime_scales
+                    = quant_data_op->get_kind() == op_kind::_mul_scales
+                    && quant_data_op->has_attr(op_attr::with_runtime_scales)
+                    && quant_data_op->get_attr<bool>(
+                            op_attr::with_runtime_scales);
+            op_t *reciprocal_op = nullptr;
+            if (runtime_scales) {
+                const auto &scale_val = quant_data_op->get_input_value(1);
+                if (scale_val->has_producer()
+                        && is_reciprocal(&scale_val->get_producer()))
+                    reciprocal_op = &scale_val->get_producer();
+            }
+            auto algo = reciprocal_op ? dnnl::algorithm::binary_div
+                    : (quant_data_op->get_kind() == op_kind::_mul_scales)
                     ? dnnl::algorithm::binary_mul
                     : quant_data_op->get_kind() == op_kind::_add_zps
                     ? dnnl::algorithm::binary_add
@@ -192,15 +221,35 @@ status_t replace_quant_data_with_binary_post_op(
             in_val->set_data_type(out_val->get_logical_tensor().data_type);
             insert_empty_scratchpad(bin_op);
 
-            // add quant data as a constant input
             const int64_t mask
                     = quant_data_op->get_attr<int64_t>(op_attr::mask);
             const std::vector<int64_t> out_shape
                     = ltw(out_val->get_logical_tensor()).vdims();
             std::vector<int64_t> new_shape(out_shape.size(), 1);
-
             for (size_t d = 0; d < out_shape.size(); ++d)
                 if (mask & (1LL << d)) new_shape[d] = out_shape[d];
+
+            if (reciprocal_op) {
+                auto scale_val = reciprocal_op->get_input_value(0);
+                scale_val->remove_consumer(*reciprocal_op, 0);
+                bin_op->connect_input(1, scale_val);
+                rewriter.to_insert(bin_op);
+
+                auto reshape_op = std::make_shared<op_t>(op_kind::_reshape);
+                reshape_op->set_attr<bool>(op_attr::special_zero, false);
+                reshape_op->set_attr<std::vector<int64_t>>(
+                        op_attr::shape, new_shape);
+                rewriter.insert_op_before(reshape_op, bin_op, 1);
+
+                rewriter.to_remove(quant_data_op->shared_from_this());
+                rewriter.to_remove(reciprocal_op->shared_from_this());
+
+                visited.insert(next_op);
+                next_op = get_next_op(next_op);
+                continue;
+            }
+
+            // add quant data as a constant input
             op_ptr const_data_op;
             if (quant_data_op->get_kind() == op_kind::_mul_scales) {
                 const auto scales = quant_data_op->get_attr<std::vector<float>>(
@@ -1323,29 +1372,6 @@ status_t fuse_src_scales(std::shared_ptr<subgraph_t> &sg) {
         auto &next_op = consumers[0].get_op();
         auto offset = consumers[0].get_offset();
         if (offset == 0 || offset == 1) {
-            // Matmul only support applying scale per channel along the last
-            // dimension for DNNL_ARG_WEIGHTS.
-            const bool is_per_channel = scale_op->has_attr(op_attr::mask)
-                    && scale_op->get_attr<int64_t>(op_attr::mask) != 0;
-            const bool is_per_group = utils::has_group_shape(scale_op);
-            if (offset == 1 && next_op.get_kind() == op_kind::_matmul
-                    && is_per_channel && !is_per_group) {
-                int64_t mask = scale_op->get_attr<int64_t>(op_attr::mask);
-                bool trans_flag = next_op.has_attr(op_attr::transpose_b)
-                        ? next_op.get_attr<bool>(op_attr::transpose_b)
-                        : false;
-                int ndims = scale_op->get_input_value(0)
-                                    ->get_logical_tensor()
-                                    .ndims;
-                const int64_t expected_mask = trans_flag ? (1LL << (ndims - 2))
-                                                         : (1LL << (ndims - 1));
-                VCHECK_TRANSFORM(mask == expected_mask, status::unimplemented,
-                        "Matmul only support applying per channel scale "
-                        "along the last dimension for DNNL_ARG_WEIGHTS. "
-                        "mask: %ld, expected: %ld, ndims: %d",
-                        static_cast<long int>(mask),
-                        static_cast<long int>(expected_mask), ndims);
-            }
             if (!next_op.has_attr(op_attr::fusion_info)) {
                 fusion_info_t fusion_info;
                 next_op.set_attr<fusion_info_t>(
@@ -1400,6 +1426,13 @@ status_t fuse_dst_scales(std::shared_ptr<subgraph_t> &sg) {
         if (consumers.size() != 1) continue;
         auto &next_op = consumers[0].get_op();
         if (next_op.get_kind() != op_kind::_mul_scales) continue;
+        // TODO(xxx): unify fusing re-quantization scales into softmax.
+        // Currently, dynamic quantize scales are fused as binary post-ops while
+        // static quantize scales are fused as dst scales.
+        if (cur_op->get_kind() == op_kind::_softmax && next_op.num_inputs() > 1
+                && next_op.get_input_value(1)->has_producer()
+                && is_reciprocal(&next_op.get_input_value(1)->get_producer()))
+            continue;
         // For these three ops, the dst zps are not supported
         if (impl::utils::one_of(cur_op->get_kind(), op_kind::_softmax,
                     op_kind::_layernorm, op_kind::_groupnorm)) {
@@ -2313,28 +2346,7 @@ status_t fuse_reciprocal_mul_to_div(std::shared_ptr<subgraph_t> &sg) {
                 || visited.count(cur_op.get()) != 0)
             continue;
 
-        auto is_reciprocal = [&cur_op]() -> bool {
-            bool ok = static_cast<dnnl::algorithm>(
-                              cur_op->get_attr<int64_t>(op_attr::alg_kind))
-                    == dnnl::algorithm::eltwise_pow;
-            if (!ok) return false;
-
-            // check attribute alpha
-            float alpha = 0.f;
-            if (cur_op->has_attr(op_attr::alpha))
-                alpha = cur_op->get_attr<float>(op_attr::alpha);
-            if (alpha != 1.f) return false;
-
-            // check attribute beta
-            float beta = 0.f;
-            if (cur_op->has_attr(op_attr::beta))
-                beta = cur_op->get_attr<float>(op_attr::beta);
-            if (beta != -1.f) return false;
-
-            return true;
-        };
-
-        if (!is_reciprocal()) continue;
+        if (!is_reciprocal(cur_op.get())) continue;
 
         visited.insert(cur_op.get());
 
@@ -4794,149 +4806,6 @@ status_t fuse_sdpa(std::shared_ptr<subgraph_t> &sg) {
 #define DNNL_ARG_WEIGHTS_GATE DNNL_ARG_WEIGHTS_0
 #define DNNL_ARG_WEIGHTS_UP DNNL_ARG_WEIGHTS_1
 #define DNNL_ARG_WEIGHTS_DOWN DNNL_ARG_WEIGHTS_2
-
-// The pass is called against a gated mlp subgraph matched by the gated mlp
-// patterns. Hence we have the basic assumptions for the topology which
-// simplifies the pass logic below.
-status_t fuse_gated_mlp(std::shared_ptr<subgraph_t> &sg) {
-    std::vector<op_ptr> candidates;
-    const auto &ops = sg->get_ops();
-    size_t matmul_count = 0;
-    dnnl::algorithm act_algo = dnnl::algorithm::undef;
-    op_ptr gate = nullptr, up = nullptr, down = nullptr;
-
-    for (const auto &op : ops) {
-        if (op->get_kind() == op_kind::_matmul) {
-            matmul_count++;
-            candidates.emplace_back(op);
-            // if it has no consumer, it's the down matmul. If it has a binary consumer, it's the up matmul. Otherwise, it's the gate matmul.
-            auto out_val = op->get_output_value(0);
-            auto &consumers = out_val->get_consumers();
-            if (consumers.empty()) {
-                down = op;
-            } else if (consumers.size() == 1
-                    && consumers[0].get_op().get_kind() == op_kind::_binary) {
-                up = op;
-            } else {
-                gate = op;
-            }
-        } else if (op->get_kind() == op_kind::_eltwise) {
-            candidates.emplace_back(op);
-            act_algo = static_cast<dnnl::algorithm>(
-                    op->get_attr<int64_t>(op_attr::alg_kind));
-            if (act_algo == dnnl::algorithm::eltwise_logistic) {
-                // check the consumer of sigmoid, it should be binary_mul
-                auto out_val = op->get_output_value(0);
-                if (out_val->get_consumers().size() != 1) { break; }
-                auto &consumer = out_val->get_consumers()[0].get_op();
-                if (consumer.get_kind() != op_kind::_binary) { break; }
-                auto consumer_alg = static_cast<dnnl::algorithm>(
-                        consumer.get_attr<int64_t>(op_attr::alg_kind));
-                if (consumer_alg != dnnl::algorithm::binary_mul) { break; }
-                // check the consumer of binary_mul, it should be the second matmul or another binary_mul.
-                auto out_val2 = consumer.get_output_value(0);
-                if (out_val2->get_consumers().size() != 1) { break; }
-                auto &consumer2 = out_val2->get_consumers()[0].get_op();
-                if (consumer2.get_kind() != op_kind::_matmul
-                        && consumer2.get_kind() != op_kind::_binary) {
-                    break;
-                }
-                // if it's binary_mul, it's gated mlp with swish activation: sigmoid + binary_mul.
-                if (consumer2.get_kind() == op_kind::_binary) {
-                    act_algo = dnnl::algorithm::eltwise_swish;
-                }
-            }
-        } else if (op->get_kind() == op_kind::_binary) {
-            auto alg = static_cast<dnnl::algorithm>(
-                    op->get_attr<int64_t>(op_attr::alg_kind));
-            if (alg != dnnl::algorithm::binary_mul) { break; }
-            candidates.emplace_back(op);
-        } else if (op->get_kind() == op_kind::_reorder) {
-            // Optional typecast.
-            candidates.emplace_back(op);
-        } else {
-            // strange op for gated mlp pattern, bail out.
-            break;
-        }
-    }
-
-    // seems not a gated mlp pattern, bail out.
-    if (matmul_count != 3) { return status::unimplemented; }
-    if (candidates.size() != ops.size()) { return status::unimplemented; }
-    if (gate == nullptr || up == nullptr || down == nullptr) {
-        return status::unimplemented;
-    }
-
-    fusion_info_t fusion_info;
-    auto handle_fusion_info = [&fusion_info](const op_ptr &op, int arg) {
-        if (op->has_attr(op_attr::fusion_info)) {
-            auto op_fusion_info
-                    = op->get_attr<fusion_info_t>(op_attr::fusion_info);
-            if (op_fusion_info.get_mutable_scales(true, 1)) {
-                fusion_info.set_runtime_scales(
-                        op_fusion_info.get_mutable_scales(true, 1)
-                                ->shared_from_this(),
-                        true, arg);
-            }
-            if (op_fusion_info.with_runtime_zero_points(true, 1)) {
-                fusion_info.set_zero_points(
-                        op_fusion_info.get_mutable_zero_points(true, 1)
-                                ->shared_from_this(),
-                        true, arg);
-            }
-        }
-    };
-
-    handle_fusion_info(gate, DNNL_ARG_WEIGHTS_GATE);
-    handle_fusion_info(up, DNNL_ARG_WEIGHTS_UP);
-    handle_fusion_info(down, DNNL_ARG_WEIGHTS_DOWN);
-
-    subgraph_rewriter_t rewriter(sg);
-    op_ptr gated_mlp_op = std::make_shared<op_t>(op_kind::_gated_mlp);
-    gated_mlp_op->set_attr<int64_t>(
-            op_attr::alg_kind, static_cast<int64_t>(act_algo));
-
-    gated_mlp_op->set_attr<fusion_info_t>(op_attr::fusion_info, fusion_info);
-
-    // connect inputs and outputs
-    auto src_val = gate->get_input_value(0);
-    auto wei0_val = gate->get_input_value(1);
-    auto wei1_val = up->get_input_value(1);
-    auto wei2_val = down->get_input_value(1);
-    src_val->remove_consumer(*gate, 0);
-    wei0_val->remove_consumer(*gate, 1);
-    wei1_val->remove_consumer(*up, 1);
-    wei2_val->remove_consumer(*down, 1);
-    gated_mlp_op->connect_input(0, src_val);
-    gated_mlp_op->connect_input(1, wei0_val);
-    gated_mlp_op->connect_input(2, wei1_val);
-    gated_mlp_op->connect_input(3, wei2_val);
-
-    size_t input_idx = 4;
-    // Handle quantization parameters from matmuls
-    for (const auto &matmul : {gate, up, down}) {
-        auto inputs = matmul->get_input_values();
-        for (size_t idx = 2; idx < inputs.size(); ++idx) {
-            const auto &qparam_val = inputs[idx];
-            qparam_val->remove_consumer(*matmul, idx);
-            gated_mlp_op->connect_input(input_idx++, qparam_val);
-        }
-    }
-
-    auto dst_val = down->get_output_value(0);
-    dst_val->set_producer(*gated_mlp_op);
-    gated_mlp_op->add_output(dst_val);
-
-    insert_empty_scratchpad(gated_mlp_op);
-
-    for (auto &op : candidates) {
-        rewriter.to_remove(op);
-    }
-    rewriter.to_insert(gated_mlp_op);
-    rewriter.run();
-
-    return status::success;
-}
 
 // Fuses a backward SDPA subgraph into a single _sdpa_bwd op.
 //

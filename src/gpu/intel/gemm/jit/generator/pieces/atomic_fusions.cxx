@@ -231,7 +231,10 @@ void Generator<hw>::gemmFusedBetaScale(GEMMProblem problem, GEMMStrategy strateg
     auto lastC = lastCRange[lastCRange.getLen() - 1];
 
     useR0(state, [&](GRF r0_info) {
-        globalMemFence(lastC, r0_info, strategy); /* Zeroing C will synchronize on this */
+        // Zeroing C will synchronize on this but not in efficient 64-bit addressing mode.
+        globalMemFence(lastC, r0_info, strategy);
+        if (getEfficient64Bit())
+            fencewait();
     });
 
     mark(lNoScale);
@@ -397,6 +400,7 @@ void Generator<hw>::gemmRedirectToTempC(GEMMProblem &problem, GEMMStrategy &stra
 
     state.effC[0] = state.effTempC;
     state.C_layoutExt = state.C_layout;
+    state.C_layoutExt.retarget(problem.C, strategy.C);
     state.C_layoutExtUnmasked.clear();
     state.C_layoutExtNonatomicUnmasked.clear();
     state.inputs.ldc[0] = invalid;
@@ -456,7 +460,7 @@ bool Generator<hw>::gemmFusedPostOpsFinalize(Label &labelLateExit, GEMMProblem &
         auto strategy0 = modStrategy;
         auto state0 = modState;
 
-        if (!problem.beta0() && !state.useTempC) stub();    /* todo: implement beta scaling */
+        if (!problem.beta0() && !state.useTempC) stub();    /* TODO: implement beta scaling */
 
         and_(1 | nz | state.flagAP, null.ud(), state.inputs.flags, FlagDidBeta);
         jmpi(1 | ~state.flagAP, lTileAccumulate);
@@ -500,7 +504,7 @@ bool Generator<hw>::gemmFusedPostOpsFinalize(Label &labelLateExit, GEMMProblem &
 
     broadcastToWG(f0[0], kDone, modStrategy, modState, 4);
 
-    if (strategy.slmBuffers > 0 || strategy.kParallelLocal) {
+    if (std::max(strategy.slmBuffersA, strategy.slmBuffersB) > 0 || strategy.kParallelLocal) {
         useTempAndR0(modState, [&](GRF temp, GRF r0_info) {
             slmBarrier(temp, r0_info, strategy);
         });

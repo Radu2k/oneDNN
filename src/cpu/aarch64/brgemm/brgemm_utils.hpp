@@ -1,7 +1,7 @@
 /*******************************************************************************
 * Copyright 2022 Intel Corporation
 * Copyright 2024 FUJITSU LIMITED
-* Copyright 2024-2025 Arm Ltd. and affiliates
+* Copyright 2024-2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@
 #define CPU_AARCH64_BRGEMM_BRGEMM_UTILS_HPP
 
 #include "cpu/aarch64/brgemm/brgemm.hpp"
-
 #include "cpu/aarch64/cpu_isa_traits.hpp"
+#include "cpu/ref_io_helper.hpp"
 
 #include "common/c_types_map.hpp"
 
@@ -30,10 +30,81 @@ namespace impl {
 namespace cpu {
 namespace aarch64 {
 
+namespace scale_utils {
+inline size_t scales_simd_w(cpu_isa_t isa) {
+    return simd_elems(data_type::f32, isa);
+}
+
+inline float load_scale(const primitive_attr_t *attr, int arg,
+        const void *scales, dim_t idx = 0) {
+    if (attr->scales_.has_default_values(arg)) return 1.f;
+
+    const auto scales_dt = attr->scales_.get_data_type(arg);
+    return cpu::io::load_float_value(scales_dt, scales, idx);
+}
+
+inline void precompute_oscales(cpu_isa_t isa, float *oscales,
+        const primitive_attr_t *attr, const void *src_scales,
+        const void *wei_scales, dim_t oc, float scale_adjust_factor) {
+    if (oscales == nullptr) return;
+
+    const float src_scale = load_scale(attr, DNNL_ARG_SRC, src_scales);
+    const auto &wei_scales_attr = attr->scales_.get(DNNL_ARG_WEIGHTS);
+    const bool is_oc_scale = wei_scales_attr.get_mask() > 0;
+
+    if (is_oc_scale) {
+        for (dim_t c = 0; c < oc; c++) {
+            oscales[c] = src_scale
+                    * load_scale(attr, DNNL_ARG_WEIGHTS, wei_scales, c)
+                    * scale_adjust_factor;
+        }
+    } else {
+        const float scale = src_scale
+                * load_scale(attr, DNNL_ARG_WEIGHTS, wei_scales)
+                * scale_adjust_factor;
+        utils::array_set(oscales, scale, scales_simd_w(isa));
+    }
+}
+
+inline void precompute_inv_dst_scales(cpu_isa_t isa,
+        float *dst_scales_precomputed, const primitive_attr_t *attr,
+        const void *dst_scales) {
+    if (dst_scales_precomputed == nullptr) return;
+
+    const float dst_scale = 1.f / load_scale(attr, DNNL_ARG_DST, dst_scales);
+    utils::array_set(dst_scales_precomputed, dst_scale, scales_simd_w(isa));
+}
+} // namespace scale_utils
+
 status_t init_kernel_datatype(
         brgemm_desc_t *brg, data_type_t dt_a, data_type_t dt_b);
 
 namespace brgemm_utils {
+inline constexpr int mmla_bd_blk() {
+    return 2;
+}
+inline constexpr int mmla_ld_blk() {
+    return 2;
+}
+inline constexpr int mmla_rd_chunk_bytes() {
+    return 8;
+}
+inline constexpr int mmla_rd_block() {
+    return 8;
+}
+
+inline constexpr int mmla_rd_chunk_elems(int dt_a_sz) {
+    return mmla_rd_chunk_bytes() / dt_a_sz;
+}
+inline constexpr int mmla_rd_chunks_per_block(int dt_a_sz) {
+    return mmla_rd_block() / mmla_rd_chunk_elems(dt_a_sz);
+}
+
+status_t validate_mmla_compute(const brgemm_desc_t &brg);
+
+inline bool is_mmla_ld_blocks_supported(dim_t ld_blocks) {
+    return ld_blocks >= 1 && ld_blocks <= 12;
+}
 
 bool can_dispatch_uker(const brgemm_desc_t *brg);
 
